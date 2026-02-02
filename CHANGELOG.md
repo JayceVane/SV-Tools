@@ -2,6 +2,23 @@
 
 All notable changes to the SystemVerilog VSCode Extension will be documented in this file.
 
+## [2.0.2] - 2025-02-02
+
+### Added
+- **GNU-to-1tbs Style Conversion**: Automatic preprocessing to convert GNU-formatted code to 1tbs style
+  - When using `indentStyle: "1tbs"`, standalone `begin` statements are automatically merged to the previous line
+  - Supports keywords: `always_ff`, `always_comb`, `always_latch`, `if`, `else`, `case`, `for`, `forever`, `task`, `function`, `interface`, `module`, `class`, `package`, `program`, `clocking`, `initial`, `final`, and more
+  - Enables conversion of existing GNU-formatted code to 1tbs style without manual editing
+
+### Fixed
+- Fixed regex syntax error in preprocessing keyword patterns
+- Added `else` keyword to 1tbs merging list
+
+### Technical Details
+- Preprocessing occurs before main beautification in the daemon
+- Only active when `indentStyle` is set to `"1tbs"` (default)
+- GNU style (`indentStyle: "gnu"`) is unaffected by preprocessing
+
 ## [2.0.1] - 2025-02-02
 
 ### Fixed

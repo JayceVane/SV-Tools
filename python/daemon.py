@@ -65,8 +65,74 @@ class FormatterDaemon:
             alignComma=options.get('alignComma', True)
         )
 
+    def preprocess_text(self, text, options):
+        """Preprocess text to handle GNU-to-1tbs style conversion"""
+        import re
+
+        # If using 1tbs style, merge standalone 'begin' to previous line
+        if options.get('indentSyle', '1tbs') == '1tbs':
+            lines = text.split('\n')
+            processed_lines = []
+            i = 0
+            while i < len(lines):
+                current_line = lines[i].rstrip()
+                next_line = lines[i + 1].rstrip() if i + 1 < len(lines) else None
+
+                # Check if current line ends with keywords that should have 'begin' on same line
+                # and next line is a standalone 'begin'
+                if next_line and next_line.strip() == 'begin':
+                    # Keywords that should be followed by 'begin' on the same line in 1tbs style
+                    start_keywords = [
+                        r'\balways_(?:ff|comb|latch)\b',
+                        r'\bif\b',
+                        r'\belse\b',
+                        r'\belse\s+if\b',
+                        r'\bcase\b',
+                        r'\bfor\b',
+                        r'\bforever\b',
+                        r'\btask\b',
+                        r'\bfunction\b',
+                        r'\binterface\b',
+                        r'\bmodule\b',
+                        r'\bclass\b',
+                        r'\bpackage\b',
+                        r'\bprogram\b',
+                        r'\bclocking\b',
+                        r'\bblock\b',
+                        r'\bgenerate\b',
+                        r'\bspecify\b',
+                        r'\bproperty\b',
+                        r'\bsequence\b',
+                        r'\bcovergroup\b',
+                        r'\binitial\b',
+                        r'\bfinal\b'
+                    ]
+
+                    # Check if current line matches any of these patterns
+                    should_merge = False
+                    for pattern in start_keywords:
+                        if re.search(pattern, current_line):
+                            should_merge = True
+                            break
+
+                    # Merge begin to current line if matched keyword pattern
+                    if should_merge:
+                        processed_lines.append(current_line + ' begin')
+                        i += 2  # Skip the 'begin' line
+                        continue
+
+                processed_lines.append(lines[i])
+                i += 1
+
+            return '\n'.join(processed_lines)
+
+        return text
+
     def format_text(self, text, options):
         """Format the given text using VerilogBeautifier"""
+        # Preprocess text to merge standalone 'begin' in 1tbs mode
+        text = self.preprocess_text(text, options)
+
         # Always recreate beautifier with current options to respect user configuration
         self.create_beautifier(options)
 
