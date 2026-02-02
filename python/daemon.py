@@ -133,6 +133,32 @@ class FormatterDaemon:
 
         return text
 
+    def postprocess_text(self, text, options):
+        """Postprocess text to remove excessive empty lines"""
+        max_empty_lines = options.get('maxConsecutiveEmptyLines', 1)
+
+        # If not set or negative, return as-is
+        if max_empty_lines < 0:
+            return text
+
+        lines = text.split('\n')
+        processed_lines = []
+        empty_line_count = 0
+
+        for line in lines:
+            # Check if line is empty (only whitespace)
+            if line.strip() == '':
+                empty_line_count += 1
+                # Only add empty line if we haven't reached the limit
+                if empty_line_count <= max_empty_lines:
+                    processed_lines.append(line)
+            else:
+                # Non-empty line, reset counter and add the line
+                empty_line_count = 0
+                processed_lines.append(line)
+
+        return '\n'.join(processed_lines)
+
     def format_text(self, text, options):
         """Format the given text using VerilogBeautifier"""
         # Preprocess text to merge standalone 'begin' in 1tbs mode
@@ -143,6 +169,10 @@ class FormatterDaemon:
 
         try:
             formatted_text = self.beautifier.beautifyText(text)
+
+            # Postprocess to remove excessive empty lines
+            formatted_text = self.postprocess_text(formatted_text, options)
+
             return {
                 'success': True,
                 'result': formatted_text

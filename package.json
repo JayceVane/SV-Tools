@@ -2,7 +2,7 @@
   "name": "sv-align",
   "displayName": "SystemVerilog Align Formatter",
   "description": "Verilog/SystemVerilog formatter adapted from Sublime Text plugin",
-  "version": "2.0.4",
+  "version": "2.0.5",
   "publisher": "JayceVane",
   "author": {
     "name": "JayceVane",
@@ -96,6 +96,13 @@
           "type": "boolean",
           "default": true,
           "description": "Strip empty lines"
+        },
+        "svAlign.maxConsecutiveEmptyLines": {
+          "type": "number",
+          "default": 1,
+          "minimum": 0,
+          "maximum": 10,
+          "description": "Maximum number of consecutive empty lines allowed (0 = remove all empty lines)"
         },
         "svAlign.instAlignPort": {
           "type": "boolean",

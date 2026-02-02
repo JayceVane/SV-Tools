@@ -89,6 +89,7 @@
 | `paramOneLine` | boolean | true | 尽可能将参数保持在一行 |
 | `indentStyle` | string | "1tbs" | 缩进风格（"1tbs" 或 "gnu"） |
 | `stripEmptyLine` | boolean | true | 删除多余的空行 |
+| `maxConsecutiveEmptyLines` | number | 1 | 允许的最大连续空行数（0 = 移除所有空行） |
 | `instAlignPort` | boolean | true | 对齐模块实例化端口 |
 | `ignoreTick` | boolean | true | 缩进时忽略预处理器指令 |
 | `importSameLine` | boolean | false | 将 import 语句与模块声明保持在同一行 |
@@ -139,6 +140,16 @@
 - **类型**: 布尔值
 - **默认值**: true
 - **说明**: 删除代码中多余的空行，保持代码紧凑。
+
+#### `maxConsecutiveEmptyLines`（最大连续空行数）
+- **类型**: 数字
+- **默认值**: 1
+- **取值范围**: 0-10
+- **说明**: 控制代码中允许的最大连续空行数。
+  - 0: 移除所有空行，代码完全紧凑
+  - 1: 最多允许 1 个连续空行（推荐，保持代码简洁）
+  - 2-10: 允许更多空行分隔不同的代码块
+  - 此选项在 `stripEmptyLine` 为 true 时生效
 
 #### `instAlignPort`（对齐实例端口）
 - **类型**: 布尔值

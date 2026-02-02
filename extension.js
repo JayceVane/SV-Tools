@@ -42,7 +42,8 @@ async function formatDocument(document, range = null) {
         instAlignPort: config.get('instAlignPort', true),
         ignoreTick: config.get('ignoreTick', true),
         importSameLine: config.get('importSameLine', false),
-        alignComma: config.get('alignComma', true)
+        alignComma: config.get('alignComma', true),
+        maxConsecutiveEmptyLines: config.get('maxConsecutiveEmptyLines', 1)
     };
 
     try {

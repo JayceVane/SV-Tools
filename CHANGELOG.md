@@ -2,6 +2,21 @@
 
 All notable changes to the SystemVerilog VSCode Extension will be documented in this file.
 
+## [2.0.5] - 2025-02-02
+
+### Added
+- **Maximum Consecutive Empty Lines Control**: New configurable option to control empty lines
+  - New configuration: `svAlign.maxConsecutiveEmptyLines`
+  - Default value: 1 (allow at most 1 consecutive empty line)
+  - Range: 0-10 (0 = remove all empty lines)
+  - Post-processing removes excessive empty lines after beautification
+  - Provides fine-grained control over code spacing and readability
+
+### Technical Details
+- Added `postprocess_text()` method in daemon.py
+- Processes formatted text to enforce empty line limits
+- Runs after main beautification to ensure consistent formatting
+
 ## [2.0.4] - 2025-02-02
 
 ### Fixed
