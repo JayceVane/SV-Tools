@@ -2,7 +2,7 @@
   "name": "sv-align",
   "displayName": "SystemVerilog Align Formatter",
   "description": "Verilog/SystemVerilog formatter adapted from Sublime Text plugin",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "publisher": "JayceVane",
   "author": {
     "name": "JayceVane",
@@ -46,7 +46,7 @@
       "properties": {
         "svAlign.tabSize": {
           "type": "number",
-          "default": 3,
+          "default": 4,
           "description": "Number of spaces for indentation"
         },
         "svAlign.useTab": {
