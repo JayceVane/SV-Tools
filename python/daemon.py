@@ -88,7 +88,7 @@ class FormatterDaemon:
                         r'\bwhile\b',
                         r'\bdo\b',
                         r'\bforeach\b',
-                        r'\balways_(?:ff|comb|latch)\b',
+                        r'\balways(?:_(?:ff|comb|latch))?\b',  # Matches: always, always_ff, always_comb, always_latch
                         r'\bif\b',
                         r'\belse\b',
                         r'\belse\s+if\b',

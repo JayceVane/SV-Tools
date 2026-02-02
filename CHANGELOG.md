@@ -2,6 +2,14 @@
 
 All notable changes to the SystemVerilog VSCode Extension will be documented in this file.
 
+## [2.0.4] - 2025-02-02
+
+### Fixed
+- **Always Keyword Support**: Fixed regex pattern to support all forms of `always` keyword
+  - Traditional Verilog: `always @(posedge clk)`, `always @(*)`, `always @(a or b)`
+  - SystemVerilog: `always_ff`, `always_comb`, `always_latch`
+  - All forms now correctly merge `begin` to the same line in 1tbs mode
+
 ## [2.0.3] - 2025-02-02
 
 ### Fixed
