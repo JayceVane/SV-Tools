@@ -2,13 +2,18 @@
   "name": "sv-align",
   "displayName": "SystemVerilog Align Formatter",
   "description": "Verilog/SystemVerilog formatter adapted from Sublime Text plugin",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "publisher": "JayceVane",
   "author": {
     "name": "JayceVane",
     "email": "JayceVane@163.com"
   },
   "license": "Apache-2.0",
+  "icon": "icon.png",
+  "galleryBanner": {
+    "color": "#007ACC",
+    "theme": "dark"
+  },
   "repository": {
     "type": "git",
     "url": "https://github.com/your-username/SystemVerilog"
@@ -22,6 +27,18 @@
   },
   "categories": [
     "Formatters"
+  ],
+  "keywords": [
+    "systemverilog",
+    "verilog",
+    "formatter",
+    "format",
+    "align",
+    "hdl",
+    "fpga",
+    "硬件描述语言",
+    "SystemVerilog",
+    "Verilog"
   ],
   "activationEvents": [
     "onLanguage:verilog",

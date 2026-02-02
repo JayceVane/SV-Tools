@@ -2,6 +2,18 @@
 
 All notable changes to the SystemVerilog VSCode Extension will be documented in this file.
 
+## [2.0.1] - 2025-02-02
+
+### Fixed
+- **Critical**: Fixed default tabSize configuration not taking effect
+  - Updated daemon default nbSpace from 3 to 4
+  - Fixed daemon configuration update logic to respect user settings
+  - Daemon now recreates beautifier instance on each format request with current options
+
+### Changed
+- Default tabSize changed from 3 to 4 spaces
+- Configuration changes now take effect immediately without reloading window
+
 ## [2.0.0] - 2025-02-02
 
 ### Added

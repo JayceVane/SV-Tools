@@ -51,7 +51,7 @@ class FormatterDaemon:
     def create_beautifier(self, options):
         """Create or update the VerilogBeautifier instance with given options"""
         self.beautifier = VerilogBeautifier(
-            nbSpace=options.get('nbSpace', 3),
+            nbSpace=options.get('nbSpace', 4),
             useTab=options.get('useTab', False),
             oneBindPerLine=options.get('oneBindPerLine', True),
             oneDeclPerLine=options.get('oneDeclPerLine', False),
@@ -67,9 +67,8 @@ class FormatterDaemon:
 
     def format_text(self, text, options):
         """Format the given text using VerilogBeautifier"""
-        # Recreate beautifier if options changed or not yet created
-        if self.beautifier is None:
-            self.create_beautifier(options)
+        # Always recreate beautifier with current options to respect user configuration
+        self.create_beautifier(options)
 
         try:
             formatted_text = self.beautifier.beautifyText(text)
@@ -148,7 +147,7 @@ class FormatterDaemon:
         """Main daemon loop - read requests from stdin and process them"""
         # Initialize with default options
         default_options = {
-            'nbSpace': 3,
+            'nbSpace': 4,
             'useTab': False,
             'oneBindPerLine': True,
             'oneDeclPerLine': False,
