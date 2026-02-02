@@ -1,0 +1,26 @@
+# Node modules
+node_modules/
+
+# VSCode
+.vscode-test/
+*.vsix
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+
+# Temporary files
+temp/
+*.tmp
+
+# OS
+.DS_Store
+Thumbs.db

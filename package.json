@@ -1,0 +1,109 @@
+{
+  "name": "sv-align",
+  "displayName": "SystemVerilog Align Formatter",
+  "description": "Verilog/SystemVerilog formatter adapted from Sublime Text plugin",
+  "version": "1.0.0",
+  "publisher": "JayceVane",
+  "author": {
+    "name": "JayceVane",
+    "email": "JayceVane@163.com"
+  },
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/your-username/SystemVerilog"
+  },
+  "bugs": {
+    "url": "https://github.com/your-username/SystemVerilog/issues"
+  },
+  "homepage": "https://github.com/your-username/SystemVerilog/tree/main/vscode-extension",
+  "engines": {
+    "vscode": "^1.74.0"
+  },
+  "categories": [
+    "Formatters"
+  ],
+  "activationEvents": [
+    "onLanguage:verilog",
+    "onLanguage:systemverilog"
+  ],
+  "main": "./extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "verilog",
+        "aliases": ["Verilog", "verilog"],
+        "extensions": [".v", ".vh"]
+      },
+      {
+        "id": "systemverilog",
+        "aliases": ["SystemVerilog", "System Verilog", "sv"],
+        "extensions": [".sv", ".svh"]
+      }
+    ],
+    "configuration": {
+      "title": "SystemVerilog Align",
+      "properties": {
+        "svAlign.tabSize": {
+          "type": "number",
+          "default": 3,
+          "description": "Number of spaces for indentation"
+        },
+        "svAlign.useTab": {
+          "type": "boolean",
+          "default": false,
+          "description": "Use tab for indentation"
+        },
+        "svAlign.oneBindPerLine": {
+          "type": "boolean",
+          "default": true,
+          "description": "One port binding per line in module instance"
+        },
+        "svAlign.oneDeclPerLine": {
+          "type": "boolean",
+          "default": false,
+          "description": "One signal declaration per line"
+        },
+        "svAlign.paramOneLine": {
+          "type": "boolean",
+          "default": true,
+          "description": "Keep parameters on one line if possible"
+        },
+        "svAlign.indentStyle": {
+          "type": "string",
+          "enum": ["1tbs", "gnu"],
+          "default": "1tbs",
+          "description": "Indentation style"
+        },
+        "svAlign.stripEmptyLine": {
+          "type": "boolean",
+          "default": true,
+          "description": "Strip empty lines"
+        },
+        "svAlign.instAlignPort": {
+          "type": "boolean",
+          "default": true,
+          "description": "Align instance ports"
+        },
+        "svAlign.ignoreTick": {
+          "type": "boolean",
+          "default": true,
+          "description": "Ignore preprocessor directives for indentation"
+        },
+        "svAlign.importSameLine": {
+          "type": "boolean",
+          "default": false,
+          "description": "Keep import on same line as module declaration"
+        },
+        "svAlign.alignComma": {
+          "type": "boolean",
+          "default": true,
+          "description": "Align comma/semicolon"
+        }
+      }
+    }
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.74.0"
+  }
+}

@@ -1,0 +1,19 @@
+# Authors
+
+## VSCode Extension
+
+- JayceVane <JayceVane@163.com>
+  - VSCode integration wrapper
+  - Extension packaging and distribution
+
+## Original Sublime Text Plugin
+
+- Nicolas Belmonte
+  - Original Sublime Text SystemVerilog plugin
+  - Core formatting algorithms and beautifier logic
+  - Repository: https://github.com/nicolas3d/SystemVerilog
+
+## Contributors
+
+This project is open to contributions. If you would like to contribute,
+please submit a pull request or contact the maintainers.

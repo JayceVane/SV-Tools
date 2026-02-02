@@ -1,0 +1,44 @@
+# SystemVerilog VSCode Extension
+
+This project incorporates the SystemVerilog Sublime Text plugin by Nicolas Belmonte,
+which is licensed under the Apache License, Version 2.0.
+
+## The Original Sublime Text Plugin
+
+Copyright (c) 2014-2025 Nicolas Belmonte
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this work except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+
+## The VSCode Extension Wrapper
+
+Copyright (c) 2025 JayceVane
+Contact: JayceVane@163.com
+
+The VSCode extension wrapper (extension.js, python/formatter.py) is also
+licensed under the Apache License, Version 2.0. See the LICENSE file for details.
+
+## Source Code
+
+The original Sublime Text plugin can be found at:
+https://github.com/nicolas3d/SystemVerilog
+
+## Modifications
+
+The following modifications were made to adapt the plugin for VSCode:
+1. Created extension.js to integrate with VSCode formatting API
+2. Created python/formatter.py as a wrapper for the beautifier
+3. Removed Sublime Text specific dependencies
+4. Added configuration support through VSCode settings
+
+All core formatting logic (verilog_beautifier.py, verilogutil.py) remains
+unchanged from the original implementation.
