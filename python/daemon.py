@@ -83,6 +83,11 @@ class FormatterDaemon:
                 if next_line and next_line.strip() == 'begin':
                     # Keywords that should be followed by 'begin' on the same line in 1tbs style
                     start_keywords = [
+                        r'\bfork\b',
+                        r'\brepeat\b',
+                        r'\bwhile\b',
+                        r'\bdo\b',
+                        r'\bforeach\b',
                         r'\balways_(?:ff|comb|latch)\b',
                         r'\bif\b',
                         r'\belse\b',

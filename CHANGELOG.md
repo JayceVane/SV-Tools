@@ -2,6 +2,14 @@
 
 All notable changes to the SystemVerilog VSCode Extension will be documented in this file.
 
+## [2.0.3] - 2025-02-02
+
+### Fixed
+- **Extended Keyword Support**: Added missing keywords for GNU-to-1tbs conversion
+  - Added support for: `fork`, `repeat`, `while`, `do`, `foreach`
+  - All common SystemVerilog control flow keywords now supported
+  - Verified with comprehensive test suite
+
 ## [2.0.2] - 2025-02-02
 
 ### Added

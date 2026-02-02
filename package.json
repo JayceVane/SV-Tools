@@ -2,7 +2,7 @@
   "name": "sv-align",
   "displayName": "SystemVerilog Align Formatter",
   "description": "Verilog/SystemVerilog formatter adapted from Sublime Text plugin",
-  "version": "2.0.2",
+  "version": "2.0.3",
   "publisher": "JayceVane",
   "author": {
     "name": "JayceVane",
