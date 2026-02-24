@@ -1,9 +1,12 @@
-# SystemVerilog Align Formatter for VSCode
+# SystemVerilog Tools for VSCode
 
-一款适用于 Visual Studio Code 的 Verilog/SystemVerilog 代码格式化插件，改编自 Sublime Text SystemVerilog 插件。
+一款适用于 Visual Studio Code 的 Verilog/SystemVerilog 代码格式化和生产力工具插件，改编自 Sublime Text SystemVerilog 插件和 Verilog-Gadget 插件。
+
+**版本**: v2.4.1
 
 ## 功能特性
 
+### 格式化功能
 - 自动格式化 Verilog 和 SystemVerilog 文件
 - **完整 Unicode 支持** - 完美支持中文、日文、韩文等 UTF-8 编码的注释
 - 对齐功能：
@@ -18,6 +21,103 @@
 - 删除空行选项
 - 每行单声明/单绑定选项
 - **高性能**：使用持久化守护进程，格式化速度提升 87-93%
+
+### Verilog-Gadget 生产力工具
+
+#### 1. 模块实例化生成 (Generate Module Instantiation)
+- 自动解析模块定义
+- 生成模块实例化代码
+- 自动识别时钟和复位信号
+- **自动生成端口声明**：
+  - input 端口自动生成 `reg` 声明
+  - output 端口自动生成 `wire` 声明
+  - inout 端口自动生成 `wire` 声明
+  - 每个声明单独一行
+- 复制到剪贴板，方便粘贴
+
+**快捷键**: `Ctrl+Shift+C` (Windows/Linux) / `Cmd+Shift+C` (macOS)
+
+**使用方法**:
+1. 打开包含模块定义的文件
+2. 按下快捷键或从命令面板选择 "SystemVerilog Tools: Generate Module Instantiation"
+3. 实例化代码会自动复制到剪贴板
+
+#### 2. 测试台生成 (Generate Testbench)
+- 自动生成完整的测试台代码
+- 自动生成时钟和复位逻辑
+- 可配置的波形dump类型 (fsdb/vpd/shm/vcd)
+- 自动生成 init 和 drive 任务
+
+**快捷键**: `Ctrl+Shift+T` (Windows/Linux) / `Cmd+Shift+T` (macOS)
+
+**使用方法**:
+1. 打开包含模块定义的文件
+2. 按下快捷键或从命令面板选择 "SystemVerilog Tools: Generate Testbench"
+3. 新的测试台文件会自动创建
+
+#### 3. 代码重复编号 (Repeat Code with Numbers)
+- 使用格式化占位符重复代码
+- 支持多种格式化选项（十进制、十六进制等）
+- 支持行列步进控制
+- 支持剪贴板内容插入
+
+**快捷键**: `Ctrl+F12` (Windows/Linux) / `Cmd+F12` (macOS)
+
+**占位符格式**:
+- `{:d}` - 十进制整数
+- `{0:03x}` - 十六进制，3位，前导零
+- `{cb}` - 剪贴板内容（每行）
+
+**使用方法**:
+1. 选中包含占位符的代码
+2. 按下快捷键或从命令面板选择 "SystemVerilog Tools: Repeat Code with Numbers"
+3. 输入范围和步进（格式：`start~end,row_step,col_step`）
+4. 代码会自动生成
+
+**示例**:
+```
+选中: assign signal_{:d} = {:d};
+输入: 0~8
+结果:
+assign signal_0 = 0;
+assign signal_1 = 1;
+...
+assign signal_8 = 8;
+```
+
+#### 4. 代码对齐 (Align Selected Code)
+- 使用 verilog-beautifier 格式化引擎
+- 智能识别代码类型并自动对齐
+- 支持端口声明对齐
+- 支持信号声明对齐
+- 支持实例化端口对齐
+- 支持赋值语句对齐
+
+**快捷键**: `Ctrl+Shift+X` (Windows/Linux) / `Cmd+Shift+X` (macOS)
+
+**使用方法**:
+1. 选中需要对齐的代码块
+2. 按下快捷键或从命令面板选择 "SystemVerilog Tools: Align Selected Code"
+3. 代码会自动对齐
+
+#### 5. 文件头插入 (Insert File Header)
+- 插入标准化的文件头注释
+- 支持自定义模板
+- 自动填充文件名、日期、时间等信息
+
+**快捷键**: `Ctrl+Shift+Insert` (Windows/Linux) / `Cmd+Shift+Insert` (macOS)
+
+**模板占位符**:
+- `{FILE}` - 文件名
+- `{DATE}` - 创建日期 (YYYY-MM-DD)
+- `{TIME}` - 创建时间 (HH:MM:SS)
+- `{YEAR}` - 年份
+- `{TABS}` - 制表符大小
+
+**使用方法**:
+1. 打开文件或新建文件
+2. 按下快捷键或从命令面板选择 "SystemVerilog Tools: Insert File Header"
+3. 文件头会自动插入到文件开头
 
 ## 系统要求
 
@@ -46,7 +146,7 @@
    - Linux: `~/.vscode/extensions`
    - macOS: `~/.vscode/extensions`
 
-2. 将文件夹重命名为 `sv-align`
+2. 将文件夹重命名为 `svtools`
 
 ## 使用方法
 
@@ -62,7 +162,7 @@
   "[systemverilog]": {
     "editor.formatOnSave": true
   },
-  "svAlign.pythonPath": "python"  // Linux/Mac 上使用 "python3"
+  "svtools.pythonPath": "python"  // Linux/Mac 上使用 "python3"
 }
 ```
 
@@ -78,7 +178,7 @@
 
 ## 配置选项
 
-所有配置都在 `svAlign` 配置项下，可在 VSCode 设置中搜索 `svAlign` 进行配置：
+所有配置都在 `svtools` 配置项下，可在 VSCode 设置中搜索 `svtools` 进行配置：
 
 | 配置项 | 类型 | 默认值 | 说明 |
 |--------|------|--------|------|
@@ -94,82 +194,16 @@
 | `ignoreTick` | boolean | true | 缩进时忽略预处理器指令 |
 | `importSameLine` | boolean | false | 将 import 语句与模块声明保持在同一行 |
 | `alignComma` | boolean | true | 对齐逗号/分号 |
-
-### 配置项详细说明
-
-#### `tabSize`（缩进空格数）
-- **类型**: 数字
-- **默认值**: 4
-- **说明**: 控制代码缩进使用的空格数量。推荐设置为 4 个空格以符合常见代码风格。
-
-#### `useTab`（使用 Tab）
-- **类型**: 布尔值
-- **默认值**: false
-- **说明**: 设为 true 时使用 Tab 字符缩进，false 使用空格缩进。建议使用空格缩进以保持跨平台一致性。
-
-#### `oneBindPerLine`（每行单端口）
-- **类型**: 布尔值
-- **默认值**: true
-- **说明**: 模块实例化时，是否将每个端口连接放在单独一行。
-  - true: 每个端口单独一行，便于查看和注释
-  - false: 端口可以紧凑排列在同一行
-
-#### `oneDeclPerLine`（每行单声明）
-- **类型**: 布尔值
-- **默认值**: false
-- **说明**: 是否强制每个信号声明单独一行。
-  - true: `logic a; logic b;` 会被拆分为两行
-  - false: 允许 `logic a, b;` 这种声明方式
-
-#### `paramOneLine`（参数单行）
-- **类型**: 布尔值
-- **默认值**: true
-- **说明**: 尽可能将参数定义保持在同一行。
-  - true: 短参数定义会保持在一行
-  - false: 每个参数单独一行
-
-#### `indentStyle`（缩进风格）
-- **类型**: 字符串
-- **默认值**: "1tbs"
-- **可选值**: "1tbs" 或 "gnu"
-- **说明**:
-  - "1tbs": 传统的 One True Brace Style，左括号在同一行
-  - "gnu": GNU 风格，左括号单独一行
-
-#### `stripEmptyLine`（删除空行）
-- **类型**: 布尔值
-- **默认值**: true
-- **说明**: 删除代码中多余的空行，保持代码紧凑。
-
-#### `maxConsecutiveEmptyLines`（最大连续空行数）
-- **类型**: 数字
-- **默认值**: 1
-- **取值范围**: 0-10
-- **说明**: 控制代码中允许的最大连续空行数。
-  - 0: 移除所有空行，代码完全紧凑
-  - 1: 最多允许 1 个连续空行（推荐，保持代码简洁）
-  - 2-10: 允许更多空行分隔不同的代码块
-  - 此选项在 `stripEmptyLine` 为 true 时生效
-
-#### `instAlignPort`（对齐实例端口）
-- **类型**: 布尔值
-- **默认值**: true
-- **说明**: 模块实例化时是否对齐端口连接，提高代码可读性。
-
-#### `ignoreTick`（忽略预处理器指令）
-- **类型**: 布尔值
-- **默认值**: true
-- **说明**: 缩进计算时是否忽略 `` `ifdef`、`` `define` 等预处理器指令。
-
-#### `importSameLine`（import 同行）
-- **类型**: 布尔值
-- **默认值**: false
-- **说明**: 将 import 语句与模块声明保持在同一行。
-
-#### `alignComma`（对齐逗号分号）
-- **类型**: 布尔值
-- **默认值**: true
-- **说明**: 对齐声明中的逗号和分号，提高代码对齐美观度。
+| `pythonPath` | string | "python" | Python 可执行文件路径 |
+| `instPrefix` | string | "inst_" | 模块实例名称默认前缀 |
+| `includePortDeclarations` | boolean | true | 生成模块实例化时是否包含端口声明 |
+| `reset` | array | [] | 异步复位信号名称列表 |
+| `sreset` | array | [] | 同步复位信号名称列表 |
+| `clock` | array | ["clk", "uclk", "cclk"] | 时钟信号名称列表 |
+| `waveType` | string | "fsdb" | 波形dump类型 (fsdb/vpd/shm/vcd) |
+| `taskInit` | boolean | true | 在测试台中生成 init 任务 |
+| `taskDrive` | boolean | true | 在测试台中生成 drive 任务 |
+| `headerTemplate` | string | "" | 文件头模板（使用占位符） |
 
 ### 配置示例
 
@@ -177,16 +211,42 @@
 
 ```json
 {
-  "svAlign.tabSize": 4,
-  "svAlign.useTab": false,
-  "svAlign.oneBindPerLine": true,
-  "svAlign.oneDeclPerLine": false,
-  "svAlign.paramOneLine": false,
-  "svAlign.indentStyle": "1tbs",
-  "svAlign.stripEmptyLine": true,
-  "svAlign.instAlignPort": true
+  "svtools.tabSize": 4,
+  "svtools.useTab": false,
+  "svtools.oneBindPerLine": true,
+  "svtools.oneDeclPerLine": false,
+  "svtools.paramOneLine": false,
+  "svtools.indentStyle": "1tbs",
+  "svtools.stripEmptyLine": true,
+  "svtools.instAlignPort": true,
+  "svtools.instPrefix": "u_",
+  "svtools.clock": ["clk", "sys_clk"],
+  "svtools.reset": ["rst_n", "arst_n"],
+  "svtools.waveType": "fsdb"
 }
 ```
+
+## 命令列表
+
+### 格式化命令
+- `svtools.formatDocument` - 格式化当前文档
+
+### 生产力工具命令
+- `svtools.moduleInstantiation` - 生成模块实例化代码
+- `svtools.generateTestbench` - 生成测试台
+- `svtools.repeatCode` - 重复代码并编号
+- `svtools.alignCode` - 对齐选中的代码
+- `svtools.insertHeader` - 插入文件头
+
+## 快捷键
+
+| 命令 | Windows/Linux | macOS |
+|------|---------------|-------|
+| 生成模块实例化 | `Ctrl+Shift+C` | `Cmd+Shift+C` |
+| 生成测试台 | `Ctrl+Shift+T` | `Cmd+Shift+T` |
+| 重复代码编号 | `Ctrl+F12` | `Cmd+F12` |
+| 对齐代码 | `Ctrl+Shift+X` | `Cmd+Shift+X` |
+| 插入文件头 | `Ctrl+Shift+Insert` | `Cmd+Shift+Insert` |
 
 ## 自定义 Python 路径
 
@@ -195,14 +255,14 @@
 ### Windows
 ```json
 {
-  "svAlign.pythonPath": "C:\\Python39\\python.exe"
+  "svtools.pythonPath": "C:\\Python39\\python.exe"
 }
 ```
 
 ### Linux/macOS
 ```json
 {
-  "svAlign.pythonPath": "/usr/bin/python3"
+  "svtools.pythonPath": "/usr/bin/python3"
 }
 ```
 
@@ -239,12 +299,13 @@ endmodule
 ```
 vscode-extension/
 ├── extension.js           # VSCode 扩展入口
-├── processManager.js      # Python 守护进程管理器
 ├── package.json           # 扩展清单文件
-├── python/               # Python 格式化脚本
+├── templates/             # 模板文件
+│   └── header_template.txt
+├── python/               # Python 脚本
 │   ├── daemon.py         # 守护进程（高性能）
-│   ├── formatter.py      # 主格式化包装器（备用）
-│   └── verilogutil/      # 核心格式化逻辑
+│   └── verilogutil/      # 核心逻辑
+│       ├── vg_core.py    # Verilog-Gadget 核心功能
 │       ├── verilog_beautifier.py
 │       └── verilogutil.py
 ```
@@ -260,7 +321,7 @@ vscode-extension/
 
 ### 格式化没有生效
 1. 确认 Python 已正确安装并在 PATH 中
-2. 检查 `svAlign.pythonPath` 配置是否正确
+2. 检查 `svtools.pythonPath` 配置是否正确
 3. 查看 VSCode 输出面板的错误信息
 
 ### 中文注释乱码
@@ -271,10 +332,14 @@ v2.0.0 版本已优化性能，使用持久化守护进程，格式化速度提�
 
 ## 致谢
 
-本 VSCode 插件改编自 [Nicolas Belmonte 的 Sublime Text SystemVerilog 插件](https://github.com/nicolas3d/SystemVerilog)的核心格式化逻辑。所有核心格式化算法均保留自原始实现。
+本 VSCode 插件改编自以下 Sublime Text 插件的核心逻辑：
+
+1. [Nicolas Belmonte 的 Sublime Text SystemVerilog 插件](https://github.com/nicolas3d/SystemVerilog) - 格式化功能
+2. [yongchan jeon (Kris) 的 Verilog-Gadget 插件](https://github.com/poucotm/Verilog-Gadget) - 生产力工具
 
 ### 原作者
 - **Nicolas Belmonte** - [Sublime Text SystemVerilog Plugin](https://github.com/nicolas3d/SystemVerilog)
+- **yongchan jeon (Kris)** - [Verilog-Gadget Plugin](https://github.com/poucotm/Verilog-Gadget)
 
 ### VSCode 扩展开发
 - **JayceVane** - [VSCode 集成封装](https://github.com/JayceVane)
@@ -286,7 +351,7 @@ Copyright (c) 2025 JayceVane
 
 本软件采用 [Apache License, Version 2.0](LICENSE) 许可。关于第三方代码的信息，请参阅 [NOTICE](NOTICE) 文件。
 
-本插件包含 Sublime Text SystemVerilog 插件的核心格式化逻辑，同样采用 Apache License, Version 2.0 许可。
+本插件包含 Sublime Text SystemVerilog 插件和 Verilog-Gadget 插件的核心逻辑，同样采用 Apache License, Version 2.0 许可。
 
 ### 许可证摘要
 

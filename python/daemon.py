@@ -39,6 +39,16 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), 'verilogutil'))
 
 from verilog_beautifier import VerilogBeautifier
+from vg_core import (
+    parse_module,
+    module_inst,
+    generate_testbench,
+    generate_port_declarations,
+    repeat_code_with_numbers,
+    align_code,
+    generate_header_template,
+    remove_comment_line_space
+)
 
 
 class FormatterDaemon:
@@ -213,6 +223,123 @@ class FormatterDaemon:
         sys.stdout.write(json_str + '\n')
         sys.stdout.flush()
 
+    def generate_module_inst(self, text, options):
+        """Generate module instantiation code with port declarations"""
+        try:
+            text = remove_comment_line_space(text)
+            module, ports_list, param_list, clk_list, rst_list = parse_module(text, options)
+
+            if not module:
+                return {
+                    'success': False,
+                    'error': 'Failed to find module definition'
+                }
+
+            iprefix = options.get('inst_prefix', 'inst_')
+            include_declarations = options.get('include_declarations', True)
+
+            # Generate port declarations (input->reg, output->wire)
+            port_decls = ""
+            if include_declarations:
+                port_decls = generate_port_declarations(ports_list, param_list)
+                if port_decls:
+                    port_decls = "\n// Signal declarations\n" + port_decls + "\n"
+
+            # Generate module instantiation
+            inst_code = module_inst(module, ports_list, param_list, [], [], [], iprefix)
+
+            # Combine declarations and instantiation
+            result = port_decls + "\n" + inst_code
+
+            return {
+                'success': True,
+                'result': result,
+                'module': module
+            }
+        except Exception as e:
+            return {
+                'success': False,
+                'error': str(e)
+            }
+
+    def generate_testbench(self, text, options):
+        """Generate testbench code"""
+        try:
+            text = remove_comment_line_space(text)
+            module, ports_list, param_list, clk_list, rst_list = parse_module(text, options)
+
+            if not module:
+                return {
+                    'success': False,
+                    'error': 'Failed to find module definition'
+                }
+
+            tb_code = generate_testbench(module, ports_list, param_list, clk_list, rst_list, options)
+
+            return {
+                'success': True,
+                'result': tb_code,
+                'module': module
+            }
+        except Exception as e:
+            return {
+                'success': False,
+                'error': str(e)
+            }
+
+    def repeat_code(self, template, options):
+        """Repeat code with number formatting"""
+        try:
+            start = options.get('start', 0)
+            end = options.get('end', 10)
+            row_step = options.get('row_step', 1)
+            col_step = options.get('col_step', 0)
+            clipboard_lines = options.get('clipboard_lines', [])
+
+            result = repeat_code_with_numbers(template, start, end, row_step, col_step, clipboard_lines)
+
+            return {
+                'success': True,
+                'result': result
+            }
+        except Exception as e:
+            return {
+                'success': False,
+                'error': str(e)
+            }
+
+    def align_verilog_code(self, text, options):
+        """Align Verilog code"""
+        try:
+            tab_size = options.get('tab_size', 4)
+            result = align_code(text, tab_size)
+
+            return {
+                'success': True,
+                'result': result
+            }
+        except Exception as e:
+            return {
+                'success': False,
+                'error': str(e)
+            }
+
+    def generate_header(self, template, file_name, options):
+        """Generate header from template"""
+        try:
+            tab_size = options.get('tab_size', 4)
+            result = generate_header_template(template, file_name, tab_size)
+
+            return {
+                'success': True,
+                'result': result
+            }
+        except Exception as e:
+            return {
+                'success': False,
+                'error': str(e)
+            }
+
     def handle_request(self, request):
         """Handle an incoming JSON-RPC request"""
         try:
@@ -229,6 +356,77 @@ class FormatterDaemon:
                     return
 
                 result = self.format_text(text, options)
+                if result['success']:
+                    self.send_response(request_id, result)
+                else:
+                    self.send_error(request_id, -32603, result['error'])
+
+            elif method == 'module_inst':
+                text = params.get('text', '')
+                options = params.get('options', {})
+
+                if not text:
+                    self.send_error(request_id, -32602, 'Invalid params: missing text')
+                    return
+
+                result = self.generate_module_inst(text, options)
+                if result['success']:
+                    self.send_response(request_id, result)
+                else:
+                    self.send_error(request_id, -32603, result['error'])
+
+            elif method == 'testbench_gen':
+                text = params.get('text', '')
+                options = params.get('options', {})
+
+                if not text:
+                    self.send_error(request_id, -32602, 'Invalid params: missing text')
+                    return
+
+                result = self.generate_testbench(text, options)
+                if result['success']:
+                    self.send_response(request_id, result)
+                else:
+                    self.send_error(request_id, -32603, result['error'])
+
+            elif method == 'repeat_code':
+                template = params.get('template', '')
+                options = params.get('options', {})
+
+                if not template:
+                    self.send_error(request_id, -32602, 'Invalid params: missing template')
+                    return
+
+                result = self.repeat_code(template, options)
+                if result['success']:
+                    self.send_response(request_id, result)
+                else:
+                    self.send_error(request_id, -32603, result['error'])
+
+            elif method == 'align_code':
+                text = params.get('text', '')
+                options = params.get('options', {})
+
+                if not text:
+                    self.send_error(request_id, -32602, 'Invalid params: missing text')
+                    return
+
+                result = self.align_verilog_code(text, options)
+                if result['success']:
+                    self.send_response(request_id, result)
+                else:
+                    self.send_error(request_id, -32603, result['error'])
+
+            elif method == 'generate_header':
+                template = params.get('template', '')
+                file_name = params.get('file_name', '')
+                options = params.get('options', {})
+
+                if not template:
+                    self.send_error(request_id, -32602, 'Invalid params: missing template')
+                    return
+
+                result = self.generate_header(template, file_name, options)
                 if result['success']:
                     self.send_response(request_id, result)
                 else:

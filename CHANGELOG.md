@@ -2,6 +2,122 @@
 
 All notable changes to the SystemVerilog VSCode Extension will be documented in this file.
 
+## [2.4.1] - 2025-02-24
+
+### Fixed
+- **Signal Declaration Spacing**: Fixed spacing in generated signal declarations
+  - Added space between type (`reg`/`wire`) and bit specification (`[7:0]`)
+  - Now generates: `reg [7:0] data_in;` instead of `reg[7:0] data_in;`
+  - Properly formats: `reg clk;`, `wire valid;`
+
+### Before/After
+```
+// Before:
+reg[7:0] data_in;
+wire[7:0] data_out;
+
+// After:
+reg [7:0] data_in;
+wire [7:0] data_out;
+```
+
+## [2.4.0] - 2025-02-24
+
+### Added
+- **Port Declarations in Module Instantiation**: Enhanced module instantiation with automatic signal declarations
+  - Input ports now generate `reg` declarations
+  - Output ports now generate `wire` declarations
+  - Inout ports now generate `wire` declarations
+  - Each declaration on a separate line
+  - Parameters generate `localparam` declarations
+  - New configuration: `svtools.includePortDeclarations` (default: true)
+
+### Example
+```systemverilog
+// Before (instantiation only):
+my_module u_my_module (
+    .clk (clk),
+    .rst_n (rst_n),
+    .data (data)
+);
+
+// After (with declarations):
+// Signal declarations
+localparam WIDTH = 8;
+reg  clk;
+reg  rst_n;
+wire [7:0] data;
+
+my_module u_my_module (
+    .clk (clk),
+    .rst_n (rst_n),
+    .data (data)
+);
+```
+
+## [2.3.0] - 2025-02-24
+
+### Fixed
+- **Daemon Import Error**: Fixed critical import issue preventing daemon from starting
+  - Fixed syntax error in `vg_core.py` (extra closing bracket)
+  - Fixed import path in `daemon.py` for `vg_core` module
+  - Daemon now initializes successfully on startup
+
+### Technical Details
+- Removed duplicate `]` in function signature at line 347 of `vg_core.py`
+- Changed import from `verilogutil.vg_core` to `vg_core` in `daemon.py`
+
+## [2.2.0] - 2025-02-24
+
+### Added
+- **Module Instantiation**: Generate module instantiation code from module definition
+  - New command: `svtools.moduleInstantiation`
+  - Keyboard shortcut: `Ctrl+Shift+C` (Windows/Linux) / `Cmd+Shift+C` (macOS)
+  - Automatically detects clock and reset signals
+  - Copies instantiation code to clipboard
+
+- **Testbench Generation**: Generate complete testbench from module definition
+  - New command: `svtools.generateTestbench`
+  - Keyboard shortcut: `Ctrl+Shift+T` (Windows/Linux) / `Cmd+Shift+T` (macOS)
+  - Auto-generates clock and reset logic
+  - Configurable waveform dump type (fsdb/vpd/shm/vcd)
+  - Generates init and drive tasks
+
+- **Code Repetition**: Repeat code with number formatting
+  - New command: `svtools.repeatCode`
+  - Keyboard shortcut: `Ctrl+F12` (Windows/Linux) / `Cmd+F12` (macOS)
+  - Supports format placeholders: `{:d}`, `{0:03x}`, `{cb}`
+  - Configurable row/column step increments
+
+- **Code Alignment**: Align selected code using verilog-beautifier
+  - New command: `svtools.alignCode`
+  - Keyboard shortcut: `Ctrl+Shift+X` (Windows/Linux) / `Cmd+Shift+X` (macOS)
+  - Supports port declarations, signal declarations, assignments, instance connections
+
+- **File Header Insertion**: Insert standardized file headers
+  - New command: `svtools.insertHeader`
+  - Keyboard shortcut: `Ctrl+Shift+Insert` (Windows/Linux) / `Cmd+Shift+Insert` (macOS)
+  - Template placeholders: `{FILE}`, `{DATE}`, `{TIME}`, `{YEAR}`, `{TABS}`
+  - Customizable header template
+
+### Changed
+- **Plugin Rename**: Unified plugin name to "SystemVerilog Tools"
+  - Package name: `sv-align` → `svtools`
+  - All commands now use `svtools` prefix
+  - All configurations now use `svtools` prefix
+  - Command category: "SystemVerilog Tools"
+
+- **Configuration Consolidation**: Merged all configuration under `svtools` prefix
+  - `svAlign.*` → `svtools.*`
+  - `svGadget.*` → `svtools.*`
+  - Single unified configuration namespace
+
+### Technical Details
+- Added `vg_core.py` module with Verilog-Gadget functionality ported from Sublime Text
+- Extended daemon.py with new JSON-RPC methods: `module_inst`, `testbench_gen`, `repeat_code`, `align_code`, `generate_header`
+- Added header template in `templates/header_template.txt`
+- Context menu submenu: `svtools.submenu` for productivity tools
+
 ## [2.0.5] - 2025-02-02
 
 ### Added

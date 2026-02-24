@@ -1,8 +1,8 @@
 {
-  "name": "sv-align",
-  "displayName": "SystemVerilog Align Formatter",
-  "description": "Verilog/SystemVerilog formatter adapted from Sublime Text plugin",
-  "version": "2.0.5",
+  "name": "svtools",
+  "displayName": "SystemVerilog Tools",
+  "description": "Verilog/SystemVerilog formatter, module instantiation, testbench generation, and productivity tools",
+  "version": "2.4.1",
   "publisher": "JayceVane",
   "author": {
     "name": "JayceVane",
@@ -26,7 +26,8 @@
     "vscode": "^1.74.0"
   },
   "categories": [
-    "Formatters"
+    "Formatters",
+    "Snippets"
   ],
   "keywords": [
     "systemverilog",
@@ -36,6 +37,8 @@
     "align",
     "hdl",
     "fpga",
+    "testbench",
+    "module instantiation",
     "硬件描述语言",
     "SystemVerilog",
     "Verilog"
@@ -58,71 +61,232 @@
         "extensions": [".sv", ".svh"]
       }
     ],
+    "commands": [
+      {
+        "command": "svtools.formatDocument",
+        "title": "Format Document",
+        "category": "SystemVerilog Tools"
+      },
+      {
+        "command": "svtools.moduleInstantiation",
+        "title": "Generate Module Instantiation",
+        "category": "SystemVerilog Tools",
+        "icon": "icon.png"
+      },
+      {
+        "command": "svtools.generateTestbench",
+        "title": "Generate Testbench",
+        "category": "SystemVerilog Tools"
+      },
+      {
+        "command": "svtools.repeatCode",
+        "title": "Repeat Code with Numbers",
+        "category": "SystemVerilog Tools"
+      },
+      {
+        "command": "svtools.alignCode",
+        "title": "Align Selected Code",
+        "category": "SystemVerilog Tools"
+      },
+      {
+        "command": "svtools.insertHeader",
+        "title": "Insert File Header",
+        "category": "SystemVerilog Tools"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "svtools.moduleInstantiation",
+        "key": "ctrl+shift+c",
+        "mac": "cmd+shift+c",
+        "when": "editorLangId == verilog || editorLangId == systemverilog"
+      },
+      {
+        "command": "svtools.generateTestbench",
+        "key": "ctrl+shift+t",
+        "mac": "cmd+shift+t",
+        "when": "editorLangId == verilog || editorLangId == systemverilog"
+      },
+      {
+        "command": "svtools.repeatCode",
+        "key": "ctrl+f12",
+        "mac": "cmd+f12",
+        "when": "editorLangId == verilog || editorLangId == systemverilog"
+      },
+      {
+        "command": "svtools.alignCode",
+        "key": "ctrl+shift+x",
+        "mac": "cmd+shift+x",
+        "when": "editorLangId == verilog || editorLangId == systemverilog"
+      },
+      {
+        "command": "svtools.insertHeader",
+        "key": "ctrl+shift+insert",
+        "mac": "cmd+shift+insert",
+        "when": "editorLangId == verilog || editorLangId == systemverilog"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "svtools.formatDocument",
+          "when": "editorLangId == verilog || editorLangId == systemverilog",
+          "group": "1_modification"
+        },
+        {
+          "submenu": "svtools.submenu",
+          "when": "editorLangId == verilog || editorLangId == systemverilog",
+          "group": "2_modification"
+        }
+      ],
+      "svtools.submenu": [
+        {
+          "command": "svtools.moduleInstantiation",
+          "group": "1_gadget"
+        },
+        {
+          "command": "svtools.generateTestbench",
+          "group": "1_gadget"
+        },
+        {
+          "command": "svtools.repeatCode",
+          "group": "2_gadget"
+        },
+        {
+          "command": "svtools.alignCode",
+          "group": "2_gadget"
+        },
+        {
+          "command": "svtools.insertHeader",
+          "group": "3_gadget"
+        }
+      ]
+    },
     "configuration": {
-      "title": "SystemVerilog Align",
+      "title": "SystemVerilog Tools",
       "properties": {
-        "svAlign.tabSize": {
+        "svtools.tabSize": {
           "type": "number",
           "default": 4,
           "description": "Number of spaces for indentation"
         },
-        "svAlign.useTab": {
+        "svtools.useTab": {
           "type": "boolean",
           "default": false,
           "description": "Use tab for indentation"
         },
-        "svAlign.oneBindPerLine": {
+        "svtools.oneBindPerLine": {
           "type": "boolean",
           "default": true,
           "description": "One port binding per line in module instance"
         },
-        "svAlign.oneDeclPerLine": {
+        "svtools.oneDeclPerLine": {
           "type": "boolean",
           "default": false,
           "description": "One signal declaration per line"
         },
-        "svAlign.paramOneLine": {
+        "svtools.paramOneLine": {
           "type": "boolean",
           "default": true,
           "description": "Keep parameters on one line if possible"
         },
-        "svAlign.indentStyle": {
+        "svtools.indentStyle": {
           "type": "string",
           "enum": ["1tbs", "gnu"],
           "default": "1tbs",
           "description": "Indentation style"
         },
-        "svAlign.stripEmptyLine": {
+        "svtools.stripEmptyLine": {
           "type": "boolean",
           "default": true,
           "description": "Strip empty lines"
         },
-        "svAlign.maxConsecutiveEmptyLines": {
+        "svtools.maxConsecutiveEmptyLines": {
           "type": "number",
           "default": 1,
           "minimum": 0,
           "maximum": 10,
           "description": "Maximum number of consecutive empty lines allowed (0 = remove all empty lines)"
         },
-        "svAlign.instAlignPort": {
+        "svtools.instAlignPort": {
           "type": "boolean",
           "default": true,
           "description": "Align instance ports"
         },
-        "svAlign.ignoreTick": {
+        "svtools.ignoreTick": {
           "type": "boolean",
           "default": true,
           "description": "Ignore preprocessor directives for indentation"
         },
-        "svAlign.importSameLine": {
+        "svtools.importSameLine": {
           "type": "boolean",
           "default": false,
           "description": "Keep import on same line as module declaration"
         },
-        "svAlign.alignComma": {
+        "svtools.alignComma": {
           "type": "boolean",
           "default": true,
           "description": "Align comma/semicolon"
+        },
+        "svtools.pythonPath": {
+          "type": "string",
+          "default": "python",
+          "description": "Path to Python executable"
+        },
+        "svtools.instPrefix": {
+          "type": "string",
+          "default": "inst_",
+          "description": "Default prefix for module instance name"
+        },
+        "svtools.includePortDeclarations": {
+          "type": "boolean",
+          "default": true,
+          "description": "Include signal declarations when generating module instantiation (input->reg, output->wire)"
+        },
+        "svtools.reset": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "description": "Default asynchronous reset signal names"
+        },
+        "svtools.sreset": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "description": "Default synchronous reset signal names"
+        },
+        "svtools.clock": {
+          "type": "array",
+          "default": ["clk", "uclk", "cclk"],
+          "items": {
+            "type": "string"
+          },
+          "description": "Default clock signal names"
+        },
+        "svtools.waveType": {
+          "type": "string",
+          "enum": ["fsdb", "vpd", "shm", "vcd"],
+          "default": "fsdb",
+          "description": "Type of waveform dump"
+        },
+        "svtools.taskInit": {
+          "type": "boolean",
+          "default": true,
+          "description": "Generate init task in testbench"
+        },
+        "svtools.taskDrive": {
+          "type": "boolean",
+          "default": true,
+          "description": "Generate drive task in testbench"
+        },
+        "svtools.headerTemplate": {
+          "type": "string",
+          "default": "",
+          "description": "Header template with placeholders: {FILE}, {DATE}, {TIME}, {YEAR}, {TABS}"
         }
       }
     }
