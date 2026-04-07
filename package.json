@@ -2,7 +2,7 @@
   "name": "svtools",
   "displayName": "SystemVerilog Tools",
   "description": "Verilog/SystemVerilog formatter, module instantiation, testbench generation, and productivity tools",
-  "version": "2.4.1",
+  "version": "2.4.2",
   "publisher": "JayceVane",
   "author": {
     "name": "JayceVane",

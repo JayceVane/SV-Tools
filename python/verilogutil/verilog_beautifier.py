@@ -742,7 +742,8 @@ class VerilogBeautifier():
             if ',' in s:
                 s = x[6]
             port_l.append(s)
-        max_port_len=max([len(x) for x in port_l])
+        if port_l:
+            max_port_len=max([len(x) for x in port_l])
         len_sign = 0
         len_type = 0
         len_type_user = 0
@@ -960,44 +961,96 @@ class VerilogBeautifier():
                     txt_new = txt_new[:-1]
         return txt_new
 
+    def _find_matching_paren(self, text, start):
+        depth = 0
+        in_string = False
+        i = start
+        while i < len(text):
+            c = text[i]
+            if in_string:
+                if c == '\\' and i + 1 < len(text):
+                    i += 2
+                    continue
+                if c == '"':
+                    in_string = False
+            else:
+                if c == '"':
+                    in_string = True
+                elif c == '(':
+                    depth += 1
+                elif c == ')':
+                    depth -= 1
+                    if depth == 0:
+                        return i
+            i += 1
+        return -1
+
     # Alignement for module instance
     def alignInstance(self,txt,ilvl):
-        # Check if parameterized module
-        m = re.search(r'(?s)(?P<emptyline>\n*)(?P<mtype>^[ \t]*(bind\s+[\w\.]+\s+)?\w+)\s*(?P<paramsfull>#\s*\((?P<params>.*)\s*\))?\s*(?P<mname>\w+)\s*\(\s*(?P<ports>.*)\s*\)\s*;(?P<comment>.*)$',txt,flags=re.MULTILINE)
-        if not m:
+        txt_clean = verilogutil.clean_comment(txt)
+        m_type = re.search(r'^(?P<emptyline>[ \t]*)\n?(?P<mtype>(?:(?:bind\s+[\w\.]+\s+)?[ \t]*)?\w+)',txt_clean,flags=re.MULTILINE)
+        if not m_type:
             return ''
-        # Add module type
-        txt_new = m.group('emptyline') + self.indent*(ilvl) + m.group('mtype').strip()
-        #Add parameter binding : if already on one line simply remove extra space, otherwise apply standard alignement
-        if m.group('params'):
+        mtype = m_type.group('mtype').strip()
+        emptyline = m_type.group('emptyline')
+        rest = txt_clean[m_type.end():]
+        params = None
+        mname = None
+        ports = None
+        rest_stripped = rest.lstrip()
+        if rest_stripped.startswith('#'):
+            hash_pos = rest.index('#')
+            paren_pos = rest.index('(', hash_pos)
+            end_paren = self._find_matching_paren(rest, paren_pos)
+            if end_paren == -1:
+                return ''
+            params = rest[paren_pos+1:end_paren]
+            rest = rest[end_paren+1:]
+            rest_stripped = rest.lstrip()
+        m_name = re.match(r'\s*(\w+)', rest_stripped)
+        if not m_name:
+            return ''
+        mname = m_name.group(1)
+        rest = rest_stripped[m_name.end():]
+        rest_stripped = rest.lstrip()
+        if rest_stripped.startswith('('):
+            paren_pos = rest.index('(')
+            end_paren = self._find_matching_paren(rest, paren_pos)
+            if end_paren == -1:
+                return ''
+            ports = rest[paren_pos+1:end_paren]
+            rest = rest[end_paren+1:]
+        rest_stripped = rest.lstrip()
+        comment = ''
+        if rest_stripped.startswith(';'):
+            rest_stripped = rest_stripped[1:].strip()
+            comment = rest_stripped
+        txt_new = emptyline + self.indent*(ilvl) + mtype
+        if params is not None:
             txt_new += ' #('
-            if ('\n' in m.group('params').strip()) or not self.settings['paramOneLine']:
-                txt_new += '\n'+self.alignInstanceBinding(m.group('params'),ilvl+1)+self.indent*(ilvl)
+            if ('\n' in params.strip()) or not self.settings['paramOneLine']:
+                txt_new += '\n'+self.alignInstanceBinding(params,ilvl+1)+self.indent*(ilvl)
             else :
-                p = m.group('params').strip()
+                p = params.strip()
                 p = re.sub(r'\s+','',p)
                 p = re.sub(r'\),',r'), ',p)
                 txt_new += p
             txt_new += ')'
-        # Add module name
-        txt_new += ' ' + m.group('mname') + ' ('
-        # Add ports binding
-        if m.group('ports'):
-            # if port binding starts with a .* let it on the same line
-            if not m.group('ports').startswith('.*') and '\n' in m.group('ports').rstrip():
+        txt_new += ' ' + mname + ' ('
+        if ports:
+            if not ports.startswith('.*') and '\n' in ports.rstrip():
                 txt_new += '\n'
-            if '\n' in m.group('ports').strip() :
-                txt_new += self.alignInstanceBinding(m.group('ports'),ilvl+1)
+            if '\n' in ports.strip() :
+                txt_new += self.alignInstanceBinding(ports,ilvl+1)
                 txt_new += self.indent*(ilvl)
             else:
-                p = m.group('ports').strip()
+                p = ports.strip()
                 p = re.sub(r'\s+','',p)
                 p = re.sub(r'\),',r'), ',p)
                 txt_new += p
         txt_new += ');'
-        # Add end
-        if m.group('comment'):
-            txt_new += ' ' + m.group('comment')
+        if comment:
+            txt_new += ' ' + comment
         return txt_new
 
     def alignInstanceBinding(self,txt,ilvl):
