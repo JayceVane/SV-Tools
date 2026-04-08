@@ -136,7 +136,7 @@ class VerilogBeautifier():
             if w_d[-1]=='\n':
                 ilvl_prev = ilvl
                 if not w.strip():
-                    if w!='\n' and self.block_state in ['module']:
+                    if w!='\n' and self.block_state in ['module','interface']:
                         block+=w
                     has_indent = w!='\n'
                 if state_end:
@@ -271,7 +271,7 @@ class VerilogBeautifier():
                             block = line
                             line = ''
             # Check that a module block get the whole port declaration
-            if self.block_state=='module' and w==';':
+            if self.block_state in ['module','interface'] and w==';':
                 tmp = verilogutil.clean_comment(block+line).strip()
                 m = re.search(r';\s*\(',tmp,flags=re.MULTILINE)
                 m2 = re.search(r'\bimport\b',tmp,flags=re.MULTILINE)
@@ -282,9 +282,8 @@ class VerilogBeautifier():
             if w==';' and self.state not in ['comment_line','ignore_line','comment_block','attribute','string', '('] and not mod_import:
                 if self.block_state in ['text','decl','struct_assign'] and self.re_decl.match(line.strip()):
                     self.block_state = 'decl'
-                    # print('Setting Block state to decl on line "{0}"'.format(line))
-                elif self.block_state in ['module','instance','text','package','decl'] or (self.block_state in ['struct','struct_assign','enum'] and self.state!='{'):
-                    if self.block_state=='module':
+                elif self.block_state in ['module','interface','instance','text','package','decl'] or (self.block_state in ['struct','struct_assign','enum'] and self.state!='{'):
+                    if self.block_state in ['module','interface']:
                         block_tmp = self.alignModulePort(block+line,ilvl-1)
                         line = ''
                         block_ended = True
@@ -294,6 +293,7 @@ class VerilogBeautifier():
                     elif self.block_state=='instance':
                         block_tmp = self.alignInstance(block+line,ilvl)
                         line = ''
+                        block_ended = True
                     elif self.block_state=='struct':
                         block_tmp = self.alignDecl(block+line)
                         line = ''
@@ -463,8 +463,8 @@ class VerilogBeautifier():
         # Check that there is no reminding stuff todo:
         block = block+line
         # print('[Beautify] state={block_state}.{state}\n{block} '.format(state=self.state, block_state=self.block_state, block=block))
-        if self.block_state in ['module','instance','text','package','decl', 'assign'] or (self.block_state in ['struct','struct_assign','enum'] and self.state!='{'):
-            if self.block_state=='module':
+        if self.block_state in ['module','interface','instance','text','package','decl', 'assign'] or (self.block_state in ['struct','struct_assign','enum'] and self.state!='{'):
+            if self.block_state in ['module','interface']:
                 block_tmp = self.alignModulePort(block,ilvl-1)
             elif self.settings['reindentOnly']:
                 block_tmp = block
@@ -499,7 +499,7 @@ class VerilogBeautifier():
             else :
                 self.stateUpdate(w)
             # print('Block {0} detected in "{1}". Prev= "{2}" => state = {3}'.format(w,txt,w_prev,self.states))
-            if w in ['module','package', 'generate', 'function', 'task', 'property', 'sequence', 'checker']:
+            if w in ['module','interface','package', 'generate', 'function', 'task', 'property', 'sequence', 'checker']:
                 self.block_state = w
                 return "incr_ilvl_flush"
             else:
@@ -534,10 +534,10 @@ class VerilogBeautifier():
     # Align ANSI style port declara3ion of a module
     def alignModulePort(self,txt, ilvl):
         # Extract parameter and ports
-        m = re.search(r'(?s)(?P<module>^[ \t]*module)\s*(?P<mname>\w+)(?P<import>\s+import\s+.*?;)?\s*(?P<paramsfull>#\s*\(\s*(?P<params>.*?)\s*\))?\s*(\(\s*(?P<ports>.*)\s*\))?\s*;$',txt,flags=re.MULTILINE)
+        m = re.search(r'(?s)(?P<module>^[ \t]*(?:module|interface))\s*(?P<mname>\w+)(?P<import>\s+import\s+.*?;)?\s*(?P<paramsfull>#\s*\(\s*(?P<params>.*?)\s*\))?\s*(\(\s*(?P<ports>.*)\s*\))?\s*;$',txt,flags=re.MULTILINE)
         if not m:
             return ''
-        txt_new = self.indent*(ilvl) + 'module ' + m.group('mname').strip()
+        txt_new = self.indent*(ilvl) + m.group('module').strip() + ' ' + m.group('mname').strip()
         # Add optional import declaration
         if m.group('import'):
             imports = m.group('import').strip().split('\n')
@@ -985,47 +985,134 @@ class VerilogBeautifier():
             i += 1
         return -1
 
+    def _skip_comment_or_string(self, text, pos):
+        i = pos
+        if i >= len(text):
+            return i
+        if text[i] == '"':
+            i += 1
+            while i < len(text):
+                if text[i] == '\\' and i + 1 < len(text):
+                    i += 2
+                    continue
+                if text[i] == '"':
+                    return i + 1
+                i += 1
+            return i
+        if text[i] == '/' and i + 1 < len(text):
+            if text[i+1] == '/':
+                i += 2
+                while i < len(text) and text[i] != '\n':
+                    i += 1
+                return i
+            if text[i+1] == '*':
+                i += 2
+                while i + 1 < len(text):
+                    if text[i] == '*' and text[i+1] == '/':
+                        return i + 2
+                    i += 1
+                return len(text)
+        return pos
+
+    def _find_next_nonspace_skip_comment(self, text, pos):
+        i = pos
+        while i < len(text):
+            if text[i] in ' \t\r\n':
+                i += 1
+                continue
+            if text[i] == '/' and i + 1 < len(text) and text[i+1] in '/*':
+                i = self._skip_comment_or_string(text, i)
+                continue
+            if text[i] == '"':
+                return i
+            return i
+        return len(text)
+
+    def _find_char_skip_comment(self, text, pos, ch):
+        i = pos
+        while i < len(text):
+            if text[i] == '/' and i + 1 < len(text) and text[i+1] in '/*':
+                i = self._skip_comment_or_string(text, i)
+                continue
+            if text[i] == '"':
+                i = self._skip_comment_or_string(text, i)
+                continue
+            if text[i] == ch:
+                return i
+            i += 1
+        return -1
+
+    def _find_matching_paren_skip_comment(self, text, start):
+        depth = 0
+        i = start
+        while i < len(text):
+            c = text[i]
+            if c == '/' and i + 1 < len(text) and text[i+1] in '/*':
+                i = self._skip_comment_or_string(text, i)
+                continue
+            if c == '"':
+                i = self._skip_comment_or_string(text, i)
+                continue
+            if c == '(':
+                depth += 1
+            elif c == ')':
+                depth -= 1
+                if depth == 0:
+                    return i
+            i += 1
+        return -1
+
     # Alignement for module instance
     def alignInstance(self,txt,ilvl):
+        leading_newlines = ''
+        txt_stripped = txt.lstrip(' \t')
+        while txt_stripped.startswith('\n'):
+            leading_newlines += '\n'
+            txt_stripped = txt_stripped[1:].lstrip(' \t')
+        if leading_newlines:
+            txt = txt_stripped
         txt_clean = verilogutil.clean_comment(txt)
-        m_type = re.search(r'^(?P<emptyline>[ \t]*)\n?(?P<mtype>(?:(?:bind\s+[\w\.]+\s+)?[ \t]*)?\w+)',txt_clean,flags=re.MULTILINE)
+        m_type = re.search(r'^[ \t]*\n?(?P<mtype>(?:(?:bind\s+[\w\.]+\s+)?[ \t]*)?\w+)',txt_clean,flags=re.MULTILINE)
         if not m_type:
             return ''
         mtype = m_type.group('mtype').strip()
-        emptyline = m_type.group('emptyline')
-        rest = txt_clean[m_type.end():]
+        m_type_orig = re.search(r'^[ \t]*\n?\s*\w+', txt, flags=re.MULTILINE)
+        if not m_type_orig:
+            return ''
+        pos = m_type_orig.end()
         params = None
         mname = None
         ports = None
-        rest_stripped = rest.lstrip()
-        if rest_stripped.startswith('#'):
-            hash_pos = rest.index('#')
-            paren_pos = rest.index('(', hash_pos)
-            end_paren = self._find_matching_paren(rest, paren_pos)
+        nxt = self._find_next_nonspace_skip_comment(txt, pos)
+        if nxt < len(txt) and txt[nxt] == '#':
+            paren_pos = self._find_char_skip_comment(txt, nxt, '(')
+            if paren_pos == -1:
+                return ''
+            end_paren = self._find_matching_paren_skip_comment(txt, paren_pos)
             if end_paren == -1:
                 return ''
-            params = rest[paren_pos+1:end_paren]
-            rest = rest[end_paren+1:]
-            rest_stripped = rest.lstrip()
-        m_name = re.match(r'\s*(\w+)', rest_stripped)
+            params = txt[paren_pos+1:end_paren]
+            pos = end_paren + 1
+        nxt = self._find_next_nonspace_skip_comment(txt, pos)
+        m_name = re.match(r'\w+', txt[nxt:])
         if not m_name:
             return ''
-        mname = m_name.group(1)
-        rest = rest_stripped[m_name.end():]
-        rest_stripped = rest.lstrip()
-        if rest_stripped.startswith('('):
-            paren_pos = rest.index('(')
-            end_paren = self._find_matching_paren(rest, paren_pos)
+        mname = m_name.group(0)
+        pos = nxt + m_name.end()
+        nxt = self._find_next_nonspace_skip_comment(txt, pos)
+        if nxt < len(txt) and txt[nxt] == '(':
+            end_paren = self._find_matching_paren_skip_comment(txt, nxt)
             if end_paren == -1:
                 return ''
-            ports = rest[paren_pos+1:end_paren]
-            rest = rest[end_paren+1:]
-        rest_stripped = rest.lstrip()
+            ports = txt[nxt+1:end_paren]
+            pos = end_paren + 1
+        nxt = self._find_next_nonspace_skip_comment(txt, pos)
         comment = ''
-        if rest_stripped.startswith(';'):
-            rest_stripped = rest_stripped[1:].strip()
-            comment = rest_stripped
-        txt_new = emptyline + self.indent*(ilvl) + mtype
+        if nxt < len(txt) and txt[nxt] == ';':
+            nxt2 = self._find_next_nonspace_skip_comment(txt, nxt + 1)
+            if nxt2 < len(txt):
+                comment = txt[nxt2:].rstrip()
+        txt_new = self.indent*(ilvl) + mtype
         if params is not None:
             txt_new += ' #('
             if ('\n' in params.strip()) or not self.settings['paramOneLine']:
@@ -1051,7 +1138,7 @@ class VerilogBeautifier():
         txt_new += ');'
         if comment:
             txt_new += ' ' + comment
-        return txt_new
+        return leading_newlines + txt_new
 
     def alignInstanceBinding(self,txt,ilvl):
         was_split = False
