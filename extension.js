@@ -19,37 +19,59 @@
  */
 
 const vscode = require('vscode');
-const ProcessManager = require('./processManager');
+const path = require('path');
+
+// Load native module
+let svtools = null;
+
+function loadNativeModule() {
+    if (svtools) return svtools;
+    
+    try {
+        // Try to load the native module
+        const modulePath = path.join(__dirname, 'src-rust', 'svtools.win32-x64-msvc.node');
+        svtools = require(modulePath);
+        console.log('svtools native module loaded successfully');
+        return svtools;
+    } catch (err) {
+        console.error('Failed to load svtools native module:', err);
+        return null;
+    }
+}
 
 /**
- * Format Verilog/SystemVerilog code using Python daemon
+ * Format Verilog/SystemVerilog code using native module
  */
 async function formatDocument(document, range = null) {
+    const native = loadNativeModule();
+    if (!native) {
+        vscode.window.showErrorMessage('svtools native module not loaded');
+        return null;
+    }
+
     const config = vscode.workspace.getConfiguration('svAlign');
 
     // Get the document text
     const text = document.getText(range);
 
-    // Get configuration options
+    // Get configuration options (camelCase for napi-rs auto-conversion)
     const options = {
-        nbSpace: config.get('tabSize', 4),
+        indentStyle: config.get('indentStyle', '1tbs'),
         useTab: config.get('useTab', false),
-        oneBindPerLine: config.get('oneBindPerLine', true),
-        oneDeclPerLine: config.get('oneDeclPerLine', false),
-        paramOneLine: config.get('paramOneLine', true),
-        indentSyle: config.get('indentStyle', '1tbs'),
+        nbSpace: config.get('tabSize', 4),
+        maxConsecutiveEmptyLines: config.get('maxConsecutiveEmptyLines', 1),
         reindentOnly: false,
-        stripEmptyLine: config.get('stripEmptyLine', true),
-        instAlignPort: config.get('instAlignPort', true),
         ignoreTick: config.get('ignoreTick', true),
-        importSameLine: config.get('importSameLine', false),
+        oneDeclPerLine: config.get('oneDeclPerLine', false),
+        oneBindPerLine: config.get('oneBindPerLine', true),
         alignComma: config.get('alignComma', true),
-        maxConsecutiveEmptyLines: config.get('maxConsecutiveEmptyLines', 1)
+        paramOneLine: config.get('paramOneLine', true),
+        importSameLine: config.get('importSameLine', false),
+        instAlignPort: config.get('instAlignPort', true)
     };
 
     try {
-        // Use daemon for formatting
-        const formattedText = await daemon.format(text, options);
+        const formattedText = native.formatText(text, options);
         return formattedText;
     } catch (error) {
         vscode.window.showErrorMessage(`Formatting failed: ${error.message}`);
@@ -62,6 +84,12 @@ async function formatDocument(document, range = null) {
  * Generate module instantiation
  */
 async function generateModuleInstance() {
+    const native = loadNativeModule();
+    if (!native) {
+        vscode.window.showErrorMessage('svtools native module not loaded');
+        return;
+    }
+
     const editor = vscode.window.activeTextEditor;
     if (!editor) {
         vscode.window.showWarningMessage('No active editor');
@@ -73,14 +101,14 @@ async function generateModuleInstance() {
     const config = vscode.workspace.getConfiguration('svGadget');
 
     const options = {
-        inst_prefix: config.get('instPrefix', 'inst_'),
+        instPrefix: config.get('instPrefix', 'inst_'),
         reset: config.get('reset', []),
         clock: config.get('clock', []),
-        include_declarations: config.get('includePortDeclarations', true)
+        includeDeclarations: config.get('includePortDeclarations', true)
     };
 
     try {
-        const result = await daemon.sendRequest('module_inst', { text, options });
+        const result = native.generateModuleInst(text, options);
         if (result.success) {
             await vscode.env.clipboard.writeText(result.result);
             vscode.window.showInformationMessage(`Module instantiation copied to clipboard: ${result.module}`);
@@ -96,6 +124,12 @@ async function generateModuleInstance() {
  * Generate testbench
  */
 async function generateTestbench() {
+    const native = loadNativeModule();
+    if (!native) {
+        vscode.window.showErrorMessage('svtools native module not loaded');
+        return;
+    }
+
     const editor = vscode.window.activeTextEditor;
     if (!editor) {
         vscode.window.showWarningMessage('No active editor');
@@ -107,17 +141,17 @@ async function generateTestbench() {
     const config = vscode.workspace.getConfiguration('svGadget');
 
     const options = {
-        inst_prefix: config.get('instPrefix', 'inst_'),
+        instPrefix: config.get('instPrefix', 'inst_'),
         reset: config.get('reset', []),
         sreset: config.get('sreset', []),
         clock: config.get('clock', []),
-        wave_type: config.get('waveType', 'fsdb'),
-        task_init: config.get('taskInit', true),
-        task_drive: config.get('taskDrive', true)
+        waveType: config.get('waveType', 'fsdb'),
+        taskInit: config.get('taskInit', true),
+        taskDrive: config.get('taskDrive', true)
     };
 
     try {
-        const result = await daemon.sendRequest('testbench_gen', { text, options });
+        const result = native.generateTestbench(text, options);
         if (result.success) {
             // Create new untitled document with testbench code
             const doc = await vscode.workspace.openTextDocument({
@@ -138,6 +172,12 @@ async function generateTestbench() {
  * Repeat code with numbers
  */
 async function repeatCodeWithNumbers() {
+    const native = loadNativeModule();
+    if (!native) {
+        vscode.window.showErrorMessage('svtools native module not loaded');
+        return;
+    }
+
     const editor = vscode.window.activeTextEditor;
     if (!editor) {
         vscode.window.showWarningMessage('No active editor');
@@ -176,33 +216,36 @@ async function repeatCodeWithNumbers() {
         const options = {
             start,
             end,
-            row_step: rowStep,
-            col_step: colStep
+            rowStep,
+            colStep,
+            clipboardLines: []
         };
 
         // Check if {cb} placeholder is used
         if (template.includes('{cb}')) {
             const clipboardText = await vscode.env.clipboard.readText();
-            options.clipboard_lines = clipboardText.split('\n').filter(l => l.trim());
+            options.clipboardLines = clipboardText.split('\n').filter(l => l.trim());
         }
 
-        const result = await daemon.sendRequest('repeat_code', { template, options });
-        if (result.success) {
-            await editor.edit(editBuilder => {
-                editBuilder.replace(selection, result.result);
-            });
-        } else {
-            vscode.window.showErrorMessage(`Failed to repeat code: ${result.error}`);
-        }
+        const result = native.repeatCode(template, options);
+        await editor.edit(editBuilder => {
+            editBuilder.replace(selection, result);
+        });
     } catch (error) {
         vscode.window.showErrorMessage(`Repeat code failed: ${error.message}`);
     }
 }
 
 /**
- * Align selected code (using verilog-beautifier)
+ * Align selected code
  */
 async function alignSelectedCode() {
+    const native = loadNativeModule();
+    if (!native) {
+        vscode.window.showErrorMessage('svtools native module not loaded');
+        return;
+    }
+
     const editor = vscode.window.activeTextEditor;
     if (!editor) {
         vscode.window.showWarningMessage('No active editor');
@@ -213,23 +256,11 @@ async function alignSelectedCode() {
     const text = editor.document.getText(selection);
     const config = vscode.workspace.getConfiguration('svAlign');
 
-    const options = {
-        nbSpace: config.get('tabSize', 4),
-        useTab: config.get('useTab', false),
-        indentSyle: config.get('indentStyle', '1tbs'),
-        instAlignPort: config.get('instAlignPort', true),
-        alignComma: config.get('alignComma', true)
-    };
-
     try {
-        const result = await daemon.sendRequest('format', { text, options });
-        if (result.success) {
-            await editor.edit(editBuilder => {
-                editBuilder.replace(selection, result.result);
-            });
-        } else {
-            vscode.window.showErrorMessage(`Failed to align code: ${result.error}`);
-        }
+        const result = native.alignCode(text, config.get('tabSize', 4));
+        await editor.edit(editBuilder => {
+            editBuilder.replace(selection, result);
+        });
     } catch (error) {
         vscode.window.showErrorMessage(`Align code failed: ${error.message}`);
     }
@@ -239,6 +270,12 @@ async function alignSelectedCode() {
  * Insert header template
  */
 async function insertHeaderTemplate() {
+    const native = loadNativeModule();
+    if (!native) {
+        vscode.window.showErrorMessage('svtools native module not loaded');
+        return;
+    }
+
     const editor = vscode.window.activeTextEditor;
     if (!editor) {
         vscode.window.showWarningMessage('No active editor');
@@ -249,25 +286,14 @@ async function insertHeaderTemplate() {
     const headerTemplate = config.get('headerTemplate', getDefaultHeaderTemplate());
     const document = editor.document;
 
-    const options = {
-        tab_size: vscode.workspace.getConfiguration('editor', {}).get('tabSize', 4)
-    };
+    const tabSize = vscode.workspace.getConfiguration('editor', {}).get('tabSize', 4);
 
     try {
-        const result = await daemon.sendRequest('generate_header', {
-            template: headerTemplate,
-            file_name: document.fileName,
-            options
+        const result = native.generateHeader(headerTemplate, document.fileName, tabSize);
+        // Insert at the beginning of the document
+        await editor.edit(editBuilder => {
+            editBuilder.insert(new vscode.Position(0, 0), result);
         });
-
-        if (result.success) {
-            // Insert at the beginning of the document
-            await editor.edit(editBuilder => {
-                editBuilder.insert(new vscode.Position(0, 0), result.result);
-            });
-        } else {
-            vscode.window.showErrorMessage(`Failed to generate header: ${result.error}`);
-        }
     } catch (error) {
         vscode.window.showErrorMessage(`Header insertion failed: ${error.message}`);
     }
@@ -295,17 +321,14 @@ function getDefaultHeaderTemplate() {
 `;
 }
 
-// Global daemon instance
-let daemon = null;
-
 /**
  * Activate the extension
  */
 function activate(context) {
     console.log('SystemVerilog extension is now active!');
 
-    // Create daemon instance
-    daemon = new ProcessManager();
+    // Preload native module
+    loadNativeModule();
 
     // Register document formatting edit provider for both verilog and systemverilog
     const languages = ['verilog', 'systemverilog'];
@@ -381,11 +404,8 @@ function activate(context) {
  * Deactivate the extension
  */
 function deactivate() {
-    // Stop the daemon process
-    if (daemon) {
-        daemon.stop();
-        daemon = null;
-    }
+    // Native module doesn't need cleanup
+    svtools = null;
 }
 
 module.exports = {
