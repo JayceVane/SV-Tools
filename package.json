@@ -1,8 +1,8 @@
 {
   "name": "svtools",
-  "displayName": "SystemVerilog Tools",
-  "description": "Verilog/SystemVerilog formatter, module instantiation, testbench generation, and productivity tools",
-  "version": "2.4.5",
+  "displayName": "SystemVerilog Tools (Native)",
+  "description": "Verilog/SystemVerilog formatter, module instantiation, testbench generation, and productivity tools (Rust native backend)",
+  "version": "3.0.0",
   "publisher": "JayceVane",
   "author": {
     "name": "JayceVane",
@@ -227,11 +227,6 @@
           "type": "boolean",
           "default": true,
           "description": "Align comma/semicolon"
-        },
-        "svtools.pythonPath": {
-          "type": "string",
-          "default": "python",
-          "description": "Path to Python executable"
         },
         "svtools.instPrefix": {
           "type": "string",
