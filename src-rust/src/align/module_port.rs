@@ -33,25 +33,67 @@ pub fn split_on_comma(txt: &str) -> Vec<String> {
 
 /// Align ANSI-style module/interface port declarations.
 /// Replicates Python `VerilogBeautifier.alignModulePort()`.
+/// Returns (formatted_text, remaining_text_after_semicolon) on success.
 pub fn align_module_port(
     txt: &str,
     ilvl: usize,
     options: &FormatOptions,
     indent: &str,
     indent_space: &str,
-) -> String {
-    // Extract module/interface header with params and ports
+) -> (String, String) {
+    // Extract module/interface header - match up to opening parenthesis of ports
     let re_module = Regex::new(concat!(
         r"(?s)(?P<module>^[ \t]*(?:module|interface))\s*(?P<mname>\w+)",
         r"(?P<import>\s+import\s+.*?;)?\s*",
         r"(?P<paramsfull>#\s*\(\s*(?P<params>.*?)\s*\))?",
-        r"\s*(\(\s*(?P<ports>.*)\s*\))?\s*;$"
+        r"\s*\("
     ))
     .unwrap();
 
     let m = match re_module.captures(txt) {
         Some(caps) => caps,
-        None => return String::new(),
+        None => {
+            eprintln!(
+                "[DEBUG] align_module_port: regex failed to match: {:?}",
+                txt
+            );
+            return (String::new(), String::new());
+        }
+    };
+
+    // Find the position after the opening parenthesis
+    let paren_start = m.get(0).unwrap().end();
+
+    // Find matching closing parenthesis using balanced matching
+    let mut depth = 1i32;
+    let mut i = paren_start;
+    let bytes = txt.as_bytes();
+    while i < bytes.len() && depth > 0 {
+        match bytes[i] {
+            b'(' => depth += 1,
+            b')' => depth -= 1,
+            b'/' if i + 1 < bytes.len() && (bytes[i + 1] == b'/' || bytes[i + 1] == b'*') => {
+                i = skip_comment(txt, i);
+                continue;
+            }
+            b'"' => {
+                i = skip_comment(txt, i);
+                continue;
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+
+    let ports_end = if depth == 0 { i - 1 } else { txt.len() };
+    let ports_content = &txt[paren_start..ports_end];
+
+    // Find semicolon after ports
+    let after_ports = &txt[ports_end + 1..];
+    let semicolon_pos = after_ports.find(';');
+    let remaining = match semicolon_pos {
+        Some(pos) => after_ports[pos + 1..].to_string(),
+        None => String::new(),
     };
 
     let module_kw = m.name("module").unwrap().as_str().trim();
@@ -252,12 +294,13 @@ pub fn align_module_port(
         txt_new.push(')');
     }
 
-    // Handle no ports
-    if m.name("ports").is_none() {
+    // Handle no ports (empty or whitespace only)
+    let ports_trimmed = ports_content.trim();
+    if ports_trimmed.is_empty() {
         if !options.reindent_only() {
             txt_new.push_str(" ()");
         }
-        return format!("{};", txt_new);
+        return (format!("{};\n", txt_new), remaining);
     }
 
     // Add port list
@@ -266,7 +309,7 @@ pub fn align_module_port(
     }
     txt_new.push_str("(\n");
 
-    let ports_txt = m.name("ports").unwrap().as_str();
+    let ports_txt = ports_trimmed;
     let re_port = Regex::new(
         r"^[ \t]*(?P<dir>[\w\.]+)[ \t]+(?P<var>var|ref\b)?[ \t]*\
          (?P<type>[\w\:]+\b)?[ \t]*(?P<sign>signed|unsigned\b)?[ \t]*\
@@ -553,7 +596,51 @@ pub fn align_module_port(
     }
 
     txt_new.push_str(&format!("{})", indent.repeat(ilvl)));
-    format!("{};", txt_new)
+    (format!("{};\n", txt_new), remaining)
+}
+
+/// Skip over a comment or string literal starting at the given position.
+/// Returns the position after the comment/string.
+fn skip_comment(text: &str, pos: usize) -> usize {
+    let bytes = text.as_bytes();
+    if pos >= bytes.len() {
+        return pos;
+    }
+
+    match bytes[pos] {
+        b'"' => {
+            let mut i = pos + 1;
+            while i < bytes.len() {
+                if bytes[i] == b'\\' && i + 1 < bytes.len() {
+                    i += 2;
+                    continue;
+                }
+                if bytes[i] == b'"' {
+                    return i + 1;
+                }
+                i += 1;
+            }
+            i
+        }
+        b'/' if pos + 1 < bytes.len() && bytes[pos + 1] == b'/' => {
+            let mut i = pos + 2;
+            while i < bytes.len() && bytes[i] != b'\n' {
+                i += 1;
+            }
+            i
+        }
+        b'/' if pos + 1 < bytes.len() && bytes[pos + 1] == b'*' => {
+            let mut i = pos + 2;
+            while i + 1 < bytes.len() {
+                if bytes[i] == b'*' && bytes[i + 1] == b'/' {
+                    return i + 2;
+                }
+                i += 1;
+            }
+            text.len()
+        }
+        _ => pos,
+    }
 }
 
 #[cfg(test)]

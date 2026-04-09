@@ -492,11 +492,21 @@ impl VerilogBeautifier {
                     BlockState::Struct | BlockState::StructAssign | BlockState::Enum
                 ) && self.state != "{")
                 {
+                    let mut skip_block_handled = false;
                     let block_tmp = match &self.block_state {
                         BlockState::Module | BlockState::Interface => {
-                            let result = self.align_module_port(&(block.clone() + &line), ilvl - 1);
+                            let (result, remaining) =
+                                self.align_module_port(&(block.clone() + &line), ilvl - 1);
                             line.clear();
                             block_ended = true;
+                            // If there's remaining content after the module declaration,
+                            // output result and set remaining as new block
+                            if !remaining.is_empty() && !result.is_empty() {
+                                txt_new.push_str(&result);
+                                block = remaining;
+                                self.block_state = BlockState::None;
+                                skip_block_handled = true;
+                            }
                             result
                         }
                         _ if self.options.reindent_only() => {
@@ -505,7 +515,8 @@ impl VerilogBeautifier {
                             result
                         }
                         BlockState::Instance => {
-                            let result = self.align_instance(&(block.clone() + &line), ilvl);
+                            let input = block.clone() + &line;
+                            let result = self.align_instance(&input, ilvl);
                             line.clear();
                             block_ended = true;
                             result
@@ -532,6 +543,10 @@ impl VerilogBeautifier {
                             result
                         }
                     };
+
+                    if skip_block_handled {
+                        continue;
+                    }
 
                     if block_tmp.is_empty() {
                         eprintln!(
@@ -785,7 +800,8 @@ impl VerilogBeautifier {
         {
             let block_tmp = match &self.block_state {
                 BlockState::Module | BlockState::Interface => {
-                    self.align_module_port(&block, ilvl - 1)
+                    let (result, _remaining) = self.align_module_port(&block, ilvl - 1);
+                    result
                 }
                 _ if self.options.reindent_only() => block.clone(),
                 BlockState::Instance => self.align_instance(&block, ilvl),
@@ -962,7 +978,7 @@ impl VerilogBeautifier {
 
     // ── Alignment stubs (delegated to align/ module) ────────────
 
-    fn align_module_port(&self, txt: &str, ilvl: usize) -> String {
+    fn align_module_port(&self, txt: &str, ilvl: usize) -> (String, String) {
         crate::align::module_port::align_module_port(
             txt,
             ilvl,

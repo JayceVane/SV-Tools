@@ -4,6 +4,7 @@ use crate::config::FormatOptions;
 
 /// Align module instance port bindings.
 /// Replicates Python `VerilogBeautifier.alignInstance()` and `alignInstanceBinding()`.
+/// Returns original text if parsing fails (for graceful degradation).
 pub fn align_instance(
     txt: &str,
     ilvl: usize,
@@ -11,14 +12,29 @@ pub fn align_instance(
     indent: &str,
     indent_space: &str,
 ) -> String {
-    // Handle leading newlines
+    // Store original for fallback
+    let original_txt = txt.to_string();
+
+    // Handle leading newlines - keep at most one for blank line separation
     let mut leading_newlines = String::new();
     let mut txt_work = txt.to_string();
-    while txt_work.trim_start().starts_with('\n') {
-        leading_newlines.push('\n');
-        let trimmed = txt_work.trim_start();
-        txt_work = trimmed[1..].trim_start().to_string();
+    let mut newline_count = 0;
+    let mut chars = txt_work.chars().peekable();
+    while let Some(&c) = chars.peek() {
+        if c == '\n' || c == ' ' || c == '\t' {
+            if c == '\n' {
+                newline_count += 1;
+            }
+            chars.next();
+        } else {
+            break;
+        }
     }
+    // Keep only one blank line (two newlines: one from previous content, one for blank)
+    if newline_count > 1 {
+        leading_newlines.push('\n');
+    }
+    txt_work = chars.collect();
 
     // Find module type
     let txt_clean = crate::parser::comments::clean_comment(&txt_work);
@@ -27,13 +43,13 @@ pub fn align_instance(
         .captures(&txt_clean)
     {
         Some(c) => c,
-        None => return String::new(),
+        None => return original_txt, // Return original on parse failure
     };
     let mtype = m_type.name("mtype").unwrap().as_str().trim();
 
     let m_type_orig = match Regex::new(r"^[ \t]*\n?\s*\w+").unwrap().captures(&txt_work) {
         Some(c) => c,
-        None => return String::new(),
+        None => return original_txt, // Return original on parse failure
     };
     let mut pos = m_type_orig.get(0).unwrap().end();
 
@@ -109,11 +125,11 @@ pub fn align_instance(
     if nxt < txt_work.len() && txt_work.as_bytes()[nxt] == b'#' {
         let paren_pos = find_char(&txt_work, nxt, b'(');
         if paren_pos == usize::MAX {
-            return String::new();
+            return original_txt;
         }
         let end_paren = find_matching_paren(&txt_work, paren_pos);
         if end_paren == usize::MAX {
-            return String::new();
+            return original_txt;
         }
         params = Some(txt_work[paren_pos + 1..end_paren].to_string());
         pos = end_paren + 1;
@@ -123,7 +139,7 @@ pub fn align_instance(
     let nxt = find_next_nonspace(&txt_work, pos);
     let m_name = match Regex::new(r"\w+").unwrap().find(&txt_work[nxt..]) {
         Some(m) => m.as_str().to_string(),
-        None => return String::new(),
+        None => return original_txt,
     };
     pos = nxt + m_name.len();
 
@@ -133,23 +149,24 @@ pub fn align_instance(
     if nxt < txt_work.len() && txt_work.as_bytes()[nxt] == b'(' {
         let end_paren = find_matching_paren(&txt_work, nxt);
         if end_paren == usize::MAX {
-            return String::new();
+            return original_txt;
         }
         ports = Some(txt_work[nxt + 1..end_paren].to_string());
         pos = end_paren + 1;
     }
 
-    // Parse trailing comment
+    // Parse trailing comment and check for semicolon
     let nxt = find_next_nonspace(&txt_work, pos);
-    let comment = if nxt < txt_work.len() && txt_work.as_bytes()[nxt] == b';' {
+    let (has_semicolon, comment) = if nxt < txt_work.len() && txt_work.as_bytes()[nxt] == b';' {
         let nxt2 = find_next_nonspace(&txt_work, nxt + 1);
         if nxt2 < txt_work.len() {
-            txt_work[nxt2..].trim().to_string()
+            (true, txt_work[nxt2..].trim().to_string())
         } else {
-            String::new()
+            (true, String::new())
         }
     } else {
-        String::new()
+        // Missing semicolon - will add one
+        (false, String::new())
     };
 
     // Build output
@@ -190,6 +207,8 @@ pub fn align_instance(
     if !comment.is_empty() {
         txt_new.push_str(&format!(" {}", comment));
     }
+    // Ensure trailing newline for proper formatting
+    txt_new.push('\n');
 
     format!("{}{}", leading_newlines, txt_new)
 }
