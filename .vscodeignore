@@ -1,0 +1,42 @@
+# Rust build artifacts
+src-rust/target/**
+src-rust/**/*.rs
+src-rust/Cargo.toml
+src-rust/Cargo.lock
+src-rust/build.rs
+
+# Test files
+src-rust/test*.js
+src-rust/test*.rs
+test*.js
+test*.py
+test/
+
+# Source control
+.git/**
+.gitignore
+
+# IDE
+.idea/**
+.vscode/**
+*.swp
+*.swo
+
+# Node
+node_modules/**
+
+# Python
+python/**
+*.pyc
+__pycache__/**
+
+# Misc
+.arts/**
+.claude/**
+*.md
+nul
+package-lock.json
+src-rust/package-lock.json
+
+# Old vsix packages
+*.vsix
