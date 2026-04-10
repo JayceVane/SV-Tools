@@ -430,7 +430,8 @@ pub fn align_module_port(
         let l = orig_line.trim();
 
         if options.ignore_tick() && l.starts_with('`') {
-            txt_new.push_str(&format!("{}\n", orig_line));
+            // Preserve tick lines with proper indentation
+            txt_new.push_str(&format!("{}{}\n", indent.repeat(ilvl + 1), l));
         } else if (i != lines.len() - 1 && i != 0 && (options.strip_empty_line() || !l.is_empty()))
             || !l.is_empty()
         {
