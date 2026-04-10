@@ -44,25 +44,26 @@ mod tests {
     fn test_basic_tokenize() {
         let txt = "module foo (\n\tinput clk\n);";
         let tokens = tokenize(txt);
-        let words: Vec<&str> = tokens
+        let words: Vec<String> = tokens
             .iter()
             .map(|t| match t {
-                Token::Word(s) => s.as_str(),
+                Token::Word(s) => s.clone(),
                 Token::Punct(c) => {
                     let mut buf = [0u8; 4];
                     c.encode_utf8(&mut buf);
-                    // safe because single ASCII punct
-                    unsafe { std::str::from_utf8_unchecked(&buf[..c.len_utf8()]) }
+                    std::str::from_utf8(&buf[..c.len_utf8()])
+                        .unwrap()
+                        .to_string()
                 }
-                Token::Space(s) => s.as_str(),
-                Token::Newline => "\n",
+                Token::Space(s) => s.clone(),
+                Token::Newline => "\n".to_string(),
             })
             .collect();
 
-        assert!(words.contains(&"module"));
-        assert!(words.contains(&"foo"));
-        assert!(words.contains(&"input"));
-        assert!(words.contains(&"clk"));
+        assert!(words.contains(&"module".to_string()));
+        assert!(words.contains(&"foo".to_string()));
+        assert!(words.contains(&"input".to_string()));
+        assert!(words.contains(&"clk".to_string()));
     }
 
     #[test]

@@ -473,10 +473,11 @@ impl VerilogBeautifier {
                 .contains(&self.state.as_str())
                 && !mod_import
             {
+                let is_decl_match = RE_DECL_FULL.is_match(line.trim());
                 if matches!(
                     self.block_state,
                     BlockState::Text | BlockState::Decl | BlockState::StructAssign
-                ) && RE_DECL_FULL.is_match(line.trim())
+                ) && is_decl_match
                 {
                     self.block_state = BlockState::Decl;
                 } else if matches!(

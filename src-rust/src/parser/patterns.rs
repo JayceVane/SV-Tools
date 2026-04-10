@@ -56,16 +56,7 @@ pub const PORT_DIRS: &[&str] = &["input", "output", "inout", "ref"];
 /// Full signal declaration regex (from VerilogBeautifier.__init__)
 pub static RE_DECL_FULL: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
-        r"^[ \t]*(?:(?P<param>localparam|parameter|local|protected)\s+)?\
-         (?P<scope>\w+\:\:)?\
-         (?P<type>[A-Za-z_]\w*)[ \t]+\
-         (?P<sign>signed\b|unsigned\b)?[ \t]*\
-         (?P<bw>(?:\[([\w\*\(\)\/><\:\-\+`\$\s]+)\][ \t]*)*)\
-         [ \t]*(?P<name>[A-Za-z_]\w*)[ \t]*\
-         (?P<array>(?:\[([\w\*\(\)\/><\:\-\+`\$\s]+)\][ \t]*)*)\
-         (=\s*(?P<init>[^;]+))?\
-         (?P<sig_list>,[\w, \t]*)?;\
-         [ \t]*(?P<comment>.*)",
+        r#"^[ \t]*(?:(?P<param>localparam|parameter|local|protected)\s+)?(?P<scope>\w+\:\:)?(?P<type>[A-Za-z_]\w*)[ \t]+(?P<sign>signed\b|unsigned\b)?[ \t]*(?P<bw>(?:\[[\w\*\(\)\/><\:\-\+`\$\s]+\][ \t]*)*)?[ \t]*(?P<name>[A-Za-z_]\w*)[ \t]*(?P<array>(?:\[[\w\*\(\)\/><\:\-\+`\$\s]+\][ \t]*)*)?(=\s*(?P<init>[^;]+))?(?P<sig_list>,[\w, \t]*)?;[ \t]*(?P<comment>.*)"#,
     )
     .unwrap()
 });
@@ -124,3 +115,17 @@ pub const KW_BLOCK_WITH_TICK: &[&str] = &[
     "`elsif",
     "`else",
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_re_decl_full() {
+        // Test the actual RE_DECL_FULL
+        let test_cases = vec!["wire [511:0] pl_awdata ;", "wire pl_awlast ;"];
+        for tc in test_cases {
+            assert!(RE_DECL_FULL.is_match(tc), "Failed to match: {}", tc);
+        }
+    }
+}

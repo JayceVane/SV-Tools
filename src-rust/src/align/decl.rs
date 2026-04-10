@@ -6,16 +6,7 @@ use crate::config::FormatOptions;
 /// Replicates Python `VerilogBeautifier.alignDecl()`.
 pub fn align_decl(txt: &str, options: &FormatOptions, indent: &str, indent_space: &str) -> String {
     let re_decl = Regex::new(
-        r"^[ \t]*(?:(?P<param>localparam|parameter|local|protected)\s+)?\
-         (?P<scope>\w+\:\:)?\
-         (?P<type>[A-Za-z_]\w*)[ \t]+\
-         (?P<sign>signed\b|unsigned\b)?[ \t]*\
-         (?P<bw>(?:\[[\w\*\(\)\/><\:\-\+`\$\s]+\][ \t]*)*)\
-         [ \t]*(?P<name>[A-Za-z_]\w*)[ \t]*\
-         (?P<array>(?:\[[\w\*\(\)\/><\:\-\+`\$\s]+\][ \t]*)*)\
-         (=\s*(?P<init>[^;]+))?\
-         (?P<sig_list>,[\w, \t]*)?;\
-         [ \t]*(?P<comment>.*)",
+        r#"^[ \t]*(?:(?P<param>localparam|parameter|local|protected)\s+)?(?P<scope>\w+\:\:)?(?P<type>[A-Za-z_]\w*)[ \t]+(?P<sign>signed\b|unsigned\b)?[ \t]*(?P<bw>(?:\[[\w\*\(\)\/><\:\-\+`\$\s]+\][ \t]*)*)[ \t]*(?P<name>[A-Za-z_]\w*)[ \t]*(?P<array>(?:\[[\w\*\(\)\/><\:\-\+`\$\s]+\][ \t]*)*)(=\s*(?P<init>[^;]+))?(?P<sig_list>,[\w, \t]*)?;[ \t]*(?P<comment>.*)"#,
     )
     .unwrap();
 
@@ -116,10 +107,10 @@ pub fn align_decl(txt: &str, options: &FormatOptions, indent: &str, indent_space
         }
     }
 
-    // Second pass: rewrite with alignment
-    let mut txt_new = String::new();
+    // Second pass: generate formatted lines and calculate max line length
+    let mut formatted_lines: Vec<(String, Option<String>, usize, bool)> = Vec::new(); // (line, comment, ilvl, is_decl)
     for (line, caps, ilvl) in &lines_match {
-        let l = if let Some(m) = caps {
+        if let Some(m) = caps {
             let widths = &len_max[ilvl];
             let mut l = indent.repeat(*ilvl);
             let tp = m.name("type").unwrap().as_str().trim();
@@ -262,23 +253,53 @@ pub fn align_decl(txt: &str, options: &FormatOptions, indent: &str, indent_space
                 }
             }
 
+            // Get comment
+            let comment = m.name("comment").map(|c| c.as_str().trim().to_string());
+            formatted_lines.push((l, comment, *ilvl, true));
+        } else {
+            formatted_lines.push((line.to_string(), None, 0, false));
+        }
+    }
+
+    // Calculate max line length per indent level for semicolon alignment
+    if options.align_comma() {
+        for (l, _comment, ilvl, is_decl) in &formatted_lines {
+            if *is_decl {
+                let widths = len_max.get_mut(ilvl).unwrap();
+                let line_len = l.trim_end().len();
+                if line_len > widths.semi_col {
+                    widths.semi_col = line_len;
+                }
+            }
+        }
+    }
+
+    // Third pass: add semicolons and comments
+    let mut txt_new = String::new();
+    for (l, comment, ilvl, is_decl) in &formatted_lines {
+        let l = if *is_decl {
+            let widths = &len_max[ilvl];
+            let mut l = l.clone();
+
             if options.align_comma() {
-                l.push(';');
+                // Align semicolon to max column
+                let l_tmp = l.trim_end();
+                let pad = widths.semi_col.saturating_sub(l_tmp.len());
+                l = format!("{}{:width$};", l_tmp, "", width = pad);
             } else {
                 let l_tmp = l.trim_end().to_string();
                 let nb_pad = l.len() - l_tmp.len();
                 l = format!("{};{:width$}", l_tmp, "", width = nb_pad);
             }
 
-            if let Some(comment) = m.name("comment") {
-                let c = comment.as_str().trim();
+            if let Some(c) = comment {
                 if !c.is_empty() {
                     l.push_str(&format!(" {}", c));
                 }
             }
             l
         } else {
-            line.to_string()
+            l.clone()
         };
 
         txt_new.push_str(&l);
@@ -327,6 +348,7 @@ struct DeclWidths {
     array_sum: usize,
     init: usize,
     comment: usize,
+    semi_col: usize, // Position for semicolon alignment
 }
 
 impl DeclWidths {
@@ -346,6 +368,7 @@ impl DeclWidths {
             array_sum: 0,
             init: 0,
             comment: 0,
+            semi_col: 0,
         }
     }
 }
