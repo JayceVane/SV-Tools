@@ -43,7 +43,7 @@ pub fn align_instance(
         .captures(&txt_clean)
     {
         Some(c) => c,
-        None => return original_txt, // Return original on parse failure
+        None => return original_txt,
     };
     let mtype = m_type.name("mtype").unwrap().as_str().trim();
 
@@ -143,31 +143,42 @@ pub fn align_instance(
     };
     pos = nxt + m_name.len();
 
-    // Parse ports
+    // Parse ports and trailing comment
     let mut ports: Option<String> = None;
     let nxt = find_next_nonspace(&txt_work, pos);
-    if nxt < txt_work.len() && txt_work.as_bytes()[nxt] == b'(' {
-        let end_paren = find_matching_paren(&txt_work, nxt);
-        if end_paren == usize::MAX {
-            return original_txt;
-        }
-        ports = Some(txt_work[nxt + 1..end_paren].to_string());
-        pos = end_paren + 1;
-    }
-
-    // Parse trailing comment and check for semicolon
-    let nxt = find_next_nonspace(&txt_work, pos);
-    let (has_semicolon, comment) = if nxt < txt_work.len() && txt_work.as_bytes()[nxt] == b';' {
-        let nxt2 = find_next_nonspace(&txt_work, nxt + 1);
-        if nxt2 < txt_work.len() {
-            (true, txt_work[nxt2..].trim().to_string())
+    let (has_ports, has_semicolon, comment) =
+        if nxt < txt_work.len() && txt_work.as_bytes()[nxt] == b'(' {
+            // Has port connections
+            let end_paren = find_matching_paren(&txt_work, nxt);
+            if end_paren == usize::MAX {
+                return original_txt;
+            }
+            ports = Some(txt_work[nxt + 1..end_paren].to_string());
+            let nxt2 = find_next_nonspace(&txt_work, end_paren + 1);
+            if nxt2 < txt_work.len() && txt_work.as_bytes()[nxt2] == b';' {
+                let nxt3 = find_next_nonspace(&txt_work, nxt2 + 1);
+                let cmt = if nxt3 < txt_work.len() {
+                    txt_work[nxt3..].trim().to_string()
+                } else {
+                    String::new()
+                };
+                (true, true, cmt)
+            } else {
+                (true, false, String::new())
+            }
+        } else if nxt < txt_work.len() && txt_work.as_bytes()[nxt] == b';' {
+            // No ports, just semicolon
+            let nxt2 = find_next_nonspace(&txt_work, nxt + 1);
+            let cmt = if nxt2 < txt_work.len() {
+                txt_work[nxt2..].trim().to_string()
+            } else {
+                String::new()
+            };
+            (false, true, cmt)
         } else {
-            (true, String::new())
-        }
-    } else {
-        // Missing semicolon - will add one
-        (false, String::new())
-    };
+            // Missing semicolon
+            (false, false, String::new())
+        };
 
     // Build output
     let mut txt_new = format!("{}{}", indent.repeat(ilvl), mtype);
@@ -189,17 +200,22 @@ pub fn align_instance(
     }
 
     // Instance name and ports
-    txt_new.push_str(&format!(" {} (", m_name));
-    if let Some(ref p) = ports {
-        let p_trimmed = p.trim();
-        if !p_trimmed.is_empty() {
-            // Always use align_instance_binding for proper alignment
-            txt_new.push('\n');
-            txt_new.push_str(&align_instance_binding(p, ilvl + 1, options, indent));
-            txt_new.push_str(indent);
+    if has_ports {
+        txt_new.push_str(&format!(" {} (", m_name));
+        if let Some(ref p) = ports {
+            let p_trimmed = p.trim();
+            if !p_trimmed.is_empty() {
+                // Always use align_instance_binding for proper alignment
+                txt_new.push('\n');
+                txt_new.push_str(&align_instance_binding(p, ilvl + 1, options, indent));
+                txt_new.push_str(indent);
+            }
         }
+        txt_new.push(')');
+    } else {
+        txt_new.push_str(&format!(" {}", m_name));
     }
-    txt_new.push_str(");");
+    txt_new.push(';');
     if !comment.is_empty() {
         txt_new.push_str(&format!(" {}", comment));
     }

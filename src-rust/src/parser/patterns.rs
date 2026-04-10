@@ -61,9 +61,11 @@ pub static RE_DECL_FULL: LazyLock<Regex> = LazyLock::new(|| {
     .unwrap()
 });
 
-/// Module instance regex
+/// Module instance regex (supports with/without port connections)
+/// Matches: type [params] name ( or type [params] name ;
 pub static RE_INST_FULL: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?s)^[ \t]*\b(?P<itype>\w+)\s*(#\s*\([^;]+\))?\s*\b(?P<iname>\w+)\s*\(").unwrap()
+    Regex::new(r"(?s)^[ \t]*\b(?P<itype>\w+)\s*(#\s*\([^;]+\))?\s*\b(?P<iname>\w+)\s*(\(|;)")
+        .unwrap()
 });
 
 // ── Beautifier block keywords ───────────────────────────────────
