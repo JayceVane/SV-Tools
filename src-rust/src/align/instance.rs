@@ -191,16 +191,12 @@ pub fn align_instance(
     // Instance name and ports
     txt_new.push_str(&format!(" {} (", m_name));
     if let Some(ref p) = ports {
-        if !p.trim().starts_with(".*") && p.trim().contains('\n') {
+        let p_trimmed = p.trim();
+        if !p_trimmed.is_empty() {
+            // Always use align_instance_binding for proper alignment
             txt_new.push('\n');
-        }
-        if p.trim().contains('\n') {
             txt_new.push_str(&align_instance_binding(p, ilvl + 1, options, indent));
             txt_new.push_str(indent);
-        } else {
-            let p_clean = Regex::new(r"\s+").unwrap().replace_all(p.trim(), "");
-            let p_clean = Regex::new(r"\),").unwrap().replace_all(&p_clean, "), ");
-            txt_new.push_str(&p_clean);
         }
     }
     txt_new.push_str(");");
@@ -222,11 +218,11 @@ fn align_instance_binding(txt: &str, ilvl: usize, options: &FormatOptions, inden
     if options.one_bind_per_line() {
         txt = Regex::new(r"\)[ \t]*,[ \t]*\.")
             .unwrap()
-            .replace_all(&txt, "), \n.")
+            .replace_all(&txt, "),\n.")
             .to_string();
     }
 
-    let re_bind_port = r"^[ \t]*(?P<lcomma>,)?[ \t]*\.\s*(?P<port>\w+)\s*\(\s*";
+    let re_bind_port = r"(?m)^[ \t]*(?P<lcomma>,)?[ \t]*\.\s*(?P<port>\w+)\s*\(\s*";
     let re_bind_sig = r"(?P<signal>.*?)\s*\)\s*(?P<comma>,)?\s*(?P<comment>//.*?|/\*.*?)?$";
 
     let full_re = Regex::new(&format!("{}{}", re_bind_port, re_bind_sig)).unwrap();
