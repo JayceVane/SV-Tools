@@ -4,10 +4,22 @@ src-rust/**/*.rs
 src-rust/Cargo.toml
 src-rust/Cargo.lock
 src-rust/build.rs
+src-rust/src/**
+src-rust/*.js
+src-rust/*.d.ts
+src-rust/node_modules/.package-lock.json
+src-rust/node_modules/@napi-rs/**
+src-rust/node_modules/.bin/**
+
+# Python backend (not needed for native version)
+processManager.js
 
 # Test files
 src-rust/test*.js
 src-rust/test*.rs
+src-rust/test*.sv
+src-rust/debug*.js
+src-rust/compare*.js
 test*.js
 test*.py
 test/
