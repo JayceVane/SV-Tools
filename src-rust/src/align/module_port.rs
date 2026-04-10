@@ -311,11 +311,7 @@ pub fn align_module_port(
 
     let ports_txt = ports_trimmed;
     let re_port = Regex::new(
-        r"^[ \t]*(?P<dir>[\w\.]+)[ \t]+(?P<var>var|ref\b)?[ \t]*\
-         (?P<type>[\w\:]+\b)?[ \t]*(?P<sign>signed|unsigned\b)?[ \t]*\
-         (?P<bw>(?:\[[\w\*\(\)\/><\:\-\+`\$\s]+\][ \t]*)*)\
-         [ \t]*(?P<ports>(?P<port1>\w+)[\w, \t\[\]\*\-\+\$\(\)\'\:\)]*)\
-         [ \t]*(?P<comment>.*)",
+        r#"(?m)^[ \t]*(?P<dir>[\w\.]+)[ \t]+(?P<var>var|ref\b)?[ \t]*(?P<type>[\w\:]+\b)?[ \t]*(?P<sign>signed|unsigned\b)?[ \t]*(?P<bw>(?:\[[\w\*\(\)\/><\:\-\+`\$\s]+\][ \t]*)*)[ \t]*(?P<ports>(?P<port1>\w+)[\w, \t\[\]\*\-\+\$\(\)\'\:\)]*)[ \t]*(?P<comment>.*)"#,
     )
     .unwrap();
 
@@ -549,22 +545,24 @@ pub fn align_module_port(
                     }
 
                     // Port list
-                    let ports = m_port.name("ports").unwrap().as_str().trim();
+                    let ports_raw = m_port.name("ports").unwrap().as_str();
+                    let has_trailing_comma = ports_raw.trim_end().ends_with(',');
                     let ports = Regex::new(r"\s*,\s*")
                         .unwrap()
-                        .replace_all(ports.trim_end_matches(','), ", ");
+                        .replace_all(ports_raw.trim_end_matches(','), ", ");
                     let ports_str = ports.to_string();
                     l_new.push(' ');
 
-                    if ports_str.ends_with(", ") {
+                    if has_trailing_comma {
+                        // Port has trailing comma - align and add comma if not last line
                         if options.align_comma() {
                             l_new.push_str(&format!(
                                 "{:<width$}",
-                                &ports_str[..ports_str.len() - 2],
+                                &ports_str,
                                 width = max_port_len
                             ));
                         } else {
-                            l_new.push_str(&ports_str[..ports_str.len() - 2]);
+                            l_new.push_str(&ports_str);
                         }
                         if i != lines.len() - 1 {
                             l_new.push(',');
