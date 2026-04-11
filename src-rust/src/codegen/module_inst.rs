@@ -122,11 +122,12 @@ fn build_instance(info: &ModuleInfo, iprefix: &str) -> String {
         let dir_pad = dir_max_len - p.direction.len();
         let sz = p.size.trim();
         let comment = if sz.is_empty() {
+            // No size: direction + padding + spaces for size column + port name
             format!(
-                "// {}{}{}{}",
+                "// {}{}  {}{}",
                 p.direction,
                 " ".repeat(dir_pad),
-                " ".repeat(size_max_len + 1),
+                " ".repeat(size_max_len),
                 p.name
             )
         } else {
