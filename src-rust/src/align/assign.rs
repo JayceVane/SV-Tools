@@ -128,9 +128,7 @@ pub fn align_assign(
                     txt_new_tmp.push_str(&format!("{}\n", line));
                 }
             }
-            if !txt.ends_with('\n') && txt_new_tmp.ends_with('\n') {
-                txt_new_tmp.pop();
-            }
+            // Don't remove trailing newline - blocks should end with newline
             txt_new = txt_new_tmp;
         }
     }

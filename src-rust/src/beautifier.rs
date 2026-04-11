@@ -862,9 +862,12 @@ impl VerilogBeautifier {
         // Check block keywords
         if self.kw_block.contains(&w.to_string()) {
             // Handle external declarations
+            // Note: if w_d.last() is newline, prev1() quote doesn't mean keyword is in string
+            // (it could be from a previous line's string that has ended)
+            let prev_is_quote = w_d.prev1() == "\"" && w_d.last() != "\n";
             if ["extern", "cover", "assert", "pure"].contains(&w_d.prev1())
                 || (["extern", "pure"].contains(&w_d.prev3()) && w_d.prev1() == "virtual")
-                || w_d.prev1() == "\""
+                || prev_is_quote
             {
                 return String::new();
             }
