@@ -53,10 +53,6 @@ pub fn align_module_port(
     let m = match re_module.captures(txt) {
         Some(caps) => caps,
         None => {
-            eprintln!(
-                "[DEBUG] align_module_port: regex failed to match: {:?}",
-                txt
-            );
             return (String::new(), String::new());
         }
     };
@@ -311,7 +307,7 @@ pub fn align_module_port(
 
     let ports_txt = ports_trimmed;
     let re_port = Regex::new(
-        r#"(?m)^[ \t]*(?P<dir>[\w\.]+)[ \t]+(?P<var>var|ref\b)?[ \t]*(?P<type>[\w\:]+\b)?[ \t]*(?P<sign>signed|unsigned\b)?[ \t]*(?P<bw>(?:\[[\w\*\(\)\/><\:\-\+`\$\s]+\][ \t]*)*)[ \t]*(?P<ports>(?P<port1>\w+)[\w, \t\[\]\*\-\+\$\(\)\'\:\)]*)[ \t]*(?P<comment>.*)"#,
+        r#"(?m)^[ \t]*(?P<dir>[\w\.]+)[ \t]+(?P<var>var|ref\b)?[ \t]*(?P<type>[\w\:]+\b)?[ \t]*(?P<sign>signed|unsigned\b)?[ \t]*(?P<bw>(?:\[[\w\*\(\)\/><\:\-\+`\$\s]+\][ \t]*)*)[ \t]*(?P<ports>(?P<port1>\w+)(?:[ \t]*,[ \t]*\w+)*)[ \t]*(?P<comment>,?.*)"#,
     )
     .unwrap();
 
@@ -508,10 +504,10 @@ pub fn align_module_port(
                                 }
                             }
 
-                            if len_bw > 1 {
+                            if len_bw > 0 {
                                 let s = if !bw.is_empty() {
                                     let bw_clean = Regex::new(r"\s*").unwrap().replace_all(bw, "");
-                                    let mut s = " ".to_string();
+                                    let mut s = String::new();
                                     for (bi, inner) in Regex::new(r"\[(.+?)\]")
                                         .unwrap()
                                         .find_iter(&bw_clean)
@@ -525,7 +521,7 @@ pub fn align_module_port(
                                 } else {
                                     String::new()
                                 };
-                                l_new.push_str(&format!("{:<width$}", s, width = len_bw + 1));
+                                l_new.push_str(&format!(" {:<width$}", s, width = len_bw));
                             }
 
                             if max_len > len_type_full {
@@ -537,8 +533,29 @@ pub fn align_module_port(
                             }
                         } else if !tp.is_empty() {
                             l_new.push_str(&format!(" {:<width$}", tp, width = len_type_user));
+                            // Also apply max_len padding for user types
+                            if max_len > len_type_full {
+                                l_new.push_str(&format!(
+                                    "{:width$}",
+                                    "",
+                                    width = max_len - len_type_full
+                                ));
+                            }
                         } else if len_type_user > 0 {
                             l_new.push_str(&format!("{:width$}", "", width = len_type_user + 1));
+                            // Also apply max_len padding
+                            if max_len > len_type_full {
+                                l_new.push_str(&format!(
+                                    "{:width$}",
+                                    "",
+                                    width = max_len - len_type_full
+                                ));
+                            }
+                        } else {
+                            // No type, no bw - need to fill space to align with max_len
+                            if max_len > 0 {
+                                l_new.push_str(&format!("{:width$}", "", width = max_len + 1));
+                            }
                         }
                     } else {
                         // Interface port
@@ -547,11 +564,34 @@ pub fn align_module_port(
 
                     // Port list
                     let ports_raw = m_port.name("ports").unwrap().as_str();
-                    let has_trailing_comma = ports_raw.trim_end().ends_with(',');
-                    let ports = Regex::new(r"\s*,\s*")
-                        .unwrap()
-                        .replace_all(ports_raw.trim_end_matches(','), ", ");
-                    let ports_str = ports.to_string();
+                    // Check if the original line has trailing comma (check the raw line, not ports_raw)
+                    // The comment group may have captured the comma
+                    let comment_raw = m_port.name("comment").map(|x| x.as_str()).unwrap_or("");
+                    let has_trailing_comma = comment_raw.trim_start().starts_with(',');
+                    // Remove leading comma from comment if present
+                    let comment = if has_trailing_comma {
+                        comment_raw
+                            .trim_start()
+                            .strip_prefix(',')
+                            .unwrap_or(comment_raw)
+                            .trim_start()
+                    } else {
+                        comment_raw
+                    };
+                    // Trim the port name and remove extra spaces
+                    // Use port1 for the actual port name, then reconstruct multi-port lines
+                    let port_name = m_port.name("port1").unwrap().as_str();
+                    let ports_str = if ports_raw.contains(',') {
+                        // Multi-port line like "a, b, c" - need to preserve the comma-separated format
+                        // but remove extra spaces
+                        ports_raw
+                            .split(',')
+                            .map(|p| p.trim())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    } else {
+                        port_name.to_string()
+                    };
                     l_new.push(' ');
 
                     if has_trailing_comma {
@@ -569,17 +609,13 @@ pub fn align_module_port(
                             l_new.push(',');
                         }
                     } else {
-                        l_new.push_str(&format!(
-                            "{:<width$} ",
-                            ports_str.trim_end_matches(','),
-                            width = max_port_len
-                        ));
+                        // Last port without comma - just add the port name
+                        l_new.push_str(&ports_str);
                     }
 
-                    if let Some(comment) = m_port.name("comment") {
-                        if !comment.as_str().is_empty() {
-                            l_new.push_str(&format!(" {}", comment.as_str()));
-                        }
+                    // Add comment if present (and not just a comma that we already handled)
+                    if !comment.is_empty() {
+                        l_new.push_str(&format!(" {}", comment));
                     }
                     txt_new.push_str(&format!(
                         "{}\n",

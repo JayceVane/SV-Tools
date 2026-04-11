@@ -36,12 +36,6 @@ fn generate_module_inst(text: String, options: GadgetOptions) -> Result<ModuleIn
     let cleaned = crate::parser::comments::clean_comment(&text);
     let normalized = crate::codegen::align_code::normalize_for_parsing(&cleaned);
 
-    // Debug: print normalized text (first 200 chars)
-    eprintln!(
-        "DEBUG normalized (first 200): {}",
-        &normalized.chars().take(200).collect::<String>()
-    );
-
     match parser::module::parse_module(&normalized, &options) {
         Some(info) => {
             let port_decls = if options.include_declarations() {

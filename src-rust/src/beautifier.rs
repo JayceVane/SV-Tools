@@ -550,11 +550,7 @@ impl VerilogBeautifier {
                     }
 
                     if block_tmp.is_empty() {
-                        eprintln!(
-                            "[Beautify: ERROR] Unable to extract a {} from {:?}",
-                            self.block_state.as_str(),
-                            block
-                        );
+                        // Unable to extract block content
                     } else {
                         block = block_tmp;
                     }
@@ -814,11 +810,7 @@ impl VerilogBeautifier {
             };
 
             if block_tmp.is_empty() {
-                eprintln!(
-                    "[Beautify: ERROR] Unable to extract a {} from {:?}",
-                    self.block_state.as_str(),
-                    block
-                );
+                // Unable to extract block content
             } else {
                 block = block_tmp;
             }

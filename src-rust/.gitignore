@@ -16,3 +16,12 @@ Thumbs.db
 
 # Test files
 test-*.js
+debug-*.js
+compare-*.js
+test-*.sv
+test-*.py
+test2-*.sv
+*.node
+
+# Keep the platform-specific node file
+!svtools.win32-x64-msvc.node
