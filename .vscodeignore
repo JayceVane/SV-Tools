@@ -11,6 +11,9 @@ src-rust/node_modules/.package-lock.json
 src-rust/node_modules/@napi-rs/**
 src-rust/node_modules/.bin/**
 
+# Duplicate node file (napi build creates both)
+src-rust/svtools.node
+
 # Python backend (not needed for native version)
 processManager.js
 
