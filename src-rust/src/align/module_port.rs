@@ -522,6 +522,8 @@ pub fn align_module_port(
                                     String::new()
                                 };
                                 l_new.push_str(&format!(" {:<width$}", s, width = len_bw));
+                            } else {
+                                // No bitwidth - need to fill space for alignment
                             }
 
                             if max_len > len_type_full {
@@ -542,7 +544,9 @@ pub fn align_module_port(
                                 ));
                             }
                         } else if len_type_user > 0 {
-                            l_new.push_str(&format!("{:width$}", "", width = len_type_user + 1));
+                            // Fill space for alignment: use len_bw + 1 for consistency with bw lines
+                            // The +1 accounts for the space before the port name
+                            l_new.push_str(&format!("{:width$}", "", width = len_bw + 1));
                             // Also apply max_len padding
                             if max_len > len_type_full {
                                 l_new.push_str(&format!(
@@ -597,11 +601,17 @@ pub fn align_module_port(
                     if has_trailing_comma {
                         // Port has trailing comma - align and add comma if not last line
                         if options.align_comma() {
-                            l_new.push_str(&format!(
-                                "{:<width$}",
-                                &ports_str,
-                                width = max_port_len
-                            ));
+                            // Pad port name to max_port_len, then add comma directly
+                            // This matches Python behavior: port_name + padding + comma (no space before comma)
+                            l_new.push_str(&ports_str);
+                            // Add padding spaces if port name is shorter than max_port_len
+                            if ports_str.len() < max_port_len {
+                                l_new.push_str(&format!(
+                                    "{:width$}",
+                                    "",
+                                    width = max_port_len - ports_str.len()
+                                ));
+                            }
                         } else {
                             l_new.push_str(&ports_str);
                         }
@@ -617,10 +627,16 @@ pub fn align_module_port(
                     if !comment.is_empty() {
                         l_new.push_str(&format!(" {}", comment));
                     }
-                    txt_new.push_str(&format!(
-                        "{}\n",
-                        l_new.trim_end_matches(|c| c == ' ' || c == '\t')
-                    ));
+                    // Only trim trailing whitespace if there's no comma (last port)
+                    // For ports with comma, preserve the alignment spaces
+                    if has_trailing_comma && i != lines.len() - 1 {
+                        txt_new.push_str(&format!("{}\n", l_new));
+                    } else {
+                        txt_new.push_str(&format!(
+                            "{}\n",
+                            l_new.trim_end_matches(|c| c == ' ' || c == '\t')
+                        ));
+                    }
                 }
             } else {
                 // No port match

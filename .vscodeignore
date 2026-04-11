@@ -11,6 +11,10 @@ src-rust/node_modules/.package-lock.json
 src-rust/node_modules/@napi-rs/**
 src-rust/node_modules/.bin/**
 
+# Rust test executables
+src-rust/*.exe
+src-rust/*.pdb
+
 # Duplicate node file (napi build creates both)
 src-rust/svtools.node
 
