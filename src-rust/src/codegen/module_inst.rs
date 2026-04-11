@@ -64,72 +64,107 @@ fn build_instance(info: &ModuleInfo, iprefix: &str) -> String {
         .collect();
     let plen = prmonly.len();
 
-    // Estimate total chars to decide compact vs expanded
-    let mut nchars = 0;
-    for p in &prmonly {
-        nchars += p.name.len() * 2 + 5;
-    }
-    for p in &info.ports {
-        nchars += p.name.len() * 2 + 5;
-    }
+    // Calculate max port name length for alignment
+    let port_max_len = info.ports.iter().map(|p| p.name.len()).max().unwrap_or(0);
 
-    let lmax = info.ports.iter().map(|p| p.name.len()).max().unwrap_or(0);
-
-    if nchars > 80 {
-        // Multi-line format
-        let mut s = format!("\t{} ", info.name);
-        if plen > 0 {
-            s.push_str("#(\n");
-            for (i, p) in prmonly.iter().enumerate() {
-                s.push_str(&format!("\t\t\t.{}({})", p.name, p.name));
-                if i != plen - 1 {
-                    s.push_str(",\n");
-                } else {
-                    s.push('\n');
-                }
-            }
-            s.push_str(&format!("\t\t) {}{} (\n", iprefix, info.name));
-        } else {
-            s.push_str(&format!("{}{}\n\t\t(\n", iprefix, info.name));
-        }
-
-        for (i, p) in info.ports.iter().enumerate() {
+    // Calculate max signal name length for alignment (inside parentheses)
+    let signal_max_len = info
+        .ports
+        .iter()
+        .map(|p| {
             let pmap = get_port_mapping(p, &info.clocks, &info.resets);
-            let sp = lmax - p.name.len();
-            s.push_str(&format!("\t\t\t.{}{} ({})", p.name, " ".repeat(sp), pmap));
-            if i != info.ports.len() - 1 {
+            pmap.len()
+        })
+        .max()
+        .unwrap_or(0);
+
+    // Always use expanded multi-line format with aligned ports and comments
+    let mut s = if plen > 0 {
+        let mut s = format!("{} {}#(\n", info.name, iprefix);
+        for (i, p) in prmonly.iter().enumerate() {
+            s.push_str(&format!("    .{}({})", p.name, p.name));
+            if i != plen - 1 {
                 s.push_str(",\n");
             } else {
                 s.push('\n');
             }
         }
-        s.push_str("\t\t);\n");
+        s.push_str(&format!(") {}{} (\n", iprefix, info.name));
         s
     } else {
-        // Compact format
-        let mut s = format!("\t{} ", info.name);
-        if plen > 0 {
-            s.push('#');
-            s.push('(');
-            for (i, p) in prmonly.iter().enumerate() {
-                s.push_str(&format!(".{}({})", p.name, p.name));
-                if i != plen - 1 {
-                    s.push_str(", ");
-                }
-            }
-            s.push_str(") ");
+        format!("{} {}{} (\n", info.name, iprefix, info.name)
+    };
+
+    // Calculate max direction and size lengths for comment alignment
+    let dir_max_len = info
+        .ports
+        .iter()
+        .map(|p| p.direction.len())
+        .max()
+        .unwrap_or(0);
+    let size_max_len = info
+        .ports
+        .iter()
+        .map(|p| p.size.trim().len())
+        .max()
+        .unwrap_or(0);
+
+    for (i, p) in info.ports.iter().enumerate() {
+        let pmap = get_port_mapping(p, &info.clocks, &info.resets);
+
+        // Align port name (right-pad with spaces)
+        let port_padding = port_max_len - p.name.len();
+
+        // Align signal name inside parentheses (right-pad with spaces)
+        let signal_padding = signal_max_len - pmap.len();
+
+        // Build comment with aligned columns: // direction  [width]  port_name
+        let dir_pad = dir_max_len - p.direction.len();
+        let sz = p.size.trim();
+        let comment = if sz.is_empty() {
+            format!(
+                "// {}{}{}{}",
+                p.direction,
+                " ".repeat(dir_pad),
+                " ".repeat(size_max_len + 1),
+                p.name
+            )
+        } else {
+            let size_pad = size_max_len - sz.len();
+            format!(
+                "// {}{} {}{} {}",
+                p.direction,
+                " ".repeat(dir_pad),
+                sz,
+                " ".repeat(size_pad),
+                p.name
+            )
+        };
+
+        // Format: .port_name          (signal_name          ), // comment
+        // Last port: no comma, extra space
+        if i != info.ports.len() - 1 {
+            s.push_str(&format!(
+                "    .{}{} ({}{}), {}\n",
+                p.name,
+                " ".repeat(port_padding),
+                pmap,
+                " ".repeat(signal_padding),
+                comment
+            ));
+        } else {
+            s.push_str(&format!(
+                "    .{}{} ({}{})  {}\n",
+                p.name,
+                " ".repeat(port_padding),
+                pmap,
+                " ".repeat(signal_padding),
+                comment
+            ));
         }
-        s.push_str(&format!("{}{} (", iprefix, info.name));
-        for (i, p) in info.ports.iter().enumerate() {
-            let pmap = get_port_mapping(p, &info.clocks, &info.resets);
-            s.push_str(&format!(".{}({})", p.name, pmap));
-            if i != info.ports.len() - 1 {
-                s.push_str(", ");
-            }
-        }
-        s.push_str(");\n");
-        s
     }
+    s.push_str(");\n");
+    s
 }
 
 /// Generate only the port declarations (input→reg, output→wire) without instantiation.

@@ -89,9 +89,7 @@ pub fn parse_module(text: &str, options: &GadgetOptions) -> Option<ModuleInfo> {
             }
             if !pname.is_empty() {
                 if pdtmp.is_some() {
-                    if let Some(ref size) = pstmp {
-                        psize = size.clone();
-                    }
+                    psize = pstmp.clone().unwrap_or_default();
                 }
                 // Update existing port or add
                 if let Some(p) = ports.iter_mut().find(|p| p.name == pname) {
@@ -256,9 +254,7 @@ fn parse_ports(text: &str, ports_list: &mut Vec<Port>) {
         }
         if !pname.is_empty() {
             if pdtmp.is_some() {
-                if let Some(ref size) = pstmp {
-                    psize = size.clone();
-                }
+                psize = pstmp.clone().unwrap_or_default();
             }
             ports_list.push(Port {
                 direction: p_dir.clone(),

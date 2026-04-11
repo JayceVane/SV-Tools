@@ -474,20 +474,26 @@ impl VerilogBeautifier {
                 && !mod_import
             {
                 let is_decl_match = RE_DECL_FULL.is_match(line.trim());
+
+                // Handle declaration state - accumulate lines without processing
+                // When block_state is Text/Decl/StructAssign and this is a declaration,
+                // just set the state and continue (don't process yet)
                 if matches!(
                     self.block_state,
                     BlockState::Text | BlockState::Decl | BlockState::StructAssign
                 ) && is_decl_match
                 {
                     self.block_state = BlockState::Decl;
-                } else if matches!(
+                    // Don't set block_handled - let lines accumulate
+                }
+                // Handle other block states that need immediate processing
+                else if matches!(
                     self.block_state,
                     BlockState::Module
                         | BlockState::Interface
                         | BlockState::Instance
                         | BlockState::Text
                         | BlockState::Package
-                        | BlockState::Decl
                 ) || (matches!(
                     self.block_state,
                     BlockState::Struct | BlockState::StructAssign | BlockState::Enum
@@ -537,7 +543,6 @@ impl VerilogBeautifier {
                             line.clear();
                             result
                         }
-                        BlockState::Decl => self.align_decl(&block),
                         _ => {
                             let result = block.clone() + &line;
                             line.clear();
@@ -921,10 +926,32 @@ impl VerilogBeautifier {
             }
         } else if matches!(self.block_state, BlockState::Text) {
             let tmp = clean_comment(txt).trim().to_string();
-            if let Some(m) = RE_INST_FULL.captures(&tmp) {
+            // Check for declaration first (before instance)
+            if RE_DECL_FULL.is_match(&tmp) {
+                self.block_state = BlockState::Decl;
+            } else if let Some(m) = RE_INST_FULL.captures(&tmp) {
                 let itype = m.name("itype").map(|x| x.as_str()).unwrap_or("");
                 let iname = m.name("iname").map(|x| x.as_str()).unwrap_or("");
-                if !["else", "begin", "end", "assert", "cover"].contains(&itype)
+                // Exclude declaration keywords and control flow keywords
+                let decl_keywords = [
+                    "wire",
+                    "reg",
+                    "logic",
+                    "bit",
+                    "int",
+                    "integer",
+                    "byte",
+                    "shortint",
+                    "longint",
+                    "real",
+                    "shortreal",
+                    "time",
+                    "string",
+                    "localparam",
+                    "parameter",
+                ];
+                if !decl_keywords.contains(&itype)
+                    && !["else", "begin", "end", "assert", "cover"].contains(&itype)
                     && !["if", "for", "foreach"].contains(&iname)
                 {
                     self.block_state = BlockState::Instance;
