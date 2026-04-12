@@ -98,12 +98,11 @@ async function generateModuleInstance() {
 
     const document = editor.document;
     const text = document.getText();
-    const config = vscode.workspace.getConfiguration('svGadget');
+    const config = vscode.workspace.getConfiguration('svtools');
 
     const options = {
         instPrefix: config.get('instPrefix', 'inst_'),
         reset: config.get('reset', []),
-        clock: config.get('clock', []),
         includeDeclarations: config.get('includePortDeclarations', true)
     };
 
@@ -138,13 +137,13 @@ async function generateTestbench() {
 
     const document = editor.document;
     const text = document.getText();
-    const config = vscode.workspace.getConfiguration('svGadget');
+    const config = vscode.workspace.getConfiguration('svtools');
 
     const options = {
         instPrefix: config.get('instPrefix', 'inst_'),
         reset: config.get('reset', []),
         sreset: config.get('sreset', []),
-        clock: config.get('clock', []),
+        clock: config.get('clock', ['clk']),
         waveType: config.get('waveType', 'fsdb'),
         taskInit: config.get('taskInit', true),
         taskDrive: config.get('taskDrive', true)
@@ -282,7 +281,7 @@ async function insertHeaderTemplate() {
         return;
     }
 
-    const config = vscode.workspace.getConfiguration('svGadget');
+    const config = vscode.workspace.getConfiguration('svtools');
     const headerTemplate = config.get('headerTemplate', getDefaultHeaderTemplate());
     const document = editor.document;
 

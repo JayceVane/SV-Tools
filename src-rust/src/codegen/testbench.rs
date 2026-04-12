@@ -258,11 +258,13 @@ fn build_instance(
 
 fn task_init(ports: &[crate::parser::module::Port], clkrstl: &[String]) -> String {
     let mut text = String::from("\n\ttask init();\n");
+    // Reset all non-clock/reset inputs
     for p in ports {
         if p.direction == "input" && !clkrstl.contains(&p.name) {
             text.push_str(&format!("\t\t{} <= '0;\n", p.name));
         }
     }
+    text.push_str("\t\t// TODO: Add custom initialization logic here\n");
     text.push_str("\tendtask\n");
     text
 }
@@ -270,9 +272,13 @@ fn task_init(ports: &[crate::parser::module::Port], clkrstl: &[String]) -> Strin
 fn task_drive(ports: &[crate::parser::module::Port], clkrstl: &[String], tclock: &str) -> String {
     let mut text = String::from("\n\ttask drive(int iter);\n");
     text.push_str("\t\tfor(int it = 0; it < iter; it++) begin\n");
+    text.push_str("\t\t\t// TODO: Add drive logic here\n");
     for p in ports {
         if p.direction == "input" && !clkrstl.contains(&p.name) {
-            text.push_str(&format!("\t\t\t{} <= '0;\n", p.name));
+            text.push_str(&format!(
+                "\t\t\t{} <= '0; // TODO: Set input value\n",
+                p.name
+            ));
         }
     }
     if !tclock.is_empty() {
