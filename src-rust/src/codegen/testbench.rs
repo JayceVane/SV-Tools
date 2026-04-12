@@ -67,7 +67,7 @@ pub fn generate_testbench(info: &ModuleInfo, options: &GadgetOptions) -> String 
 
     // Task init
     let (taski, dtski) = if options.task_init() {
-        let task = task_init(&info.ports, &clkrstl);
+        let task = task_init(&arstb, &srstb, &clock);
         let dt = if !clock.is_empty() {
             format!("\n\t\tinit();\n\t\trepeat(10)@(posedge {});\n", clock)
         } else {
@@ -80,7 +80,7 @@ pub fn generate_testbench(info: &ModuleInfo, options: &GadgetOptions) -> String 
 
     // Task drive
     let (taskd, dtskd) = if options.task_drive() {
-        let task = task_drive(&info.ports, &clkrstl, &clock);
+        let task = task_drive(&clock);
         let dt = "\n\t\tdrive(20);\n".to_string();
         (task, dt)
     } else {
@@ -256,36 +256,38 @@ fn build_instance(
     string
 }
 
-fn task_init(ports: &[crate::parser::module::Port], clkrstl: &[String]) -> String {
+fn task_init(arst: &str, srst: &str, clock: &str) -> String {
     let mut text = String::from("\n\ttask init();\n");
-    // Reset all non-clock/reset inputs
-    for p in ports {
-        if p.direction == "input" && !clkrstl.contains(&p.name) {
-            text.push_str(&format!("\t\t{} <= '0;\n", p.name));
+
+    // Async reset
+    if !arst.is_empty() {
+        text.push_str(&format!("\t\t{} <= '0;\n", arst));
+        if !clock.is_empty() {
+            text.push_str(&format!("\t\trepeat(10)@(posedge {});\n", clock));
         }
+        text.push_str(&format!("\t\t{} <= '1;\n", arst));
     }
-    text.push_str("\t\t// TODO: Add custom initialization logic here\n");
+
+    // Sync reset
+    if !srst.is_empty() {
+        text.push_str(&format!("\t\t{} <= '0;\n", srst));
+        if !clock.is_empty() {
+            text.push_str(&format!("\t\trepeat(10)@(posedge {});\n", clock));
+        }
+        text.push_str(&format!("\t\t{} <= '1;\n", srst));
+    }
+
     text.push_str("\tendtask\n");
     text
 }
 
-fn task_drive(ports: &[crate::parser::module::Port], clkrstl: &[String], tclock: &str) -> String {
+fn task_drive(clock: &str) -> String {
     let mut text = String::from("\n\ttask drive(int iter);\n");
     text.push_str("\t\tfor(int it = 0; it < iter; it++) begin\n");
-    text.push_str("\t\t\t// TODO: Add drive logic here\n");
-    for p in ports {
-        if p.direction == "input" && !clkrstl.contains(&p.name) {
-            text.push_str(&format!(
-                "\t\t\t{} <= '0; // TODO: Set input value\n",
-                p.name
-            ));
-        }
+    if !clock.is_empty() {
+        text.push_str(&format!("\t\t\t@(posedge {});\n", clock));
     }
-    if !tclock.is_empty() {
-        text.push_str(&format!("\t\t\t@(posedge {});\n\t\tend\n", tclock));
-    } else {
-        text.push_str("\t\tend\n");
-    }
+    text.push_str("\t\tend\n");
     text.push_str("\tendtask\n");
     text
 }
