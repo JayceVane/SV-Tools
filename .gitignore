@@ -1,5 +1,6 @@
 # Node modules
 node_modules/
+package-lock.json
 
 # VSCode
 .vscode-test/
@@ -17,10 +18,22 @@ __pycache__/
 dist/
 build/
 
+# Rust
+*.exe
+*.pdb
+test_format.rs
+
 # Temporary files
 temp/
 *.tmp
+test-inst.js
+test/
 
 # OS
 .DS_Store
 Thumbs.db
+
+# AI tools
+.arts/
+.claude/
+nul
