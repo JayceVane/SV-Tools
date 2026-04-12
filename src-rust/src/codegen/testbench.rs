@@ -120,10 +120,10 @@ pub fn generate_testbench(info: &ModuleInfo, options: &GadgetOptions) -> String 
     };
 
     format!(
-        "`timescale 1ns/1ps\nmodule tb_{} (); /* this is automatically generated */\n{}{}{}\n\t// (*NOTE*) replace reset, clock, others\n{}{}{}{}\n\tinitial begin\n\t\t// do something\n{}{}\t\trepeat(10)@(posedge {});\n\t\t$finish;\n\tend\n\n\t// dump wave\n\tinitial begin\n\t\t$display(\"random seed : %0d\", $unsigned($get_initial_random_seed()));{}\n\tend\n\nendmodule\n",
+        "`timescale 1ns/1ps\nmodule tb_{} (); /* this is automatically generated */\n{}{}{}\n\t// (*NOTE*) replace reset, clock, others\n{}{}{}{}{}\n\tinitial begin\n\t\t// do something\n{}{}\t\trepeat(10)@(posedge {});\n\t\t$finish;\n\tend\n\n\t// dump wave\n\tinitial begin\n\t\t$display(\"random seed : %0d\", $unsigned($get_initial_random_seed()));{}\n\tend\n\nendmodule\n",
         module,
         sclks, arsts, srsts,
-        declp_out, decls_out, minst, taski,
+        declp_out, decls_out, minst, taski, taskd,
         dtski, dtskd,
         clock,
         str_dump
@@ -192,21 +192,12 @@ fn declare_sigls(ports: &[crate::parser::module::Port], clkrstl: &[String]) -> S
     for (i, tmps) in strl.iter().enumerate() {
         if !clkrstl.contains(&ports[i].name) {
             let sp = lmax - tmps.len();
-            if lmax == sp {
-                text.push_str(&format!(
-                    "\tlogic {}{} {}\n",
-                    " ".repeat(sp),
-                    ports[i].size,
-                    ports[i].name
-                ));
-            } else {
-                text.push_str(&format!(
-                    "\tlogic {}{} {}\n",
-                    " ".repeat(sp),
-                    ports[i].size,
-                    ports[i].name
-                ));
-            }
+            text.push_str(&format!(
+                "\t{}{} {};\n",
+                tmps,
+                " ".repeat(sp),
+                ports[i].name
+            ));
         }
     }
     text
