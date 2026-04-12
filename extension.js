@@ -101,7 +101,7 @@ async function generateModuleInstance() {
     const config = vscode.workspace.getConfiguration('svtools');
 
     const options = {
-        instPrefix: config.get('instPrefix', 'inst_'),
+        instPrefix: config.get('instPrefix', 'u_'),
         reset: config.get('reset', []),
         includeDeclarations: config.get('includePortDeclarations', true)
     };
@@ -140,7 +140,7 @@ async function generateTestbench() {
     const config = vscode.workspace.getConfiguration('svtools');
 
     const options = {
-        instPrefix: config.get('instPrefix', 'inst_'),
+        instPrefix: config.get('instPrefix', 'u_'),
         reset: config.get('reset', []),
         sreset: config.get('sreset', []),
         clock: config.get('clock', ['clk']),

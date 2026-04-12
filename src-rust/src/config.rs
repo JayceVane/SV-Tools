@@ -102,7 +102,7 @@ pub struct GadgetOptions {
 impl Default for GadgetOptions {
     fn default() -> Self {
         Self {
-            inst_prefix: Some("inst_".into()),
+            inst_prefix: Some("u_".into()),
             reset: Some(vec![]),
             sreset: Some(vec![]),
             clock: Some(vec!["clk".into(), "uclk".into(), "cclk".into()]),
@@ -116,7 +116,7 @@ impl Default for GadgetOptions {
 
 impl GadgetOptions {
     pub fn inst_prefix(&self) -> &str {
-        self.inst_prefix.as_deref().unwrap_or("inst_")
+        self.inst_prefix.as_deref().unwrap_or("u_")
     }
     pub fn reset(&self) -> &[String] {
         self.reset.as_deref().unwrap_or(&[])

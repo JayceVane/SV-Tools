@@ -230,7 +230,7 @@
         },
         "svtools.instPrefix": {
           "type": "string",
-          "default": "inst_",
+          "default": "u_",
           "description": "Default prefix for module instance name"
         },
         "svtools.includePortDeclarations": {
