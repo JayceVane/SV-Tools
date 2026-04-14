@@ -414,36 +414,65 @@ pub fn align_module_port(
         max_port_len = max_port_len.max(s.len());
     }
 
-    // Python-style alignment: calculate prefix length for each declaration
-    // prefix = dir [+ var] [+ type] [+ sign] [+ range]
-    // Then pad all prefixes to the same length
+    // Python-style alignment with dedicated columns for var/type/sign/bw
+    // Each column has a fixed width; lines without content in a column still reserve the space.
+    let mut len_var: usize = 0; // "var" keyword width
+    let mut len_type: usize = 0; // type (reg/wire/logic/user-defined) width
+
+    for d in &decl {
+        if let Some(v) = d.name("var") {
+            len_var = len_var.max(v.as_str().len());
+        }
+        let tp = d.name("type").map(|x| x.as_str().trim()).unwrap_or("");
+        // Only count standard types (reg/wire/logic) for the type column
+        // User-defined types are handled separately
+        if ["reg", "wire", "logic"].contains(&tp) {
+            len_type = len_type.max(tp.len());
+        }
+    }
+
+    // Calculate prefix length for each declaration
+    // prefix = len_dir [+ 1+len_var] [+ 1+len_type] [+ 1+len_sign] [+ 1+len_bw]
+    // All lines use the same column widths regardless of whether they have content
+    let has_var = len_var > 0;
+    let has_type = len_type > 0;
+
     let mut max_prefix_len: usize = 0;
 
     for d in &decl {
         let dir = d.name("dir").unwrap().as_str();
         if !PORT_DIRS.contains(&dir) {
-            max_prefix_len = max_prefix_len.max(dir.len());
             continue;
         }
 
-        let var = d.name("var").map(|x| x.as_str());
         let tp = d.name("type").map(|x| x.as_str().trim()).unwrap_or("");
-        let sign = d.name("sign").map(|x| x.as_str().trim()).unwrap_or("");
-        let bw = d.name("bw").map(|x| x.as_str()).unwrap_or("");
+        let is_standard_type = ["reg", "wire", "logic"].contains(&tp);
 
-        let mut plen = dir.len();
-        if let Some(v) = var {
-            plen += 1 + v.len();
+        let mut plen = len_dir; // fixed direction column
+
+        // Var column: always reserve space if any line has var
+        if has_var {
+            plen += 1 + len_var;
         }
-        if !tp.is_empty() {
-            plen += 1 + tp.len();
+        // Type column: always reserve space if any line has standard type
+        if has_type {
+            plen += 1 + len_type;
         }
-        if !sign.is_empty() {
-            plen += 1 + sign.len();
+        // If this line has a user-defined type (not reg/wire/logic), it goes in type column
+        // but we need to ensure the column is wide enough
+        if !is_standard_type && !tp.is_empty() {
+            // User-defined type - needs its own column width
+            // For now, include in type column but ensure width
+            plen = plen.max(len_dir + (if has_var { 1 + len_var } else { 0 }) + 1 + tp.len());
         }
+
+        let bw = d.name("bw").map(|x| x.as_str()).unwrap_or("");
         if !bw.is_empty() {
             let bw_clean = Regex::new(r"\s*").unwrap().replace_all(bw, "");
             plen += 1 + bw_clean.len();
+        } else if len_bw > 0 {
+            // Reserve space for bw column even if this line doesn't have it
+            plen += 1 + len_bw;
         }
 
         max_prefix_len = max_prefix_len.max(plen);
@@ -477,7 +506,7 @@ pub fn align_module_port(
                     let dir = m_port.name("dir").unwrap().as_str();
 
                     if PORT_DIRS.contains(&dir) {
-                        // Build prefix string
+                        // Build prefix with fixed column widths
                         l_new.push_str(&format!("{:<width$}", dir, width = len_dir));
 
                         let var = m_port.name("var").map(|x| x.as_str());
@@ -485,22 +514,33 @@ pub fn align_module_port(
                         let sign = m_port.name("sign").map(|x| x.as_str().trim()).unwrap_or("");
                         let bw_raw = m_port.name("bw").map(|x| x.as_str()).unwrap_or("");
 
-                        // Add var if present
-                        if let Some(v) = var {
-                            l_new.push_str(&format!(" {}", v));
+                        // Var column: fixed width if any line has var
+                        if has_var {
+                            if let Some(v) = var {
+                                l_new.push_str(&format!(" {:<width$}", v, width = len_var));
+                            } else {
+                                l_new.push_str(&format!(" {:width$}", "", width = len_var));
+                            }
                         }
 
-                        // Add type if present
-                        if !tp.is_empty() {
-                            l_new.push_str(&format!(" {}", tp));
+                        // Type column: fixed width if any line has standard type
+                        if has_type {
+                            if ["reg", "wire", "logic"].contains(&tp) {
+                                l_new.push_str(&format!(" {:<width$}", tp, width = len_type));
+                            } else if !tp.is_empty() {
+                                // User-defined type - put in same column
+                                l_new.push_str(&format!(" {:<width$}", tp, width = len_type));
+                            } else {
+                                l_new.push_str(&format!(" {:width$}", "", width = len_type));
+                            }
                         }
 
-                        // Add sign if present
+                        // Sign if present
                         if !sign.is_empty() {
                             l_new.push_str(&format!(" {}", sign));
                         }
 
-                        // Add formatted bit-width if present
+                        // Bit-width: fixed width for aligned brackets
                         if !bw_raw.is_empty() {
                             let bw_clean = Regex::new(r"\s*").unwrap().replace_all(bw_raw, "");
                             let mut bw_s = String::new();
@@ -513,7 +553,10 @@ pub fn align_module_port(
                                 let w = len_bw_a.get(bi).unwrap_or(&0);
                                 bw_s.push_str(&format!("[{:>width$}]", content, width = w));
                             }
-                            l_new.push_str(&format!(" {}", bw_s));
+                            l_new.push_str(&format!(" {:<width$}", bw_s, width = len_bw));
+                        } else if len_bw > 0 {
+                            // Reserve space for bw column
+                            l_new.push_str(&format!(" {:width$}", "", width = len_bw));
                         }
 
                         // Pad to max_prefix_len + 1 space before port name

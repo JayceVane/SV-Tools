@@ -169,7 +169,7 @@ fn align_semicolons(txt: &str) -> String {
     let lines: Vec<&str> = txt.split('\n').collect();
     let mut max_semi_pos: HashMap<usize, usize> = HashMap::new();
 
-    // First pass: calculate indent level groups and find max semicolon position
+    // First pass: calculate indent level groups and find max content length (before semicolon)
     let mut current_group: usize = 0;
     let mut prev_indent: usize = 0;
     for l in &lines {
@@ -183,11 +183,12 @@ fn align_semicolons(txt: &str) -> String {
             prev_indent = indent;
         }
         if trimmed.ends_with(';') {
-            // Position where semicolon should be (1-indexed for clarity, so use line length)
-            let semi_pos = trimmed.len();
+            // Content before semicolon, trimmed of trailing spaces
+            let before_semi = trimmed[..trimmed.len() - 1].trim_end();
+            let content_len = before_semi.len();
             let entry = max_semi_pos.entry(current_group).or_insert(0);
-            if semi_pos > *entry {
-                *entry = semi_pos;
+            if content_len > *entry {
+                *entry = content_len;
             }
         }
     }
@@ -210,27 +211,18 @@ fn align_semicolons(txt: &str) -> String {
         }
         if trimmed.ends_with(';') {
             if let Some(&max_pos) = max_semi_pos.get(&current_group) {
-                let current_len = trimmed.len();
-                if current_len < max_pos {
-                    // Need to pad spaces before semicolon
-                    // trimmed = "    dbg_xxx <= value ;" (length = current_len)
-                    // We want semicolon at position max_pos
-                    // So we need (max_pos - current_len) spaces before ';'
+                // Content before semicolon (trimmed of trailing spaces)
+                let before_semi = trimmed[..trimmed.len() - 1].trim_end();
+                let spaces_needed = max_pos.saturating_sub(before_semi.len());
 
-                    // Get content before semicolon and trim trailing spaces
-                    let before_semi_with_spaces = &trimmed[..trimmed.len() - 1];
-                    let before_semi = before_semi_with_spaces.trim_end();
-                    let spaces_needed = max_pos - before_semi.len() - 1; // -1 for semicolon itself
-
-                    // Reconstruct: indent + content + padding + semicolon
-                    result.push_str(&format!(
-                        "{}{}{};\n",
-                        &l[..indent],             // preserve original indent
-                        before_semi.trim_start(), // content without indent
-                        " ".repeat(spaces_needed)
-                    ));
-                    continue;
-                }
+                // Reconstruct: indent + content + padding + semicolon
+                result.push_str(&format!(
+                    "{}{}{};\n",
+                    &l[..indent],
+                    before_semi.trim_start(),
+                    " ".repeat(spaces_needed)
+                ));
+                continue;
             }
         }
         result.push_str(l);
