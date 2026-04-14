@@ -175,6 +175,7 @@ fn align_semicolons(txt: &str) -> String {
     for l in &lines {
         let trimmed = l.trim_end();
         if trimmed.is_empty() {
+            current_group += 1; // blank lines separate alignment groups
             continue;
         }
         let indent = l.len() - l.trim_start().len();
@@ -200,6 +201,7 @@ fn align_semicolons(txt: &str) -> String {
     for l in &lines {
         let trimmed = l.trim_end();
         if trimmed.is_empty() {
+            current_group += 1; // blank lines separate alignment groups
             result.push_str(l);
             result.push('\n');
             continue;
