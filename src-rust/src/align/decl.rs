@@ -6,28 +6,34 @@ use crate::config::FormatOptions;
 /// Replicates Python `VerilogBeautifier.alignDecl()`.
 pub fn align_decl(txt: &str, options: &FormatOptions, indent: &str, indent_space: &str) -> String {
     let re_decl = Regex::new(
-        r#"^[ \t]*(?:(?P<param>localparam|parameter|local|protected)\s+)?(?P<scope>\w+\:\:)?(?P<type>[A-Za-z_]\w*)[ \t]+(?P<sign>signed\b|unsigned\b)?[ \t]*(?P<bw>(?:\[[\w\*\(\)\/><\:\-\+`\$\s]+\][ \t]*)*)[ \t]*(?P<name>[A-Za-z_]\w*)[ \t]*(?P<array>(?:\[[\w\*\(\)\/><\:\-\+`\$\s]+\][ \t]*)*)(=\s*(?P<init>[^;]+))?(?P<sig_list>,[\w, \t]*)?;[ \t]*(?P<comment>.*)"#,
+        r#"^[ \t]*(?P<attr>(?:\(\*.*?\*\)[ \t]*)*)(?:(?P<param>localparam|parameter|local|protected)\s+)?(?P<scope>\w+\:\:)?(?P<type>[A-Za-z_]\w*)[ \t]+(?P<sign>signed\b|unsigned\b)?[ \t]*(?P<bw>(?:\[[\w\*\(\)\/><\:\-\+`\$\s]+\][ \t]*)*)[ \t]*(?P<name>[A-Za-z_]\w*)[ \t]*(?P<array>(?:\[[\w\*\(\)\/><\:\-\+`\$\s]+\][ \t]*)*)(=\s*(?P<init>[^;]+))?(?P<sig_list>,[\w, \t]*)?;[ \t]*(?P<comment>.*)"#,
     )
     .unwrap();
 
     let lines: Vec<&str> = txt.split('\n').collect();
-    let mut lines_match: Vec<(&str, Option<regex::Captures>, usize)> = Vec::new();
-    let mut len_max: HashMap<usize, DeclWidths> = HashMap::new();
+    // Group by (indent_level, attribute_prefix) for proper alignment
+    let mut lines_match: Vec<(&str, Option<regex::Captures>, usize, String)> = Vec::new();
+    let mut len_max: HashMap<(usize, String), DeclWidths> = HashMap::new();
     let one_decl_per_line = options.one_decl_per_line();
 
     // First pass: collect matches and calculate column widths
     for l in &lines {
         if let Some(m) = re_decl.captures(l) {
             let ilvl = get_indent_level(l, options, indent, indent_space);
-            let widths = len_max.entry(ilvl).or_insert_with(DeclWidths::new);
+            let attr = m
+                .name("attr")
+                .map(|a| a.as_str().trim().to_string())
+                .unwrap_or_default();
+            let key = (ilvl, attr.clone());
+            let widths = len_max.entry(key.clone()).or_insert_with(DeclWidths::new);
 
             for (k, val) in m.iter().enumerate() {
                 if let Some(v) = val {
                     let w = v.as_str().trim();
                     match k {
-                        1 => widths.param = widths.param.max(w.len()),
-                        2 => widths.scope = widths.scope.max(w.len()),
-                        3 => {
+                        2 => widths.param = widths.param.max(w.len()),
+                        3 => widths.scope = widths.scope.max(w.len()),
+                        4 => {
                             let t = w;
                             let is_standard =
                                 ["logic", "wire", "reg", "bit", "int", "integer"].contains(&t);
@@ -40,8 +46,8 @@ pub fn align_decl(txt: &str, options: &FormatOptions, indent: &str, indent_space
                             }
                             widths.type_full = widths.type_full.max(t.len());
                         }
-                        4 => widths.sign = widths.sign.max(w.len()),
-                        5 => {
+                        5 => widths.sign = widths.sign.max(w.len()),
+                        6 => {
                             // Bitwidth - per dimension
                             let bw_clean = Regex::new(r"\s*").unwrap().replace_all(w, "");
                             for (i, inner) in Regex::new(r"\[(.+?)\]")
@@ -57,8 +63,8 @@ pub fn align_decl(txt: &str, options: &FormatOptions, indent: &str, indent_space
                                 }
                             }
                         }
-                        6 => widths.name = widths.name.max(w.len()),
-                        7 => {
+                        7 => widths.name = widths.name.max(w.len()),
+                        8 => {
                             let arr_clean = Regex::new(r"\s*").unwrap().replace_all(w, "");
                             for (i, inner) in Regex::new(r"\[(.+?)\]")
                                 .unwrap()
@@ -73,8 +79,8 @@ pub fn align_decl(txt: &str, options: &FormatOptions, indent: &str, indent_space
                                 }
                             }
                         }
-                        8 => widths.init = widths.init.max(w.trim().len()),
-                        10 => widths.comment = widths.comment.max(w.trim().len()),
+                        10 => widths.init = widths.init.max(w.trim().len()),
+                        12 => widths.comment = widths.comment.max(w.trim().len()),
                         _ => {}
                     }
                 }
@@ -92,9 +98,9 @@ pub fn align_decl(txt: &str, options: &FormatOptions, indent: &str, indent_space
                 }
             }
 
-            lines_match.push((l, Some(m), ilvl));
+            lines_match.push((l, Some(m), ilvl, attr));
         } else {
-            lines_match.push((l, None, 0));
+            lines_match.push((l, None, 0, String::new()));
         }
     }
 
@@ -109,10 +115,16 @@ pub fn align_decl(txt: &str, options: &FormatOptions, indent: &str, indent_space
 
     // Second pass: generate formatted lines and calculate max line length
     let mut formatted_lines: Vec<(String, Option<String>, usize, bool)> = Vec::new(); // (line, comment, ilvl, is_decl)
-    for (line, caps, ilvl) in &lines_match {
+    for (line, caps, ilvl, attr) in &lines_match {
         if let Some(m) = caps {
-            let widths = &len_max[ilvl];
+            let key = (*ilvl, attr.clone());
+            let widths = &len_max[&key];
             let mut l = indent.repeat(*ilvl);
+            // Prepend attribute prefix if present
+            if !attr.is_empty() {
+                l.push_str(attr);
+                l.push(' ');
+            }
             let tp = m.name("type").unwrap().as_str().trim();
             let is_usertype = !["logic", "wire", "reg", "bit", "int", "integer"].contains(&tp);
 
@@ -261,24 +273,44 @@ pub fn align_decl(txt: &str, options: &FormatOptions, indent: &str, indent_space
         }
     }
 
-    // Calculate max line length per indent level for semicolon alignment
+    // Calculate max line length per (indent level, attr) for semicolon alignment
     if options.align_comma() {
         for (l, _comment, ilvl, is_decl) in &formatted_lines {
             if *is_decl {
-                let widths = len_max.get_mut(ilvl).unwrap();
-                let line_len = l.trim_end().len();
-                if line_len > widths.semi_col {
-                    widths.semi_col = line_len;
+                // Find the attr from original lines_match by index
+                // We need to track index, so let's iterate with index
+            }
+        }
+        // Re-iterate with original lines_match data for proper key lookup
+        let mut idx = 0;
+        for (l, _comment, ilvl, is_decl) in &formatted_lines {
+            if *is_decl {
+                if let Some((_line, _caps, _ilvl, attr)) = lines_match.get(idx) {
+                    let key = (*ilvl, attr.clone());
+                    if let Some(widths) = len_max.get_mut(&key) {
+                        let line_len = l.trim_end().len();
+                        if line_len > widths.semi_col {
+                            widths.semi_col = line_len;
+                        }
+                    }
                 }
             }
+            idx += 1;
         }
     }
 
     // Third pass: add semicolons and comments
     let mut txt_new = String::new();
+    let mut idx = 0;
     for (l, comment, ilvl, is_decl) in &formatted_lines {
         let l = if *is_decl {
-            let widths = &len_max[ilvl];
+            // Find attr from original lines_match
+            let attr = lines_match
+                .get(idx)
+                .map(|(_, _, _, a)| a.clone())
+                .unwrap_or_default();
+            let key = (*ilvl, attr);
+            let widths = &len_max[&key];
             let mut l = l.clone();
 
             if options.align_comma() {
@@ -304,6 +336,7 @@ pub fn align_decl(txt: &str, options: &FormatOptions, indent: &str, indent_space
 
         txt_new.push_str(&l);
         txt_new.push('\n');
+        idx += 1;
     }
 
     if !txt.ends_with('\n') {
@@ -370,5 +403,67 @@ impl DeclWidths {
             comment: 0,
             semi_col: 0,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_decl_regex_basic() {
+        let re = Regex::new(
+            r#"^[ \t]*(?P<attr>(?:\(\*.*?\*\)[ \t]*)*)(?:(?P<param>localparam|parameter|local|protected)\s+)?(?P<scope>\w+\:\:)?(?P<type>[A-Za-z_]\w*)[ \t]+(?P<sign>signed\b|unsigned\b)?[ \t]*(?P<bw>(?:\[[\w\*\(\)\/><\:\-\+`\$\s]+\][ \t]*)*)[ \t]*(?P<name>[A-Za-z_]\w*)[ \t]*(?P<array>(?:\[[\w\*\(\)\/><\:\-\+`\$\s]+\][ \t]*)*)(=\s*(?P<init>[^;]+))?(?P<sig_list>,[\w, \t]*)?;[ \t]*(?P<comment>.*)"#,
+        ).unwrap();
+
+        let test_cases = vec![
+            "logic [31:0] data_a;",
+            "reg [31:0] dbg_rfu_wreg0;",
+            "reg        dbg_rfu_wreg1;",
+            "(* mark_debug = true *) reg [31:0] dbg_rfu_wreg0;",
+        ];
+
+        for tc in &test_cases {
+            if let Some(m) = re.captures(tc) {
+                println!("Input: {}", tc);
+                println!("  type: {:?}", m.name("type").map(|x| x.as_str()));
+                println!("  bw:   {:?}", m.name("bw").map(|x| x.as_str()));
+                println!("  name: {:?}", m.name("name").map(|x| x.as_str()));
+                println!("  attr: {:?}", m.name("attr").map(|x| x.as_str()));
+                assert!(m.name("type").is_some(), "type missing for: {}", tc);
+                assert!(m.name("name").is_some(), "name missing for: {}", tc);
+            } else {
+                panic!("No match for: {}", tc);
+            }
+        }
+    }
+
+    #[test]
+    fn test_align_decl_basic() {
+        let options = FormatOptions::default();
+        let indent = "    ";
+        let indent_space = "    ";
+
+        let txt = "logic [31:0] data_a;\nlogic [7:0]  data_b;\nlogic        data_c;\n";
+        let result = align_decl(txt, &options, indent, indent_space);
+        assert!(
+            result.contains("31:0"),
+            "31:0 missing in output: {}",
+            result
+        );
+        assert!(result.contains("7:0"), "7:0 missing in output");
+    }
+
+    #[test]
+    fn test_align_decl_attribute() {
+        let options = FormatOptions::default();
+        let indent = "    ";
+        let indent_space = "    ";
+
+        let txt = "(* mark_debug = true *) reg [31:0] dbg_rfu_wreg0;\n(* mark_debug = true *) reg        dbg_rfu_wreg1;\n(* mark_debug = true *) reg [15:0] dbg_rfu_wreg2;\n";
+        let result = align_decl(txt, &options, indent, indent_space);
+        assert!(result.contains("31:0"), "31:0 missing in output");
+        assert!(result.contains("15:0"), "15:0 missing in output");
+        assert!(result.contains("mark_debug"), "attribute missing in output");
     }
 }

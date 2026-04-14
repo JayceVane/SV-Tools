@@ -645,12 +645,15 @@ impl VerilogBeautifier {
                 if ilvl > 0 {
                     ilvl -= 1;
                 }
-                self.state_update(None);
+                self.state_update(None); // pop "attribute" → back to "("
+                                         // FIX: pop the residual "(" state since ")" was consumed here
+                if self.state == "(" {
+                    self.state_update(None);
+                }
                 block.push_str(&line);
                 line.clear();
-                if self.block_state.is_none() {
-                    block_handled = true;
-                }
+                // Don't flush the block - keep attribute in block so it stays
+                // with the subsequent declaration/statement for alignment
             }
             // String end
             else if self.state == "string" && w == "\"" {
@@ -675,9 +678,9 @@ impl VerilogBeautifier {
                         line = line.trim().to_string();
                     }
                 } else if w_d.last() == "(" && w == "*" {
-                    if !self.states.is_empty() && self.states.last() == Some(&"(".to_string()) {
-                        self.states.pop();
-                    }
+                    // NOTE: Do NOT pop "(" here - it will be popped when attribute ends
+                    // The "(" state tracks that we're inside parentheses, and "*)"
+                    // closes the attribute, not the parenthesis.
                     self.state_update(Some("attribute".to_string()));
                     block_ended = false;
                 } else if w == "\"" {
@@ -921,7 +924,7 @@ impl VerilogBeautifier {
                 self.block_state = BlockState::Always {
                     always_state: AlwaysState::None,
                 };
-            } else if w_d.last() == "\n" && w != "/" && !state_end {
+            } else if (w_d.last() == "\n" || w_d.last() == ")") && w != "/" && !state_end {
                 self.block_state = BlockState::Text;
             }
         } else if matches!(self.block_state, BlockState::Text) {
@@ -1033,5 +1036,155 @@ impl VerilogBeautifier {
             &self.indent,
             &self.indent_space,
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_attribute_state_management() {
+        let options = FormatOptions::default();
+        let mut beautifier = VerilogBeautifier::new(options);
+
+        // Test that (* ... *) attribute doesn't leave residual "(" state
+        let input = r#"(* mark_debug = "true" *) reg [31:0] dbg_rfu_wreg0;"#;
+        let result = beautifier.beautify_text(input);
+        println!("Input: {}", input);
+        println!("Output: {}", result);
+
+        // After processing, the state should be empty (not "(")
+        assert!(
+            beautifier.state.is_empty(),
+            "State should be empty after processing, but got: {:?}",
+            beautifier.state
+        );
+    }
+
+    #[test]
+    fn test_attribute_in_if_block() {
+        let options = FormatOptions::default();
+        let mut beautifier = VerilogBeautifier::new(options);
+
+        let input = r#"if(DEBUG_EN) begin
+    (* mark_debug = "true" *) reg [31:0] dbg_rfu_wreg0   ;
+    (* mark_debug = "true" *) reg [31:0] dbg_rfu_wreg1   ;
+    (* mark_debug = "true" *) reg        dbg_tx_done_reg ;
+end"#;
+
+        let result = beautifier.beautify_text(input);
+        println!("Input:\n{}", input);
+        println!("\nOutput:\n{}", result);
+
+        // Verify output is valid and doesn't corrupt subsequent processing
+        assert!(
+            result.contains("mark_debug"),
+            "Attribute should be preserved"
+        );
+        assert!(result.contains("reg"), "reg keyword should be preserved");
+
+        // Check semicolon alignment - all semicolons should be at the same column
+        let lines: Vec<&str> = result.lines().collect();
+        let reg_lines: Vec<&str> = lines
+            .iter()
+            .filter(|l| l.contains("reg") && l.contains("dbg_"))
+            .copied()
+            .collect();
+
+        assert_eq!(reg_lines.len(), 3, "Expected 3 reg declarations");
+
+        // Find position of semicolons
+        let semi_positions: Vec<usize> = reg_lines
+            .iter()
+            .map(|l| l.rfind(';').unwrap_or(0))
+            .collect();
+
+        println!("Semicolon positions: {:?}", semi_positions);
+
+        // All semicolons should be at the same position
+        let first_pos = semi_positions[0];
+        for (i, pos) in semi_positions.iter().enumerate() {
+            assert_eq!(
+                *pos, first_pos,
+                "Semicolon at line {} is not aligned. Expected position {}, got {}",
+                i, first_pos, pos
+            );
+        }
+    }
+
+    #[test]
+    fn test_if_block_without_attribute() {
+        // Test case from test5.sv line 360-385
+        let options = FormatOptions::default();
+        let mut beautifier = VerilogBeautifier::new(options);
+
+        let input = r#"if(DEBUG_ENABLE) begin
+    reg [31:0] dbg_User_Reg_awwaddr ;
+    reg [31:0] dbg_User_Reg_awwdata ;
+    reg        dbg_User_Reg_awwvalid;
+    reg        dbg_User_Reg_awready;
+    reg [31:0] dbg_User_Reg_araddr  ;
+    reg        dbg_User_Reg_arvalid ;
+    reg        dbg_User_Reg_arready ;
+    reg [31:0] dbg_User_Reg_rdata   ;
+    reg        dbg_User_Reg_rready  ;
+    reg        dbg_User_Reg_rvalid  ;
+
+    always @(posedge gp_clk) begin
+        dbg_User_Reg_awwaddr  <= User_Reg_awwaddr ; 
+        dbg_User_Reg_awwdata  <= User_Reg_awwdata ; 
+        dbg_User_Reg_awwvalid <= User_Reg_awwvalid ;
+        dbg_User_Reg_awwready <= User_Reg_awwready ;
+        dbg_User_Reg_araddr   <= User_Reg_araddr ;  
+        dbg_User_Reg_arvalid  <= User_Reg_arvalid ; 
+        dbg_User_Reg_arready  <= User_Reg_arready   ;
+        dbg_User_Reg_rdata    <= User_Reg_rdata ;   
+        dbg_User_Reg_rready   <= User_Reg_rready ;  
+        dbg_User_Reg_rvalid   <= User_Reg_rvalid ;  
+    end
+end"#;
+
+        let result = beautifier.beautify_text(input);
+        println!("Input:\n{}", input);
+        println!("\nOutput:\n{}", result);
+
+        // Check reg declarations are aligned
+        let lines: Vec<&str> = result.lines().collect();
+        let reg_decl_lines: Vec<&str> = lines
+            .iter()
+            .filter(|l| l.trim().starts_with("reg") && l.contains("dbg_User"))
+            .copied()
+            .collect();
+
+        println!("Reg declaration lines: {:?}", reg_decl_lines.len());
+
+        // Check always block assignments are aligned
+        let always_lines: Vec<&str> = lines
+            .iter()
+            .filter(|l| l.contains("<=") && l.contains("dbg_User"))
+            .copied()
+            .collect();
+
+        println!("Always assignment lines: {:?}", always_lines.len());
+
+        // Find semicolon positions in always block assignments
+        let semi_pos: Vec<usize> = always_lines
+            .iter()
+            .map(|l| l.rfind(';').unwrap_or(0))
+            .collect();
+        println!("Always block semicolon positions: {:?}", semi_pos);
+
+        // All semicolons in always block should be aligned
+        if !semi_pos.is_empty() {
+            let first = semi_pos[0];
+            for (i, &pos) in semi_pos.iter().enumerate() {
+                assert_eq!(
+                    pos, first,
+                    "Semicolon at always block line {} not aligned. Expected {}, got {}",
+                    i, first, pos
+                );
+            }
+        }
     }
 }

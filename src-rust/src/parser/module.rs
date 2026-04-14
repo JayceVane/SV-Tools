@@ -149,6 +149,12 @@ pub fn parse_module(text: &str, options: &GadgetOptions) -> Option<ModuleInfo> {
         }
     }
 
+    // Deduplicate final lists
+    clock_list.sort();
+    clock_list.dedup();
+    reset_list.sort();
+    reset_list.dedup();
+
     Some(ModuleInfo {
         name: module,
         ports,
@@ -269,6 +275,7 @@ fn get_clock_reset(text: &str) -> (Vec<String>, Vec<String>) {
     let mut clks = Vec::new();
     let mut rsts = Vec::new();
 
+    // Parse from always blocks
     for caps in Regex::new(r"always\s*@\s*\(.+?\)")
         .unwrap()
         .captures_iter(text)

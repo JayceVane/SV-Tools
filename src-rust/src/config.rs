@@ -103,8 +103,8 @@ impl Default for GadgetOptions {
     fn default() -> Self {
         Self {
             inst_prefix: Some("u_".into()),
-            reset: Some(vec![]),
-            sreset: Some(vec![]),
+            reset: Some(vec!["rst_n".into(), "reset_n".into()]),
+            sreset: Some(vec!["sreset".into(), "srst".into()]),
             clock: Some(vec!["clk".into(), "uclk".into(), "cclk".into()]),
             wave_type: Some("fsdb".into()),
             task_init: Some(true),

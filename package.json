@@ -2,7 +2,7 @@
   "name": "svtools",
   "displayName": "SystemVerilog Tools (Native)",
   "description": "Verilog/SystemVerilog formatter, module instantiation, testbench generation, and productivity tools (Rust native backend)",
-  "version": "3.2.5",
+  "version": "3.2.13",
   "publisher": "JayceVane",
   "author": {
     "name": "JayceVane",
@@ -99,43 +99,49 @@
         "command": "svtools.moduleInstantiation",
         "key": "ctrl+shift+c",
         "mac": "cmd+shift+c",
-        "when": "editorLangId == verilog || editorLangId == systemverilog"
+        "when": "editorLangId == verilog || editorLangId == systemverilog || editorLangId == system-verilog"
       },
       {
         "command": "svtools.generateTestbench",
         "key": "ctrl+shift+t",
         "mac": "cmd+shift+t",
-        "when": "editorLangId == verilog || editorLangId == systemverilog"
+        "when": "editorLangId == verilog || editorLangId == systemverilog || editorLangId == system-verilog"
       },
       {
         "command": "svtools.repeatCode",
         "key": "ctrl+f12",
         "mac": "cmd+f12",
-        "when": "editorLangId == verilog || editorLangId == systemverilog"
+        "when": "editorLangId == verilog || editorLangId == systemverilog || editorLangId == system-verilog"
       },
       {
         "command": "svtools.alignCode",
         "key": "ctrl+shift+x",
         "mac": "cmd+shift+x",
-        "when": "editorLangId == verilog || editorLangId == systemverilog"
+        "when": "editorLangId == verilog || editorLangId == systemverilog || editorLangId == system-verilog"
       },
       {
         "command": "svtools.insertHeader",
         "key": "ctrl+shift+insert",
         "mac": "cmd+shift+insert",
-        "when": "editorLangId == verilog || editorLangId == systemverilog"
+        "when": "editorLangId == verilog || editorLangId == systemverilog || editorLangId == system-verilog"
+      }
+    ],
+    "submenus": [
+      {
+        "id": "svtools.submenu",
+        "label": "SystemVerilog Tools"
       }
     ],
     "menus": {
       "editor/context": [
         {
           "command": "svtools.formatDocument",
-          "when": "editorLangId == verilog || editorLangId == systemverilog",
+          "when": "editorLangId == verilog || editorLangId == systemverilog || editorLangId == system-verilog",
           "group": "1_modification"
         },
         {
           "submenu": "svtools.submenu",
-          "when": "editorLangId == verilog || editorLangId == systemverilog",
+          "when": "editorLangId == verilog || editorLangId == systemverilog || editorLangId == system-verilog",
           "group": "2_modification"
         }
       ],

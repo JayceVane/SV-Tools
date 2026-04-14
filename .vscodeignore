@@ -10,6 +10,7 @@ src-rust/*.d.ts
 src-rust/node_modules/.package-lock.json
 src-rust/node_modules/@napi-rs/**
 src-rust/node_modules/.bin/**
+src-rust/.gitignore
 
 # Rust test executables
 src-rust/*.exe
@@ -17,6 +18,10 @@ src-rust/*.pdb
 
 # Duplicate node file (napi build creates both)
 src-rust/svtools.node
+src-rust/svtools.win32-x64-msvc.node
+
+# src-rust package.json (not needed at runtime)
+src-rust/package.json
 
 # Python backend (not needed for native version)
 processManager.js
@@ -29,7 +34,12 @@ src-rust/debug*.js
 src-rust/compare*.js
 test*.js
 test*.py
+test*.sv
+test*.txt
 test/
+example.sv
+convert_svg.py
+verify_keywords.py
 
 # Source control
 .git/**

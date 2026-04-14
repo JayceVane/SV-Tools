@@ -29,7 +29,7 @@ function loadNativeModule() {
     
     try {
         // Try to load the native module
-        const modulePath = path.join(__dirname, 'src-rust', 'svtools.win32-x64-msvc.node');
+        const modulePath = path.join(__dirname, 'svtools.win32-x64-msvc.node');
         svtools = require(modulePath);
         console.log('svtools native module loaded successfully');
         return svtools;
@@ -49,7 +49,7 @@ async function formatDocument(document, range = null) {
         return null;
     }
 
-    const config = vscode.workspace.getConfiguration('svAlign');
+    const config = vscode.workspace.getConfiguration('svtools');
 
     // Get the document text
     const text = document.getText(range);
@@ -253,7 +253,7 @@ async function alignSelectedCode() {
 
     const selection = editor.selection;
     const text = editor.document.getText(selection);
-    const config = vscode.workspace.getConfiguration('svAlign');
+    const config = vscode.workspace.getConfiguration('svtools');
 
     try {
         const result = native.alignCode(text, config.get('tabSize', 4));

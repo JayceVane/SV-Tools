@@ -128,6 +128,13 @@ pub fn align_assign(
                     txt_new_tmp.push_str(&format!("{}\n", line));
                 }
             }
+
+            // Semicolon alignment: for always block assignments (mask_op & 4),
+            // align semicolons within the same indent level group
+            if mask_op & 4 != 0 && options.align_comma() {
+                txt_new_tmp = align_semicolons(&txt_new_tmp);
+            }
+
             // Don't remove trailing newline - blocks should end with newline
             txt_new = txt_new_tmp;
         }
@@ -153,4 +160,82 @@ fn get_indent_level(
     } else {
         cnt / options.nb_space()
     }
+}
+
+/// Align semicolons in assignment lines within the same indent level group.
+/// Finds the max line length (excluding the semicolon) per indent group,
+/// then pads shorter lines so all semicolons line up vertically.
+fn align_semicolons(txt: &str) -> String {
+    let lines: Vec<&str> = txt.split('\n').collect();
+    let mut max_semi_pos: HashMap<usize, usize> = HashMap::new();
+
+    // First pass: calculate indent level groups and find max semicolon position
+    let mut current_group: usize = 0;
+    let mut prev_indent: usize = 0;
+    for l in &lines {
+        let trimmed = l.trim_end();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let indent = l.len() - l.trim_start().len();
+        if indent != prev_indent {
+            current_group += 1;
+            prev_indent = indent;
+        }
+        if trimmed.ends_with(';') {
+            // Position where semicolon should be (1-indexed for clarity, so use line length)
+            let semi_pos = trimmed.len();
+            let entry = max_semi_pos.entry(current_group).or_insert(0);
+            if semi_pos > *entry {
+                *entry = semi_pos;
+            }
+        }
+    }
+
+    // Second pass: pad lines to align semicolons
+    let mut result = String::new();
+    current_group = 0;
+    prev_indent = 0;
+    for l in &lines {
+        let trimmed = l.trim_end();
+        if trimmed.is_empty() {
+            result.push_str(l);
+            result.push('\n');
+            continue;
+        }
+        let indent = l.len() - l.trim_start().len();
+        if indent != prev_indent {
+            current_group += 1;
+            prev_indent = indent;
+        }
+        if trimmed.ends_with(';') {
+            if let Some(&max_pos) = max_semi_pos.get(&current_group) {
+                let current_len = trimmed.len();
+                if current_len < max_pos {
+                    // Need to pad spaces before semicolon
+                    // trimmed = "    dbg_xxx <= value ;" (length = current_len)
+                    // We want semicolon at position max_pos
+                    // So we need (max_pos - current_len) spaces before ';'
+
+                    // Get content before semicolon and trim trailing spaces
+                    let before_semi_with_spaces = &trimmed[..trimmed.len() - 1];
+                    let before_semi = before_semi_with_spaces.trim_end();
+                    let spaces_needed = max_pos - before_semi.len() - 1; // -1 for semicolon itself
+
+                    // Reconstruct: indent + content + padding + semicolon
+                    result.push_str(&format!(
+                        "{}{}{};\n",
+                        &l[..indent],             // preserve original indent
+                        before_semi.trim_start(), // content without indent
+                        " ".repeat(spaces_needed)
+                    ));
+                    continue;
+                }
+            }
+        }
+        result.push_str(l);
+        result.push('\n');
+    }
+
+    result
 }

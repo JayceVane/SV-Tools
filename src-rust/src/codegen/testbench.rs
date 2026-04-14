@@ -1,3 +1,4 @@
+use super::module_inst::build_instance_code;
 use crate::config::GadgetOptions;
 use crate::parser::module::ModuleInfo;
 
@@ -29,7 +30,14 @@ pub fn generate_testbench(info: &ModuleInfo, options: &GadgetOptions) -> String 
 
     let declp = declare_param(&info.params);
     let decls = declare_sigls(&info.ports, &clkrstl);
-    let minst = build_instance(info, iprefix, &clockl, &resetl, &sresetl);
+    // Use build_instance_code from module_inst for aligned formatting with comments
+    // Add tab indentation to each line of the instance
+    let minst_raw = build_instance_code(info, iprefix);
+    let minst = minst_raw
+        .lines()
+        .map(|line| format!("\t{}", line))
+        .collect::<Vec<_>>()
+        .join("\n");
 
     let arstb = resetl.first().cloned().unwrap_or_default();
     let srstb = sresetl.first().cloned().unwrap_or_default();
@@ -47,9 +55,16 @@ pub fn generate_testbench(info: &ModuleInfo, options: &GadgetOptions) -> String 
 
     // Async reset
     let arsts = if !arstb.is_empty() {
+        let (init_val, final_val) = if arstb.ends_with('n') {
+            // Active-low: start asserted ('0 = reset), then release ('1 = normal)
+            ("'0", "'1")
+        } else {
+            // Active-high: start asserted ('1 = reset), then release ('0 = normal)
+            ("'1", "'0")
+        };
         format!(
-            "\n\t// asynchronous reset\n\tlogic {};\n\tinitial begin\n\t\t{} <= '0;\n\t\t#10\n\t\t{} <= '1;\n\tend\n",
-            arstb, arstb, arstb
+            "\n\t// asynchronous reset\n\tlogic {};\n\tinitial begin\n\t\t{} <= {};\n\t\t#10\n\t\t{} <= {};\n\tend\n",
+            arstb, arstb, init_val, arstb, final_val
         )
     } else {
         String::new()
@@ -57,17 +72,22 @@ pub fn generate_testbench(info: &ModuleInfo, options: &GadgetOptions) -> String 
 
     // Sync reset
     let srsts = if !srstb.is_empty() {
+        let (init_val, final_val) = if srstb.ends_with('n') {
+            ("'0", "'1")
+        } else {
+            ("'1", "'0")
+        };
         format!(
-            "\n\t// synchronous reset\n\tlogic {};\n\tinitial begin\n\t\t{} <= '0;\n\t\trepeat(5)@(posedge {});\n\t\t{} <= '1;\n\tend\n",
-            srstb, srstb, clock, srstb
+            "\n\t// synchronous reset\n\tlogic {};\n\tinitial begin\n\t\t{} <= {};\n\t\trepeat(5)@(posedge {});\n\t\t{} <= {};\n\tend\n",
+            srstb, srstb, init_val, clock, srstb, final_val
         )
     } else {
         String::new()
     };
 
-    // Task init
+    // Task init - placeholder for additional initialization logic
     let (taski, dtski) = if options.task_init() {
-        let task = task_init(&arstb, &srstb, &clock);
+        let task = String::from("\n\t// initialization task - add custom init logic here\n\ttask init();\n\t\t// TODO: add initialization logic\n\tendtask\n");
         let dt = if !clock.is_empty() {
             format!("\n\t\tinit();\n\t\trepeat(10)@(posedge {});\n", clock)
         } else {
@@ -200,84 +220,6 @@ fn declare_sigls(ports: &[crate::parser::module::Port], clkrstl: &[String]) -> S
             ));
         }
     }
-    text
-}
-
-fn build_instance(
-    info: &ModuleInfo,
-    iprefix: &str,
-    clockl: &[String],
-    resetl: &[String],
-    srstl: &[String],
-) -> String {
-    let prmonly: Vec<&crate::parser::module::Param> = info
-        .params
-        .iter()
-        .filter(|p| p.kind == "parameter")
-        .collect();
-    let plen = prmonly.len();
-    let lmax = info.ports.iter().map(|p| p.name.len()).max().unwrap_or(0);
-
-    let mut string = if plen > 0 {
-        let mut s = format!("\t{} #(\n", info.name);
-        for (i, p) in prmonly.iter().enumerate() {
-            s.push_str(&format!("\t\t\t.{}({})", p.name, p.name));
-            if i != plen - 1 {
-                s.push_str(",\n");
-            } else {
-                s.push('\n');
-            }
-        }
-        s.push_str(&format!("\t\t) {}{} (\n", iprefix, info.name));
-        s
-    } else {
-        format!("\t{} {}{} (\n", info.name, iprefix, info.name)
-    };
-
-    for (i, p) in info.ports.iter().enumerate() {
-        let sp = lmax - p.name.len();
-        let pmap = if p.direction == "input" && clockl.contains(&p.name) {
-            clockl.first().cloned().unwrap_or_else(|| p.name.clone())
-        } else if p.direction == "input" && resetl.contains(&p.name) {
-            resetl.first().cloned().unwrap_or_else(|| p.name.clone())
-        } else if p.direction == "input" && srstl.contains(&p.name) {
-            srstl.first().cloned().unwrap_or_else(|| p.name.clone())
-        } else {
-            p.name.clone()
-        };
-        string.push_str(&format!("\t\t\t.{}{} ({})", p.name, " ".repeat(sp), pmap));
-        if i != info.ports.len() - 1 {
-            string.push_str(",\n");
-        } else {
-            string.push('\n');
-        }
-    }
-    string.push_str("\t\t);\n");
-    string
-}
-
-fn task_init(arst: &str, srst: &str, clock: &str) -> String {
-    let mut text = String::from("\n\ttask init();\n");
-
-    // Async reset
-    if !arst.is_empty() {
-        text.push_str(&format!("\t\t{} <= '0;\n", arst));
-        if !clock.is_empty() {
-            text.push_str(&format!("\t\trepeat(10)@(posedge {});\n", clock));
-        }
-        text.push_str(&format!("\t\t{} <= '1;\n", arst));
-    }
-
-    // Sync reset
-    if !srst.is_empty() {
-        text.push_str(&format!("\t\t{} <= '0;\n", srst));
-        if !clock.is_empty() {
-            text.push_str(&format!("\t\trepeat(10)@(posedge {});\n", clock));
-        }
-        text.push_str(&format!("\t\t{} <= '1;\n", srst));
-    }
-
-    text.push_str("\tendtask\n");
     text
 }
 

@@ -356,55 +356,49 @@ pub fn align_module_port(
     }
     let len_bw: usize = len_bw_a.iter().sum::<usize>() + 2 * len_bw_a.len();
 
-    // Determine type column widths
-    let mut len_type: usize = 0;
-    let mut len_type_user: usize = 0;
-    let mut len_sign: usize = 0;
-    let mut len_var: usize = 0;
+    // Python-style alignment: calculate prefix length for each declaration
+    // prefix = dir [+ var] [+ type] [+ sign] [+ range]
+    // Then pad all prefixes to the same length
+    let mut max_prefix_len: usize = 0;
 
     for d in &decl {
+        let dir = d.name("dir").unwrap().as_str();
+        if !PORT_DIRS.contains(&dir) {
+            max_prefix_len = max_prefix_len.max(dir.len());
+            continue;
+        }
+
+        let var = d.name("var").map(|x| x.as_str());
         let tp = d.name("type").map(|x| x.as_str().trim()).unwrap_or("");
-        let sign = d.name("sign").map(|x| x.as_str()).unwrap_or("");
+        let sign = d.name("sign").map(|x| x.as_str().trim()).unwrap_or("");
         let bw = d.name("bw").map(|x| x.as_str()).unwrap_or("");
-        let var = d.name("var").map(|x| x.as_str()).unwrap_or("");
 
-        if !var.is_empty() {
-            len_var = 3;
+        // Calculate prefix length: dir [+ ' ' + var] [+ ' ' + type] [+ ' ' + sign] [+ ' ' + bw]
+        let mut plen = dir.len();
+        if let Some(v) = var {
+            plen += 1 + v.len();
+        }
+        if !tp.is_empty() {
+            plen += 1 + tp.len();
+        }
+        if !sign.is_empty() {
+            plen += 1 + sign.len();
+        }
+        if !bw.is_empty() {
+            let bw_clean = Regex::new(r"\s*").unwrap().replace_all(bw, "");
+            plen += 1 + bw_clean.len();
         }
 
-        if sign == "" && bw == "" && !["logic", "wire", "reg", "signed", "unsigned"].contains(&tp) {
-            len_type_user = len_type_user.max(tp.len());
-        } else {
-            if tp != "signed" && tp != "unsigned" {
-                len_type = len_type.max(tp.len());
-            }
-        }
-
-        if ["signed", "unsigned"].contains(&tp) || ["signed", "unsigned"].contains(&sign) {
-            len_sign = len_sign.max(tp.len()).max(sign.len());
-        }
+        max_prefix_len = max_prefix_len.max(plen);
     }
 
-    let len_type_full = len_type
-        + if len_var > 0 { 1 + len_var } else { 0 }
-        + if len_bw > 0 { 1 + len_bw } else { 0 }
-        + if len_sign > 0 { 1 + len_sign } else { 0 };
-
-    let max_len = if len_type_user < len_type_full {
-        len_type_full
+    // Round up max_prefix_len to tab boundary for clean alignment
+    let tab_size = options.nb_space();
+    let max_prefix_len = if tab_size > 0 {
+        let aligned = max_prefix_len + (tab_size - max_prefix_len % tab_size);
+        aligned
     } else {
-        len_type_user
-    };
-    let len_type_user = if len_if < max_len + len_dir + 1 {
-        max_len
-    } else {
-        len_if - len_dir - 1
-    };
-    let len_if = len_if.max(max_len + len_dir + 1);
-    let len_type_user = if len_var > 0 {
-        len_type_user.saturating_sub(len_var + 1)
-    } else {
-        len_type_user
+        max_prefix_len + 1
     };
 
     // Calculate port name column width
@@ -420,13 +414,57 @@ pub fn align_module_port(
         max_port_len = max_port_len.max(s.len());
     }
 
+    // Python-style alignment: calculate prefix length for each declaration
+    // prefix = dir [+ var] [+ type] [+ sign] [+ range]
+    // Then pad all prefixes to the same length
+    let mut max_prefix_len: usize = 0;
+
+    for d in &decl {
+        let dir = d.name("dir").unwrap().as_str();
+        if !PORT_DIRS.contains(&dir) {
+            max_prefix_len = max_prefix_len.max(dir.len());
+            continue;
+        }
+
+        let var = d.name("var").map(|x| x.as_str());
+        let tp = d.name("type").map(|x| x.as_str().trim()).unwrap_or("");
+        let sign = d.name("sign").map(|x| x.as_str().trim()).unwrap_or("");
+        let bw = d.name("bw").map(|x| x.as_str()).unwrap_or("");
+
+        let mut plen = dir.len();
+        if let Some(v) = var {
+            plen += 1 + v.len();
+        }
+        if !tp.is_empty() {
+            plen += 1 + tp.len();
+        }
+        if !sign.is_empty() {
+            plen += 1 + sign.len();
+        }
+        if !bw.is_empty() {
+            let bw_clean = Regex::new(r"\s*").unwrap().replace_all(bw, "");
+            plen += 1 + bw_clean.len();
+        }
+
+        max_prefix_len = max_prefix_len.max(plen);
+    }
+
+    // Round up max_prefix_len to tab boundary for clean alignment
+    let tab_size = options.nb_space();
+    let max_prefix_len = if tab_size > 0 {
+        let aligned = max_prefix_len + (tab_size - max_prefix_len % tab_size);
+        aligned
+    } else {
+        max_prefix_len + 1
+    };
+
     // Rewrite each port line with alignment
     let lines: Vec<&str> = txt_port.split('\n').collect();
+
     for (i, orig_line) in lines.iter().enumerate() {
         let l = orig_line.trim();
 
         if options.ignore_tick() && l.starts_with('`') {
-            // Preserve tick lines with proper indentation
             txt_new.push_str(&format!("{}{}\n", indent.repeat(ilvl + 1), l));
         } else if (i != lines.len() - 1 && i != 0 && (options.strip_empty_line() || !l.is_empty()))
             || !l.is_empty()
@@ -439,140 +477,64 @@ pub fn align_module_port(
                     let dir = m_port.name("dir").unwrap().as_str();
 
                     if PORT_DIRS.contains(&dir) {
+                        // Build prefix string
                         l_new.push_str(&format!("{:<width$}", dir, width = len_dir));
-                        if len_var > 0 {
-                            if let Some(v) = m_port.name("var") {
-                                l_new.push_str(&format!(" {}", v.as_str()));
-                            } else {
-                                l_new.push_str(&format!("{:width$}", "", width = len_var + 1));
-                            }
-                        }
 
+                        let var = m_port.name("var").map(|x| x.as_str());
                         let tp = m_port.name("type").map(|x| x.as_str().trim()).unwrap_or("");
                         let sign = m_port.name("sign").map(|x| x.as_str().trim()).unwrap_or("");
-                        let bw = m_port.name("bw").map(|x| x.as_str()).unwrap_or("");
+                        let bw_raw = m_port.name("bw").map(|x| x.as_str()).unwrap_or("");
 
-                        if !sign.is_empty()
-                            || !bw.is_empty()
-                            || ["logic", "wire", "reg", "signed", "unsigned"].contains(&tp)
-                        {
-                            if len_type > 0 {
-                                if !tp.is_empty() {
-                                    if tp != "signed" && tp != "unsigned" {
-                                        l_new.push_str(&format!(
-                                            " {:<width$}",
-                                            tp,
-                                            width = len_type
-                                        ));
-                                    } else {
-                                        l_new.push_str(&format!(
-                                            "{:width$}",
-                                            "",
-                                            width = len_type + 1
-                                        ));
-                                        l_new.push_str(&format!(
-                                            " {:<width$}",
-                                            tp,
-                                            width = len_sign
-                                        ));
-                                    }
-                                } else {
-                                    l_new.push_str(&format!("{:width$}", "", width = len_type + 1));
-                                }
-                                if len_sign > 0 {
-                                    if !sign.is_empty() {
-                                        l_new.push_str(&format!(
-                                            " {:<width$}",
-                                            sign,
-                                            width = len_sign
-                                        ));
-                                    } else if !["signed", "unsigned"].contains(&tp) {
-                                        l_new.push_str(&format!(
-                                            "{:width$}",
-                                            "",
-                                            width = len_sign + 1
-                                        ));
-                                    }
-                                }
-                            } else if len_sign > 0 {
-                                if ["signed", "unsigned"].contains(&tp) {
-                                    l_new.push_str(&format!(" {:<width$}", tp, width = len_sign));
-                                } else if !sign.is_empty() {
-                                    l_new.push_str(&format!(" {:<width$}", sign, width = len_sign));
-                                } else {
-                                    l_new.push_str(&format!("{:width$}", "", width = len_sign + 1));
-                                }
-                            }
-
-                            if len_bw > 0 {
-                                let s = if !bw.is_empty() {
-                                    let bw_clean = Regex::new(r"\s*").unwrap().replace_all(bw, "");
-                                    let mut s = String::new();
-                                    for (bi, inner) in Regex::new(r"\[(.+?)\]")
-                                        .unwrap()
-                                        .find_iter(&bw_clean)
-                                        .enumerate()
-                                    {
-                                        let content = &inner.as_str()[1..inner.as_str().len() - 1];
-                                        let w = len_bw_a.get(bi).unwrap_or(&0);
-                                        s.push_str(&format!("[{:>width$}]", content, width = w));
-                                    }
-                                    s
-                                } else {
-                                    String::new()
-                                };
-                                l_new.push_str(&format!(" {:<width$}", s, width = len_bw));
-                            } else {
-                                // No bitwidth - need to fill space for alignment
-                            }
-
-                            if max_len > len_type_full {
-                                l_new.push_str(&format!(
-                                    "{:width$}",
-                                    "",
-                                    width = max_len - len_type_full
-                                ));
-                            }
-                        } else if !tp.is_empty() {
-                            l_new.push_str(&format!(" {:<width$}", tp, width = len_type_user));
-                            // Also apply max_len padding for user types
-                            if max_len > len_type_full {
-                                l_new.push_str(&format!(
-                                    "{:width$}",
-                                    "",
-                                    width = max_len - len_type_full
-                                ));
-                            }
-                        } else if len_type_user > 0 {
-                            // Fill space for alignment: use len_bw + 1 for consistency with bw lines
-                            // The +1 accounts for the space before the port name
-                            l_new.push_str(&format!("{:width$}", "", width = len_bw + 1));
-                            // Also apply max_len padding
-                            if max_len > len_type_full {
-                                l_new.push_str(&format!(
-                                    "{:width$}",
-                                    "",
-                                    width = max_len - len_type_full
-                                ));
-                            }
-                        } else {
-                            // No type, no bw - need to fill space to align with max_len
-                            if max_len > 0 {
-                                l_new.push_str(&format!("{:width$}", "", width = max_len + 1));
-                            }
+                        // Add var if present
+                        if let Some(v) = var {
+                            l_new.push_str(&format!(" {}", v));
                         }
+
+                        // Add type if present
+                        if !tp.is_empty() {
+                            l_new.push_str(&format!(" {}", tp));
+                        }
+
+                        // Add sign if present
+                        if !sign.is_empty() {
+                            l_new.push_str(&format!(" {}", sign));
+                        }
+
+                        // Add formatted bit-width if present
+                        if !bw_raw.is_empty() {
+                            let bw_clean = Regex::new(r"\s*").unwrap().replace_all(bw_raw, "");
+                            let mut bw_s = String::new();
+                            for (bi, inner) in Regex::new(r"\[(.+?)\]")
+                                .unwrap()
+                                .find_iter(&bw_clean)
+                                .enumerate()
+                            {
+                                let content = &inner.as_str()[1..inner.as_str().len() - 1];
+                                let w = len_bw_a.get(bi).unwrap_or(&0);
+                                bw_s.push_str(&format!("[{:>width$}]", content, width = w));
+                            }
+                            l_new.push_str(&format!(" {}", bw_s));
+                        }
+
+                        // Pad to max_prefix_len + 1 space before port name
+                        let current_len = l_new.len() - indent.repeat(ilvl + 1).len();
+                        if current_len < max_prefix_len {
+                            l_new.push_str(&format!(
+                                "{:width$}",
+                                "",
+                                width = max_prefix_len - current_len
+                            ));
+                        }
+                        l_new.push(' ');
                     } else {
                         // Interface port
-                        l_new.push_str(&format!("{:<width$}", dir, width = len_if));
+                        l_new.push_str(&format!("{:<width$}", dir, width = max_prefix_len + 1));
                     }
 
                     // Port list
                     let ports_raw = m_port.name("ports").unwrap().as_str();
-                    // Check if the original line has trailing comma (check the raw line, not ports_raw)
-                    // The comment group may have captured the comma
                     let comment_raw = m_port.name("comment").map(|x| x.as_str()).unwrap_or("");
                     let has_trailing_comma = comment_raw.trim_start().starts_with(',');
-                    // Remove leading comma from comment if present
                     let comment = if has_trailing_comma {
                         comment_raw
                             .trim_start()
@@ -582,12 +544,8 @@ pub fn align_module_port(
                     } else {
                         comment_raw
                     };
-                    // Trim the port name and remove extra spaces
-                    // Use port1 for the actual port name, then reconstruct multi-port lines
                     let port_name = m_port.name("port1").unwrap().as_str();
                     let ports_str = if ports_raw.contains(',') {
-                        // Multi-port line like "a, b, c" - need to preserve the comma-separated format
-                        // but remove extra spaces
                         ports_raw
                             .split(',')
                             .map(|p| p.trim())
@@ -596,15 +554,10 @@ pub fn align_module_port(
                     } else {
                         port_name.to_string()
                     };
-                    l_new.push(' ');
 
                     if has_trailing_comma {
-                        // Port has trailing comma - align and add comma if not last line
                         if options.align_comma() {
-                            // Pad port name to max_port_len, then add comma directly
-                            // This matches Python behavior: port_name + padding + comma (no space before comma)
                             l_new.push_str(&ports_str);
-                            // Add padding spaces if port name is shorter than max_port_len
                             if ports_str.len() < max_port_len {
                                 l_new.push_str(&format!(
                                     "{:width$}",
@@ -619,16 +572,12 @@ pub fn align_module_port(
                             l_new.push(',');
                         }
                     } else {
-                        // Last port without comma - just add the port name
                         l_new.push_str(&ports_str);
                     }
 
-                    // Add comment if present (and not just a comma that we already handled)
                     if !comment.is_empty() {
                         l_new.push_str(&format!(" {}", comment));
                     }
-                    // Only trim trailing whitespace if there's no comma (last port)
-                    // For ports with comma, preserve the alignment spaces
                     if has_trailing_comma && i != lines.len() - 1 {
                         txt_new.push_str(&format!("{}\n", l_new));
                     } else {
@@ -639,7 +588,6 @@ pub fn align_module_port(
                     }
                 }
             } else {
-                // No port match
                 let l_new = format!("{}{}", indent.repeat(ilvl + 1), l);
                 txt_new.push_str(&format!("{}\n", l_new.trim_end()));
             }
