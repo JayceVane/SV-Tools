@@ -16,12 +16,12 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/your-username/SystemVerilog"
+    "url": "https://github.com/JayceVane/SV-Tools"
   },
   "bugs": {
-    "url": "https://github.com/your-username/SystemVerilog/issues"
+    "url": "https://github.com/JayceVane/SV-Tools/issues"
   },
-  "homepage": "https://github.com/your-username/SystemVerilog/tree/main/vscode-extension",
+  "homepage": "https://github.com/JayceVane/SV-Tools",
   "engines": {
     "vscode": "^1.74.0"
   },

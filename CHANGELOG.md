@@ -2,6 +2,59 @@
 
 All notable changes to the SystemVerilog VSCode Extension will be documented in this file.
 
+## [3.2.15] - 2025-04-15
+
+### Changed
+- Updated documentation to reflect Rust native backend architecture
+
+## [3.2.0] - 2025-04-01
+
+### Added
+- Enhanced Unicode support for comments in all languages
+
+### Fixed
+- Minor formatting edge cases
+
+## [3.1.0] - 2025-03-15
+
+### Added
+- Improved testbench generation with better signal detection
+- Enhanced module instantiation with configurable prefix
+
+### Fixed
+- Alignment issues with nested port declarations
+
+## [3.0.0] - 2025-03-01
+
+### BREAKING CHANGES
+- **Rust Native Backend**: Complete rewrite using Rust with napi-rs
+  - Removed Python dependency entirely
+  - Native Node.js addon for maximum performance
+  - No external runtime required
+
+### Added
+- Rust-based core engine with napi-rs bindings
+- Native `.node` module for Windows (x64), Linux (x64), macOS (x64/arm64)
+- Zero-dependency installation (no Python needed)
+
+### Removed
+- Python daemon process (`daemon.py`)
+- `svtools.pythonPath` configuration option
+- All Python source files from the extension package
+
+### Changed
+- Architecture: Python subprocess → Rust native module
+- Startup time: Instant (no Python initialization)
+- Memory footprint: Significantly reduced
+- Distribution: Single `.node` file per platform
+
+### Technical Details
+- Core formatting logic ported to Rust
+- Tokenizer rewritten with regex-based approach
+- Parser restructured for better maintainability
+- Code generation modules (testbench, module_inst, repeat, align, header) ported
+- Build system: Cargo with napi-build
+
 ## [2.4.1] - 2025-02-24
 
 ### Fixed

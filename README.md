@@ -2,7 +2,9 @@
 
 一款适用于 Visual Studio Code 的 Verilog/SystemVerilog 代码格式化和生产力工具插件，改编自 Sublime Text SystemVerilog 插件和 Verilog-Gadget 插件。
 
-**版本**: v2.4.1
+**版本**: v3.2.15
+
+> **v3.0 重大更新**: 核心引擎使用 Rust 重构，无需 Python 依赖，性能大幅提升！
 
 ## 功能特性
 
@@ -20,7 +22,7 @@
 - 可配置的缩进风格（空格或制表符）
 - 删除空行选项
 - 每行单声明/单绑定选项
-- **高性能**：使用持久化守护进程，格式化速度提升 87-93%
+- **Rust Native 后端**：使用 Rust 编译的原生模块，无需 Python，启动快、性能高
 
 ### Verilog-Gadget 生产力工具
 
@@ -121,10 +123,14 @@ assign signal_8 = 8;
 
 ## 系统要求
 
-- 已安装 [Python 3.6+](https://www.python.org/downloads/) 并添加到 PATH 环境变量
 - Visual Studio Code 1.74.0 或更高版本
+- **无需安装 Python**（v3.0+ 使用 Rust 原生模块）
 
 ## 安装方法
+
+### 从 VSCode Marketplace 安装（推荐）
+
+在 VSCode 扩展市场搜索 "SystemVerilog Tools" 并安装。
 
 ### 从源码安装
 
@@ -135,18 +141,15 @@ assign signal_8 = 8;
    ```bash
    cd vscode-extension
    npm install
+   # 构建 Rust 原生模块（需要 Rust 工具链）
+   cd src-rust && cargo build --release
+   cp target/release/svtools.dll ../  # Windows
+   # 或 cp target/release/libsvtools.so ../  # Linux
+   # 或 cp target/release/libsvtools.dylib ../  # macOS
+   
    vsce package
    ```
    然后在 VSCode 中安装生成的 `.vsix` 文件
-
-### 手动安装
-
-1. 将 `vscode-extension` 文件夹复制到 VSCode 扩展目录：
-   - Windows: `%USERPROFILE%\.vscode\extensions`
-   - Linux: `~/.vscode/extensions`
-   - macOS: `~/.vscode/extensions`
-
-2. 将文件夹重命名为 `svtools`
 
 ## 使用方法
 
@@ -161,8 +164,7 @@ assign signal_8 = 8;
   },
   "[systemverilog]": {
     "editor.formatOnSave": true
-  },
-  "svtools.pythonPath": "python"  // Linux/Mac 上使用 "python3"
+  }
 }
 ```
 
@@ -194,8 +196,7 @@ assign signal_8 = 8;
 | `ignoreTick` | boolean | true | 缩进时忽略预处理器指令 |
 | `importSameLine` | boolean | false | 将 import 语句与模块声明保持在同一行 |
 | `alignComma` | boolean | true | 对齐逗号/分号 |
-| `pythonPath` | string | "python" | Python 可执行文件路径 |
-| `instPrefix` | string | "inst_" | 模块实例名称默认前缀 |
+| `instPrefix` | string | "u_" | 模块实例名称默认前缀 |
 | `includePortDeclarations` | boolean | true | 生成模块实例化时是否包含端口声明 |
 | `reset` | array | [] | 异步复位信号名称列表 |
 | `sreset` | array | [] | 同步复位信号名称列表 |
@@ -204,6 +205,8 @@ assign signal_8 = 8;
 | `taskInit` | boolean | true | 在测试台中生成 init 任务 |
 | `taskDrive` | boolean | true | 在测试台中生成 drive 任务 |
 | `headerTemplate` | string | "" | 文件头模板（使用占位符） |
+
+> **注意**: v3.0+ 已移除 `pythonPath` 配置项，因为不再需要 Python 依赖。
 
 ### 配置示例
 
@@ -226,8 +229,6 @@ assign signal_8 = 8;
 }
 ```
 
-## 命令列表
-
 ### 格式化命令
 - `svtools.formatDocument` - 格式化当前文档
 
@@ -248,25 +249,16 @@ assign signal_8 = 8;
 | 对齐代码 | `Ctrl+Shift+X` | `Cmd+Shift+X` |
 | 插入文件头 | `Ctrl+Shift+Insert` | `Cmd+Shift+Insert` |
 
-## 自定义 Python 路径
+## 架构
 
-如果 Python 不在系统 PATH 中，可以指定完整路径：
+本项目使用 **Rust Native Backend**：
 
-### Windows
-```json
-{
-  "svtools.pythonPath": "C:\\Python39\\python.exe"
-}
-```
+- 核心格式化和代码生成逻辑使用 Rust 编写
+- 通过 napi-rs 编译为原生 Node.js 模块
+- 无需外部运行时依赖（Python 等）
+- 启动速度快，内存占用低
 
-### Linux/macOS
-```json
-{
-  "svtools.pythonPath": "/usr/bin/python3"
-}
-```
-
-## 格式化示例
+## 命令列表
 
 ### 格式化前
 ```systemverilog
@@ -300,35 +292,40 @@ endmodule
 vscode-extension/
 ├── extension.js           # VSCode 扩展入口
 ├── package.json           # 扩展清单文件
+├── svtools.win32-x64-msvc.node  # Rust 编译的原生模块
 ├── templates/             # 模板文件
 │   └── header_template.txt
-├── python/               # Python 脚本
-│   ├── daemon.py         # 守护进程（高性能）
-│   └── verilogutil/      # 核心逻辑
-│       ├── vg_core.py    # Verilog-Gadget 核心功能
-│       ├── verilog_beautifier.py
-│       └── verilogutil.py
+└── src-rust/              # Rust 源码
+    ├── Cargo.toml
+    ├── src/
+    │   ├── lib.rs         # napi-rs 入口
+    │   ├── beautifier.rs  # 格式化核心
+    │   ├── tokenizer.rs   # 词法分析
+    │   ├── parser/        # 语法解析
+    │   ├── align/         # 对齐算法
+    │   └── codegen/       # 代码生成
+    └── build.rs
 ```
 
 ## 调试
 
 1. 在 VSCode 中打开插件源码
-2. 在 `extension.js` 或 `python/daemon.py` 中设置断点
+2. 在 `extension.js` 或 `src-rust/src/` 中设置断点
 3. 按 `F5` 启动调试
 4. 查看"输出"面板中的错误信息
 
 ## 常见问题
 
 ### 格式化没有生效
-1. 确认 Python 已正确安装并在 PATH 中
-2. 检查 `svtools.pythonPath` 配置是否正确
+1. 确认扩展已正确安装并激活
+2. 检查文件语言模式是否为 Verilog 或 SystemVerilog
 3. 查看 VSCode 输出面板的错误信息
 
 ### 中文注释乱码
 本插件已修复 Windows 平台中文乱码问题，强制使用 UTF-8 编码。如仍有问题，请检查文件保存编码是否为 UTF-8。
 
-### 格式化速度慢
-v2.0.0 版本已优化性能，使用持久化守护进程，格式化速度提升 87-93%。
+### 找不到原生模块
+确保 `svtools.win32-x64-msvc.node`（Windows）或对应的 `.node` 文件存在于扩展目录中。
 
 ## 致谢
 
