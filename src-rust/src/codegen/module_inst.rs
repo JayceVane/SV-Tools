@@ -80,9 +80,14 @@ fn build_instance(info: &ModuleInfo, iprefix: &str) -> String {
 
     // Always use expanded multi-line format with aligned ports and comments
     let mut s = if plen > 0 {
-        let mut s = format!("{} {}#(\n", info.name, iprefix);
+        let mut s = format!("{} #(\n", info.name);
+
+        // Calculate max param name length for alignment
+        let param_max_len = prmonly.iter().map(|p| p.name.len()).max().unwrap_or(0);
+
         for (i, p) in prmonly.iter().enumerate() {
-            s.push_str(&format!("    .{}({})", p.name, p.name));
+            let pad = param_max_len - p.name.len();
+            s.push_str(&format!("    .{}{} ({})", p.name, " ".repeat(pad), p.name));
             if i != plen - 1 {
                 s.push_str(",\n");
             } else {
