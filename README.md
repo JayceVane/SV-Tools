@@ -342,6 +342,11 @@ vscode-extension/
 - **JayceVane** - [VSCode 集成封装](https://github.com/JayceVane)
   - 邮箱: [JayceVane@163.com](mailto:JayceVane@163.com)
 
+### AI 辅助开发
+本项目的开发过程中使用了以下 AI 工具辅助编码、调试和文档编写：
+- [OpenCode](https://github.com/opencode-ai/opencode) - AI 编程助手
+- [GLM (智谱 AI)](https://zhipuai.cn) - 大语言模型
+
 ## 许可证
 
 Copyright (c) 2025 JayceVane

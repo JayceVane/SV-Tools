@@ -61,7 +61,6 @@ __pycache__/**
 
 # Misc
 .arts/**
-.claude/**
 *.md
 nul
 package-lock.json
