@@ -2,10 +2,72 @@
 
 All notable changes to the SystemVerilog VSCode Extension will be documented in this file.
 
+## [3.2.16] - 2025-04-15
+
+### Fixed
+- **Module Instantiation**: Remove stray instance prefix from module type line when using parameters (`module_name #(...)` instead of `module_name u_ #(...)`)
+- **Parameter Alignment**: Align parameter names in instance parameter list to longest name
+
 ## [3.2.15] - 2025-04-15
 
+### Fixed
+- **Semicolon Alignment**: Blank lines now separate independent alignment groups — non-contiguous assignment blocks align semicolons independently
+
+## [3.2.14] - 2025-04-15
+
+### Fixed
+- **Port Alignment**: Use fixed column widths (direction/var/type/bw) instead of variable prefix length — lines without `reg`/`wire` now correctly preserve column space
+- **Semicolon Alignment**: All lines now use unified rebuild output with `trim_end() + padding + ;`, fixing longest-line not being aligned
+
+## [3.2.13] - 2025-04-15
+
 ### Changed
-- Updated documentation to reflect Rust native backend architecture
+- Rewrote port alignment using Python-style prefix length calculation
+- Testbench instantiation now uses `build_instance_code` for consistent formatting
+- Fixed attribute `(* ... *)` block_state handling in beautifier
+
+## [3.2.12] - 2025-04-15
+
+### Fixed
+- **Attribute Alignment**: Fixed `(* ... *)` attribute state management — residual `(` state after attribute end now properly popped
+- **Semicolon Alignment**: Added `align_semicolons` function for always block assignment statements
+
+## [3.2.11] - 2025-04-15
+
+### Fixed
+- **Beautifier**: Attribute ending now correctly pops residual `(` state from stack
+- **Assign Alignment**: Rewrote `align_semicolons` — spaces padded before semicolon instead of after
+
+## [3.2.10] - 2025-04-15
+
+### Fixed
+- **Decl Alignment**: Added `attr` capture group to declaration regex for `(* ... *)` attribute prefix support
+- **Beautifier**: Fixed block_state for attribute lines — attribute text now stays in block for `align_decl` processing
+- **Extension**: Fixed native module load path from `src-rust/` to root directory
+
+## [3.2.9] - 2025-04-15
+
+### Changed
+- Simplified testbench init task — only contains `// TODO: add initialization logic` placeholder
+- Reset polarity auto-detection: signals ending with `_n` are active-low
+- Removed `task_init` function
+
+## [3.2.8] - 2025-04-15
+
+### Fixed
+- Testbench instantiation uses `build_instance_code` with port alignment and comments
+- Reset polarity auto-detection logic
+
+## [3.2.5] - 2025-04-15
+
+### Changed
+- Changed default `instPrefix` from `inst_` to `u_`
+- Configuration prefix unified to `svtools`
+
+### Fixed
+- Module instantiation port name/signal name alignment with three-column comment alignment
+- Parser `psize` not reset causing bit-width inheritance issue
+- Removed Python backend files from master branch
 
 ## [3.2.0] - 2025-04-01
 

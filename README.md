@@ -2,7 +2,7 @@
 
 一款适用于 Visual Studio Code 的 Verilog/SystemVerilog 代码格式化和生产力工具插件，改编自 Sublime Text SystemVerilog 插件和 Verilog-Gadget 插件。
 
-**版本**: v3.2.15
+**版本**: v3.2.16
 
 > **v3.0 重大更新**: 核心引擎使用 Rust 重构，无需 Python 依赖，性能大幅提升！
 
@@ -198,8 +198,8 @@ assign signal_8 = 8;
 | `alignComma` | boolean | true | 对齐逗号/分号 |
 | `instPrefix` | string | "u_" | 模块实例名称默认前缀 |
 | `includePortDeclarations` | boolean | true | 生成模块实例化时是否包含端口声明 |
-| `reset` | array | [] | 异步复位信号名称列表 |
-| `sreset` | array | [] | 同步复位信号名称列表 |
+| `reset` | array | ["rst_n", "reset_n"] | 异步复位信号名称列表 |
+| `sreset` | array | ["sreset", "srst"] | 同步复位信号名称列表 |
 | `clock` | array | ["clk", "uclk", "cclk"] | 时钟信号名称列表 |
 | `waveType` | string | "fsdb" | 波形dump类型 (fsdb/vpd/shm/vcd) |
 | `taskInit` | boolean | true | 在测试台中生成 init 任务 |
