@@ -207,7 +207,7 @@ impl VerilogBeautifier {
                     }
                     has_indent = w != "\n";
                 }
-                if state_end {
+                if state_end && self.state != "(" {
                     self.state_update(None);
                     assert!(ilvl > 0, "Block end with no indentation! Line {}", line_cnt);
                     ilvl -= 1;
@@ -262,6 +262,12 @@ impl VerilogBeautifier {
                         ilvl_tmp += v.count;
                     }
                     line = self.indent.repeat(ilvl_tmp);
+                }
+
+                // Handle delayed state_end for parentheses
+                if state_end && self.state == "(" {
+                    self.state_update(None);
+                    ilvl -= 1;
                 }
             }
 
@@ -319,7 +325,11 @@ impl VerilogBeautifier {
                         if m.is_none() {
                             if tmp.starts_with("always") {
                                 split_always = 1;
-                            } else if ilvl == ilvl_prev && self.state != "(" {
+                            } else if ilvl == ilvl_prev
+                                && self.state != "("
+                                && !["task", "function", "property", "sequence", "checker"]
+                                    .contains(&self.state.as_str())
+                            {
                                 if !split.contains_key(&ilvl) {
                                     if self.state == "case"
                                         && Regex::new(r"^\s*\w+\s*,$").unwrap().is_match(&tmp)
@@ -608,11 +618,9 @@ impl VerilogBeautifier {
                     ]
                     .contains(&w.as_str()) =>
                     {
-                        if self.options.reindent_only() {
-                            block = block + &line;
-                        } else {
-                            block = self.align_assign(&(block.clone() + &line), 1);
-                        }
+                        // task/function/sequence/property/class blocks are
+                        // already correctly indented, no alignment needed
+                        block = block + &line;
                         line.clear();
                         block_handled = true;
                     }
@@ -623,12 +631,6 @@ impl VerilogBeautifier {
                     self.state_update(None);
                     assert!(ilvl > 0, "Block end with no indentation! Line {}", line_cnt);
                     ilvl -= 1;
-                    if split.contains_key(&ilvl) && ["end", "endcase"].contains(&w) {
-                        last_split = split.remove(&ilvl);
-                        if let Some(ref ls) = last_split {
-                            split_else = w == "end" && ls.text.contains(':');
-                        }
-                    }
                 }
             }
             // Comment block end
@@ -883,34 +885,42 @@ impl VerilogBeautifier {
                 return String::new();
             }
 
+            // For parentheses after task/function declaration, don't push state
+            // The parameters are part of the declaration, not a nested block
+            let skip_state_push = w == "("
+                && ["task", "function", "property", "sequence", "checker"]
+                    .contains(&self.state.as_str());
+
             let state_name = if w.starts_with("case") {
                 "case".to_string()
             } else {
                 w.to_string()
             };
-            self.state_update(Some(state_name));
+            if !skip_state_push {
+                self.state_update(Some(state_name));
+            }
 
-            if [
-                "module",
-                "interface",
-                "package",
-                "generate",
-                "function",
-                "task",
-                "property",
-                "sequence",
-                "checker",
-            ]
-            .contains(&w)
-            {
+            if ["module", "interface", "package", "generate"].contains(&w) {
                 self.block_state = match w {
                     "module" => BlockState::Module,
                     "interface" => BlockState::Interface,
                     "package" => BlockState::Package,
                     "generate" => BlockState::Generate,
-                    _ => BlockState::Text,
+                    _ => BlockState::None,
                 };
                 return "incr_ilvl_flush".to_string();
+            } else if ["function", "task", "property", "sequence", "checker"].contains(&w) {
+                self.block_state = BlockState::Text;
+                return "incr_ilvl".to_string();
+            } else if w == "(" {
+                // For parentheses after task/function declaration, don't increase indent
+                // The parameters should align at the same level as the task body
+                if ["task", "function", "property", "sequence", "checker"]
+                    .contains(&self.state.as_str())
+                {
+                    return String::new();
+                }
+                return "incr_ilvl".to_string();
             } else {
                 return "incr_ilvl".to_string();
             }
@@ -955,6 +965,7 @@ impl VerilogBeautifier {
                 ];
                 if !decl_keywords.contains(&itype)
                     && !["else", "begin", "end", "assert", "cover"].contains(&itype)
+                    && !["task", "function", "property", "sequence", "checker"].contains(&itype)
                     && !["if", "for", "foreach"].contains(&iname)
                 {
                     self.block_state = BlockState::Instance;
