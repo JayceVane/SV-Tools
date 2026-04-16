@@ -258,33 +258,81 @@ assign signal_8 = 8;
 - 无需外部运行时依赖（Python 等）
 - 启动速度快，内存占用低
 
-## 命令列表
+## 格式化示例
 
 ### 格式化前
 ```systemverilog
-module test(
-input clk, // 时钟信号
-input rst_n, // 复位信号
-output [7:0] data // 数据输出
+module alu (
+input clk,rst_n,
+input [3:0] opcode,
+input [31:0] operand_a,operand_b,
+output reg [31:0] result,
+output zero,overflow
 );
-logic [7:0] buffer;
-assign data = buffer;
+reg zero_flag,overflow_flag;
+always @(posedge clk or negedge rst_n) begin
+if(!rst_n) begin
+result<=32'd0;
+zero_flag<=1'b0;
+overflow_flag<=1'b0;
+end else begin
+case(opcode)
+4'd0:result<=operand_a+operand_b;
+4'd1:result<=operand_a-operand_b;
+4'd2:result<=operand_a&operand_b;
+4'd3:result<=operand_a|operand_b;
+default:result<=32'd0;
+endcase
+zero_flag<=(result==32'd0);
+end
+end
+assign zero=zero_flag;
+assign overflow=overflow_flag;
 endmodule
 ```
 
 ### 格式化后
 ```systemverilog
-module test (
-   input        clk    , // 时钟信号
-   input        rst_n  , // 复位信号
-   output logic [7:0] data     // 数据输出
+module alu (
+    input                clk, rst_n,
+    input      [ 3:0]    opcode   ,
+    input      [31:0]    operand_a, operand_b,
+    output reg [31:0]    result   ,
+    output               zero, overflow
 );
-   logic [7:0] buffer;
 
-   assign data = buffer;
+    reg zero_flag,overflow_flag;
+
+    always @(posedge clk or negedge rst_n) begin
+        if(!rst_n) begin
+            result        <= 32'd0;
+            zero_flag     <= 1'b0 ;
+            overflow_flag <= 1'b0 ;
+        end else begin
+            case(opcode)
+                4'd0:result<=operand_a+operand_b;
+                4'd1:result<=operand_a-operand_b;
+                4'd2:result<=operand_a&operand_b;
+                4'd3:result<=operand_a|operand_b;
+                default:result<=32'd0           ;
+            endcase
+            zero_flag <= (result==32'd0);
+        end
+    end
+
+    assign zero     = zero_flag;
+    assign overflow = overflow_flag;
 
 endmodule
 ```
+
+**格式化特性**：
+- ✅ 端口声明对齐
+- ✅ 信号声明对齐
+- ✅ always 块自动缩进
+- ✅ case 语句格式化
+- ✅ 赋值语句对齐
+- ✅ 自动插入空行分隔逻辑块
 
 ## 项目结构
 
