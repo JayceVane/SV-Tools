@@ -251,7 +251,7 @@ impl VerilogBeautifier {
                 }
 
                 // Insert indentation
-                if !matches!(self.block_state, BlockState::Module)
+                if !matches!(self.block_state, BlockState::Module | BlockState::Interface)
                     && !w.trim().is_empty()
                     && (!["comment_block", "attribute"].contains(&self.state.as_str())
                         || has_indent)

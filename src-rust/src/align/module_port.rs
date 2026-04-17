@@ -113,12 +113,7 @@ pub fn align_module_port(
     // Add optional parameter declaration
     if let Some(params_match) = m.name("params") {
         let param_txt = params_match.as_str().trim();
-        let re_param_str = r"^[ \t]*(?:(?P<parameter>parameter|localparam)\s+)?\
-         (?P<type>[\w\:]+\b)?[ \t]*\
-         (?P<sign>signed|unsigned\b)?[ \t]*\
-         (?P<bw>(?:\[[\w\*\(\)\/><\:\-\+`\$\s]+\][ \t]*)*)\
-         [ \t]*(?P<param>\w+)\b\s*=\s*\
-         (?P<value>[^\n]*?)(?P<comment>$|//.*?$)";
+        let re_param_str = r"(?m)^[ \t]*(?:(?P<parameter>parameter|localparam)\s+)?(?P<type>[\w\:]+\b)?[ \t]*(?P<sign>signed|unsigned\b)?[ \t]*(?P<bw>(?:\[[\w\*\(\)\/><\:\-\+`\$\s]+\][ \t]*)*)[ \t]*(?P<param>\w+)\b\s*=\s*(?P<value>[^\n]*?)(?P<comment>$|//.*?$)";
         let re_param = Regex::new(re_param_str).unwrap();
 
         let decl: Vec<_> = re_param.captures_iter(param_txt).collect();
@@ -261,6 +256,12 @@ pub fn align_module_port(
                                 if !comment.as_str().is_empty() {
                                     l_new.push_str(&format!(" {}", comment.as_str()));
                                 }
+                            }
+
+                            // Add trailing comma if original line had one
+                            let l_trimmed = l.trim_end();
+                            if l_trimmed.ends_with(',') && !l_new.trim_end().ends_with(',') {
+                                l_new.push(',');
                             }
                         } else {
                             l_new.push_str(l);
