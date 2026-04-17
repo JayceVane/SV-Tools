@@ -190,7 +190,7 @@ pub fn align_instance(
         if p_trimmed.contains('\n') || !options.param_one_line() {
             txt_new.push('\n');
             txt_new.push_str(&align_instance_binding(p, ilvl + 1, options, indent));
-            txt_new.push_str(indent);
+            txt_new.push_str(&indent.repeat(ilvl));
         } else {
             let p_clean = Regex::new(r"\s+").unwrap().replace_all(p_trimmed, "");
             let p_clean = Regex::new(r"\),").unwrap().replace_all(&p_clean, "), ");
@@ -208,7 +208,7 @@ pub fn align_instance(
                 // Always use align_instance_binding for proper alignment
                 txt_new.push('\n');
                 txt_new.push_str(&align_instance_binding(p, ilvl + 1, options, indent));
-                txt_new.push_str(indent);
+                txt_new.push_str(&indent.repeat(ilvl));
             }
         }
         txt_new.push(')');

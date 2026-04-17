@@ -533,7 +533,41 @@ impl VerilogBeautifier {
                         }
                         BlockState::Instance => {
                             let input = block.clone() + &line;
-                            let result = self.align_instance(&input, ilvl);
+                            // If block contains a prefix before the instance (e.g., "if...begin\n"),
+                            // separate it: output prefix directly, only pass instance part to align_instance
+                            let (prefix, instance_part) = {
+                                let lines: Vec<&str> = input.split('\n').collect();
+                                let mut instance_start_line = 0;
+                                let mut found = false;
+                                for (i, ln) in lines.iter().enumerate() {
+                                    let ln_trimmed = ln.trim();
+                                    if !ln_trimmed.is_empty() && RE_INST_FULL.is_match(ln_trimmed) {
+                                        instance_start_line = i;
+                                        found = true;
+                                        break;
+                                    }
+                                }
+                                if found && instance_start_line > 0 {
+                                    // Calculate byte offset of instance_start_line
+                                    let mut byte_offset = 0;
+                                    for (i, ln) in lines.iter().enumerate() {
+                                        if i == instance_start_line {
+                                            break;
+                                        }
+                                        byte_offset += ln.len() + 1; // +1 for '\n'
+                                    }
+                                    let pfx = input[..byte_offset].to_string();
+                                    let inst = input[byte_offset..].to_string();
+                                    (pfx, inst)
+                                } else {
+                                    (String::new(), input)
+                                }
+                            };
+                            let result = if prefix.is_empty() {
+                                self.align_instance(&instance_part, ilvl)
+                            } else {
+                                prefix + &self.align_instance(&instance_part, ilvl)
+                            };
                             line.clear();
                             block_ended = true;
                             result
@@ -629,7 +663,77 @@ impl VerilogBeautifier {
                         // flush the block to prevent subsequent code from merging into it.
                         // Skip when inside Always block (handled separately).
                         if w == "end" && !matches!(self.block_state, BlockState::Always { .. }) {
-                            block = block + &line;
+                            let mut block_tmp = block.clone() + &line;
+                            // Scan block for module instances and align them,
+                            // similar to Generate block handling.
+                            if !self.options.reindent_only() {
+                                // Scan block for module instances and align them.
+                                // Split into lines and detect instances line by line,
+                                // since RE_INST_FULL requires ^ to match start of line.
+                                let mut offset = 0;
+                                let mut replacements: Vec<(String, String)> = Vec::new();
+                                for ln in block_tmp.split('\n') {
+                                    let ln_trimmed = ln.trim_start();
+                                    if let Some(m) = RE_INST_FULL.captures(ln_trimmed) {
+                                        let itype =
+                                            m.name("itype").map(|x| x.as_str()).unwrap_or("");
+                                        let iname =
+                                            m.name("iname").map(|x| x.as_str()).unwrap_or("");
+                                        let decl_keywords = [
+                                            "wire",
+                                            "reg",
+                                            "logic",
+                                            "bit",
+                                            "int",
+                                            "integer",
+                                            "byte",
+                                            "shortint",
+                                            "longint",
+                                            "real",
+                                            "shortreal",
+                                            "time",
+                                            "string",
+                                            "localparam",
+                                            "parameter",
+                                        ];
+                                        if !decl_keywords.contains(&itype)
+                                            && !["else", "begin", "end", "assert", "cover"]
+                                                .contains(&itype)
+                                            && ![
+                                                "task", "function", "property", "sequence",
+                                                "checker",
+                                            ]
+                                            .contains(&itype)
+                                            && !["if", "for", "foreach"].contains(&iname)
+                                        {
+                                            let leading = ln.len() - ln_trimmed.len();
+                                            let inst_start = offset + leading;
+                                            let inst_end = block_tmp[inst_start..]
+                                                .find(';')
+                                                .map(|p| inst_start + p + 1)
+                                                .unwrap_or(block_tmp.len());
+                                            if inst_end > inst_start {
+                                                let inst_block =
+                                                    block_tmp[inst_start..inst_end].to_string();
+                                                let inst_ilvl = Self::get_indent_level(
+                                                    &inst_block,
+                                                    &self.options,
+                                                    &self.indent,
+                                                    &self.indent_space,
+                                                );
+                                                let inst_aligned =
+                                                    self.align_instance(&inst_block, inst_ilvl);
+                                                replacements.push((inst_block, inst_aligned));
+                                            }
+                                        }
+                                    }
+                                    offset += ln.len() + 1;
+                                }
+                                for (old, new) in replacements {
+                                    block_tmp = block_tmp.replace(&old, &new);
+                                }
+                            }
+                            block = block_tmp;
                             if !block.ends_with('\n') {
                                 block.push('\n');
                             }
@@ -963,46 +1067,65 @@ impl VerilogBeautifier {
             // Check for declaration first (before instance)
             if RE_DECL_FULL.is_match(&tmp) {
                 self.block_state = BlockState::Decl;
-            } else if let Some(m) = RE_INST_FULL.captures(&tmp) {
-                let itype = m.name("itype").map(|x| x.as_str()).unwrap_or("");
-                let iname = m.name("iname").map(|x| x.as_str()).unwrap_or("");
-                // Exclude declaration keywords and control flow keywords
-                let decl_keywords = [
-                    "wire",
-                    "reg",
-                    "logic",
-                    "bit",
-                    "int",
-                    "integer",
-                    "byte",
-                    "shortint",
-                    "longint",
-                    "real",
-                    "shortreal",
-                    "time",
-                    "string",
-                    "localparam",
-                    "parameter",
-                ];
-                if !decl_keywords.contains(&itype)
-                    && !["else", "begin", "end", "assert", "cover"].contains(&itype)
-                    && !["task", "function", "property", "sequence", "checker"].contains(&itype)
-                    && !["if", "for", "foreach"].contains(&iname)
-                {
-                    self.block_state = BlockState::Instance;
+            } else {
+                // Try to match instance pattern on the full text first,
+                // then on each line (handles if...begin prefix wrapping)
+                let mut inst_match: Option<regex::Captures<'_>> = None;
+                if let Some(m) = RE_INST_FULL.captures(&tmp) {
+                    inst_match = Some(m);
+                } else if tmp.contains('\n') {
+                    // Try each line for instance pattern
+                    for ln in tmp.split('\n') {
+                        let ln_trimmed = ln.trim();
+                        if !ln_trimmed.is_empty() {
+                            if let Some(m) = RE_INST_FULL.captures(ln_trimmed) {
+                                inst_match = Some(m);
+                                break;
+                            }
+                        }
+                    }
                 }
-            } else if Regex::new(r"^\s*\b(typedef\s+)?(struct|union)\b")
-                .unwrap()
-                .is_match(&tmp)
-            {
-                self.block_state = BlockState::Struct;
-            } else if Regex::new(r"^\s*\b(typedef\s+)?(enum)\b")
-                .unwrap()
-                .is_match(&tmp)
-            {
-                self.block_state = BlockState::Enum;
-            } else if Regex::new(r"(?s)^.*=\s*'\{").unwrap().is_match(&tmp) {
-                self.block_state = BlockState::StructAssign;
+                if let Some(m) = inst_match {
+                    let itype = m.name("itype").map(|x| x.as_str()).unwrap_or("");
+                    let iname = m.name("iname").map(|x| x.as_str()).unwrap_or("");
+                    // Exclude declaration keywords and control flow keywords
+                    let decl_keywords = [
+                        "wire",
+                        "reg",
+                        "logic",
+                        "bit",
+                        "int",
+                        "integer",
+                        "byte",
+                        "shortint",
+                        "longint",
+                        "real",
+                        "shortreal",
+                        "time",
+                        "string",
+                        "localparam",
+                        "parameter",
+                    ];
+                    if !decl_keywords.contains(&itype)
+                        && !["else", "begin", "end", "assert", "cover", "if"].contains(&itype)
+                        && !["task", "function", "property", "sequence", "checker"].contains(&itype)
+                        && !["if", "for", "foreach"].contains(&iname)
+                    {
+                        self.block_state = BlockState::Instance;
+                    }
+                } else if Regex::new(r"^\s*\b(typedef\s+)?(struct|union)\b")
+                    .unwrap()
+                    .is_match(&tmp)
+                {
+                    self.block_state = BlockState::Struct;
+                } else if Regex::new(r"^\s*\b(typedef\s+)?(enum)\b")
+                    .unwrap()
+                    .is_match(&tmp)
+                {
+                    self.block_state = BlockState::Enum;
+                } else if Regex::new(r"(?s)^.*=\s*'\{").unwrap().is_match(&tmp) {
+                    self.block_state = BlockState::StructAssign;
+                }
             }
         }
 
