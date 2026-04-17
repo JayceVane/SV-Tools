@@ -2,7 +2,7 @@
   "name": "svtools",
   "displayName": "SystemVerilog Tools",
   "description": "Verilog/SystemVerilog formatter, module instantiation, testbench generation, and productivity tools (Rust native backend)",
-  "version": "3.2.19",
+  "version": "3.2.20",
   "publisher": "JayceVane",
   "author": {
     "name": "JayceVane",
@@ -52,13 +52,26 @@
     "languages": [
       {
         "id": "verilog",
-        "aliases": ["Verilog", "verilog"],
-        "extensions": [".v", ".vh"]
+        "aliases": [
+          "Verilog",
+          "verilog"
+        ],
+        "extensions": [
+          ".v",
+          ".vh"
+        ]
       },
       {
         "id": "systemverilog",
-        "aliases": ["SystemVerilog", "System Verilog", "sv"],
-        "extensions": [".sv", ".svh"]
+        "aliases": [
+          "SystemVerilog",
+          "System Verilog",
+          "sv"
+        ],
+        "extensions": [
+          ".sv",
+          ".svh"
+        ]
       }
     ],
     "commands": [
@@ -198,7 +211,10 @@
         },
         "svtools.indentStyle": {
           "type": "string",
-          "enum": ["1tbs", "gnu"],
+          "enum": [
+            "1tbs",
+            "gnu"
+          ],
           "default": "1tbs",
           "description": "Indentation style"
         },
@@ -262,7 +278,11 @@
         },
         "svtools.clock": {
           "type": "array",
-          "default": ["clk", "uclk", "cclk"],
+          "default": [
+            "clk",
+            "uclk",
+            "cclk"
+          ],
           "items": {
             "type": "string"
           },
@@ -270,7 +290,12 @@
         },
         "svtools.waveType": {
           "type": "string",
-          "enum": ["fsdb", "vpd", "shm", "vcd"],
+          "enum": [
+            "fsdb",
+            "vpd",
+            "shm",
+            "vcd"
+          ],
           "default": "fsdb",
           "description": "Type of waveform dump"
         },
