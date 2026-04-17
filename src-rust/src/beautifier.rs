@@ -624,7 +624,20 @@ impl VerilogBeautifier {
                         line.clear();
                         block_handled = true;
                     }
-                    _ => {}
+                    _ => {
+                        // When 'end' closes a 'begin' block (e.g. if/for/initial begin...end),
+                        // flush the block to prevent subsequent code from merging into it.
+                        // Skip when inside Always block (handled separately).
+                        if w == "end" && !matches!(self.block_state, BlockState::Always { .. }) {
+                            block = block + &line;
+                            if !block.ends_with('\n') {
+                                block.push('\n');
+                            }
+                            line.clear();
+                            block_handled = true;
+                            block_ended = true;
+                        }
+                    }
                 }
 
                 if w_d.last() != "\n" {
@@ -939,7 +952,10 @@ impl VerilogBeautifier {
                 self.block_state = BlockState::Always {
                     always_state: AlwaysState::None,
                 };
-            } else if (w_d.last() == "\n" || w_d.last() == ")") && w != "/" && !state_end {
+            } else if (w_d.last() == "\n" || w_d.last() == ")" || w_d.last() == ";")
+                && w != "/"
+                && !state_end
+            {
                 self.block_state = BlockState::Text;
             }
         } else if matches!(self.block_state, BlockState::Text) {
