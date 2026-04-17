@@ -1006,6 +1006,10 @@ impl VerilogBeautifier {
             if (w == "function" || w == "task") && ["import", "export"].contains(&w_d.prev1()) {
                 return String::new();
             }
+            // `disable fork;` is a statement, not a fork block
+            if w == "fork" && w_d.prev1() == "disable" {
+                return String::new();
+            }
 
             // For parentheses after task/function declaration, don't push state
             // The parameters are part of the declaration, not a nested block

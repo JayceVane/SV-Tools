@@ -294,7 +294,7 @@ fn align_instance_binding(txt: &str, ilvl: usize, options: &FormatOptions, inden
                     txt_new.push_str(&format!("{:width$})", "", width = max_sig_len));
                 }
 
-                if i != lines.len() - 1 {
+                if m.name("comma").is_some() {
                     txt_new.push(',');
                 }
                 if let Some(comment) = m.name("comment") {
