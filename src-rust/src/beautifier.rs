@@ -713,8 +713,13 @@ impl VerilogBeautifier {
                     } else {
                         block = self.align_assign(&(block.clone() + &line), 7);
                     }
+                    // Ensure block ends with newline so subsequent code starts on a new line
+                    if !block.ends_with('\n') {
+                        block.push('\n');
+                    }
                     line.clear();
                     block_handled = true;
+                    block_ended = true;
                     self.always_state = AlwaysState::None;
                     split_always = 0;
                     self.block_state = BlockState::Always {
