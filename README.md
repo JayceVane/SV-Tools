@@ -2,7 +2,7 @@
 
 一款适用于 Visual Studio Code 的 Verilog/SystemVerilog 代码格式化和生产力工具插件，改编自 Sublime Text SystemVerilog 插件和 Verilog-Gadget 插件。
 
-**版本**: v3.2.21
+**版本**: v3.3.0
 
 > **v3.0 重大更新**: 核心引擎使用 Rust 重构，无需 Python 依赖，性能大幅提升！
 
@@ -386,8 +386,12 @@ endfunction
 
 **格式化后**：
 ```systemverilog
-task automatic drive(input int iter,
-  input logic[31:0] base_addr,input logic[31:0] burst_len);
+task automatic drive (
+  input int            iter     ,
+  input logic [31:0]   base_addr,
+  input logic [31:0]   burst_len
+);
+
   for(int i=0;i<iter;i++) begin
     @(posedge clk);arbase<=base_addr+i*burst_len*4;
     arvalid<=1'b1;@(posedge clk);arvalid<=1'b0;
@@ -395,8 +399,11 @@ task automatic drive(input int iter,
 
 endtask
 
-function automatic logic[7:0] get_checksum(
-  input logic[7:0] data[],input int len);
+function automatic logic[7:0] get_checksum (
+  input logic [7:0]  data [],
+  input int          len
+);
+
   logic[7:0] sum=0;
   for(int i=0;i<len;i++) sum+=data[i];
   return  sum;

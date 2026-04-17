@@ -24,6 +24,7 @@ pub enum BlockState {
     Always { always_state: AlwaysState },
     Package,
     Generate,
+    TaskFuncDecl,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -54,6 +55,7 @@ impl BlockState {
             BlockState::Always { .. } => "always",
             BlockState::Package => "package",
             BlockState::Generate => "generate",
+            BlockState::TaskFuncDecl => "taskfuncdecl",
         }
     }
 }
@@ -504,6 +506,7 @@ impl VerilogBeautifier {
                         | BlockState::Instance
                         | BlockState::Text
                         | BlockState::Package
+                        | BlockState::TaskFuncDecl
                 ) || (matches!(
                     self.block_state,
                     BlockState::Struct | BlockState::StructAssign | BlockState::Enum
@@ -518,6 +521,19 @@ impl VerilogBeautifier {
                             block_ended = true;
                             // If there's remaining content after the module declaration,
                             // output result and set remaining as new block
+                            if !remaining.is_empty() && !result.is_empty() {
+                                txt_new.push_str(&result);
+                                block = remaining;
+                                self.block_state = BlockState::None;
+                                skip_block_handled = true;
+                            }
+                            result
+                        }
+                        BlockState::TaskFuncDecl => {
+                            let (result, remaining) =
+                                self.align_task_func_param(&(block.clone() + &line), ilvl - 1);
+                            line.clear();
+                            block_ended = true;
                             if !remaining.is_empty() && !result.is_empty() {
                                 txt_new.push_str(&result);
                                 block = remaining;
@@ -1035,7 +1051,10 @@ impl VerilogBeautifier {
                     _ => BlockState::None,
                 };
                 return "incr_ilvl_flush".to_string();
-            } else if ["function", "task", "property", "sequence", "checker"].contains(&w) {
+            } else if ["function", "task"].contains(&w) {
+                self.block_state = BlockState::TaskFuncDecl;
+                return "incr_ilvl".to_string();
+            } else if ["property", "sequence", "checker"].contains(&w) {
                 self.block_state = BlockState::Text;
                 return "incr_ilvl".to_string();
             } else if w == "(" {
@@ -1171,6 +1190,10 @@ impl VerilogBeautifier {
             &self.indent,
             &self.indent_space,
         )
+    }
+
+    fn align_task_func_param(&self, txt: &str, ilvl: usize) -> (String, String) {
+        crate::align::task_func_param::align_task_func_param(txt, ilvl, &self.options, &self.indent)
     }
 
     fn align_decl(&self, txt: &str) -> String {
