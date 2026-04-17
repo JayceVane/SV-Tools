@@ -260,78 +260,158 @@ assign signal_8 = 8;
 
 ## 格式化示例
 
-### 格式化前
+### 示例 1: 模块端口对齐 + always 块 + case 语句
+
+**格式化前**：
 ```systemverilog
-module alu (
+module alu #(parameter W=8,localparam DW=W*2)(
 input clk,rst_n,
-input [3:0] opcode,
-input [31:0] operand_a,operand_b,
-output reg [31:0] result,
-output zero,overflow
-);
+input [W-1:0] opcode,
+input [DW-1:0] operand_a,operand_b,
+output reg [DW-1:0] result,
+output zero,overflow);
 reg zero_flag,overflow_flag;
 always @(posedge clk or negedge rst_n) begin
-if(!rst_n) begin
-result<=32'd0;
-zero_flag<=1'b0;
-overflow_flag<=1'b0;
-end else begin
+if(!rst_n) begin result<=0;zero_flag<=0;overflow_flag<=0; end else begin
 case(opcode)
 4'd0:result<=operand_a+operand_b;
 4'd1:result<=operand_a-operand_b;
 4'd2:result<=operand_a&operand_b;
 4'd3:result<=operand_a|operand_b;
-default:result<=32'd0;
-endcase
-zero_flag<=(result==32'd0);
-end
-end
-assign zero=zero_flag;
-assign overflow=overflow_flag;
+default:result<=0; endcase
+zero_flag<=(result==0); end end
+assign zero=zero_flag; assign overflow=overflow_flag;
 endmodule
 ```
 
-### 格式化后
+**格式化后**：
 ```systemverilog
-module alu (
-    input                clk, rst_n,
-    input      [ 3:0]    opcode   ,
-    input      [31:0]    operand_a, operand_b,
-    output reg [31:0]    result   ,
-    output               zero, overflow
+module alu #(parameter W=8,localparam DW=W*2
+) (
+  input                clk, rst_n,
+  input      [ W-1:0]  opcode   ,
+  input      [DW-1:0]  operand_a, operand_b,
+  output reg [DW-1:0]  result   ,
+  output               zero, overflow
 );
 
-    reg zero_flag,overflow_flag;
+  reg zero_flag,overflow_flag;
 
-    always @(posedge clk or negedge rst_n) begin
-        if(!rst_n) begin
-            result        <= 32'd0;
-            zero_flag     <= 1'b0 ;
-            overflow_flag <= 1'b0 ;
-        end else begin
-            case(opcode)
-                4'd0:result<=operand_a+operand_b;
-                4'd1:result<=operand_a-operand_b;
-                4'd2:result<=operand_a&operand_b;
-                4'd3:result<=operand_a|operand_b;
-                default:result<=32'd0           ;
-            endcase
-            zero_flag <= (result==32'd0);
-        end
-    end
+  always @(posedge clk or negedge rst_n) begin
+    if(!rst_n) begin result<=0;zero_flag<=0;overflow_flag<=0; end else begin
+      case(opcode)
+        4'd0:result<=operand_a+operand_b;
+        4'd1:result<=operand_a-operand_b;
+        4'd2:result<=operand_a&operand_b;
+        4'd3:result<=operand_a|operand_b;
+        default:result<=0; endcase
+      zero_flag <= (result==0); end end
 
-    assign zero     = zero_flag;
-    assign overflow = overflow_flag;
+  assign zero = zero_flag; assign overflow=overflow_flag;
 
 endmodule
+```
+
+### 示例 2: 接口 + 模块实例化端口对齐
+
+**格式化前**：
+```systemverilog
+interface axi_if #(parameter DATA_W=32,parameter ADDR_W=32,parameter ID_W=4)();
+logic[ID_W-1:0] awid;logic[ADDR_W-1:0] awaddr;
+logic[7:0] awlen;logic[2:0] awsize;logic awvalid;logic awready;
+modport master(output awid,awaddr,awlen,awsize,awvalid,input awready);
+endinterface
+
+module top #(parameter W=16) (
+input clk,rst_n,
+input [31:0] arbase,
+output [63:0] tx_data);
+axi_if #(.DATA_W(64),.ADDR_W(32),.ID_W(4)) axi_bus ();
+simple_module #(.W(W)) u_inst(
+.clk(clk),.rst_n(rst_n),
+.data_in(arbase[15:0]),
+.data_out());
+endmodule
+```
+
+**格式化后**：
+```systemverilog
+interface axi_if #(parameter DATA_W=32,parameter ADDR_W=32,parameter ID_W=4
+) ();
+
+  logic[ID_W-1:0] awid;logic[ADDR_W-1:0] awaddr;
+  logic[7:0] awlen;logic[2:0] awsize;logic awvalid; logic awready;
+
+  modport master(output awid,awaddr,awlen,awsize,awvalid,input awready);
+endinterface
+
+module top #(parameter W=16
+) (
+  input          clk, rst_n,
+  input  [31:0]  arbase ,
+  output [63:0]  tx_data
+);
+
+  axi_if #(.DATA_W(64), .ADDR_W(32), .ID_W(4)) axi_bus ();
+
+  simple_module #(.W(W)) u_inst (
+    .clk     (clk         ),
+    .rst_n   (rst_n       ),
+    .data_in (arbase[15:0]),
+    .data_out(            )
+  );
+
+endmodule
+```
+
+### 示例 3: Task / Function 参数对齐
+
+**格式化前**：
+```systemverilog
+task automatic drive(input int iter,
+input logic[31:0] base_addr,input logic[31:0] burst_len);
+for(int i=0;i<iter;i++) begin
+@(posedge clk);arbase<=base_addr+i*burst_len*4;
+arvalid<=1'b1;@(posedge clk);arvalid<=1'b0;
+wait(arready);end
+endtask
+
+function automatic logic[7:0] get_checksum(
+input logic[7:0] data[],input int len);
+logic[7:0] sum=0;
+for(int i=0;i<len;i++) sum+=data[i];
+return sum;
+endfunction
+```
+
+**格式化后**：
+```systemverilog
+task automatic drive(input int iter,
+  input logic[31:0] base_addr,input logic[31:0] burst_len);
+  for(int i=0;i<iter;i++) begin
+    @(posedge clk);arbase<=base_addr+i*burst_len*4;
+    arvalid<=1'b1;@(posedge clk);arvalid<=1'b0;
+    wait(arready);end
+
+endtask
+
+function automatic logic[7:0] get_checksum(
+  input logic[7:0] data[],input int len);
+  logic[7:0] sum=0;
+  for(int i=0;i<len;i++) sum+=data[i];
+  return  sum;
+endfunction
 ```
 
 **格式化特性**：
-- ✅ 端口声明对齐
-- ✅ 信号声明对齐
+- ✅ 端口声明对齐（位宽、名称、注释）
+- ✅ 参数列表格式化
 - ✅ always 块自动缩进
 - ✅ case 语句格式化
 - ✅ 赋值语句对齐
+- ✅ 模块实例化端口对齐
+- ✅ Task / Function 参数缩进
+- ✅ 接口 (interface) 格式化
 - ✅ 自动插入空行分隔逻辑块
 
 ## 项目结构
