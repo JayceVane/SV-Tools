@@ -466,12 +466,12 @@ vscode-extension/
 
 本 VSCode 插件改编自以下 Sublime Text 插件的核心逻辑：
 
-1. [Nicolas Belmonte 的 Sublime Text SystemVerilog 插件](https://github.com/nicolas3d/SystemVerilog) - 格式化功能
-2. [yongchan jeon (Kris) 的 Verilog-Gadget 插件](https://github.com/poucotm/Verilog-Gadget) - 生产力工具
+1. [TheClams 的 Sublime Text SystemVerilog 插件](https://github.com/TheClams/SystemVerilog) - 格式化功能
+2. [poucotm 的 Verilog-Gadget 插件](https://github.com/poucotm/Verilog-Gadget) - 生产力工具
 
 ### 原作者
-- **Nicolas Belmonte** - [Sublime Text SystemVerilog Plugin](https://github.com/nicolas3d/SystemVerilog)
-- **yongchan jeon (Kris)** - [Verilog-Gadget Plugin](https://github.com/poucotm/Verilog-Gadget)
+- **TheClams** - [Sublime Text SystemVerilog Plugin](https://github.com/TheClams/SystemVerilog)
+- **poucotm** - [Verilog-Gadget Plugin](https://github.com/poucotm/Verilog-Gadget)
 
 ### VSCode 扩展开发
 - **JayceVane** - [VSCode 集成封装](https://github.com/JayceVane)
