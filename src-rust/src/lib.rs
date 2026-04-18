@@ -1,11 +1,11 @@
-mod align;
-mod beautifier;
-mod codegen;
-mod config;
-mod parser;
-mod postprocess;
-mod preprocess;
-mod tokenizer;
+pub mod align;
+pub mod beautifier;
+pub mod codegen;
+pub mod config;
+pub mod parser;
+pub mod postprocess;
+pub mod preprocess;
+pub mod tokenizer;
 
 use config::*;
 use napi::bindgen_prelude::*;

@@ -2,11 +2,15 @@
 name = "svtools"
 version = "3.3.0"
 edition = "2021"
-description = "SystemVerilog formatter and tools native addon for VSCode"
+description = "SystemVerilog formatter and tools (VSCode extension + CLI)"
 license = "Apache-2.0"
 
 [lib]
-crate-type = ["cdylib"]
+crate-type = ["cdylib", "lib"]
+
+[[bin]]
+name = "svtools"
+path = "src/main.rs"
 
 [dependencies]
 napi = { version = "2", features = ["serde-json"] }
