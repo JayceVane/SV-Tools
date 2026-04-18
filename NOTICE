@@ -1,11 +1,7 @@
-# SystemVerilog VSCode Extension
+# SystemVerilog Tools for VSCode (SV-Tools)
 
-This project incorporates the SystemVerilog Sublime Text plugin by Nicolas Belmonte,
-which is licensed under the Apache License, Version 2.0.
-
-## The Original Sublime Text Plugin
-
-Copyright (c) 2014-2025 Nicolas Belmonte
+Copyright (c) 2025 JayceVane
+Contact: JayceVane@163.com
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this work except in compliance with the License.
@@ -19,26 +15,56 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 
-## The VSCode Extension Wrapper
+---
 
-Copyright (c) 2025 JayceVane
-Contact: JayceVane@163.com
+This project incorporates software developed by third parties:
 
-The VSCode extension wrapper (extension.js, python/formatter.py) is also
-licensed under the Apache License, Version 2.0. See the LICENSE file for details.
+## 1. TheClams/SystemVerilog (Sublime Text Plugin)
 
-## Source Code
+Copyright 2014 Clams
 
-The original Sublime Text plugin can be found at:
-https://github.com/nicolas3d/SystemVerilog
+Licensed under the Apache License, Version 2.0.
+
+Source: https://github.com/TheClams/SystemVerilog
+
+This project adapts the core formatting logic from the SystemVerilog Sublime
+Text plugin. The original Python implementation (verilog_beautifier.py,
+verilogutil.py) has been rewritten in Rust as a native module.
+
+## 2. poucotm/Verilog-Gadget (Sublime Text Plugin)
+
+The MIT License (MIT)
+
+Copyright (c) 2016 Yongchan Jeon (Kris) <poucotm@gmail.com>
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+Source: https://github.com/poucotm/Verilog-Gadget
+
+This project adapts the productivity tools (module instantiation, testbench
+generation, repeat code, alignment, header insertion) from Verilog-Gadget.
 
 ## Modifications
 
-The following modifications were made to adapt the plugin for VSCode:
-1. Created extension.js to integrate with VSCode formatting API
-2. Created python/formatter.py as a wrapper for the beautifier
+The following modifications were made to adapt these plugins for VSCode:
+1. Rewrote core formatting engine in Rust (via napi-rs native module)
+2. Created extension.js to integrate with VSCode formatting API
 3. Removed Sublime Text specific dependencies
 4. Added configuration support through VSCode settings
-
-All core formatting logic (verilog_beautifier.py, verilogutil.py) remains
-unchanged from the original implementation.
+5. Added CLI binary (svtools) for standalone formatting
