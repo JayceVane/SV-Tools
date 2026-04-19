@@ -1,4 +1,5 @@
 pub mod align;
+pub mod analyzer;
 pub mod beautifier;
 pub mod codegen;
 pub mod config;
