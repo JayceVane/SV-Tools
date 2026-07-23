@@ -179,6 +179,7 @@ pub fn align_module_port(
                 txt_new.push('\n');
                 let lines: Vec<&str> = param_txt.split('\n').collect();
                 let mut last_kw = last_param.to_string();
+                let mut param_idx: usize = 0;
 
                 for (i, line) in lines.iter().enumerate() {
                     let l = line.trim();
@@ -242,15 +243,12 @@ pub fn align_module_port(
                             ));
                             l_new.push_str(&format!(
                                 " = {:<width$}",
-                                values[i].clone().min(
-                                    values[values.len().min(i)..]
-                                        .first()
-                                        .map(|s| s.as_str())
-                                        .unwrap_or("")
-                                        .to_string()
+                                values.get(param_idx).cloned().unwrap_or_default().min(
+                                    values.get(param_idx + 1).cloned().unwrap_or_default()
                                 ),
                                 width = len_value
                             ));
+                            param_idx += 1;
 
                             if let Some(comment) = m_param.name("comment") {
                                 if !comment.as_str().is_empty() {
