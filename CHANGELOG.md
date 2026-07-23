@@ -2,6 +2,11 @@
 
 All notable changes to the SystemVerilog VSCode Extension will be documented in this file.
 
+## [3.3.2] - 2026-07-23
+
+### Fixed
+- **Formatter**: Fix extension host crash (panic: index out of bounds) when module parameter list contains comment lines (e.g. `//pragma translate_off`)
+
 ## [3.3.1] - 2026-07-23
 
 ### Fixed
