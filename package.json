@@ -2,7 +2,7 @@
   "name": "svtools",
   "displayName": "SystemVerilog Tools",
   "description": "Verilog/SystemVerilog formatter, module instantiation, testbench generation, and productivity tools (Rust native backend)",
-  "version": "3.3.0",
+  "version": "3.3.1",
   "publisher": "JayceVane",
   "author": {
     "name": "JayceVane",
