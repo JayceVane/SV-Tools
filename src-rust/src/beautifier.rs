@@ -866,16 +866,19 @@ impl VerilogBeautifier {
                     } else if matches!(current_always_state, AlwaysState::ExpectElse)
                         && !w.trim().is_empty()
                         && w != "/"
+                        && !(w == "end" && state_end)
                     {
                         block = block + &line;
                         let last_sc = block.rfind(';').map(|p| p + 1).unwrap_or(0);
-                        let last_end = block.rfind("end").map(|p| p + 3).unwrap_or(0);
+                        let last_end =
+                            Self::rfind_standalone_end(&block).map(|p| p + 3).unwrap_or(0);
                         let split_pos = last_sc.max(last_end);
                         line = block[split_pos..].to_string();
                         block = block[..split_pos].to_string();
 
                         if split_always == 1 {
-                            let re_indent = Regex::new(&format!("^{}", self.indent)).unwrap();
+                            let re_indent =
+                                Regex::new(&format!("(?m)^{}", self.indent)).unwrap();
                             line = re_indent.replace_all(&line, "").to_string();
                             self.block_state = BlockState::None;
                             let action = self.process_word(w, &w_d, state_end, &line);
@@ -1180,6 +1183,29 @@ impl VerilogBeautifier {
         }
     }
 
+    /// Find the last standalone `end` keyword — not part of `endmodule`, `endtask`, etc.
+    fn rfind_standalone_end(s: &str) -> Option<usize> {
+        let mut search_from = s.len();
+        while let Some(pos) = s[..search_from].rfind("end") {
+            let before_ok = pos == 0
+                || {
+                    let b = s.as_bytes()[pos - 1];
+                    !b.is_ascii_alphanumeric() && b != b'_'
+                };
+            let after_pos = pos + 3;
+            let after_ok = after_pos >= s.len()
+                || {
+                    let b = s.as_bytes()[after_pos];
+                    !b.is_ascii_alphanumeric() && b != b'_'
+                };
+            if before_ok && after_ok {
+                return Some(pos);
+            }
+            search_from = pos;
+        }
+        None
+    }
+
     // ── Alignment stubs (delegated to align/ module) ────────────
 
     fn align_module_port(&self, txt: &str, ilvl: usize) -> (String, String) {
@@ -1367,6 +1393,120 @@ end"#;
                     i, first, pos
                 );
             }
+        }
+    }
+
+    #[test]
+    fn test_rfind_standalone_end() {
+        assert_eq!(VerilogBeautifier::rfind_standalone_end("end"), Some(0));
+        assert_eq!(VerilogBeautifier::rfind_standalone_end("  end  "), Some(2));
+        assert_eq!(VerilogBeautifier::rfind_standalone_end("endmodule"), None);
+        assert_eq!(VerilogBeautifier::rfind_standalone_end("endtask"), None);
+        assert_eq!(VerilogBeautifier::rfind_standalone_end("endfunction"), None);
+        assert_eq!(
+            VerilogBeautifier::rfind_standalone_end("end\nendmodule"),
+            Some(0)
+        );
+        assert_eq!(
+            VerilogBeautifier::rfind_standalone_end("data <= 1;\nend"),
+            Some(11)
+        );
+        assert_eq!(
+            VerilogBeautifier::rfind_standalone_end("end\nendmodule\nend"),
+            Some(14)
+        );
+        assert_eq!(VerilogBeautifier::rfind_standalone_end("no_keyword"), None);
+        assert_eq!(
+            VerilogBeautifier::rfind_standalone_end("backend"),
+            None
+        );
+    }
+
+    #[test]
+    fn test_always_if_begin_end_no_else() {
+        let options = FormatOptions::default();
+        let mut beautifier = VerilogBeautifier::new(options);
+
+        let input = r#"module test (
+    input  clk,
+    input  rst,
+    output reg data
+);
+
+    always @(posedge clk)
+        if (rst) begin
+            data <= 1'b0;
+        end
+
+    assign x = 1;
+
+endmodule
+"#;
+        let result = beautifier.beautify_text(input);
+
+        assert!(
+            result.contains("endmodule"),
+            "endmodule should not be split: {}",
+            result
+        );
+        assert!(
+            !result.contains("end\n\nmodule"),
+            "endmodule must not be split into end + module: {}",
+            result
+        );
+
+        let lines: Vec<&str> = result.lines().collect();
+        let assign_line = lines.iter().find(|l| l.trim().starts_with("assign x"));
+        if let Some(l) = assign_line {
+            let indent = l.len() - l.trim_start().len();
+            assert_eq!(
+                indent, 4,
+                "assign should be at module body indent (4 spaces), got {}: '{}'",
+                indent, l
+            );
+        }
+    }
+
+    #[test]
+    fn test_always_if_else_begin_end() {
+        let options = FormatOptions::default();
+        let mut beautifier = VerilogBeautifier::new(options);
+
+        let input = r#"module test (
+    input  clk,
+    input  rst,
+    output reg data
+);
+
+    always @(posedge clk)
+        if (rst)
+            data <= 1'b0;
+        else if (!rst)
+            data <= 1'b1;
+
+endmodule
+"#;
+        let result = beautifier.beautify_text(input);
+
+        assert!(
+            result.contains("endmodule"),
+            "endmodule should not be split: {}",
+            result
+        );
+        assert!(
+            !result.contains("end\n\nmodule"),
+            "endmodule must not be split into end + module: {}",
+            result
+        );
+
+        let endmodule_line = result.lines().find(|l| l.trim() == "endmodule");
+        if let Some(l) = endmodule_line {
+            let indent = l.len() - l.trim_start().len();
+            assert_eq!(
+                indent, 0,
+                "endmodule should be at top level (0 indent), got {}: '{}'",
+                indent, l
+            );
         }
     }
 }
