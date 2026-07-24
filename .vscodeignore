@@ -66,5 +66,16 @@ nul
 package-lock.json
 src-rust/package-lock.json
 
+# Private test project
+test_project/**
+
+# Bug notes (dev only)
+docs/**
+
+# AI tool state
+.opencode/**
+.sisyphus/**
+.codeartsdoer/**
+
 # Old vsix packages
 *.vsix

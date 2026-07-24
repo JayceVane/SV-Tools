@@ -35,4 +35,9 @@ Thumbs.db
 
 # AI tools
 .arts/
+.opencode/
+.sisyphus/
 nul
+
+# Private test project (proprietary, not for open source)
+test_project/
