@@ -2,6 +2,18 @@
 
 All notable changes to the SystemVerilog VSCode Extension will be documented in this file.
 
+## [3.3.2] - 2026-07-23
+
+### Fixed
+- **Formatter**: Fix extension host crash (panic: index out of bounds) when module parameter list contains comment lines (e.g. `//pragma translate_off`)
+
+## [3.3.1] - 2026-07-23
+
+### Fixed
+- **Formatter**: `endmodule` no longer split into `end` + `module` when always block uses `if...begin...end` without `else`
+- **Formatter**: Correct indentation after always block with `begin...end` — subsequent statements no longer over-indented
+- **Formatter**: `rfind("end")` now uses word-boundary matching to avoid false matches on `endmodule`/`endtask`/`endfunction` etc.
+
 ## [3.2.16] - 2025-04-15
 
 ### Fixed
