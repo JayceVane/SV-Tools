@@ -2,9 +2,11 @@
 
 一款适用于 Visual Studio Code 的 Verilog/SystemVerilog 代码格式化和生产力工具插件，改编自 Sublime Text SystemVerilog 插件和 Verilog-Gadget 插件。
 
-**版本**: v3.3.0
+**版本**: v3.4.0
 
 > **v3.0 重大更新**: 核心引擎使用 Rust 重构，无需 Python 依赖，性能大幅提升！
+>
+> **v3.4.0 重大更新**: 新增 tree-sitter 符号分析引擎、语法高亮、Go to Definition、Hover 悬浮、上下文感知补全、CLI 格式化器！
 
 ## 功能特性
 
@@ -120,6 +122,53 @@ assign signal_8 = 8;
 1. 打开文件或新建文件
 2. 按下快捷键或从命令面板选择 "SystemVerilog Tools: Insert File Header"
 3. 文件头会自动插入到文件开头
+
+### 语法高亮 (v3.4.0+)
+
+- 内置 TextMate 语法文件，Verilog 和 SystemVerilog 共用
+- 覆盖：注释、字符串、Verilog 数字（`8'hFF`、`1'b0`）、预处理器指令、属性 `(* ... *)`、关键字、数据类型、端口方向、系统任务（`$display`）、运算符
+- **模块例化高亮**：模块类型名、实例名、端口连接 `.port_name()` 分别着色
+
+### 大纲视图 / Outline (v3.4.0+)
+
+- 基于 **tree-sitter** 的 AST 解析，提取 module / interface / package / class / task / function / port / parameter / net / instance 等符号
+- 在 VSCode 侧边栏 **Outline** 面板展示代码结构树
+- 支持面包屑导航
+
+### Go to Definition (v3.4.0+)
+
+- **Ctrl+Click** 模块例化中的模块类型名或实例名
+- 自动扫描工作区 `.v/.sv/.vh/.svh` 文件，跳转到 `module <name>` 定义处
+- 启发式识别例化上下文，跳过关键字和普通信号名
+
+### Hover 悬浮提示 (v3.4.0+)
+
+- 悬浮**实例名**或**模块类型名** → 显示目标模块的端口列表、参数列表、内部信号摘要、源文件链接
+- 悬浮**信号/端口/参数名** → 显示声明详情及所属模块、行号
+- 支持跨文件查找
+
+### 上下文感知补全 (v3.4.0+)
+
+- **4 种代码场景**自动识别，提供不同的补全内容：
+  - 顶层（module 外）：module / interface / package 模板、timescale、testbench
+  - 模块头：input / output / parameter、数据类型
+  - 模块体：always 系列、assign、wire / reg / logic、generate、FSM
+  - always 块内：if / else / case / for / begin-end
+- **例化端口/参数补全**：在例化括号内输入 `.` 触发，跨文件查找目标模块端口/参数列表，自动过滤已连接端口
+- **31 个代码片段**：always 系列、module 模板、FSM 三段式、testbench、typedef、声明模板等
+- 当前文件符号补全：端口、参数、信号、实例、task / function 名
+
+### CLI 格式化器 (v3.4.0+)
+
+- 独立 `svtools.exe`（Windows x64），无需 VSCode 即可格式化
+- 用法：
+  ```bash
+  svtools.exe file.sv                  # 格式化并输出到 stdout
+  svtools.exe -i file1.sv file2.sv     # 原地格式化
+  svtools.exe -c *.sv                  # 检查是否需要格式化
+  svtools.exe --tab-size 2 file.sv     # 2 空格缩进
+  cat file.sv | svtools.exe            # 从 stdin 读取
+  ```
 
 ## 系统要求
 
@@ -425,20 +474,24 @@ endfunction
 
 ```
 vscode-extension/
-├── extension.js           # VSCode 扩展入口
+├── extension.js           # VSCode 扩展入口（格式化 + Provider 注册）
 ├── package.json           # 扩展清单文件
 ├── svtools.win32-x64-msvc.node  # Rust 编译的原生模块
+├── syntaxes/              # TextMate 语法文件
+│   └── systemverilog.tmLanguage.json
 ├── templates/             # 模板文件
 │   └── header_template.txt
 └── src-rust/              # Rust 源码
     ├── Cargo.toml
     ├── src/
     │   ├── lib.rs         # napi-rs 入口
+    │   ├── main.rs        # CLI 格式化器入口
     │   ├── beautifier.rs  # 格式化核心
     │   ├── tokenizer.rs   # 词法分析
     │   ├── parser/        # 语法解析
     │   ├── align/         # 对齐算法
-    │   └── codegen/       # 代码生成
+    │   ├── codegen/       # 代码生成
+    │   └── analyzer/      # tree-sitter 符号分析 (v3.4.0+)
     └── build.rs
 ```
 
@@ -469,9 +522,16 @@ vscode-extension/
 1. [TheClams 的 Sublime Text SystemVerilog 插件](https://github.com/TheClams/SystemVerilog) - 格式化功能
 2. [poucotm 的 Verilog-Gadget 插件](https://github.com/poucotm/Verilog-Gadget) - 生产力工具
 
+v3.4.0 使用了以下开源项目：
+
+3. [tree-sitter](https://github.com/tree-sitter/tree-sitter) (MIT) - 增量解析库
+4. [tree-sitter-systemverilog](https://github.com/gmlarumbe/tree-sitter-systemverilog) (MIT) - SystemVerilog 语法
+
 ### 原作者
 - **TheClams** - [Sublime Text SystemVerilog Plugin](https://github.com/TheClams/SystemVerilog)
 - **poucotm** - [Verilog-Gadget Plugin](https://github.com/poucotm/Verilog-Gadget)
+- **Max Brunsfeld** - [tree-sitter](https://github.com/tree-sitter/tree-sitter)
+- **Gonzalo M. Larumbe** - [tree-sitter-systemverilog](https://github.com/gmlarumbe/tree-sitter-systemverilog)
 
 ### VSCode 扩展开发
 - **JayceVane** - [VSCode 集成封装](https://github.com/JayceVane)
@@ -489,6 +549,8 @@ Copyright (c) 2025 JayceVane
 本软件采用 [Apache License, Version 2.0](LICENSE) 许可。关于第三方代码的信息，请参阅 [NOTICE](NOTICE) 文件。
 
 本插件包含 Sublime Text SystemVerilog 插件和 Verilog-Gadget 插件的核心逻辑，同样采用 Apache License, Version 2.0 许可。
+
+v3.4.0 新增的 tree-sitter 和 tree-sitter-systemverilog 依赖采用 MIT 许可（详见 [NOTICE](NOTICE)）。
 
 ### 许可证摘要
 
