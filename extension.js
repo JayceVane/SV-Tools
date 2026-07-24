@@ -505,6 +505,7 @@ const SV_KEYWORDS = [
 
 const SV_SNIPPETS = [
     // Always blocks
+    { label: 'always', detail: 'always @(...)', body: 'always @(${1:*}) begin\n\t$0\nend' },
     { label: 'always_ff', detail: 'always_ff @(posedge clk)', body: 'always_ff @(posedge ${1:clk}) begin\n\t$0\nend' },
     { label: 'always_ff_rst', detail: 'always_ff with async reset', body: 'always_ff @(posedge ${1:clk} or negedge ${2:rst_n}) begin\n\tif (!$2) begin\n\t\t$0\n\tend else begin\n\t\t\n\tend\nend' },
     { label: 'always_comb', detail: 'always_comb', body: 'always_comb begin\n\t$0\nend' },
@@ -550,30 +551,14 @@ const SV_SNIPPETS = [
  * Detect the code context at the cursor position
  */
 function detectContext(document, position) {
+    // Use full text from document start to cursor for accurate depth counting
     const textBefore = document.getText(
-        new vscode.Range(Math.max(0, position.line - 50), 0, position.line, position.character)
+        new vscode.Range(0, 0, position.line, position.character)
     );
     const lineText = document.lineAt(position.line).text;
     const beforeCursor = lineText.substring(0, position.character);
 
-    // Inside instantiation port/parameter connections: ".port" or ".PARAM"
-    if (/\.\s*\w*$/.test(beforeCursor)) {
-        // Find the module type: scan backwards for "module_type [#(...)] inst_name ("
-        const instInfo = findEnclosingInstantiation(document, position);
-        if (instInfo) {
-            return { type: 'instance_port', moduleType: instInfo.moduleType };
-        }
-    }
-
-    // Inside instantiation parameter override: "#(" context
-    if (/#\s*\([^)]*$/.test(textBefore) && !/\)\s*\w+\s*\(/.test(textBefore.split('#').pop())) {
-        const instInfo = findEnclosingInstantiation(document, position);
-        if (instInfo) {
-            return { type: 'instance_param', moduleType: instInfo.moduleType };
-        }
-    }
-
-    // Count begin/end, module/endmodule to determine nesting
+    // Module header / body / always detection below (no instance logic here)
     const moduleDepth = (textBefore.match(/\bmodule\b/g) || []).length
         - (textBefore.match(/\bendmodule\b/g) || []).length;
     const alwaysDepth = (textBefore.match(/\balways\b/g) || []).length;
@@ -603,16 +588,15 @@ function detectContext(document, position) {
 
 /**
  * Find the module type of the instantiation enclosing the cursor.
- * Returns null if the cursor is outside the instantiation's parentheses.
+ * Returns null if the cursor is clearly outside the instantiation.
  */
 function findEnclosingInstantiation(document, position) {
-    // Scan backwards up to 30 lines
     const startLine = Math.max(0, position.line - 30);
     const text = document.getText(
         new vscode.Range(startLine, 0, position.line, position.character)
     );
 
-    // Find all "identifier [#(...)] identifier (" matches
+    // Find the last "identifier [#(...)] identifier (" pattern
     const re = /([A-Za-z_]\w*)\s*(?:#\s*\([\s\S]*?\)\s*)?([A-Za-z_]\w*)\s*\(/g;
     let lastMatch = null;
     let m;
@@ -621,17 +605,39 @@ function findEnclosingInstantiation(document, position) {
     }
     if (!lastMatch) return null;
 
-    // Verify cursor is still inside the parentheses:
-    // count unmatched "(" after the match — if balanced or closed, we're outside
+    // Simple check: if ");" appears after the match, the instantiation is closed
     const afterMatch = text.substring(lastMatch.index + lastMatch[0].length);
-    let depth = 1; // we're after the opening "("
-    for (const ch of afterMatch) {
-        if (ch === '(') depth++;
-        else if (ch === ')') depth--;
-        if (depth <= 0) return null; // parentheses closed → cursor is outside
-    }
+    const closed = /\)\s*;/.test(afterMatch);
+    if (closed) return null;
 
     return { moduleType: lastMatch[1], instName: lastMatch[2] };
+}
+
+/**
+ * Find the module type of the instantiation at the cursor position
+ * using tree-sitter analyzer's Instance symbol ranges.
+ * Returns { moduleType, startLine, endLine } or null.
+ */
+function findInstanceAtPosition(document, position, native) {
+    if (!native || !native.extractSymbols) return null;
+    try {
+        const result = native.extractSymbols(document.getText());
+        const line = position.line + 1; // analyzer uses 1-based lines
+        for (const sym of result.symbols) {
+            if (!sym.children) continue;
+            for (const child of sym.children) {
+                if (child.kind === 'Instance' && child.detail
+                    && line >= child.startLine && line <= child.endLine) {
+                    return {
+                        moduleType: child.detail,
+                        startLine: child.startLine,
+                        endLine: child.endLine
+                    };
+                }
+            }
+        }
+    } catch (e) { /* ignore */ }
+    return null;
 }
 
 /**
@@ -639,13 +645,23 @@ function findEnclosingInstantiation(document, position) {
  */
 async function provideCompletionItems(document, position) {
     const items = [];
-    const ctx = detectContext(document, position);
     const native = loadNativeModule();
+    const lineText = document.lineAt(position.line).text;
+    const beforeCursor = lineText.substring(0, position.character);
 
-    // ── Instance port/parameter completion ──
-    if ((ctx.type === 'instance_port' || ctx.type === 'instance_param') && ctx.moduleType) {
-        const portItems = await getInstanceCompletions(ctx.moduleType, ctx.type, native, document, position);
-        if (portItems.length > 0) return portItems;
+    // ── Instance port/parameter completion (exclusive) ──
+    if (/\.\s*\w*$/.test(beforeCursor)) {
+        const inst = findInstanceAtPosition(document, position, native);
+        if (inst) {
+            return await getInstanceCompletions(inst.moduleType, 'instance_port', native, document, position, inst.startLine, inst.endLine);
+        }
+    }
+
+    let ctx;
+    try {
+        ctx = detectContext(document, position);
+    } catch (e) {
+        ctx = { type: 'module_body' };
     }
 
     // ── Context-specific snippets ──
@@ -653,7 +669,7 @@ async function provideCompletionItems(document, position) {
         'top_level': ['module', 'module_param', 'interface', 'package', 'typedef_enum', 'typedef_struct',
             'timescale', 'include', 'define', 'testbench'],
         'module_header': ['parameter', 'localparam'],
-        'module_body': ['always_ff', 'always_ff_rst', 'always_comb', 'always_latch', 'always_star',
+        'module_body': ['always', 'always_ff', 'always_ff_rst', 'always_comb', 'always_latch', 'always_star',
             'always_posedge', 'assign', 'wire', 'reg', 'logic', 'parameter', 'localparam',
             'generate_for', 'initial', 'function', 'task', 'fsm', 'typedef_enum', 'typedef_struct',
             'if', 'ifelse', 'case', 'casex', 'for', 'beginend'],
@@ -734,17 +750,16 @@ async function provideCompletionItems(document, position) {
  * Get port/parameter completions for a module instantiation.
  * Filters out ports/params that are already connected.
  */
-async function getInstanceCompletions(moduleType, completionType, native, document, position) {
+async function getInstanceCompletions(moduleType, completionType, native, document, position, instStartLine, instEndLine) {
     const items = [];
     const def = await findModuleDefinition(moduleType);
     if (!def) return items;
 
-    // Collect already-connected port/param names from the current instantiation
+    // Collect already-connected port/param names ONLY within this instance's range
     const usedNames = new Set();
-    if (document && position) {
-        const startLine = Math.max(0, position.line - 30);
+    if (document && instStartLine && instEndLine) {
         const text = document.getText(
-            new vscode.Range(startLine, 0, position.line, position.character)
+            new vscode.Range(instStartLine - 1, 0, instEndLine - 1, 200)
         );
         const dotRe = /\.([A-Za-z_]\w*)\s*\(/g;
         let dm;
@@ -762,7 +777,8 @@ async function getInstanceCompletions(moduleType, completionType, native, docume
         if (!mod || !mod.children) return items;
 
         const filterKind = completionType === 'instance_param' ? 'Parameter' : 'Port';
-        const symbols = mod.children.filter(c => c.kind === filterKind && !usedNames.has(c.name));
+        const allSymbols = mod.children.filter(c => c.kind === filterKind);
+        const symbols = allSymbols.filter(c => !usedNames.has(c.name));
 
         for (const sym of symbols) {
             const item = new vscode.CompletionItem(
