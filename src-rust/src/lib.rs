@@ -121,3 +121,15 @@ fn generate_header(template: String, file_name: String, tab_size: u32) -> Result
         &template, &file_name, tab_size,
     ))
 }
+
+/// Extract all symbols from SystemVerilog source (for Outline / DocumentSymbol).
+#[napi]
+fn extract_symbols(text: String) -> Result<analyzer::ParseResult> {
+    Ok(analyzer::extract_symbols(&text))
+}
+
+/// Find symbols by name (for hover / goto definition).
+#[napi]
+fn find_symbol_by_name(text: String, name: String) -> Result<Vec<analyzer::SvSymbol>> {
+    Ok(analyzer::find_symbol_by_name(&text, &name))
+}
