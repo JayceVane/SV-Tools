@@ -2,6 +2,18 @@
 
 All notable changes to the SystemVerilog VSCode Extension will be documented in this file.
 
+## [3.4.1] - 2026-08-15
+
+### Fixed
+- **Syntax Highlighting**: `always@(*)` 敏感列表不再被误判为属性 `(* ... *)` 的开始——原先从该行到文件结尾会全部被吞入属性作用域,`begin`/`end`/`assign`/`endmodule` 等关键字及所有标识符高亮错乱
+- **Language Configuration**: 修复括号自动补齐失效——`contributes.languages` 缺少 `configuration` 字段,`language-configuration.json` 从未被 VS Code 加载,选中文字后输入 `(` 无法自动闭合
+
+## [3.4.0] - 2026-07-24
+
+### Added
+- Tree-sitter 语法分析器:符号提取、语法高亮、上下文感知补全、悬停提示、跳转到定义
+- 新增 `svtools.win32-x64-msvc.node` 原生模块与 CLI 二进制
+
 ## [3.3.2] - 2026-07-23
 
 ### Fixed
