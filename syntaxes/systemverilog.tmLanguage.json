@@ -9,6 +9,7 @@
     { "include": "#attributes" },
     { "include": "#numbers" },
     { "include": "#system-tasks" },
+    { "include": "#event-control" },
     { "include": "#module-instantiation" },
     { "include": "#port-connection" },
     { "include": "#keywords" },
@@ -119,6 +120,15 @@
         {
           "name": "support.function.system.systemverilog",
           "match": "\\$\\w+"
+        }
+      ]
+    },
+    "event-control": {
+      "patterns": [
+        {
+          "comment": "always @( ... ) event control — must be matched before #attributes so that @(*) is not mistaken for an attribute (* ... *)",
+          "name": "keyword.operator.event-control.systemverilog",
+          "match": "@\\s*\\("
         }
       ]
     },

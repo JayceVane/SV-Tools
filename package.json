@@ -59,7 +59,8 @@
         "extensions": [
           ".v",
           ".vh"
-        ]
+        ],
+        "configuration": "./language-configuration.json"
       },
       {
         "id": "systemverilog",
@@ -71,7 +72,8 @@
         "extensions": [
           ".sv",
           ".svh"
-        ]
+        ],
+        "configuration": "./language-configuration.json"
       }
     ],
     "grammars": [
