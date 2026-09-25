@@ -394,7 +394,11 @@ function buildWaveformHtml(vcd, meta) {
   .scope { color:#9cdcfe; padding:4px 10px; cursor:pointer; white-space:nowrap;
            font-family:Consolas,monospace; font-size:13px; display:flex; align-items:center; }
   .scope:hover { color:#c8e1ff; }
+  .scope.solo { color:#ffd54f; }
   .scope .tw { color:var(--faint); margin-right:6px; width:11px; display:inline-block; }
+  .treeBar { display:flex; gap:6px; padding:5px 8px; border-bottom:1px solid var(--border); }
+  .treeBar button { flex:none; font-size:11px; padding:2px 9px; }
+  .treeBar button.on { border-color:#3a5a74; color:#9cdcfe; background:#253340; }
   .sig { padding:4px 10px 4px 14px; cursor:pointer; white-space:nowrap; display:flex; gap:8px;
          align-items:center; font-family:Consolas,monospace; font-size:13px;
          border-left:2px solid transparent; }
@@ -473,14 +477,19 @@ const DATA = ${json};
   var cursorT = null;
   var edgeSig = null;          // 边沿导航目标信号
   var dragging = null;
-  var collapsed = {};
+  var collapsed = {};          // scope 路径 -> 是否折叠
+  var soloScope = null;        // 单独显示的 scope 路径（双击层级设置）
+  var soloPrevChecked = null;  // 进入 solo 前的勾选状态快照，退出时恢复
+  var sortMode = 'default';    // 'default'（VCD 原始顺序）| 'name'
+  var groupByScope = false;    // 按模块分组显示
 
-  var selected = [];           // 完整 signal 对象（含 changes），来自 byId
+  var selected = [];           // 当前显示的行（applyRows 按 checked/排序/分组/单独显示派生）
   var byId = {};               // key: id|path -> signal 对象
   var noChangeCount = 0;
+  var checked = {};            // key -> 是否显示在波形区
   DATA.signals.forEach(function (s) {
     byId[s.id + '|' + s.path] = s;
-    if (s.changes.length > 0) selected.push(s);
+    if (s.changes.length > 0) checked[s.id + '|' + s.path] = true;
     else noChangeCount++;
   });
 
@@ -508,23 +517,67 @@ const DATA = ${json};
 
   function renderTree() {
     sigPanel.innerHTML = '';
+    // 视图工具条：排序 / 分组 / 清除单独显示
+    var bar = document.createElement('div');
+    bar.className = 'treeBar';
+    var bName = document.createElement('button');
+    bName.textContent = '名称排序';
+    bName.title = '按信号名排序显示（再点一次恢复原始顺序）';
+    bName.className = sortMode === 'name' ? 'on' : '';
+    bName.onclick = function () {
+      sortMode = sortMode === 'name' ? 'default' : 'name';
+      applyRows(); renderTree(); draw();
+    };
+    var bGroup = document.createElement('button');
+    bGroup.textContent = '按模块分组';
+    bGroup.title = '按所属模块分组排列，并在波形区画分隔';
+    bGroup.className = groupByScope ? 'on' : '';
+    bGroup.onclick = function () {
+      groupByScope = !groupByScope;
+      if (groupByScope) sortMode = 'default';
+      applyRows(); renderTree(); draw();
+    };
+    var bAll = document.createElement('button');
+    bAll.textContent = '全部显示';
+    bAll.title = '退出单独显示，恢复之前的信号勾选状态';
+    bAll.className = soloScope ? 'on' : '';
+    bAll.onclick = function () {
+      if (!soloScope) return;
+      exitSolo();
+      applyRows(); renderTree(); draw();
+    };
+    bar.appendChild(bName); bar.appendChild(bGroup); bar.appendChild(bAll);
+    sigPanel.appendChild(bar);
+    var hint = document.createElement('div');
+    hint.className = 'hidden-note';
+    hint.textContent = '单击折叠/展开 · 双击层级=单独显示';
+    sigPanel.appendChild(hint);
+
     var selectedKeys = {};
     selected.forEach(function (s) { selectedKeys[s.id + '|' + s.path] = 1; });
     (function walk(nodes) {
       nodes.forEach(function (node) {
         if (node.children) {
-          if (collapsed[node.path]) return;
+          // 折叠时 scope 行必须保留（▸），否则无法再次展开
+          var isCollapsed = !!collapsed[node.path];
           var d = depthOf(node.path);
           var div = document.createElement('div');
-          div.className = 'scope';
+          div.className = 'scope' + (soloScope === node.path ? ' solo' : '');
           div.style.paddingLeft = (10 + d * 15) + 'px';
-          div.innerHTML = '<span class="tw">▾</span>' + esc(node.name);
+          div.innerHTML = '<span class="tw">' + (isCollapsed ? '▸' : '▾') + '</span>' + esc(node.name);
+          div.title = '单击折叠/展开 · 双击单独显示该层级';
           div.onclick = function () {
-            collapsed[node.path] = true;
+            if (collapsed[node.path]) delete collapsed[node.path];
+            else collapsed[node.path] = true;
             renderTree();
           };
+          div.ondblclick = function () {
+            if (soloScope === node.path) exitSolo();
+            else { if (soloScope) exitSolo(); enterSolo(node.path); }
+            applyRows(); renderTree(); draw();
+          };
           sigPanel.appendChild(div);
-          walk(node.children);
+          if (!isCollapsed) walk(node.children);
         } else {
           var pd = node.path.lastIndexOf('.') >= 0 ? depthOf(node.path.slice(0, node.path.lastIndexOf('.'))) + 1 : 0;
           var row = document.createElement('div');
@@ -547,22 +600,55 @@ const DATA = ${json};
       sigPanel.appendChild(note);
     }
   }
+  function scopeOf(sig) {
+    var i = sig.path.lastIndexOf('.');
+    return i >= 0 ? sig.path.slice(0, i) : '(顶层)';
+  }
+  function computeRows() {
+    var arr = [];
+    DATA.signals.forEach(function (s) {
+      if (s.changes.length === 0) return;
+      if (soloScope && s.path.slice(0, soloScope.length + 1) !== soloScope + '.') return;
+      arr.push(s);
+    });
+    if (groupByScope) {
+      arr.sort(function (a, b) { return a.path < b.path ? -1 : a.path > b.path ? 1 : 0; });
+    } else if (sortMode === 'name') {
+      arr.sort(function (a, b) { return a.name < b.name ? -1 : a.name > b.name ? 1 : (a.path < b.path ? -1 : 1); });
+    }
+    return arr;
+  }
+  function applyRows() {
+    selected = computeRows().filter(function (s) { return checked[s.id + '|' + s.path]; });
+  }
+  /** 进入 solo：快照当前勾选，自动勾选该层级下全部信号（其它层级被过滤不显示） */
+  function enterSolo(scopePath) {
+    soloScope = scopePath;
+    soloPrevChecked = Object.assign({}, checked);
+    DATA.signals.forEach(function (s) {
+      if (s.changes.length > 0 && s.path.slice(0, scopePath.length + 1) === scopePath + '.') {
+        checked[s.id + '|' + s.path] = true;
+      }
+    });
+  }
+  /** 退出 solo：恢复进入前的勾选状态 */
+  function exitSolo() {
+    if (soloPrevChecked) { checked = soloPrevChecked; soloPrevChecked = null; }
+    soloScope = null;
+  }
   function toggleSignal(node) {
     if (!node.hasChanges) return;
     var key = node.id + '|' + node.path;
-    var idx = -1;
-    for (var i = 0; i < selected.length; i++) {
-      if (selected[i].id === node.id && selected[i].path === node.path) { idx = i; break; }
-    }
-    if (idx >= 0) {
-      selected.splice(idx, 1);
+    if (checked[key]) {
+      delete checked[key];
       if (edgeSig && edgeSig.id === node.id && edgeSig.path === node.path) {
         edgeSig = null;
         navLabel.textContent = '边沿: (点击波形行选择)';
       }
     } else {
-      selected.push(byId[key]);   // 必须用含 changes 的完整对象，树节点没有 changes
+      checked[key] = true;
     }
+    applyRows();
     renderTree();
     draw();
   }
@@ -665,10 +751,22 @@ const DATA = ${json};
     var ticks = computeTicks();
     drawGrid(ctx, w, ticks);
 
+    // 分组边界（按模块分组时）：行号 -> 组名
+    var groupStarts = {};
+    if (groupByScope) {
+      var prevG = null;
+      selected.forEach(function (s, i) {
+        var g = scopeOf(s);
+        if (g !== prevG) { groupStarts[i] = g; prevG = g; }
+      });
+    }
+
     if (selected.length === 0) {
       ctx.fillStyle = '#5a5f66';
-      ctx.fillText('(在左侧信号树中点击信号以添加波形)', NAME_W + 16, 34);
-      finish(ctx, w, h, dpr, ticks);
+      ctx.fillText(soloScope
+        ? ('(层级 ' + soloScope + ' 下没有正在显示的信号)')
+        : '(在左侧信号树中点击信号以添加波形)', NAME_W + 16, 34);
+      finish(ctx, w, h, dpr, ticks, -1, groupStarts);
       return;
     }
 
@@ -695,16 +793,27 @@ const DATA = ${json};
       if (sig.width === 1 && sig.type !== 'real') drawScalar(ctx, sig, yTop);
       else drawBus(ctx, sig, yTop, fill);
     });
-    finish(ctx, w, h, dpr, ticks, edgeRow);
+    finish(ctx, w, h, dpr, ticks, edgeRow, groupStarts);
   }
 
-  function finish(ctx, w, h, dpr, ticks, edgeRow) {
+  function finish(ctx, w, h, dpr, ticks, edgeRow, groupStarts) {
+    // 分组分隔：波形区加强分隔线
+    if (groupByScope) {
+      ctx.strokeStyle = 'rgba(79,195,247,.28)';
+      ctx.beginPath();
+      for (var g in groupStarts) {
+        var gy = groupStarts[g] * ROW_H + 0.5;
+        if (gy > 0.5) { ctx.moveTo(0, gy); ctx.lineTo(w, gy); }
+      }
+      ctx.stroke();
+    }
     // 名称栏（最后画，盖在波形起笔处）
-    drawNames(ctx, h, edgeRow);
+    drawNames(ctx, h, edgeRow, groupStarts);
     // 行分隔线
     ctx.strokeStyle = 'rgba(255,255,255,.05)';
     ctx.beginPath();
     for (var i = 1; i <= selected.length; i++) {
+      if (groupByScope && groupStarts[i] !== undefined) continue; // 分组处已画加强线
       ctx.moveTo(0, i * ROW_H + 0.5); ctx.lineTo(w, i * ROW_H + 0.5);
     }
     ctx.stroke();
@@ -755,7 +864,7 @@ const DATA = ${json};
     ctx.stroke();
   }
 
-  function drawNames(ctx, h, edgeRow) {
+  function drawNames(ctx, h, edgeRow, groupStarts) {
     ctx.fillStyle = '#202327';
     ctx.fillRect(0, 0, NAME_W, h);
     ctx.strokeStyle = '#33373d';
@@ -763,6 +872,17 @@ const DATA = ${json};
     ctx.font = '12px Consolas,monospace';
     selected.forEach(function (sig, i) {
       var y = i * ROW_H + ROW_H / 2 + 4;
+      var isGroupStart = groupStarts && groupStarts[i] !== undefined;
+      if (isGroupStart) {
+        // 分组标签行：淡蓝底带 + 层级路径小字，信号名下移避让
+        ctx.fillStyle = 'rgba(79,195,247,.06)';
+        ctx.fillRect(0, i * ROW_H, NAME_W, ROW_H);
+        ctx.fillStyle = '#9cdcfe';
+        ctx.font = '10px Consolas,monospace';
+        ctx.fillText(truncText(ctx, groupStarts[i], NAME_W - 20), 8, i * ROW_H + 11);
+        ctx.font = '12px Consolas,monospace';
+        y = i * ROW_H + ROW_H - 8;
+      }
       if (i === edgeRow) {
         ctx.fillStyle = 'rgba(255,213,79,.08)';
         ctx.fillRect(0, i * ROW_H, NAME_W, ROW_H);
@@ -991,6 +1111,7 @@ const DATA = ${json};
   document.getElementById('title').textContent = DATA.fileName;
   document.getElementById('tsInfo').textContent = 'timescale: ' + (DATA.timescale || '(未声明)');
   document.getElementById('endTime').textContent = 'end: ' + fmtTime(END) + ' (' + END + ' ticks)';
+  applyRows();
   renderTree();
   draw();
 })();
