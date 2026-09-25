@@ -455,9 +455,12 @@ async function resolveToolchain(force = false) {
 /**
  * 激活 Icarus Verilog 功能：lint 诊断、仿真命令、状态栏与事件接线。
  * @param {vscode.ExtensionContext} context
+ * @param {{waveViewer?: {openWaveform: (path: string) => Promise<void>}}} [deps] 依赖注入（内置 VCD 查看器）
  */
-function activateIverilog(context) {
+function activateIverilog(context, deps) {
     const vscode = require('vscode');
+    /** @type {{openWaveform: (path: string) => Promise<void>}} */
+    const waveViewer = (deps && deps.waveViewer) || { openWaveform: async () => { } };
 
     const diagnostics = vscode.languages.createDiagnosticCollection('svtools-iverilog');
     const channel = vscode.window.createOutputChannel(OUTPUT_CHANNEL_TITLE);
@@ -796,15 +799,29 @@ function activateIverilog(context) {
         // ---- 波形提示 ----
         const waves = findFreshWaveforms(fileDir, startedAt);
         if (waves.length > 0) {
-            const rel = path.basename(waves[0]);
+            const vcdFile = waves.find(w => path.extname(w).toLowerCase() === '.vcd');
             const viewer = String(config.get('waveViewer') || '').trim();
-            const buttons = viewer ? ['打开波形', '在资源管理器中显示'] : ['在资源管理器中显示'];
+            const autoOpen = config.get('autoOpenWaveform', true);
+
+            // 内置查看器优先：未配置外部程序且是新 .vcd 时直接打开波形面板
+            if (vcdFile && !viewer && autoOpen) {
+                await waveViewer.openWaveform(vcdFile);
+            }
+
+            const rel = path.basename(waves[0]);
+            const buttons = [];
+            if (vcdFile && !viewer && vcdFile !== waves[0]) buttons.push('打开波形');
+            if (viewer) buttons.push('外部查看器打开');
+            buttons.push('在资源管理器中显示');
             vscode.window.showInformationMessage(`仿真波形已生成：${rel}`, ...buttons).then(choice => {
-                if (choice === '打开波形' && viewer) {
-                    const view = spawn(viewer, [waves[0]], { detached: true, stdio: 'ignore', windowsHide: true });
+                if (choice === '打开波形' && vcdFile) {
+                    waveViewer.openWaveform(vcdFile);
+                } else if (choice === '外部查看器打开' && viewer) {
+                    const target = vcdFile || waves[0];
+                    const view = spawn(viewer, [target], { detached: true, stdio: 'ignore', windowsHide: true });
                     view.on('error', err => vscode.window.showErrorMessage(`启动波形查看器失败：${err.message}`));
                     view.unref();
-                } else if (choice) {
+                } else if (choice === '在资源管理器中显示') {
                     vscode.commands.executeCommand('revealFileInOs', vscode.Uri.file(waves[0]));
                 }
             });

@@ -137,6 +137,12 @@
         "title": "Icarus Verilog: Stop Simulation",
         "category": "SystemVerilog Tools",
         "icon": "$(debug-stop)"
+      },
+      {
+        "command": "svtools.iverilog.openWaveform",
+        "title": "Icarus Verilog: Open VCD Waveform Viewer",
+        "category": "SystemVerilog Tools",
+        "icon": "$(pulse)"
       }
     ],
     "keybindings": [
@@ -221,6 +227,10 @@
         },
         {
           "command": "svtools.iverilog.stopSimulation",
+          "group": "4_simulation"
+        },
+        {
+          "command": "svtools.iverilog.openWaveform",
           "group": "4_simulation"
         }
       ]
@@ -465,7 +475,12 @@
         "svtools.iverilog.waveViewer": {
           "type": "string",
           "default": "",
-          "description": "Waveform viewer executable (e.g. GTKWave) used by the 'Open Waveform' button after a simulation produces a .vcd/.fst file. Empty = only reveal the file in the file explorer"
+          "description": "External waveform viewer executable (e.g. GTKWave). Empty = use the built-in VCD waveform viewer (webview panel; external program is used for .fst files)"
+        },
+        "svtools.iverilog.autoOpenWaveform": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically open the built-in waveform viewer when a simulation produces a new .vcd file"
         }
       }
     }

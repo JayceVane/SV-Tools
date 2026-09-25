@@ -187,7 +187,13 @@ assign signal_8 = 8;
 - 输出流式打印到 "SystemVerilog Tools · Icarus Verilog" 输出通道，回显实际命令行
 - 编译错误同样进入 Problems 面板；运行中可随时停止（Stop Simulation 命令 / 再次点击状态栏重新运行）
 - 支持超时自动停止（`simTimeoutMs`）、多文件工程（`simFiles` glob）、自定义 top（`simTop`）与 vvp 参数（`simArgs`）
-- 仿真产生 `.vcd` / `.fst` 波形后自动提示，可一键调起外部波形查看器（`waveViewer`，如 GTKWave）或在资源管理器中定位
+
+#### 内置波形查看器
+- 仿真产生 `.vcd` 后**自动打开内置波形面板**（`autoOpenWaveform` 可关闭），零外部依赖
+- Canvas 渲染：标量时钟/信号画高低电平与 x/z 中轴带，总线画六边形段并标注 `0x` 十六进制与二进制值
+- 左侧信号树按 scope 层级展示，点击添加/移除波形行
+- 点击波形放置游标并显示该时刻信号值；Ctrl+滚轮缩放、Fit 一键适配全程、横向滚动
+- 偏好外部工具（如 GTKWave）时配置 `waveViewer` 即可改走外部程序（`.fst` 等格式也走外部）；也可随时命令面板 "Open VCD Waveform Viewer" 手动打开任意 `.vcd`
 
 #### 工具链定位
 自动探测顺序：`svtools.iverilog.path` 配置 → `IVERILOG_HOME` 环境变量 → `PATH` → 常见安装目录。
@@ -295,7 +301,8 @@ assign signal_8 = 8;
 | `iverilog.simTop` | string | "" | 仿真 top 模块（-s）；空 = iverilog 自动选根模块 |
 | `iverilog.simArgs` | array | [] | vvp 运行参数（如 plusargs） |
 | `iverilog.simTimeoutMs` | number | 0 | 仿真超时毫秒数；0 = 不限制 |
-| `iverilog.waveViewer` | string | "" | 波形查看器路径（如 GTKWave）；空 = 仅在资源管理器中定位 |
+| `iverilog.waveViewer` | string | "" | 外部波形查看器路径；空 = 使用内置 VCD 波形面板（.fst 等格式仍走外部） |
+| `iverilog.autoOpenWaveform` | boolean | true | 仿真产生新 `.vcd` 后自动打开内置波形查看器 |
 
 > **注意**: v3.0+ 已移除 `pythonPath` 配置项，因为不再需要 Python 依赖。
 
@@ -334,6 +341,7 @@ assign signal_8 = 8;
 - `svtools.iverilog.lint` - 对当前文件运行 iverilog 语法检查
 - `svtools.iverilog.simulate` - 编译并运行仿真（vvp），返回 Promise 供脚本/Agent 调用
 - `svtools.iverilog.stopSimulation` - 停止正在运行的仿真
+- `svtools.iverilog.openWaveform` - 打开 VCD 文件到内置波形查看器
 
 ## 快捷键
 

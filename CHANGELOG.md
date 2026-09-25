@@ -8,6 +8,7 @@ All notable changes to the SystemVerilog VSCode Extension will be documented in 
 - **Icarus Verilog 集成：语法检查与仿真验证**
   - **输入（防抖）/ 打开 / 保存 `.v` / `.sv` 文件时自动运行** `iverilog -tnull` lint，诊断进入 Problems 面板（可点击跳转、按行高亮）；未保存的缓冲区内容经临时文件参与检查，输出路径自动回映射到原文件
   - **跨文件模块解析**：工作区内所有含 Verilog 文件的目录自动加入 `-y`/`-I`（文件名=模块名约定）；模块名与文件名不一致时按工作区模块索引自动补编译定义文件（缺模块报错触发迭代重试，最多 3 轮），lint 与仿真均生效（`scanWorkspace` 可关闭）
+  - **内置 VCD 波形查看器**：仿真产生 `.vcd` 后自动打开波形面板（Canvas 渲染，零外部依赖）——信号树按 scope 层级展示、点击加/删波形行、标量/总线/x-z 状态绘制、总线十六进制+二进制标注、点击游标读值、Ctrl+滚轮缩放与 Fit 适配；`autoOpenWaveform` 可关闭，`waveViewer` 配置外部程序（如 GTKWave）时改走外部；新命令 "Open VCD Waveform Viewer" 可手动打开任意 `.vcd`
   - 仿真编译失败且存在未解析模块时，输出通道给出 `simFiles` 配置提示
   - 每次 lint 在输出通道记录 `[lint] 文件 → N 错误, M 警告 (耗时)` 轨迹，自动触发是否生效一目了然
   - 一键仿真：状态栏 ▶ 按钮 / 命令面板 "Icarus Verilog: Run Simulation"，编译 + vvp 流式输出到独立通道，支持停止与超时自动终止

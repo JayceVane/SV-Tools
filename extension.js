@@ -21,6 +21,7 @@
 const vscode = require('vscode');
 const path = require('path');
 const { activateIverilog } = require('./iverilog');
+const { activateWaveViewer } = require('./vcd');
 
 // Load native module
 let svtools = null;
@@ -1056,7 +1057,8 @@ function activate(context) {
     );
 
     // Icarus Verilog lint 与仿真（诊断、命令、状态栏）
-    activateIverilog(context);
+    const waveViewer = activateWaveViewer(context);
+    activateIverilog(context, { waveViewer });
 }
 
 /**
