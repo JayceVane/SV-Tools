@@ -170,10 +170,34 @@ assign signal_8 = 8;
   cat file.sv | svtools.exe            # 从 stdin 读取
   ```
 
+### 语法检查与仿真 (Icarus Verilog)
+
+内置 [Icarus Verilog](http://iverilog.icarus.com/) 集成，无需额外插件即可完成 **lint** 与 **仿真验证**：
+
+#### Lint 语法检查
+- **打开 / 保存 `.v` / `.sv` 文件时自动运行** `iverilog -tnull`，诊断结果进入 Problems 面板，可点击跳转
+- 自动按扩展名选择语言标准（`.sv` → `-g2012`，`.v` → `-g2005`），可用 `svtools.iverilog.standard` 覆盖
+- 同目录模块自动解析（`-y <文件目录> -Y .sv`），支持 include / 库目录配置
+- 也可手动执行：命令面板 → "SystemVerilog Tools: Icarus Verilog: Lint Current File"
+
+#### 仿真验证
+- 状态栏 **▶ iverilog 仿真** 按钮（或命令面板 "Icarus Verilog: Run Simulation"）一键完成 **编译 + vvp 运行**
+- 输出流式打印到 "SystemVerilog Tools · Icarus Verilog" 输出通道，回显实际命令行
+- 编译错误同样进入 Problems 面板；运行中可随时停止（Stop Simulation 命令 / 再次点击状态栏重新运行）
+- 支持超时自动停止（`simTimeoutMs`）、多文件工程（`simFiles` glob）、自定义 top（`simTop`）与 vvp 参数（`simArgs`）
+- 仿真产生 `.vcd` / `.fst` 波形后自动提示，可一键调起外部波形查看器（`waveViewer`，如 GTKWave）或在资源管理器中定位
+
+#### 工具链定位
+自动探测顺序：`svtools.iverilog.path` 配置 → `IVERILOG_HOME` 环境变量 → `PATH` → 常见安装目录。
+**Cygwin 构建的 iverilog**（安装在 Cygwin 根目录之外）缺 `cygwin1.dll` 时会自动定位同级的 Cygwin 安装目录并注入子进程 PATH；也可通过 `svtools.iverilog.cygwinPath` 显式指定。
+
+> 提示：仿真会在工作区下生成 `.svtools/sim/` 缓存目录（存放 `.vvp` 编译产物），建议加入 `.gitignore`。
+
 ## 系统要求
 
 - Visual Studio Code 1.74.0 或更高版本
 - **无需安装 Python**（v3.0+ 使用 Rust 原生模块）
+- 语法检查 / 仿真功能需要 [Icarus Verilog](http://iverilog.icarus.com/)（可选，未安装不影响其他功能）
 
 ## 安装方法
 
@@ -254,6 +278,19 @@ assign signal_8 = 8;
 | `taskInit` | boolean | true | 在测试台中生成 init 任务 |
 | `taskDrive` | boolean | true | 在测试台中生成 drive 任务 |
 | `headerTemplate` | string | "" | 文件头模板（使用占位符） |
+| `iverilog.path` | string | "" | Icarus Verilog bin 目录或 iverilog 全路径；空 = 自动探测 |
+| `iverilog.cygwinPath` | string | "" | cygwin1.dll 所在目录（Cygwin 构建装在 Cygwin 根外时需要）；空 = 自动探测 |
+| `iverilog.lintOnSave` | boolean | true | 保存时自动 lint |
+| `iverilog.lintOnOpen` | boolean | true | 打开文件时自动 lint |
+| `iverilog.standard` | string | "auto" | 语言标准（-g）；auto: `.sv`→2012 / `.v`→2005 |
+| `iverilog.lintArgs` | array | ["-Wall"] | lint 与仿真编译的额外 iverilog 参数 |
+| `iverilog.includePaths` | array | [] | include 目录（-I），相对工作区根 |
+| `iverilog.libraryPaths` | array | [] | 模块库目录（-y），相对工作区根 |
+| `iverilog.simFiles` | array | [] | 仿真时额外编译的源文件 glob（如 `src/*.v`） |
+| `iverilog.simTop` | string | "" | 仿真 top 模块（-s）；空 = iverilog 自动选根模块 |
+| `iverilog.simArgs` | array | [] | vvp 运行参数（如 plusargs） |
+| `iverilog.simTimeoutMs` | number | 0 | 仿真超时毫秒数；0 = 不限制 |
+| `iverilog.waveViewer` | string | "" | 波形查看器路径（如 GTKWave）；空 = 仅在资源管理器中定位 |
 
 > **注意**: v3.0+ 已移除 `pythonPath` 配置项，因为不再需要 Python 依赖。
 
@@ -287,6 +324,11 @@ assign signal_8 = 8;
 - `svtools.repeatCode` - 重复代码并编号
 - `svtools.alignCode` - 对齐选中的代码
 - `svtools.insertHeader` - 插入文件头
+
+### 仿真命令（Icarus Verilog）
+- `svtools.iverilog.lint` - 对当前文件运行 iverilog 语法检查
+- `svtools.iverilog.simulate` - 编译并运行仿真（vvp），返回 Promise 供脚本/Agent 调用
+- `svtools.iverilog.stopSimulation` - 停止正在运行的仿真
 
 ## 快捷键
 

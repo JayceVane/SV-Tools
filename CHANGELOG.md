@@ -2,6 +2,17 @@
 
 All notable changes to the SystemVerilog VSCode Extension will be documented in this file.
 
+## [Unreleased]
+
+### Added
+- **Icarus Verilog 集成：语法检查与仿真验证**
+  - 打开 / 保存 `.v` / `.sv` 文件时自动运行 `iverilog -tnull` lint，诊断进入 Problems 面板（可点击跳转、按行高亮）
+  - 一键仿真：状态栏 ▶ 按钮 / 命令面板 "Icarus Verilog: Run Simulation"，编译 + vvp 流式输出到独立通道，支持停止与超时自动终止
+  - 多文件工程支持：`simFiles` glob 附加源文件、`simTop` 指定顶层、`includePaths` / `libraryPaths` 头文件与模块库目录
+  - 仿真产生的 `.vcd` / `.fst` 波形自动检测并提示，可调起外部波形查看器（`waveViewer`）
+  - 工具链自动探测（配置 → `IVERILOG_HOME` → `PATH` → 常见目录）；Cygwin 构建 iverilog 缺 `cygwin1.dll` 时自动定位同级 Cygwin 安装注入 PATH（`0xC0000135` 退出码 + DLL 目录启发式）
+  - 语言标准自动选择（`.sv`→`-g2012`、`.v`→`-g2005`），`svtools.iverilog.standard` 可覆盖
+
 ## [3.4.1] - 2026-08-15
 
 ### Fixed

@@ -41,3 +41,9 @@ nul
 
 # Private test project (proprietary, not for open source)
 test_project/
+
+# Local environment notes (machine-specific, do not publish)
+ENVIRONMENT.md
+
+# Extension simulation artifacts
+.svtools/

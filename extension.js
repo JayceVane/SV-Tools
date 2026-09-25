@@ -20,6 +20,7 @@
 
 const vscode = require('vscode');
 const path = require('path');
+const { activateIverilog } = require('./iverilog');
 
 // Load native module
 let svtools = null;
@@ -1053,6 +1054,9 @@ function activate(context) {
     context.subscriptions.push(
         vscode.commands.registerCommand('svtools.insertHeader', insertHeaderTemplate)
     );
+
+    // Icarus Verilog lint 与仿真（诊断、命令、状态栏）
+    activateIverilog(context);
 }
 
 /**
