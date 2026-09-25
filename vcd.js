@@ -283,6 +283,13 @@ function activateWaveViewer(context, deps) {
  * @param {{fileName: string, timescale: string, cspSource: string}} meta
  * @returns {string}
  */
+/**
+ * 生成波形查看器 webview HTML（内联全部脚本与样式，Canvas 视口窗口渲染）。
+ * 视觉设计：左侧信号树（层级缩进、可折叠），右侧时间刻度尺 + 名称栏对齐列 + 波形区。
+ * @param {ReturnType<typeof parseVcd>} vcd
+ * @param {{fileName: string, timescale: string, cspSource: string}} meta
+ * @returns {string}
+ */
 function buildWaveformHtml(vcd, meta) {
     const tree = buildSignalTree(vcd);
     const signals = [];
@@ -310,37 +317,61 @@ function buildWaveformHtml(vcd, meta) {
 <meta charset="UTF-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline';">
 <style>
-  :root { --bg:#1e1e1e; --fg:#cccccc; --panel:#252526; --border:#3c3c3c;
-          --line:#4fc3f7; --bus:#ffb74d; --x:#f44336; --sel:#264f78; --ruler:#9e9e9e; }
+  :root {
+    --bg:#1a1c1f; --panel:#202327; --panel2:#24272c; --border:#33373d;
+    --fg:#d4d4d4; --dim:#8a8f98; --faint:#5a5f66;
+    --accent:#4fc3f7; --bus:#ffcc80; --x:#ef5350; --cursor:#ffd54f;
+    --sel:#2b3a4a; --hover:#2a2d33;
+  }
+  * { box-sizing: border-box; }
   body { margin:0; display:flex; flex-direction:column; height:100vh;
-         background:var(--bg); color:var(--fg); font-family:Consolas,monospace; font-size:13px; }
-  header { padding:6px 10px; background:var(--panel); border-bottom:1px solid var(--border);
-           display:flex; gap:14px; align-items:center; flex-wrap:wrap; }
-  header b { font-weight:600; }
-  header span.meta { color:#9e9e9e; }
+         background:var(--bg); color:var(--fg);
+         font-family:'Segoe UI',Consolas,monospace; font-size:13px; }
+  ::-webkit-scrollbar { width:10px; height:10px; }
+  ::-webkit-scrollbar-thumb { background:#3a3f46; border-radius:5px; }
+  ::-webkit-scrollbar-thumb:hover { background:#464c55; }
+  ::-webkit-scrollbar-corner { background:transparent; }
+
+  header { padding:7px 12px; background:var(--panel); border-bottom:1px solid var(--border);
+           display:flex; gap:16px; align-items:baseline; }
+  header b { font-weight:600; font-size:13px; }
+  header .meta { color:var(--dim); font-size:12px; }
+
   #main { flex:1; display:flex; min-height:0; }
-  #sigPanel { width:260px; min-width:180px; overflow:auto; border-right:1px solid var(--border);
-              background:var(--panel); padding:4px 0; }
-  .scope { font-weight:600; color:#9cdcfe; padding:2px 8px; cursor:default; }
-  .sig { padding:2px 8px 2px 20px; cursor:pointer; white-space:nowrap; display:flex; gap:6px; }
-  .sig:hover { background:#2a2d2e; }
-  .sig.selected { background:var(--sel); }
-  .sig .w { color:#6a6a6a; }
-  .hidden-note { color:#6a6a6a; padding:4px 8px; }
+  #sigPanel { width:270px; min-width:190px; overflow:auto; border-right:1px solid var(--border);
+              background:var(--panel); padding:4px 0 12px; }
+  .scope { color:#9cdcfe; padding:3px 8px; cursor:pointer; white-space:nowrap;
+           font-family:Consolas,monospace; font-size:12px; display:flex; align-items:center; }
+  .scope:hover { color:#c8e1ff; }
+  .scope .tw { color:var(--faint); margin-right:5px; width:10px; display:inline-block; }
+  .sig { padding:3px 8px 3px 12px; cursor:pointer; white-space:nowrap; display:flex; gap:7px;
+         align-items:center; font-family:Consolas,monospace; font-size:12px;
+         border-left:2px solid transparent; }
+  .sig:hover { background:var(--hover); }
+  .sig.selected { background:var(--sel); border-left-color:var(--accent); }
+  .sig .dot { width:8px; height:8px; flex:none; border-radius:2px; }
+  .sig .dot.scalar { background:var(--accent); border-radius:50%; }
+  .sig .dot.bus { background:var(--bus); }
+  .sig .w { color:var(--faint); font-size:11px; }
+  .hidden-note { color:var(--faint); padding:6px 10px; font-size:11px; }
+
   #right { flex:1; display:flex; flex-direction:column; min-width:0; }
-  #cursorInfo { padding:2px 8px; background:rgba(37,37,38,.92);
-                border-bottom:1px solid var(--border); color:#dcdcaa; min-height:1.2em;
-                white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  #ruler { display:block; background:var(--bg); }
-  #waveScroller { flex:1; overflow-y:auto; overflow-x:hidden; position:relative; }
+  #cursorInfo { padding:4px 12px; background:var(--panel); border-bottom:1px solid var(--border);
+                color:var(--cursor); min-height:1.3em; white-space:nowrap; overflow:hidden;
+                text-overflow:ellipsis; font-family:Consolas,monospace; font-size:12px; }
+  #cursorInfo .t { color:var(--dim); }
+  #ruler { display:block; cursor:pointer; }
+  #waveScroller { flex:1; overflow-y:auto; overflow-x:hidden; }
   #waveCanvas { display:block; cursor:crosshair; }
-  footer { padding:4px 10px; background:var(--panel); border-top:1px solid var(--border);
-           display:flex; gap:10px; align-items:center; }
-  button { background:#333; color:var(--fg); border:1px solid var(--border); border-radius:3px;
-           padding:2px 10px; cursor:pointer; }
-  button:hover { background:#3f3f46; }
-  #zoomLabel { color:#9e9e9e; min-width:110px; text-align:center; }
-  span.hint { color:#6a6a6a; }
+  .ghost { color:var(--faint); font-family:Consolas,monospace; font-size:12px; }
+
+  footer { padding:5px 12px; background:var(--panel); border-top:1px solid var(--border);
+           display:flex; gap:8px; align-items:center; }
+  button { background:var(--panel2); color:var(--fg); border:1px solid var(--border);
+           border-radius:4px; padding:3px 12px; cursor:pointer; font-size:12px; }
+  button:hover { background:#2c313a; border-color:#4a505a; }
+  #zoomLabel { color:var(--dim); min-width:120px; text-align:center; font-size:12px; }
+  .hint { color:var(--faint); font-size:11px; margin-left:auto; }
 </style>
 </head>
 <body>
@@ -352,25 +383,25 @@ function buildWaveformHtml(vcd, meta) {
 <div id="main">
   <div id="sigPanel"></div>
   <div id="right">
-    <div id="cursorInfo">点击波形放置游标</div>
-    <canvas id="ruler" height="24"></canvas>
+    <div id="cursorInfo"><span class="t">点击波形放置游标 · 拖拽平移</span></div>
+    <canvas id="ruler" height="26"></canvas>
     <div id="waveScroller"><canvas id="waveCanvas"></canvas></div>
   </div>
 </div>
 <footer>
   <button id="zoomOut">−</button>
   <span id="zoomLabel"></span>
-  <button id="zoomIn">+</button>
+  <button id="zoomIn">＋</button>
   <button id="zoomFit">Fit</button>
-  <span class="hint">点击放游标 · Ctrl+滚轮缩放 · 滚轮/拖拽平移 · 点击信号树加/删波形</span>
+  <span class="hint">Ctrl+滚轮缩放 · 拖拽/滚轮平移 · 点击刻度尺定位 · 点击信号树加/删波形</span>
 </footer>
 <script>
 const DATA = ${json};
 </script>
 <script>
-/* 波形渲染（视口窗口模型）：只画 [viewStart, viewStart+viewSpan] 窗口内的时间段 */
+/* 波形渲染（视口窗口模型）：只画 [viewStart, viewStart+viewSpan] 窗口内的变更段 */
 (function () {
-  var RULER_H = 24, ROW_H = 26, WAVE_LEFT = 10, EDGE = 6;
+  var RULER_H = 26, ROW_H = 26, NAME_W = 150, EDGE = 7;
   var canvas = document.getElementById('waveCanvas');
   var ruler = document.getElementById('ruler');
   var scroller = document.getElementById('waveScroller');
@@ -380,12 +411,13 @@ const DATA = ${json};
 
   var END = DATA.endTime > 0 ? DATA.endTime : 1;
   var SEC = (typeof DATA.secondsPerTime === 'number') ? DATA.secondsPerTime : 1e-9;
-  var viewStart = 0, viewSpan = END;   // 视口窗口（时间单位）
+  var viewStart = 0, viewSpan = END;
   var cursorT = null;
   var dragging = null;
+  var collapsed = {};
 
-  var selected = [];
-  var byId = {};
+  var selected = [];          // 完整 signal 对象（含 changes），来自 byId
+  var byId = {};              // key: id|path -> signal 对象
   var noChangeCount = 0;
   DATA.signals.forEach(function (s) {
     byId[s.id + '|' + s.path] = s;
@@ -393,10 +425,10 @@ const DATA = ${json};
     else noChangeCount++;
   });
 
-  function plotW() { return Math.max(canvas.clientWidth - WAVE_LEFT - 10, 50); }
+  function plotW() { return Math.max(canvas.clientWidth - NAME_W - 12, 50); }
   function viewEnd() { return viewStart + viewSpan; }
-  function t2x(t) { return WAVE_LEFT + (t - viewStart) / viewSpan * plotW(); }
-  function x2t(x) { return viewStart + (x - WAVE_LEFT) / plotW() * viewSpan; }
+  function t2x(t) { return NAME_W + (t - viewStart) / viewSpan * plotW(); }
+  function x2t(x) { return viewStart + (x - NAME_W) / plotW() * viewSpan; }
 
   function fmtSeconds(sec) {
     var abs = Math.abs(sec);
@@ -413,6 +445,8 @@ const DATA = ${json};
   function fmtTime(t) { return fmtSeconds(t * SEC); }
 
   // ---------- 信号树 ----------
+  function depthOf(path) { var n = 0, i = path.indexOf('.'); while (i >= 0) { n++; i = path.indexOf('.', i + 1); } return n; }
+
   function renderTree() {
     sigPanel.innerHTML = '';
     var selectedKeys = {};
@@ -420,17 +454,28 @@ const DATA = ${json};
     (function walk(nodes) {
       nodes.forEach(function (node) {
         if (node.children) {
+          if (collapsed[node.path]) return;
+          var d = depthOf(node.path);
           var div = document.createElement('div');
           div.className = 'scope';
-          div.textContent = node.path;
+          div.style.paddingLeft = (8 + d * 13) + 'px';
+          div.innerHTML = '<span class="tw">▾</span>' + esc(node.name);
+          div.onclick = function () {
+            collapsed[node.path] = true;
+            renderTree();
+          };
           sigPanel.appendChild(div);
           walk(node.children);
         } else {
+          var pd = node.path.lastIndexOf('.') >= 0 ? depthOf(node.path.slice(0, node.path.lastIndexOf('.'))) + 1 : 0;
           var row = document.createElement('div');
-          var isSel = selectedKeys[node.id + '|' + node.path] === 1;
+          var key = node.id + '|' + node.path;
+          var isSel = selectedKeys[key] === 1;
           row.className = 'sig' + (isSel ? ' selected' : '');
-          row.innerHTML = '<span>' + esc(node.name) + '</span>' +
-            '<span class="w">' + (node.width > 1 ? '[' + node.width + 'b]' : '') + '</span>';
+          row.style.paddingLeft = (12 + pd * 13) + 'px';
+          row.innerHTML = '<span class="dot ' + (node.width > 1 ? 'bus' : 'scalar') + '"></span>' +
+            '<span>' + esc(node.name) + '</span>' +
+            '<span class="w">' + (node.width > 1 ? node.width + 'b' : '') + '</span>';
           row.onclick = function () { toggleSignal(node); };
           sigPanel.appendChild(row);
         }
@@ -439,17 +484,19 @@ const DATA = ${json};
     if (noChangeCount > 0) {
       var note = document.createElement('div');
       note.className = 'hidden-note';
-      note.textContent = '(' + noChangeCount + ' 个无变更信号已隐藏)';
+      note.textContent = '(' + noChangeCount + ' 个参数/无变更信号已隐藏)';
       sigPanel.appendChild(note);
     }
   }
   function toggleSignal(node) {
     if (!node.hasChanges) return;
+    var key = node.id + '|' + node.path;
     var idx = -1;
     for (var i = 0; i < selected.length; i++) {
       if (selected[i].id === node.id && selected[i].path === node.path) { idx = i; break; }
     }
-    if (idx >= 0) selected.splice(idx, 1); else selected.push(node);
+    if (idx >= 0) selected.splice(idx, 1);
+    else selected.push(byId[key]);   // 必须用含 changes 的完整对象，树节点没有 changes
     renderTree();
     draw();
   }
@@ -472,80 +519,180 @@ const DATA = ${json};
     }
     return v;
   }
+  function hexOf(bin) {
+    try { return BigInt('0b' + (bin || '0')).toString(16).toUpperCase(); }
+    catch (e) { return null; }
+  }
+  function truncText(ctx, text, maxW) {
+    if (ctx.measureText(text).width <= maxW) return text;
+    while (text.length > 1 && ctx.measureText(text + '…').width > maxW) text = text.slice(0, -1);
+    return text + '…';
+  }
 
   // ---------- 绘制 ----------
   function draw() {
     var dpr = window.devicePixelRatio || 1;
     var w = Math.max(document.getElementById('right').clientWidth, 100);
     var h = Math.max(selected.length * ROW_H + 8, scroller.clientHeight);
-    setupCanvas(canvas, w, h, dpr);
-    setupCanvas(ruler, w, RULER_H, dpr);
+    setup(canvas, w, h, dpr);
+    setup(ruler, w, RULER_H, dpr);
     var ctx = canvas.getContext('2d');
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, w, h);
     ctx.font = '11px Consolas,monospace';
 
-    drawRuler(w, dpr);
+    var ticks = computeTicks();
+    drawGrid(ctx, w, ticks);
 
-    // 视口范围内的信号变更量级保护：窗口内变更点过多时跳过标签
+    if (selected.length === 0) {
+      ctx.fillStyle = '#5a5f66';
+      ctx.fillText('(在左侧信号树中点击信号以添加波形)', NAME_W + 16, 30);
+      finish(ctx, w, h, dpr, ticks);
+      return;
+    }
+
     selected.forEach(function (sig, i) {
-      var yTop = i * ROW_H + 4;
-      if (i % 2) { ctx.fillStyle = 'rgba(255,255,255,.03)'; ctx.fillRect(0, yTop - 4, w, ROW_H); }
-      ctx.strokeStyle = sig.width > 1 ? '#ffb74d' : '#4fc3f7';
-      ctx.fillStyle = ctx.strokeStyle;
-      ctx.lineWidth = 1.4;
-      if (sig.width === 1 && sig.type !== 'real') drawScalar(ctx, sig, yTop);
-      else drawBus(ctx, sig, yTop);
-      // 行首信号名水印
-      ctx.fillStyle = 'rgba(255,255,255,.35)';
-      ctx.fillText(sig.name, 2, yTop + ROW_H / 2 + 2);
-      ctx.fillStyle = sig.width > 1 ? '#ffb74d' : '#4fc3f7';
+      var yTop = i * ROW_H;
+      // 交替行背景
+      if (i % 2) {
+        ctx.fillStyle = 'rgba(255,255,255,.028)';
+        ctx.fillRect(0, yTop, w, ROW_H);
+      }
+      var stroke = sig.width > 1 ? '#ffcc80' : '#4fc3f7';
+      var fill = sig.width > 1 ? 'rgba(255,204,128,.14)' : 'rgba(79,195,247,.12)';
+      ctx.strokeStyle = stroke; ctx.fillStyle = stroke; ctx.lineWidth = 1.4;
+      if (sig.width === 1 && sig.type !== 'real') drawScalar(ctx, sig, yTop, fill);
+      else drawBus(ctx, sig, yTop, fill);
     });
-    if (cursorT !== null) drawCursorLine(ctx, h);
+    finish(ctx, w, h, dpr, ticks);
+  }
+
+  function finish(ctx, w, h, dpr, ticks) {
+    // 名称栏（最后画，盖在波形起笔处）
+    drawNames(ctx, h);
+    // 行分隔线
+    ctx.strokeStyle = 'rgba(255,255,255,.05)';
+    ctx.beginPath();
+    for (var i = 1; i <= selected.length; i++) {
+      ctx.moveTo(0, i * ROW_H + 0.5); ctx.lineTo(w, i * ROW_H + 0.5);
+    }
+    ctx.stroke();
+    // 游标竖线
+    if (cursorT !== null) {
+      var x = t2x(cursorT);
+      if (x >= NAME_W && x <= w) {
+        ctx.save();
+        ctx.strokeStyle = '#ffd54f'; ctx.setLineDash([4, 3]);
+        ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke();
+        ctx.restore();
+      }
+    }
+    drawRuler(w, dpr, ticks);
     zoomLabel.textContent = '可见 ' + fmtTime(viewSpan);
   }
 
-  function setupCanvas(c, w, h, dpr) {
+  function setup(c, w, h, dpr) {
     c.width = w * dpr; c.height = h * dpr;
     c.style.width = w + 'px'; c.style.height = h + 'px';
   }
 
-  function drawRuler(w, dpr) {
-    var ctx = ruler.getContext('2d');
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.clearRect(0, 0, w, RULER_H);
-    ctx.font = '10px Consolas,monospace';
-    ctx.fillStyle = '#9e9e9e';
-    ctx.strokeStyle = 'rgba(255,255,255,.18)';
-    // 刻度步长取 1-2-5 序列，保证相邻刻度 ≥ 90px
+  function computeTicks() {
     var secPerPx = SEC * viewSpan / plotW();
     var targetSec = secPerPx * 90;
     var pow = Math.pow(10, Math.floor(Math.log10(targetSec)));
     var step = pow;
     [5, 2, 1].some(function (m) { if (targetSec <= m * pow) { step = m * pow; return true; } return false; });
     var stepT = step / SEC;
+    var list = [];
+    for (var t = Math.ceil(viewStart / stepT) * stepT; t <= viewEnd(); t += stepT) list.push(t);
+    return list;
+  }
+
+  function drawGrid(ctx, w, ticks) {
+    ctx.strokeStyle = 'rgba(255,255,255,.045)';
     ctx.beginPath();
-    for (var t = Math.ceil(viewStart / stepT) * stepT; t <= viewEnd(); t += stepT) {
+    ticks.forEach(function (t) {
       var x = t2x(t);
-      ctx.moveTo(x, 14); ctx.lineTo(x, RULER_H);
-      ctx.fillText(fmtSeconds(t * SEC), x + 3, 10);
-    }
+      if (x >= NAME_W) { ctx.moveTo(x + 0.5, 0); ctx.lineTo(x + 0.5, selected.length * ROW_H); }
+    });
     ctx.stroke();
-    // 全程概览条
-    ctx.fillStyle = 'rgba(79,195,247,.35)';
-    ctx.fillRect(WAVE_LEFT, 17, plotW(), 3);
+  }
+
+  function drawNames(ctx, h) {
+    ctx.fillStyle = '#202327';
+    ctx.fillRect(0, 0, NAME_W, h);
+    ctx.strokeStyle = '#33373d';
+    ctx.beginPath(); ctx.moveTo(NAME_W + 0.5, 0); ctx.lineTo(NAME_W + 0.5, h); ctx.stroke();
+    ctx.font = '11px Consolas,monospace';
+    selected.forEach(function (sig, i) {
+      var y = i * ROW_H + ROW_H / 2 + 4;
+      // 类型点
+      ctx.fillStyle = sig.width > 1 ? '#ffcc80' : '#4fc3f7';
+      ctx.beginPath();
+      if (sig.width > 1) ctx.fillRect(8, y - 8, 7, 7);
+      else { ctx.arc(11.5, y - 4.5, 3.5, 0, 7); ctx.fill(); }
+      ctx.fillStyle = '#c8c8c8';
+      ctx.fillText(truncText(ctx, sig.name, NAME_W - 44), 20, y);
+      if (sig.width > 1) {
+        ctx.fillStyle = '#5a5f66';
+        ctx.fillText(sig.width + 'b', 20, y + 0);  // 简单起见与名称同行空间有限，仅名称
+      }
+    });
+  }
+
+  function drawRuler(w, dpr, ticks) {
+    var ctx = ruler.getContext('2d');
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, w, RULER_H);
+    ctx.font = '10px Consolas,monospace';
+    // 名称栏延续
+    ctx.fillStyle = '#202327'; ctx.fillRect(0, 0, NAME_W, RULER_H);
+    ctx.strokeStyle = '#33373d';
+    ctx.beginPath(); ctx.moveTo(NAME_W + 0.5, 0); ctx.lineTo(NAME_W + 0.5, RULER_H); ctx.stroke();
+    ctx.fillStyle = '#8a8f98';
+    ctx.fillText('时间', 8, 16);
+    // 刻度
+    ctx.strokeStyle = 'rgba(255,255,255,.22)';
+    ctx.fillStyle = '#8a8f98';
+    ctx.beginPath();
+    ticks.forEach(function (t) {
+      var x = t2x(t);
+      ctx.moveTo(x + 0.5, RULER_H - 9); ctx.lineTo(x + 0.5, RULER_H);
+      ctx.fillText(fmtSeconds(t * SEC), x + 3, 10);
+    });
+    ctx.stroke();
+    // 概览条
+    var ovY = RULER_H - 4;
+    ctx.fillStyle = 'rgba(79,195,247,.25)';
+    ctx.fillRect(NAME_W, ovY, plotW(), 3);
     ctx.fillStyle = '#4fc3f7';
-    ctx.fillRect(t2x(viewStart), 16, Math.max(plotW() * viewSpan / END, 4), 5);
+    var wx = NAME_W + viewStart / END * plotW();
+    var ww = Math.max(viewSpan / END * plotW(), 5);
+    ctx.fillRect(wx, ovY - 1, ww, 5);
+    // 游标时间气泡
+    if (cursorT !== null) {
+      var x = t2x(cursorT);
+      if (x >= NAME_W && x <= w) {
+        var label = fmtTime(cursorT);
+        var tw = ctx.measureText(label).width + 10;
+        var bx = Math.min(Math.max(x - tw / 2, NAME_W), w - tw);
+        ctx.fillStyle = '#ffd54f';
+        ctx.fillRect(bx, 0, tw, 14);
+        ctx.fillStyle = '#1a1c1f';
+        ctx.fillText(label, bx + 5, 11);
+      }
+    }
   }
 
   function levelY(yTop, v) {
-    return v === '1' ? yTop + 5 : (v === '0' ? yTop + ROW_H - 9 : yTop + ROW_H / 2);
+    return v === '1' ? yTop + 6 : (v === '0' ? yTop + ROW_H - 9 : yTop + ROW_H / 2);
   }
 
-  function drawScalar(ctx, sig, yTop) {
+  function drawScalar(ctx, sig, yTop, fill) {
     var list = sig.changes;
     var i0 = firstVisibleIdx(list);
     var yXm = yTop + ROW_H / 2;
+    ctx.lineJoin = 'round'; ctx.lineCap = 'round';
     ctx.beginPath();
     for (var i = i0; i < list.length; i++) {
       var t1 = Math.max(list[i].t, viewStart);
@@ -560,75 +707,63 @@ const DATA = ${json};
         ctx.moveTo(x1, yXm - 3); ctx.lineTo(x2 + 1, yXm - 3);
         ctx.moveTo(x1, yXm + 3); ctx.lineTo(x2 + 1, yXm + 3);
       }
-      // 跳变沿垂直线
-      if (i + 1 < list.length && list[i + 1].t <= viewEnd() && x2 > 0) {
+      if (i + 1 < list.length && list[i + 1].t <= viewEnd() && x2 > NAME_W) {
         var vN = list[i + 1].value;
-        if ((v === '1' || v === '0') && (vN === '1' || vN === '0')) {
-          ctx.moveTo(x2, levelY(yTop, v)); ctx.lineTo(x2, levelY(yTop, vN));
-        } else if (v !== vN) {
-          ctx.moveTo(x2, levelY(yTop, v === '1' || v === '0' ? v : 'x'));
-          ctx.lineTo(x2, levelY(yTop, vN === '1' || vN === '0' ? vN : 'x'));
-        }
+        var yA = levelY(yTop, (v === '1' || v === '0') ? v : 'x');
+        var yB = levelY(yTop, (vN === '1' || vN === '0') ? vN : 'x');
+        if (yA !== yB) { ctx.moveTo(x2, yA); ctx.lineTo(x2, yB); }
       }
     }
     ctx.stroke();
+    ctx.lineJoin = 'miter'; ctx.lineCap = 'butt';
   }
 
-  function hexOf(bin) {
-    try { return BigInt('0b' + (bin || '0')).toString(16).toUpperCase(); }
-    catch (e) { return null; }
-  }
-
-  function drawBus(ctx, sig, yTop) {
+  function drawBus(ctx, sig, yTop, fill) {
     var list = sig.changes;
     var i0 = firstVisibleIdx(list);
-    var yT = yTop + 5, yB = yTop + ROW_H - 9, yM = yTop + ROW_H / 2;
+    var yT = yTop + 6, yB = yTop + ROW_H - 9, yM = yTop + ROW_H / 2;
     for (var i = i0; i < list.length; i++) {
       var t1 = Math.max(list[i].t, viewStart);
       if (t1 > viewEnd()) break;
       var t2 = (i + 1 < list.length) ? list[i + 1].t : viewEnd();
-      var x1 = t2x(t1), x2 = Math.min(t2x(t2), t2x(viewEnd()));
+      var x1 = Math.max(t2x(t1), NAME_W), x2 = Math.min(t2x(t2), t2x(viewEnd()));
       if (x2 - x1 < 1) continue;
       var v = list[i].value;
       if (/[^01]/.test(v)) {
-        // 含 x/z：红色中轴带
         ctx.save();
-        ctx.strokeStyle = '#f44336';
+        ctx.strokeStyle = '#ef5350';
         ctx.beginPath();
         ctx.moveTo(x1, yM - 3); ctx.lineTo(x2, yM - 3);
         ctx.moveTo(x1, yM); ctx.lineTo(x2, yM);
         ctx.moveTo(x1, yM + 3); ctx.lineTo(x2, yM + 3);
         ctx.stroke();
         ctx.restore();
-        ctx.strokeStyle = '#ffb74d';
+        ctx.strokeStyle = '#ffcc80';
         continue;
       }
-      if (x2 - x1 < 4) continue; // 太窄不画六边形
+      if (x2 - x1 < 4) continue;
       var pad = Math.min(EDGE, (x2 - x1) / 3);
+      // 半透明填充 + 描边
+      ctx.fillStyle = fill;
       ctx.beginPath();
       ctx.moveTo(x1 + pad, yT); ctx.lineTo(x2 - pad, yT);
       ctx.lineTo(x2, yM); ctx.lineTo(x2 - pad, yB);
       ctx.lineTo(x1 + pad, yB); ctx.lineTo(x1, yM);
       ctx.closePath();
-      ctx.stroke();
+      ctx.fill(); ctx.stroke();
+      // 居中标签（带底色药丸）
       var hx = hexOf(v);
       var label = hx !== null ? ('0x' + hx) : v;
-      if (v.length <= 8) label += ' (0b' + v + ')';
-      if (ctx.measureText(label).width < x2 - x1 - 10) {
-        ctx.fillStyle = '#e0e0e0';
-        ctx.fillText(label, x1 + pad + 3, yM + 4);
-        ctx.fillStyle = '#ffb74d';
+      if (v.length <= 10) label += ' 0b' + v;
+      var tw = ctx.measureText(label).width;
+      if (tw < x2 - x1 - 12) {
+        var cx = (x1 + x2) / 2;
+        ctx.fillStyle = 'rgba(26,28,31,.85)';
+        ctx.fillRect(cx - tw / 2 - 3, yM - 7, tw + 6, 14);
+        ctx.fillStyle = '#ffe0b2';
+        ctx.fillText(label, cx - tw / 2, yM + 4);
       }
     }
-  }
-
-  function drawCursorLine(ctx, h) {
-    var x = t2x(cursorT);
-    if (x < 0 || x > canvas.clientWidth) return;
-    ctx.save();
-    ctx.strokeStyle = '#dcdcaa'; ctx.setLineDash([4, 3]);
-    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke();
-    ctx.restore();
   }
 
   // ---------- 交互 ----------
@@ -637,10 +772,10 @@ const DATA = ${json};
     viewStart = Math.min(Math.max(viewStart, 0), Math.max(END - viewSpan, 0));
   }
   function zoomAt(factor, anchorX) {
-    var tAnchor = x2t(anchorX != null ? anchorX : (WAVE_LEFT + plotW() / 2));
+    var tAnchor = x2t(anchorX != null ? anchorX : (NAME_W + plotW() / 2));
     viewSpan = viewSpan / factor;
     clampView();
-    viewStart = tAnchor - (anchorX != null ? anchorX - WAVE_LEFT : plotW() / 2) / plotW() * viewSpan;
+    viewStart = tAnchor - ((anchorX != null ? anchorX : NAME_W + plotW() / 2) - NAME_W) / plotW() * viewSpan;
     clampView();
     draw();
   }
@@ -670,18 +805,43 @@ const DATA = ${json};
   });
   window.addEventListener('mouseup', function () { dragging = null; });
 
+  function setCursor(t) {
+    cursorT = Math.min(Math.max(t, 0), END);
+    cursorInfo.innerHTML = '<span class="t">t =</span> ' + esc(fmtTime(cursorT)) +
+      ' <span class="t">(' + cursorT + ' ticks)</span>';
+    draw();
+  }
+
   canvas.addEventListener('click', function (e) {
     if (dragging && dragging.moved) return;
+    if (e.offsetX < NAME_W) return;
     cursorT = x2t(e.offsetX);
     var row = Math.floor(e.offsetY / ROW_H);
     var sig = selected[row];
-    var vTxt = sig ? valueAt(sig, cursorT) : null;
-    var pretty = vTxt === null ? '' :
-      (sig.width > 1 ? (hexOf(vTxt) !== null ? '0x' + hexOf(vTxt) + ' (0b' + vTxt + ')' : vTxt)
-        : (sig.type === 'real' ? vTxt : vTxt));
-    cursorInfo.textContent = 't=' + fmtTime(cursorT) +
-      (sig ? '   ' + sig.path + ' = ' + pretty : '');
+    var html = '<span class="t">t =</span> ' + esc(fmtTime(cursorT));
+    if (sig) {
+      var v = valueAt(sig, cursorT);
+      var pretty = sig.width > 1
+        ? (hexOf(v) !== null ? '0x' + hexOf(v) : v) + ' <span class="t">(0b' + v + ')</span>'
+        : esc(v);
+      html += '   <span style="color:' + (sig.width > 1 ? '#ffcc80' : '#4fc3f7') + '">' +
+        esc(sig.path) + '</span> = ' + pretty;
+    }
+    cursorInfo.innerHTML = html;
     draw();
+  });
+
+  // 点击刻度尺：概览条区居中跳转，刻度区放游标
+  ruler.addEventListener('click', function (e) {
+    if (e.offsetX < NAME_W) return;
+    if (e.offsetY >= RULER_H - 8) {
+      var t = (e.offsetX - NAME_W) / plotW() * END;
+      viewStart = t - viewSpan / 2;
+      clampView();
+      draw();
+    } else {
+      setCursor(x2t(e.offsetX));
+    }
   });
 
   document.getElementById('zoomIn').onclick = function () { zoomAt(1.3, null); };
