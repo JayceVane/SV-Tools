@@ -373,6 +373,17 @@
           "default": true,
           "description": "Run iverilog syntax check on save and report diagnostics in the Problems panel"
         },
+        "svtools.iverilog.lintOnChange": {
+          "type": "boolean",
+          "default": true,
+          "description": "Run iverilog syntax check while typing (debounced, lints the unsaved buffer via a temp file)"
+        },
+        "svtools.iverilog.lintDebounceMs": {
+          "type": "number",
+          "default": 800,
+          "minimum": 100,
+          "description": "Debounce delay in milliseconds for lint-on-type"
+        },
         "svtools.iverilog.lintOnOpen": {
           "type": "boolean",
           "default": true,

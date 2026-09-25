@@ -6,12 +6,16 @@ All notable changes to the SystemVerilog VSCode Extension will be documented in 
 
 ### Added
 - **Icarus Verilog 集成：语法检查与仿真验证**
-  - 打开 / 保存 `.v` / `.sv` 文件时自动运行 `iverilog -tnull` lint，诊断进入 Problems 面板（可点击跳转、按行高亮）
+  - **输入（防抖）/ 打开 / 保存 `.v` / `.sv` 文件时自动运行** `iverilog -tnull` lint，诊断进入 Problems 面板（可点击跳转、按行高亮）；未保存的缓冲区内容经临时文件参与检查，输出路径自动回映射到原文件
+  - 每次 lint 在输出通道记录 `[lint] 文件 → N 错误, M 警告 (耗时)` 轨迹，自动触发是否生效一目了然
   - 一键仿真：状态栏 ▶ 按钮 / 命令面板 "Icarus Verilog: Run Simulation"，编译 + vvp 流式输出到独立通道，支持停止与超时自动终止
   - 多文件工程支持：`simFiles` glob 附加源文件、`simTop` 指定顶层、`includePaths` / `libraryPaths` 头文件与模块库目录
   - 仿真产生的 `.vcd` / `.fst` 波形自动检测并提示，可调起外部波形查看器（`waveViewer`）
   - 工具链自动探测（配置 → `IVERILOG_HOME` → `PATH` → 常见目录）；Cygwin 构建 iverilog 缺 `cygwin1.dll` 时自动定位同级 Cygwin 安装注入 PATH（`0xC0000135` 退出码 + DLL 目录启发式）
   - 语言标准自动选择（`.sv`→`-g2012`、`.v`→`-g2005`），`svtools.iverilog.standard` 可覆盖
+
+### Fixed
+- 手动 lint 命令现在会清除缓存的工具链探测失败状态并强制重新探测，环境修复后无需重载窗口即可恢复自动 lint
 
 ## [3.4.1] - 2026-08-15
 

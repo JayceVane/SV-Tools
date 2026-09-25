@@ -21,6 +21,7 @@
  */
 
 const { spawn } = require('child_process');
+const crypto = require('crypto');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -139,10 +140,11 @@ function buildChildEnv(cygwinBinDir) {
  * @param {string[]} args 参数
  * @param {{cwd?: string, env?: NodeJS.ProcessEnv}} options spawn 选项
  * @param {number} [timeoutMs=0] 超时毫秒数，0 表示不限制
- * @returns {Promise<{code: number, stdout: string, stderr: string, errorMessage: string|null, timedOut: boolean}>}
+ * @returns {Promise<{code: number, stdout: string, stderr: string, errorMessage: string|null, timedOut: boolean, elapsedMs: number}>}
  */
 function runTool(command, args, options, timeoutMs = 0) {
     return new Promise((resolve) => {
+        const startedAt = Date.now();
         let child;
         try {
             child = spawn(command, args, {
@@ -151,7 +153,7 @@ function runTool(command, args, options, timeoutMs = 0) {
                 windowsHide: true
             });
         } catch (err) {
-            resolve({ code: -1, stdout: '', stderr: '', errorMessage: String(err), timedOut: false });
+            resolve({ code: -1, stdout: '', stderr: '', errorMessage: String(err), timedOut: false, elapsedMs: 0 });
             return;
         }
 
@@ -171,7 +173,7 @@ function runTool(command, args, options, timeoutMs = 0) {
             if (settled) return;
             settled = true;
             if (timer) clearTimeout(timer);
-            resolve({ code, stdout, stderr, errorMessage: errorMessage || null, timedOut });
+            resolve({ code, stdout, stderr, errorMessage: errorMessage || null, timedOut, elapsedMs: Date.now() - startedAt });
         };
 
         child.stdout.on('data', d => { stdout += d.toString(); });
@@ -349,6 +351,8 @@ function activateIverilog(context) {
     let activeSim = null;
     /** 每个文档的 lint 世代计数，旧的异步结果不覆盖新结果 */
     const lintGenerations = new Map();
+    /** 每个文档的 on-change 防抖定时器 */
+    const lintDebounceTimers = new Map();
 
     function getConfig() {
         return vscode.workspace.getConfiguration('svtools.iverilog');
@@ -412,6 +416,8 @@ function activateIverilog(context) {
 
     /**
      * 对单个文档执行 iverilog 语法检查并更新诊断。
+     * 文档有未保存修改时，把缓冲区内容写入临时文件进行 lint（保持 include/库目录
+     * 指向原文件目录），并把输出的临时路径回映射为原文件，保证 squiggle 落在正确位置。
      * @param {vscode.TextDocument} document
      * @returns {Promise<{ok: boolean, errorCount: number, warningCount: number}>}
      *          ok = 编译退出码为 0 且无 error 级诊断（仅警告视为通过）
@@ -425,13 +431,28 @@ function activateIverilog(context) {
         try {
             toolchain = await resolveToolchain();
         } catch (err) {
+            channel.appendLine(`[lint] 工具链不可用：${err.message}`);
             showToolchainError(err.message);
-            return false;
+            return empty;
         }
 
         const filePath = document.uri.fsPath;
         const fileDir = path.dirname(filePath);
         const config = getConfig();
+
+        let lintTarget = filePath;
+        let tempFile = null;
+        if (document.isDirty) {
+            const hash = crypto.createHash('md5').update(document.uri.toString()).digest('hex').slice(0, 10);
+            tempFile = path.join(os.tmpdir(), `svtools-lint-${hash}${path.extname(filePath)}`);
+            try {
+                fs.writeFileSync(tempFile, document.getText());
+                lintTarget = tempFile;
+            } catch (err) {
+                channel.appendLine(`[lint] 写入临时文件失败，回退用磁盘内容：${err.message}`);
+                tempFile = null;
+            }
+        }
 
         const args = [
             '-tnull',
@@ -442,23 +463,34 @@ function activateIverilog(context) {
                 libraryPaths: [fileDir, ...resolveConfigPaths(config.get('libraryPaths'), fileDir)],
                 extraArgs: ['-Y', '.sv', ...config.get('lintArgs', [])]
             }),
-            filePath
+            lintTarget
         ];
 
         const gen = (lintGenerations.get(document.uri.toString()) || 0) + 1;
         lintGenerations.set(document.uri.toString(), gen);
 
         const result = await runTool(toolchain.iverilog, args, { cwd: fileDir, env: toolchain.env });
+        if (tempFile) {
+            try { fs.unlinkSync(tempFile); } catch (err) { /* 清理失败可忽略 */ }
+        }
         if (lintGenerations.get(document.uri.toString()) !== gen) return empty; // 已被更新的 lint 取代
 
-        const findings = parseCompilerOutput(`${result.stderr}\n${result.stdout}`, fileDir);
+        let raw = `${result.stderr}\n${result.stdout}`;
+        if (tempFile) {
+            // 把 iverilog 输出中的临时文件路径映射回原文件，诊断才能落在正确的编辑器上
+            raw = raw.split(tempFile).join(filePath);
+        }
+        const findings = parseCompilerOutput(raw, fileDir);
         applyDiagnostics(document, findings);
         const errorCount = findings.filter(f => f.severity === 'error').length;
-        return {
+        const summary = {
             ok: result.code === 0 && errorCount === 0,
             errorCount,
             warningCount: findings.length - errorCount
         };
+        // 触发轨迹写入输出通道，便于确认自动 lint 是否生效
+        channel.appendLine(`[lint] ${path.basename(filePath)}${document.isDirty ? '（缓冲区）' : ''} → ${errorCount} 错误, ${summary.warningCount} 警告 (${result.elapsedMs}ms)`);
+        return summary;
     }
 
     let toolchainErrorShown = false;
@@ -687,12 +719,32 @@ function activateIverilog(context) {
         vscode.workspace.onDidOpenTextDocument(document => {
             if (getConfig().get('lintOnOpen')) lintDocument(document);
         }),
+        vscode.workspace.onDidChangeTextDocument(event => {
+            if (!getConfig().get('lintOnChange')) return;
+            if (event.contentChanges.length === 0) return;
+            const document = event.document;
+            if (!isVerilogDocument(document) || document.uri.scheme !== 'file') return;
+            // 防抖：停止输入一段时间后才触发，避免每个按键起一个 iverilog 进程
+            const key = document.uri.toString();
+            const pending = lintDebounceTimers.get(key);
+            if (pending) clearTimeout(pending);
+            const delay = Math.max(100, Number(getConfig().get('lintDebounceMs')) || 800);
+            lintDebounceTimers.set(key, setTimeout(() => {
+                lintDebounceTimers.delete(key);
+                lintDocument(document);
+            }, delay));
+        }),
         vscode.workspace.onDidSaveTextDocument(document => {
             if (getConfig().get('lintOnSave')) lintDocument(document);
         }),
         vscode.workspace.onDidCloseTextDocument(document => {
             diagnostics.delete(document.uri);
             lintGenerations.delete(document.uri.toString());
+            const pending = lintDebounceTimers.get(document.uri.toString());
+            if (pending) {
+                clearTimeout(pending);
+                lintDebounceTimers.delete(document.uri.toString());
+            }
         }),
         vscode.workspace.onDidChangeConfiguration(event => {
             if (!event.affectsConfiguration('svtools.iverilog')) return;
@@ -714,6 +766,11 @@ function activateIverilog(context) {
             if (!editor) {
                 vscode.window.showWarningMessage('没有打开的编辑器。');
                 return { ok: false, errorCount: 0, warningCount: 0 };
+            }
+            // 手动触发时清除缓存的探测失败，允许用户修复环境后立即恢复
+            if (toolchainFailure) {
+                toolchainFailure = null;
+                channel.appendLine('[lint] 手动触发：重新探测工具链');
             }
             const summary = await lintDocument(editor.document);
             let message;
