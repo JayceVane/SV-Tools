@@ -16,11 +16,11 @@
  * 内置 VCD 波形查看器：解析 + webview 渲染。
  *
  * 模块分层：
- *  - parseVcd / buildSignalTree 为纯函数，不依赖 vscode，可独立单元测试；
+ *  - parseVcd / buildSignalTree / parseTimescaleSeconds 为纯函数，不依赖 vscode，可独立单元测试；
  *  - activateWaveViewer() 负责 VSCode 集成（webview 面板、命令、与仿真联动）。
  *
- * VCD 语法参考 IEEE 1364：头信息（$date/$timescale 等）、$scope/$var 层级、
- * #时间戳 + 值变更（标量 0/1/x/z，向量 b/r）。
+ * 渲染采用视口窗口模型：canvas 固定为可视区大小，只绘制 [viewStart, viewStart+viewSpan]
+ * 时间窗口内的变更（二分查找定位），任意时间跨度（如 1ns 下 245e9 ticks）均可缩放浏览。
  */
 
 const HEADER_KEYS = ['$date', '$version', '$timescale', '$comment'];
@@ -164,6 +164,19 @@ function parseNumber(text) {
 }
 
 /**
+ * 解析 $timescale 为「每个时间单位对应的秒数」。如 '1ns' → 1e-9，'10ps' → 1e-10。
+ * @param {string} timescale 如 '1s'、'1ns'、'100ps'、'10 us'
+ * @returns {number|null} 秒数；无法解析返回 null
+ */
+function parseTimescaleSeconds(timescale) {
+    const m = String(timescale || '').trim().match(/^(\d+(?:\.\d+)?)\s*(s|ms|us|ns|ps|fs)$/i);
+    if (!m) return null;
+    const value = parseFloat(m[1]);
+    const unitFactors = { s: 1, ms: 1e-3, us: 1e-6, ns: 1e-9, ps: 1e-12, fs: 1e-15 };
+    return value * unitFactors[m[2].toLowerCase()];
+}
+
+/**
  * 把扁平 var 列表组织成 scope 树（供信号树面板展示）。
  * 同一 id 可能在多个 scope 出现（父模块信号在子 scope 的引用），按 path 全部保留。
  * @param {ReturnType<typeof parseVcd>} vcd
@@ -184,13 +197,16 @@ function buildSignalTree(vcd) {
         parent.children.push(node);
     }
     for (const v of vcd.vars) {
+        // 参数/规格参数是常量，对波形查看无意义（iverilog 会把它们 dump 成 t=0 变更），不进树
+        if (/^(spec)?parameter$/i.test(v.type)) continue;
         const parent = scopeNodes.get(v.scopePath) || root;
         parent.children.push({
             name: v.name,
             path: v.path,
             id: v.id,
             width: v.width,
-            type: v.type
+            type: v.type,
+            hasChanges: vcd.changes.has(v.id) && vcd.changes.get(v.id).length > 0
         });
     }
     return root;
@@ -262,14 +278,13 @@ function activateWaveViewer(context, deps) {
 }
 
 /**
- * 生成波形查看器 webview HTML（内联全部脚本与样式，Canvas 渲染）。
+ * 生成波形查看器 webview HTML（内联全部脚本与样式，Canvas 视口窗口渲染）。
  * @param {ReturnType<typeof parseVcd>} vcd
  * @param {{fileName: string, timescale: string, cspSource: string}} meta
  * @returns {string}
  */
 function buildWaveformHtml(vcd, meta) {
     const tree = buildSignalTree(vcd);
-    // 传给 webview 的精简数据：id → 变更时间轴
     const signals = [];
     for (const v of vcd.vars) {
         signals.push({
@@ -281,6 +296,7 @@ function buildWaveformHtml(vcd, meta) {
     const payload = {
         fileName: meta.fileName,
         timescale: meta.timescale,
+        secondsPerTime: parseTimescaleSeconds(meta.timescale),
         endTime: vcd.endTime,
         tree,
         signals
@@ -294,8 +310,8 @@ function buildWaveformHtml(vcd, meta) {
 <meta charset="UTF-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline';">
 <style>
-  :root { --bg:#1e1e1e; --fg:#cccccc; --panel:#252526; --border:#3c3c3c; --accent:#007acc;
-          --line-0:#4fc3f7; --line-1:#4fc3f7; --bus:#ffb74d; --x:#f44336; --sel:#264f78; }
+  :root { --bg:#1e1e1e; --fg:#cccccc; --panel:#252526; --border:#3c3c3c;
+          --line:#4fc3f7; --bus:#ffb74d; --x:#f44336; --sel:#264f78; --ruler:#9e9e9e; }
   body { margin:0; display:flex; flex-direction:column; height:100vh;
          background:var(--bg); color:var(--fg); font-family:Consolas,monospace; font-size:13px; }
   header { padding:6px 10px; background:var(--panel); border-bottom:1px solid var(--border);
@@ -309,273 +325,383 @@ function buildWaveformHtml(vcd, meta) {
   .sig { padding:2px 8px 2px 20px; cursor:pointer; white-space:nowrap; display:flex; gap:6px; }
   .sig:hover { background:#2a2d2e; }
   .sig.selected { background:var(--sel); }
-  .sig .dir { color:#6a9955; }
   .sig .w { color:#6a6a6a; }
-  #waveWrap { flex:1; overflow:auto; position:relative; }
+  .hidden-note { color:#6a6a6a; padding:4px 8px; }
+  #right { flex:1; display:flex; flex-direction:column; min-width:0; }
+  #cursorInfo { padding:2px 8px; background:rgba(37,37,38,.92);
+                border-bottom:1px solid var(--border); color:#dcdcaa; min-height:1.2em;
+                white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  #ruler { display:block; background:var(--bg); }
+  #waveScroller { flex:1; overflow-y:auto; overflow-x:hidden; position:relative; }
   #waveCanvas { display:block; cursor:crosshair; }
-  #cursorInfo { position:sticky; top:0; left:0; padding:2px 8px; background:rgba(37,37,38,.92);
-                border-bottom:1px solid var(--border); color:#dcdcaa; min-height:1.2em; }
   footer { padding:4px 10px; background:var(--panel); border-top:1px solid var(--border);
            display:flex; gap:10px; align-items:center; }
   button { background:#333; color:var(--fg); border:1px solid var(--border); border-radius:3px;
            padding:2px 10px; cursor:pointer; }
   button:hover { background:#3f3f46; }
-  #zoomLabel { color:#9e9e9e; min-width:90px; text-align:center; }
+  #zoomLabel { color:#9e9e9e; min-width:110px; text-align:center; }
+  span.hint { color:#6a6a6a; }
 </style>
 </head>
 <body>
 <header>
-  <b>${escapeHtml(meta.fileName)}</b>
-  <span class="meta">timescale: ${escapeHtml(meta.timescale || '(未声明)')}</span>
+  <b id="title"></b>
+  <span class="meta" id="tsInfo"></span>
   <span class="meta" id="endTime"></span>
 </header>
 <div id="main">
   <div id="sigPanel"></div>
-  <div id="waveWrap"><div id="cursorInfo"></div><canvas id="waveCanvas"></canvas></div>
+  <div id="right">
+    <div id="cursorInfo">点击波形放置游标</div>
+    <canvas id="ruler" height="24"></canvas>
+    <div id="waveScroller"><canvas id="waveCanvas"></canvas></div>
+  </div>
 </div>
 <footer>
   <button id="zoomOut">−</button>
   <span id="zoomLabel"></span>
   <button id="zoomIn">+</button>
   <button id="zoomFit">Fit</button>
-  <span class="meta">点击波形放置游标 · Ctrl+滚轮缩放 · 滚轮横向滚动</span>
+  <span class="hint">点击放游标 · Ctrl+滚轮缩放 · 滚轮/拖拽平移 · 点击信号树加/删波形</span>
 </footer>
 <script>
 const DATA = ${json};
 </script>
 <script>
-/* 波形渲染：信号面板 + Canvas 时序图（内联脚本第二段，DATA 已注入） */
+/* 波形渲染（视口窗口模型）：只画 [viewStart, viewStart+viewSpan] 窗口内的时间段 */
 (function () {
-  const canvas = document.getElementById('waveCanvas');
-  const wrap = document.getElementById('waveWrap');
-  const sigPanel = document.getElementById('sigPanel');
-  const cursorInfo = document.getElementById('cursorInfo');
-  const zoomLabel = document.getElementById('zoomLabel');
-  document.getElementById('endTime').textContent = 'end: ' + DATA.endTime;
+  var RULER_H = 24, ROW_H = 26, WAVE_LEFT = 10, EDGE = 6;
+  var canvas = document.getElementById('waveCanvas');
+  var ruler = document.getElementById('ruler');
+  var scroller = document.getElementById('waveScroller');
+  var sigPanel = document.getElementById('sigPanel');
+  var cursorInfo = document.getElementById('cursorInfo');
+  var zoomLabel = document.getElementById('zoomLabel');
 
-  const ROW_H = 26, WAVE_LEFT = 10, EDGE_TICK = 6;
-  const SIG_COLORS = { scalar: '#4fc3f7', bus: '#ffb74d' };
-  let selectedIds = new Set();
-  let pxPerTime = 20;            // 缩放
-  let viewOffset = 0;            // 横向滚动（时间单位）
+  var END = DATA.endTime > 0 ? DATA.endTime : 1;
+  var SEC = (typeof DATA.secondsPerTime === 'number') ? DATA.secondsPerTime : 1e-9;
+  var viewStart = 0, viewSpan = END;   // 视口窗口（时间单位）
+  var cursorT = null;
+  var dragging = null;
 
-  const signalsById = new Map(DATA.signals.map(s => [s.id, s]));
+  var selected = [];
+  var byId = {};
+  var noChangeCount = 0;
+  DATA.signals.forEach(function (s) {
+    byId[s.id + '|' + s.path] = s;
+    if (s.changes.length > 0) selected.push(s);
+    else noChangeCount++;
+  });
 
-  // ---- 信号树 ----
+  function plotW() { return Math.max(canvas.clientWidth - WAVE_LEFT - 10, 50); }
+  function viewEnd() { return viewStart + viewSpan; }
+  function t2x(t) { return WAVE_LEFT + (t - viewStart) / viewSpan * plotW(); }
+  function x2t(x) { return viewStart + (x - WAVE_LEFT) / plotW() * viewSpan; }
+
+  function fmtSeconds(sec) {
+    var abs = Math.abs(sec);
+    var units = [[1e-12,'ps'],[1e-9,'ns'],[1e-6,'us'],[1e-3,'ms'],[1,'s']];
+    for (var i = 0; i < units.length; i++) {
+      if (abs < units[i][0] * (i < units.length-1 ? 500 : 1e9) || i === units.length-1) {
+        if (abs < units[i][0]) continue;
+        var v = sec / units[i][0];
+        return (Math.round(v * 1000) / 1000) + ' ' + units[i][1];
+      }
+    }
+    return sec + ' s';
+  }
+  function fmtTime(t) { return fmtSeconds(t * SEC); }
+
+  // ---------- 信号树 ----------
   function renderTree() {
     sigPanel.innerHTML = '';
+    var selectedKeys = {};
+    selected.forEach(function (s) { selectedKeys[s.id + '|' + s.path] = 1; });
     (function walk(nodes) {
-      for (const node of nodes) {
+      nodes.forEach(function (node) {
         if (node.children) {
-          const div = document.createElement('div');
+          var div = document.createElement('div');
           div.className = 'scope';
-          div.textContent = node.path + ' (scope ' + node.type + ')';
+          div.textContent = node.path;
           sigPanel.appendChild(div);
           walk(node.children);
         } else {
-          const div = document.createElement('div');
-          div.className = 'sig' + (selectedIds.has(node.id) ? ' selected' : '');
-          div.dataset.id = node.id;
-          div.innerHTML = '<span>' + escapeHtml(node.name) + '</span>' +
+          var row = document.createElement('div');
+          var isSel = selectedKeys[node.id + '|' + node.path] === 1;
+          row.className = 'sig' + (isSel ? ' selected' : '');
+          row.innerHTML = '<span>' + esc(node.name) + '</span>' +
             '<span class="w">' + (node.width > 1 ? '[' + node.width + 'b]' : '') + '</span>';
-          div.onclick = () => toggleSignal(node.id);
-          sigPanel.appendChild(div);
+          row.onclick = function () { toggleSignal(node); };
+          sigPanel.appendChild(row);
         }
-      }
+      });
     })(DATA.tree.children);
-    if (!DATA.tree.children.length) sigPanel.textContent = '(无信号)';
+    if (noChangeCount > 0) {
+      var note = document.createElement('div');
+      note.className = 'hidden-note';
+      note.textContent = '(' + noChangeCount + ' 个无变更信号已隐藏)';
+      sigPanel.appendChild(note);
+    }
   }
-
-  function toggleSignal(id) {
-    if (selectedIds.has(id)) selectedIds.delete(id);
-    else selectedIds.add(id);
-    if (selectedIds.size === 0) DATA.signals.forEach(s => selectedIds.add(s.id));
+  function toggleSignal(node) {
+    if (!node.hasChanges) return;
+    var idx = -1;
+    for (var i = 0; i < selected.length; i++) {
+      if (selected[i].id === node.id && selected[i].path === node.path) { idx = i; break; }
+    }
+    if (idx >= 0) selected.splice(idx, 1); else selected.push(node);
     renderTree();
     draw();
   }
-  // 默认全选
-  DATA.signals.forEach(s => selectedIds.add(s.id));
 
-  // ---- 坐标换算 ----
-  const t2x = t => WAVE_LEFT + (t - viewOffset) * pxPerTime;
-  const x2t = x => viewOffset + (x - WAVE_LEFT) / pxPerTime;
-
-  function visibleRows() {
-    return DATA.signals.filter(s => selectedIds.has(s.id));
+  // ---------- 可见变更定位 ----------
+  function firstVisibleIdx(list) {
+    var lo = 0, hi = list.length - 1, ans = 0;
+    while (lo <= hi) {
+      var mid = (lo + hi) >> 1;
+      if (list[mid].t <= viewStart) { ans = mid; lo = mid + 1; } else { hi = mid - 1; }
+    }
+    return ans;
+  }
+  function valueAt(sig, t) {
+    var list = sig.changes;
+    if (!list.length) return '?';
+    var v = list[0].value;
+    for (var i = 0; i < list.length; i++) {
+      if (list[i].t <= t) v = list[i].value; else break;
+    }
+    return v;
   }
 
-  // ---- Canvas 绘制 ----
+  // ---------- 绘制 ----------
   function draw() {
-    const rows = visibleRows();
-    const width = Math.max(wrap.clientWidth, t2x(DATA.endTime) + 40);
-    const height = Math.max(rows.length * ROW_H + 8, wrap.clientHeight);
-    const dpr = window.devicePixelRatio || 1;
-    canvas.width = width * dpr; canvas.height = height * dpr;
-    canvas.style.width = width + 'px'; canvas.style.height = height + 'px';
-    const ctx = canvas.getContext('2d');
+    var dpr = window.devicePixelRatio || 1;
+    var w = Math.max(document.getElementById('right').clientWidth, 100);
+    var h = Math.max(selected.length * ROW_H + 8, scroller.clientHeight);
+    setupCanvas(canvas, w, h, dpr);
+    setupCanvas(ruler, w, RULER_H, dpr);
+    var ctx = canvas.getContext('2d');
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.clearRect(0, 0, width, height);
+    ctx.clearRect(0, 0, w, h);
     ctx.font = '11px Consolas,monospace';
 
-    rows.forEach((sig, i) => {
-      const yTop = i * ROW_H + 4, yMid = i * ROW_H + ROW_H / 2;
-      // 行背景交替
-      if (i % 2) { ctx.fillStyle = 'rgba(255,255,255,.03)'; ctx.fillRect(0, yTop - 4, width, ROW_H); }
-      drawSignal(ctx, sig, yTop, yMid);
+    drawRuler(w, dpr);
+
+    // 视口范围内的信号变更量级保护：窗口内变更点过多时跳过标签
+    selected.forEach(function (sig, i) {
+      var yTop = i * ROW_H + 4;
+      if (i % 2) { ctx.fillStyle = 'rgba(255,255,255,.03)'; ctx.fillRect(0, yTop - 4, w, ROW_H); }
+      ctx.strokeStyle = sig.width > 1 ? '#ffb74d' : '#4fc3f7';
+      ctx.fillStyle = ctx.strokeStyle;
+      ctx.lineWidth = 1.4;
+      if (sig.width === 1 && sig.type !== 'real') drawScalar(ctx, sig, yTop);
+      else drawBus(ctx, sig, yTop);
+      // 行首信号名水印
+      ctx.fillStyle = 'rgba(255,255,255,.35)';
+      ctx.fillText(sig.name, 2, yTop + ROW_H / 2 + 2);
+      ctx.fillStyle = sig.width > 1 ? '#ffb74d' : '#4fc3f7';
     });
-    zoomLabel.textContent = Math.round(pxPerTime * 10) / 10 + ' px/t';
+    if (cursorT !== null) drawCursorLine(ctx, h);
+    zoomLabel.textContent = '可见 ' + fmtTime(viewSpan);
   }
 
-  function drawSignal(ctx, sig, yTop, yMid) {
-    const changes = sig.changes;
-    if (!changes.length) {
-      ctx.fillStyle = '#777'; ctx.fillText('(无变更)', yMid && WAVE_LEFT, yMid);
-      return;
-    }
-    const color = sig.width > 1 ? SIG_COLORS.bus : SIG_COLORS.scalar;
-    ctx.strokeStyle = color; ctx.fillStyle = color; ctx.lineWidth = 1.4;
-
-    if (sig.width === 1 && sig.type !== 'real') {
-      drawScalar(ctx, changes, yTop, yMid, color);
-    } else {
-      drawBus(ctx, changes, yTop, yMid, sig.width);
-    }
+  function setupCanvas(c, w, h, dpr) {
+    c.width = w * dpr; c.height = h * dpr;
+    c.style.width = w + 'px'; c.style.height = h + 'px';
   }
 
-  function drawScalar(ctx, changes, yTop, yMid, color) {
-    const yHigh = yTop + 4, yLow = yTop + ROW_H - 8, yXmid = yMid;
+  function drawRuler(w, dpr) {
+    var ctx = ruler.getContext('2d');
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, w, RULER_H);
+    ctx.font = '10px Consolas,monospace';
+    ctx.fillStyle = '#9e9e9e';
+    ctx.strokeStyle = 'rgba(255,255,255,.18)';
+    // 刻度步长取 1-2-5 序列，保证相邻刻度 ≥ 90px
+    var secPerPx = SEC * viewSpan / plotW();
+    var targetSec = secPerPx * 90;
+    var pow = Math.pow(10, Math.floor(Math.log10(targetSec)));
+    var step = pow;
+    [5, 2, 1].some(function (m) { if (targetSec <= m * pow) { step = m * pow; return true; } return false; });
+    var stepT = step / SEC;
     ctx.beginPath();
-    let prevX = null, prevLevel = null;
-    for (let i = 0; i <= changes.length; i++) {
-      const ch = changes[i];
-      const t = i < changes.length ? ch.t : (DATA.endTime + (changes[changes.length-1].t < DATA.endTime ? DATA.endTime - changes[changes.length-1].t : 1));
-      const x = t2x(t);
-      if (x < -EDGE_TICK) { prevX = x; prevLevel = levelOf(changes[Math.max(i-1,0)].value); continue; }
-      const level = prevLevel !== null ? prevLevel : levelOf(changes[Math.max(i-1,0)] ? changes[Math.max(i-1,0)].value : 'x');
-      const xStart = Math.max(prevX !== null ? prevX : x, -10);
-      const xEnd = Math.min(x, canvas.clientWidth / (window.devicePixelRatio||1) + 50);
-      const prevT = i > 0 ? changes[i-1].t : 0;
-      const xSegStart = t2x(prevT), xSegEnd = x;
-      const lv = levelOf(i > 0 ? changes[i-1].value : (changes[0].value === '1' ? '0' : 'x'));
-      drawSegment(ctx, xSegStart, xSegEnd, yHigh, yLow, yXmid, lv);
-      prevX = x; prevLevel = levelOf(ch.value);
+    for (var t = Math.ceil(viewStart / stepT) * stepT; t <= viewEnd(); t += stepT) {
+      var x = t2x(t);
+      ctx.moveTo(x, 14); ctx.lineTo(x, RULER_H);
+      ctx.fillText(fmtSeconds(t * SEC), x + 3, 10);
+    }
+    ctx.stroke();
+    // 全程概览条
+    ctx.fillStyle = 'rgba(79,195,247,.35)';
+    ctx.fillRect(WAVE_LEFT, 17, plotW(), 3);
+    ctx.fillStyle = '#4fc3f7';
+    ctx.fillRect(t2x(viewStart), 16, Math.max(plotW() * viewSpan / END, 4), 5);
+  }
+
+  function levelY(yTop, v) {
+    return v === '1' ? yTop + 5 : (v === '0' ? yTop + ROW_H - 9 : yTop + ROW_H / 2);
+  }
+
+  function drawScalar(ctx, sig, yTop) {
+    var list = sig.changes;
+    var i0 = firstVisibleIdx(list);
+    var yXm = yTop + ROW_H / 2;
+    ctx.beginPath();
+    for (var i = i0; i < list.length; i++) {
+      var t1 = Math.max(list[i].t, viewStart);
+      if (t1 > viewEnd()) break;
+      var t2 = (i + 1 < list.length) ? list[i + 1].t : viewEnd();
+      var x1 = t2x(t1), x2 = t2x(Math.min(t2, viewEnd()));
+      var v = list[i].value;
+      if (v === '1' || v === '0') {
+        var y = levelY(yTop, v);
+        ctx.moveTo(x1, y); ctx.lineTo(x2 + 1, y);
+      } else {
+        ctx.moveTo(x1, yXm - 3); ctx.lineTo(x2 + 1, yXm - 3);
+        ctx.moveTo(x1, yXm + 3); ctx.lineTo(x2 + 1, yXm + 3);
+      }
+      // 跳变沿垂直线
+      if (i + 1 < list.length && list[i + 1].t <= viewEnd() && x2 > 0) {
+        var vN = list[i + 1].value;
+        if ((v === '1' || v === '0') && (vN === '1' || vN === '0')) {
+          ctx.moveTo(x2, levelY(yTop, v)); ctx.lineTo(x2, levelY(yTop, vN));
+        } else if (v !== vN) {
+          ctx.moveTo(x2, levelY(yTop, v === '1' || v === '0' ? v : 'x'));
+          ctx.lineTo(x2, levelY(yTop, vN === '1' || vN === '0' ? vN : 'x'));
+        }
+      }
     }
     ctx.stroke();
   }
 
-  function levelOf(v) { return v === '1' ? 1 : (v === '0' ? 0 : 2); }
-
-  function drawSegment(ctx, x1, x2, yHigh, yLow, yXmid, level) {
-    if (x2 < 0 || x1 > canvas.clientWidth) return;
-    const xx1 = Math.max(x1, 0), xx2 = x2;
-    if (level === 2) {
-      // x/z：中轴双横线
-      ctx.moveTo(xx1, yXmid - 3); ctx.lineTo(xx2, yXmid - 3);
-      ctx.moveTo(xx1, yXmid + 3); ctx.lineTo(xx2, yXmid + 3);
-    } else {
-      const y = level === 1 ? yHigh : yLow;
-      ctx.moveTo(xx1, y); ctx.lineTo(xx2, y);
-    }
+  function hexOf(bin) {
+    try { return BigInt('0b' + (bin || '0')).toString(16).toUpperCase(); }
+    catch (e) { return null; }
   }
 
-  function drawBus(ctx, changes, yTop, yMid, width) {
-    const yTopL = yTop + 4, yBotL = yTop + ROW_H - 8;
-    for (let i = 0; i < changes.length; i++) {
-      const t1 = changes[i].t, t2 = i + 1 < changes.length ? changes[i+1].t : DATA.endTime + 1;
-      const x1 = t2x(t1), x2 = t2x(t2);
-      if (x2 < -50 || x1 > canvas.clientWidth + 50) continue;
-      const value = changes[i].value;
-      const hasXZ = /[^01]/.test(value);
-      if (hasXZ) {
-        // 含 x/z：画中轴阴影带
+  function drawBus(ctx, sig, yTop) {
+    var list = sig.changes;
+    var i0 = firstVisibleIdx(list);
+    var yT = yTop + 5, yB = yTop + ROW_H - 9, yM = yTop + ROW_H / 2;
+    for (var i = i0; i < list.length; i++) {
+      var t1 = Math.max(list[i].t, viewStart);
+      if (t1 > viewEnd()) break;
+      var t2 = (i + 1 < list.length) ? list[i + 1].t : viewEnd();
+      var x1 = t2x(t1), x2 = Math.min(t2x(t2), t2x(viewEnd()));
+      if (x2 - x1 < 1) continue;
+      var v = list[i].value;
+      if (/[^01]/.test(v)) {
+        // 含 x/z：红色中轴带
         ctx.save();
         ctx.strokeStyle = '#f44336';
         ctx.beginPath();
-        ctx.moveTo(Math.max(x1,0), yMid); ctx.lineTo(x2, yMid);
-        ctx.moveTo(Math.max(x1,0), yMid - 4); ctx.lineTo(x2, yMid - 4);
-        ctx.moveTo(Math.max(x1,0), yMid + 4); ctx.lineTo(x2, yMid + 4);
+        ctx.moveTo(x1, yM - 3); ctx.lineTo(x2, yM - 3);
+        ctx.moveTo(x1, yM); ctx.lineTo(x2, yM);
+        ctx.moveTo(x1, yM + 3); ctx.lineTo(x2, yM + 3);
         ctx.stroke();
         ctx.restore();
+        ctx.strokeStyle = '#ffb74d';
         continue;
       }
-      // 正常总线段：六边形
+      if (x2 - x1 < 4) continue; // 太窄不画六边形
+      var pad = Math.min(EDGE, (x2 - x1) / 3);
       ctx.beginPath();
-      const pad = EDGE_TICK;
-      ctx.moveTo(x1 + pad, yTopL); ctx.lineTo(x2 - pad > x1 + pad ? x2 - pad : x1 + pad, yTopL);
-      ctx.lineTo(Math.min(x2, x2), yMid); ctx.lineTo(x2 - pad > x1 + pad ? x2 - pad : x1 + pad, yBotL);
-      ctx.lineTo(x1 + pad, yBotL); ctx.lineTo(x1, yMid); ctx.closePath();
+      ctx.moveTo(x1 + pad, yT); ctx.lineTo(x2 - pad, yT);
+      ctx.lineTo(x2, yM); ctx.lineTo(x2 - pad, yB);
+      ctx.lineTo(x1 + pad, yB); ctx.lineTo(x1, yM);
+      ctx.closePath();
       ctx.stroke();
-      const label = '0x' + bigIntToHex(value) + ' (' + value + ')';
-      if (x2 - x1 > ctx.measureText(label).width + 12) {
+      var hx = hexOf(v);
+      var label = hx !== null ? ('0x' + hx) : v;
+      if (v.length <= 8) label += ' (0b' + v + ')';
+      if (ctx.measureText(label).width < x2 - x1 - 10) {
         ctx.fillStyle = '#e0e0e0';
-        ctx.fillText(label, x1 + pad + 3, yMid + 4);
+        ctx.fillText(label, x1 + pad + 3, yM + 4);
         ctx.fillStyle = '#ffb74d';
       }
     }
   }
 
-  function bigIntToHex(bin) {
-    try { return BigInt('0b' + (bin || '0')).toString(16).toUpperCase(); }
-    catch (e) { return bin; }
-  }
-
-  // ---- 交互：缩放 / 滚动 / 游标 ----
-  wrap.addEventListener('wheel', (e) => {
-    if (e.ctrlKey) {
-      e.preventDefault();
-      const factor = e.deltaY < 0 ? 1.2 : 1 / 1.2;
-      const tAtCursor = x2t(e.offsetX);
-      pxPerTime = clamp(pxPerTime * factor, 0.05, 5000);
-      viewOffset = tAtCursor - (e.offsetX - WAVE_LEFT) / pxPerTime;
-      draw();
-    } else if (e.deltaX) {
-      wrap.scrollLeft += e.deltaX;
-    }
-  }, { passive: false });
-
-  canvas.addEventListener('click', (e) => {
-    const t = x2t(e.offsetX);
-    const row = Math.floor((e.offsetY - 0) / ROW_H);
-    const sig = visibleRows()[row];
-    let valueText = '(无信号)';
-    if (sig) valueText = valueAt(sig, t);
-    cursorInfo.textContent = 't=' + t + '  ' + (sig ? sig.path + ' = ' + valueText : '');
-    drawCursor(t);
-  });
-
-  let cursorT = null;
-  function drawCursor(t) {
-    cursorT = t; draw();
-    if (cursorT === null) return;
-    const ctx = canvas.getContext('2d');
+  function drawCursorLine(ctx, h) {
+    var x = t2x(cursorT);
+    if (x < 0 || x > canvas.clientWidth) return;
     ctx.save();
     ctx.strokeStyle = '#dcdcaa'; ctx.setLineDash([4, 3]);
-    ctx.beginPath(); ctx.moveTo(t2x(cursorT), 0); ctx.lineTo(t2x(cursorT), canvas.height); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke();
     ctx.restore();
   }
 
-  function valueAt(sig, t) {
-    const list = sig.changes;
-    if (!list.length) return '?';
-    let v = list[0].value;
-    for (const ch of list) { if (ch.t <= t) v = ch.value; else break; }
-    return sig.width > 1 ? ("0x" + bigIntToHex(v) + " (0b" + v + ")") : v;
+  // ---------- 交互 ----------
+  function clampView() {
+    viewSpan = Math.min(Math.max(viewSpan, END / 1e9), END * 1.2);
+    viewStart = Math.min(Math.max(viewStart, 0), Math.max(END - viewSpan, 0));
+  }
+  function zoomAt(factor, anchorX) {
+    var tAnchor = x2t(anchorX != null ? anchorX : (WAVE_LEFT + plotW() / 2));
+    viewSpan = viewSpan / factor;
+    clampView();
+    viewStart = tAnchor - (anchorX != null ? anchorX - WAVE_LEFT : plotW() / 2) / plotW() * viewSpan;
+    clampView();
+    draw();
   }
 
-  document.getElementById('zoomIn').onclick = () => { pxPerTime = clamp(pxPerTime * 1.3, 0.05, 5000); draw(); };
-  document.getElementById('zoomOut').onclick = () => { pxPerTime = clamp(pxPerTime / 1.3, 0.05, 5000); draw(); };
-  document.getElementById('zoomFit').onclick = () => {
-    const wpx = wrap.clientWidth - 2 * WAVE_LEFT;
-    pxPerTime = DATA.endTime > 0 ? wpx / DATA.endTime : 20;
-    viewOffset = 0; draw();
+  document.getElementById('right').addEventListener('wheel', function (e) {
+    e.preventDefault();
+    if (e.ctrlKey) {
+      zoomAt(e.deltaY < 0 ? 1.2 : 1 / 1.2, e.offsetX);
+    } else {
+      var delta = (e.deltaX !== 0 ? e.deltaX : e.deltaY) * viewSpan / plotW();
+      viewStart += delta;
+      clampView();
+      draw();
+    }
+  }, { passive: false });
+
+  canvas.addEventListener('mousedown', function (e) {
+    dragging = { x: e.clientX, viewStart: viewStart, moved: false };
+  });
+  window.addEventListener('mousemove', function (e) {
+    if (!dragging) return;
+    var dx = e.clientX - dragging.x;
+    if (Math.abs(dx) > 3) dragging.moved = true;
+    viewStart = dragging.viewStart - dx * viewSpan / plotW();
+    clampView();
+    draw();
+  });
+  window.addEventListener('mouseup', function () { dragging = null; });
+
+  canvas.addEventListener('click', function (e) {
+    if (dragging && dragging.moved) return;
+    cursorT = x2t(e.offsetX);
+    var row = Math.floor(e.offsetY / ROW_H);
+    var sig = selected[row];
+    var vTxt = sig ? valueAt(sig, cursorT) : null;
+    var pretty = vTxt === null ? '' :
+      (sig.width > 1 ? (hexOf(vTxt) !== null ? '0x' + hexOf(vTxt) + ' (0b' + vTxt + ')' : vTxt)
+        : (sig.type === 'real' ? vTxt : vTxt));
+    cursorInfo.textContent = 't=' + fmtTime(cursorT) +
+      (sig ? '   ' + sig.path + ' = ' + pretty : '');
+    draw();
+  });
+
+  document.getElementById('zoomIn').onclick = function () { zoomAt(1.3, null); };
+  document.getElementById('zoomOut').onclick = function () { zoomAt(1 / 1.3, null); };
+  document.getElementById('zoomFit').onclick = function () {
+    viewStart = 0; viewSpan = END; clampView(); draw();
   };
   window.addEventListener('resize', draw);
 
-  function clamp(v, lo, hi) { return Math.min(hi, Math.max(lo, v)); }
-  function escapeHtml(s) { return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+  function esc(s) {
+    return String(s).replace(/[&<>"]/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
+    });
+  }
 
+  document.getElementById('title').textContent = DATA.fileName;
+  document.getElementById('tsInfo').textContent = 'timescale: ' + (DATA.timescale || '(未声明)');
+  document.getElementById('endTime').textContent = 'end: ' + fmtTime(END) + ' (' + END + ' ticks)';
   renderTree();
-  document.getElementById('zoomFit').onclick();
+  draw();
 })();
 </script>
 </body>
@@ -590,5 +716,6 @@ module.exports = {
     activateWaveViewer,
     parseVcd,
     buildSignalTree,
+    parseTimescaleSeconds,
     buildWaveformHtml
 };
