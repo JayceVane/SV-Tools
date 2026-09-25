@@ -143,6 +143,30 @@
         "title": "Icarus Verilog: Open VCD Waveform Viewer",
         "category": "SystemVerilog Tools",
         "icon": "$(pulse)"
+      },
+      {
+        "command": "svtools.iverilog.waveformFromText",
+        "title": "VCD: Open as Waveform",
+        "category": "SystemVerilog Tools",
+        "icon": "$(pulse)"
+      },
+      {
+        "command": "svtools.iverilog.showText",
+        "title": "VCD: Show as Text",
+        "category": "SystemVerilog Tools",
+        "icon": "$(go-to-file)"
+      }
+    ],
+    "customEditors": [
+      {
+        "viewType": "svtoolsWaveViewer",
+        "displayName": "VCD 波形查看器",
+        "selector": [
+          {
+            "filenamePattern": "*.vcd"
+          }
+        ],
+        "priority": "option"
       }
     ],
     "keybindings": [
@@ -184,6 +208,18 @@
       }
     ],
     "menus": {
+      "editor/title": [
+        {
+          "command": "svtools.iverilog.waveformFromText",
+          "group": "navigation",
+          "when": "resourceExtname == .vcd && !activeCustomEditorId"
+        },
+        {
+          "command": "svtools.iverilog.showText",
+          "group": "navigation",
+          "when": "activeCustomEditorId == svtoolsWaveViewer"
+        }
+      ],
       "editor/context": [
         {
           "command": "svtools.formatDocument",
