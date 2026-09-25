@@ -729,13 +729,19 @@ const DATA = ${json};
 
   function computeTicks() {
     var secPerPx = SEC * viewSpan / plotW();
-    var targetSec = secPerPx * 95;
-    var pow = Math.pow(10, Math.floor(Math.log10(targetSec)));
+    var targetSec = secPerPx * 110;
+    var pow = Math.pow(10, Math.floor(Math.log10(Math.max(targetSec, 1e-18))));
     var step = pow;
     [5, 2, 1].some(function (m) { if (targetSec <= m * pow) { step = m * pow; return true; } return false; });
-    var stepT = step / SEC;
+    // 双重保险：主刻度至少间隔视口的 1/14；异常时逐步加倍，硬上限 40 个
+    var stepT = Math.max(step / SEC, viewSpan / 14);
+    var guard = 0;
+    while (viewSpan / stepT > 40 && guard++ < 20) stepT *= 2;
     var list = [];
-    for (var t = Math.ceil(viewStart / stepT) * stepT; t <= viewEnd(); t += stepT) list.push(t);
+    for (var t = Math.ceil(viewStart / stepT) * stepT; t <= viewEnd(); t += stepT) {
+      list.push(t);
+      if (list.length > 60) break;
+    }
     return list;
   }
 
@@ -783,10 +789,17 @@ const DATA = ${json};
     ctx.strokeStyle = 'rgba(255,255,255,.22)';
     ctx.fillStyle = '#8a8f98';
     ctx.beginPath();
+    var lastLabelEnd = -1;
     ticks.forEach(function (t) {
       var x = t2x(t);
       ctx.moveTo(x + 0.5, RULER_H - 10); ctx.lineTo(x + 0.5, RULER_H);
-      ctx.fillText(fmtSeconds(t * SEC), x + 4, 11);
+      // 标签防重叠：与上一个标签放不下就只画刻度线
+      var label = fmtSeconds(t * SEC);
+      var lw = ctx.measureText(label).width;
+      if (x >= NAME_W - 4 && x - lastLabelEnd > 8 && x + lw <= w + 4) {
+        ctx.fillText(label, x + 4, 11);
+        lastLabelEnd = x + lw;
+      }
     });
     ctx.stroke();
     var ovY = RULER_H - 4;
@@ -880,7 +893,8 @@ const DATA = ${json};
       var label = hx !== null ? ('0x' + hx) : v;
       if (v.length <= 10) label += ' 0b' + v;
       var tw = ctx.measureText(label).width;
-      if (tw < x2 - x1 - 12) {
+      // 密集时段只画六边形不写值：段宽不足以从容放下标签时跳过
+      if (x2 - x1 >= 48 && tw < x2 - x1 - 14) {
         var cx = (x1 + x2) / 2;
         ctx.fillStyle = 'rgba(26,28,31,.85)';
         ctx.fillRect(cx - tw / 2 - 4, yM - 8, tw + 8, 16);
