@@ -409,6 +409,16 @@ function buildWaveformHtml(vcd, meta) {
   .sig .dot.bus { background:var(--bus); }
   .sig .w { color:var(--faint); font-size:12px; }
   .hidden-note { color:var(--faint); padding:7px 12px; font-size:12px; }
+  .ctxMenu { position:fixed; z-index:10; background:#252526; border:1px solid #454545;
+             border-radius:4px; padding:4px 0; min-width:170px;
+             box-shadow:0 4px 14px rgba(0,0,0,.45); font-size:12px; }
+  .ctxTitle { padding:4px 12px 5px; color:#8a8f98; font-size:11px;
+              border-bottom:1px solid #33373d; margin-bottom:3px; }
+  .ctxItem { padding:5px 14px; cursor:pointer; white-space:nowrap; }
+  .ctxItem:hover { background:#2a2d2e; }
+  .ctxItem.cur { color:#9cdcfe; }
+  .ctxItem.off { color:#5a5f66; cursor:default; }
+  .ctxItem.off:hover { background:transparent; }
 
   #right { flex:1; display:flex; flex-direction:column; min-width:0; }
   #cursorInfo { padding:5px 14px; background:var(--panel); border-bottom:1px solid var(--border);
@@ -482,6 +492,8 @@ const DATA = ${json};
   var soloPrevChecked = null;  // 进入 solo 前的勾选状态快照，退出时恢复
   var sortMode = 'default';    // 'default'（VCD 原始顺序）| 'name'
   var groupByScope = false;    // 按模块分组显示
+  var fmt = {};                // key -> 显示格式：'hex'(默认) | 'bin' | 'dec' | 'sdec' | 'analog'
+  var menuEl = null;           // 右键菜单元素
 
   var selected = [];           // 当前显示的行（applyRows 按 checked/排序/分组/单独显示派生）
   var byId = {};               // key: id|path -> signal 对象
@@ -589,6 +601,11 @@ const DATA = ${json};
             '<span>' + esc(node.name) + '</span>' +
             '<span class="w">' + (node.width > 1 ? node.width + 'b' : '') + '</span>';
           row.onclick = function () { toggleSignal(node); };
+          row.oncontextmenu = function (ev) {
+            ev.preventDefault();
+            var full = byId[node.id + '|' + node.path];
+            if (full) showSigMenu(ev.clientX, ev.clientY, full);
+          };
           sigPanel.appendChild(row);
         }
       });
@@ -675,6 +692,43 @@ const DATA = ${json};
     try { return BigInt('0b' + (bin || '0')).toString(16).toUpperCase(); }
     catch (e) { return null; }
   }
+  function sigFmt(sig) {
+    return fmt[sig.id + '|' + sig.path] || (sig.type === 'real' ? 'analog' : 'hex');
+  }
+  /** 按信号格式格式化值（x/z 原样返回）。 */
+  function fmtValue(sig, v) {
+    if (sig.type === 'real') return v;
+    if (/[^01]/.test(v)) return v;
+    if (sigFmt(sig) === 'bin') return '0b' + v;
+    if (sigFmt(sig) === 'dec') {
+      try { return BigInt('0b' + v).toString(10); } catch (e) { return v; }
+    }
+    if (sigFmt(sig) === 'sdec') {
+      try {
+        var n = BigInt('0b' + v);
+        // VCD 值会省略前导零，符号位按声明的位宽判断（数值 ≥ 2^(width-1) 即为负）
+        if (sig.width > 1 && n >= (BigInt(1) << BigInt(sig.width - 1))) {
+          n -= (BigInt(1) << BigInt(sig.width));
+        }
+        return n.toString(10);
+      } catch (e) { return v; }
+    }
+    var hx = hexOf(v);
+    return hx !== null ? '0x' + hx : v;
+  }
+  /** 值的数值形式（模拟量/有符号感知），x/z 或不可解析返回 null。 */
+  function numOf(sig, v) {
+    if (sig.type === 'real') { var r = Number(v); return isFinite(r) ? r : null; }
+    if (/[^01]/.test(v)) return null;
+    try {
+      var n = BigInt('0b' + v);
+      if (sigFmt(sig) === 'sdec' && sig.width > 1 && n >= (BigInt(1) << BigInt(sig.width - 1))) {
+        n -= (BigInt(1) << BigInt(sig.width));
+      }
+      var f = Number(n);
+      return isFinite(f) ? f : null;
+    } catch (e) { return null; }
+  }
   function truncText(ctx, text, maxW) {
     if (ctx.measureText(text).width <= maxW) return text;
     while (text.length > 1 && ctx.measureText(text + '…').width > maxW) text = text.slice(0, -1);
@@ -687,9 +741,16 @@ const DATA = ${json};
       ' <span class="t">(' + t + ' ticks)</span>';
     if (sig) {
       var v = valueAt(sig, t);
-      var pretty = sig.width > 1
-        ? (hexOf(v) !== null ? '0x' + hexOf(v) : esc(v)) + ' <span class="t">(0b' + esc(v) + ')</span>'
-        : esc(v);
+      var pretty;
+      if (sig.width > 1) {
+        pretty = esc(fmtValue(sig, v));
+        if (fmt[sig.id + '|' + sig.path] && fmt[sig.id + '|' + sig.path] !== 'hex' && !/[^01]/.test(v)) {
+          var hx = hexOf(v);
+          if (hx !== null) pretty += ' <span class="t">(0x' + hx + ')</span>';
+        }
+      } else {
+        pretty = esc(v);
+      }
       html += '   <span style="color:' + (sig.width > 1 ? '#ffcc80' : '#4fc3f7') + '">' +
         esc(sig.path) + '</span> = ' + pretty;
     }
@@ -787,10 +848,12 @@ const DATA = ${json};
         ctx.fillStyle = 'rgba(255,255,255,.028)';
         ctx.fillRect(0, yTop, w, ROW_H);
       }
-      var stroke = sig.width > 1 ? '#ffcc80' : '#4fc3f7';
+      var f = sigFmt(sig);
+      var stroke = f === 'analog' ? '#4fc3f7' : (sig.width > 1 ? '#ffcc80' : '#4fc3f7');
       var fill = sig.width > 1 ? 'rgba(255,204,128,.14)' : 'rgba(79,195,247,.12)';
       ctx.strokeStyle = stroke; ctx.fillStyle = stroke; ctx.lineWidth = 1.5;
-      if (sig.width === 1 && sig.type !== 'real') drawScalar(ctx, sig, yTop);
+      if (f === 'analog') drawAnalog(ctx, sig, yTop);
+      else if (sig.width === 1 && sig.type !== 'real') drawScalar(ctx, sig, yTop);
       else drawBus(ctx, sig, yTop, fill);
     });
     finish(ctx, w, h, dpr, ticks, edgeRow, groupStarts);
@@ -893,6 +956,17 @@ const DATA = ${json};
       else { ctx.arc(14, y - 5, 4, 0, 7); ctx.fill(); }
       ctx.fillStyle = i === edgeRow ? '#ffe9a8' : '#d4d4d4';
       ctx.fillText(truncText(ctx, sig.name, NAME_W - 46), 24, y);
+      // 格式徽标（非默认格式时）
+      var f2 = sigFmt(sig);
+      if (f2 !== 'hex') {
+        var badge = { bin: 'B', dec: 'D', sdec: 'S', analog: 'A' }[f2] || '';
+        if (badge) {
+          ctx.fillStyle = '#9cdcfe';
+          ctx.font = '10px Consolas,monospace';
+          ctx.fillText(badge, NAME_W - 16, y);
+          ctx.font = '12px Consolas,monospace';
+        }
+      }
     });
   }
 
@@ -1009,9 +1083,7 @@ const DATA = ${json};
       ctx.lineTo(x1 + pad, yB); ctx.lineTo(x1, yM);
       ctx.closePath();
       ctx.fill(); ctx.stroke();
-      var hx = hexOf(v);
-      var label = hx !== null ? ('0x' + hx) : v;
-      if (v.length <= 10) label += ' 0b' + v;
+      var label = fmtValue(sig, v);
       var tw = ctx.measureText(label).width;
       // 密集时段只画六边形不写值：段宽不足以从容放下标签时跳过
       if (x2 - x1 >= 48 && tw < x2 - x1 - 14) {
@@ -1022,6 +1094,40 @@ const DATA = ${json};
         ctx.fillText(label, cx - tw / 2, yM + 4);
       }
     }
+  }
+
+  /** 模拟量渲染：值按全量程自动缩放为阶梯折线，x/z 处断开。 */
+  function drawAnalog(ctx, sig, yTop) {
+    var list = sig.changes;
+    if (!list.length) return;
+    var yTopPad = yTop + 5, yBotPad = yTop + ROW_H - 7;
+    var min = null, max = null, nums = [];
+    for (var i = 0; i < list.length; i++) {
+      var n0 = numOf(sig, list[i].value);
+      nums.push(n0);
+      if (n0 === null) continue;
+      if (min === null || n0 < min) min = n0;
+      if (max === null || n0 > max) max = n0;
+    }
+    if (min === null) return;
+    if (min === max) { min = min - 1; max = max + 1; }
+    else { var pad2 = (max - min) * 0.06; min -= pad2; max += pad2; }
+    var started = false;
+    ctx.beginPath();
+    var right = canvas.clientWidth;
+    for (var j = 0; j < list.length; j++) {
+      var t1 = list[j].t, t2 = (j + 1 < list.length) ? list[j + 1].t : viewEnd();
+      var x1 = t2x(Math.max(t1, viewStart)), x2 = t2x(Math.min(t2, viewEnd()));
+      if (x2 < NAME_W) { started = false; continue; }
+      if (x1 > right) break;
+      var n1 = nums[j];
+      if (n1 === null) { started = false; continue; }  // x/z：断开
+      var y = yBotPad - (n1 - min) / (max - min) * (yBotPad - yTopPad);
+      if (!started) { ctx.moveTo(Math.max(x1, NAME_W), y); started = true; }
+      else ctx.lineTo(x1, y);
+      ctx.lineTo(x2, y);
+    }
+    ctx.stroke();
   }
 
   // ---------- 视图控制 ----------
@@ -1073,6 +1179,66 @@ const DATA = ${json};
     }
     var row = Math.floor(e.offsetY / ROW_H);
     applyCursor(x2t(e.offsetX), selected[row] || null, false);
+  });
+
+  // ---------- 右键菜单：显示格式 / 移除 ----------
+  function hideMenu() {
+    if (menuEl && menuEl.remove) menuEl.remove();
+    menuEl = null;
+  }
+  function showSigMenu(cx, cy, sig) {
+    hideMenu();
+    var multi = sig.width > 1 || sig.type === 'real';
+    var key = sig.id + '|' + sig.path;
+    menuEl = document.createElement('div');
+    menuEl.className = 'ctxMenu';
+    menuEl.style.left = Math.min(cx, (window.innerWidth || 1600) - 190) + 'px';
+    menuEl.style.top = cy + 'px';
+    var title = document.createElement('div');
+    title.className = 'ctxTitle';
+    title.textContent = sig.name + ' · 显示格式';
+    menuEl.appendChild(title);
+    if (multi) {
+      var cur = sigFmt(sig);
+      [['hex', 'Hex 十六进制'], ['bin', 'Bin 二进制'], ['dec', 'Dec 无符号十进制'],
+       ['sdec', 'SDec 有符号十进制'], ['analog', 'Analog 模拟量']].forEach(function (it) {
+        var d = document.createElement('div');
+        d.className = 'ctxItem' + (cur === it[0] ? ' cur' : '');
+        d.textContent = it[1];
+        d.onclick = function () {
+          fmt[key] = it[0];
+          hideMenu();
+          draw();
+        };
+        menuEl.appendChild(d);
+      });
+    } else {
+      var off = document.createElement('div');
+      off.className = 'ctxItem off';
+      off.textContent = '1-bit 标量无格式选项';
+      menuEl.appendChild(off);
+    }
+    var rm = document.createElement('div');
+    rm.className = 'ctxItem';
+    rm.textContent = '✕ 移除该信号';
+    rm.onclick = function () {
+      hideMenu();
+      delete checked[key];
+      if (edgeSig && edgeSig.id === sig.id && edgeSig.path === sig.path) edgeSig = null;
+      applyRows(); renderTree(); draw();
+    };
+    menuEl.appendChild(rm);
+    document.body.appendChild(menuEl);
+  }
+  canvas.addEventListener('contextmenu', function (e) {
+    e.preventDefault();
+    var row = Math.floor(e.offsetY / ROW_H);
+    var sig = selected[row];
+    if (sig) showSigMenu(e.clientX, e.clientY, sig);
+  });
+  document.addEventListener('mousedown', function (e) {
+    if (menuEl && menuEl.contains && menuEl.contains(e.target)) return;
+    hideMenu();
   });
 
   document.getElementById('prevEdge').onclick = function () { edgeStep(-1); };
