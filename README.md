@@ -178,6 +178,7 @@ assign signal_8 = 8;
 - **输入（防抖）/ 打开 / 保存 `.v` / `.sv` 文件时自动运行** `iverilog -tnull`，诊断结果进入 Problems 面板，可点击跳转；未保存的缓冲区内容通过临时文件参与检查，边改边看
 - 每次 lint 会在 "SystemVerilog Tools · Icarus Verilog" 输出通道留一行 `[lint] 文件 → N 错误, M 警告 (耗时)` 轨迹，方便确认自动触发是否生效
 - 自动按扩展名选择语言标准（`.sv` → `-g2012`，`.v` → `-g2005`），可用 `svtools.iverilog.standard` 覆盖
+- **跨文件模块解析**：工作区内所有含 Verilog 文件的目录自动加入 `-y`/`-I`（文件名=模块名约定）；模块名与文件名不一致时，通过工作区模块索引自动把定义文件补进编译（lint 与仿真均生效，可关闭 `scanWorkspace`）
 - 同目录模块自动解析（`-y <文件目录> -Y .sv`），支持 include / 库目录配置
 - 也可手动执行：命令面板 → "SystemVerilog Tools: Icarus Verilog: Lint Current File"（手动触发会强制重新探测工具链）
 
@@ -282,6 +283,7 @@ assign signal_8 = 8;
 | `iverilog.path` | string | "" | Icarus Verilog bin 目录或 iverilog 全路径；空 = 自动探测 |
 | `iverilog.cygwinPath` | string | "" | cygwin1.dll 所在目录（Cygwin 构建装在 Cygwin 根外时需要）；空 = 自动探测 |
 | `iverilog.lintOnSave` | boolean | true | 保存时自动 lint |
+| `iverilog.scanWorkspace` | boolean | true | 扫描工作区源码：所有含 Verilog 文件的目录自动加入 -y/-I；模块名≠文件名时按模块索引补编译（lint 与仿真都生效） |
 | `iverilog.lintOnChange` | boolean | true | 输入时自动 lint（防抖，检查未保存的缓冲区内容） |
 | `iverilog.lintDebounceMs` | number | 800 | 输入触发 lint 的防抖延迟（毫秒） |
 | `iverilog.lintOnOpen` | boolean | true | 打开文件时自动 lint |

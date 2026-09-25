@@ -261,6 +261,122 @@ function formatCommandLine(command, args) {
 }
 
 // ---------------------------------------------------------------------------
+// 工作区源码扫描（目录清单 + 模块名 → 文件索引，带 TTL 缓存）
+// ---------------------------------------------------------------------------
+
+const MODULE_DECL_RE = /^[ \t]*(?:module|macromodule)[ \t]+([A-Za-z_][A-Za-z0-9_$]*)/gm;
+// iverilog 缺模块汇总块：*** These modules were missing:\n        name referenced N times.\n***
+const MISSING_MODULE_BLOCK_RE = /\*\*\* These modules were missing:\r?\n([\s\S]*?)\r?\n\s*\*\*\*/;
+const MISSING_MODULE_ENTRY_RE = /^[ \t]+([A-Za-z_][A-Za-z0-9_$]*)[ \t]+referenced/gm;
+
+const WORKSPACE_SCAN_TTL_MS = 10000;
+const WORKSPACE_SCAN_MAX_DIRS = 200;
+const WORKSPACE_SCAN_MAX_FILES = 3000;
+
+/** @type {{dirs: string[], modules: Map<string, string>, expiresAt: number}} */
+let workspaceScanCache = { dirs: [], modules: new Map(), expiresAt: 0 };
+
+/**
+ * 扫描工作区 Verilog 源码：收集含源文件的目录（供 -y/-I 使用）与
+ * 「模块名 → 文件路径」索引（供缺模块时按实际定义文件补编译，覆盖文件名≠模块名的情况）。
+ * 结果带 TTL 缓存，避免每次防抖 lint 都全量扫描；缺模块重试与文件增删事件会强制刷新。
+ * @param {boolean} [force=false] 跳过缓存强制重新扫描
+ * @returns {Promise<{dirs: string[], modules: Map<string, string>}>}
+ */
+async function scanWorkspaceSources(force = false) {
+    const vscode = require('vscode');
+    const now = Date.now();
+    if (!force && workspaceScanCache.expiresAt > now) {
+        return { dirs: workspaceScanCache.dirs, modules: workspaceScanCache.modules };
+    }
+
+    const dirs = [];
+    const modules = new Map();
+    const roots = vscode.workspace.workspaceFolders;
+    const enabled = vscode.workspace.getConfiguration('svtools.iverilog').get('scanWorkspace', true);
+    if (enabled && roots && roots.length > 0) {
+        const dirSet = new Set();
+        let scanned = 0;
+        for (const pattern of ['**/*.sv', '**/*.v', '**/*.svh', '**/*.vh']) {
+            if (scanned >= WORKSPACE_SCAN_MAX_FILES) break;
+            let uris = [];
+            try {
+                uris = await vscode.workspace.findFiles(pattern, undefined, WORKSPACE_SCAN_MAX_FILES);
+            } catch (err) {
+                continue; // 单个模式失败不影响其余
+            }
+            for (const uri of uris) {
+                if (scanned++ >= WORKSPACE_SCAN_MAX_FILES) break;
+                dirSet.add(path.dirname(uri.fsPath));
+                try {
+                    const text = fs.readFileSync(uri.fsPath, 'utf8');
+                    MODULE_DECL_RE.lastIndex = 0;
+                    let match;
+                    while ((match = MODULE_DECL_RE.exec(text)) !== null) {
+                        if (!modules.has(match[1])) modules.set(match[1], uri.fsPath);
+                    }
+                } catch (err) {
+                    // 不可读文件跳过，不影响其余扫描
+                }
+            }
+        }
+        dirs.push(...dirSet);
+    }
+
+    workspaceScanCache = {
+        dirs: dirs.slice(0, WORKSPACE_SCAN_MAX_DIRS),
+        modules,
+        expiresAt: now + WORKSPACE_SCAN_TTL_MS
+    };
+    return { dirs: workspaceScanCache.dirs, modules: workspaceScanCache.modules };
+}
+
+/**
+ * 从编译输出解析缺模块清单，用模块索引找出尚未参与编译的定义文件。
+ * @param {string} rawText 编译输出
+ * @param {Map<string, string>} moduleIndex 模块名 → 文件路径
+ * @param {Set<string>} compiledSet 已参与编译的文件（绝对路径）
+ * @returns {string[]} 需要追加编译的文件路径
+ */
+function resolveMissingModuleFiles(rawText, moduleIndex, compiledSet) {
+    const block = MISSING_MODULE_BLOCK_RE.exec(String(rawText || ''));
+    if (!block) return [];
+    const additions = [];
+    MISSING_MODULE_ENTRY_RE.lastIndex = 0;
+    let match;
+    while ((match = MISSING_MODULE_ENTRY_RE.exec(block[1])) !== null) {
+        const file = moduleIndex.get(match[1]);
+        if (file && !compiledSet.has(path.resolve(file))) additions.push(file);
+    }
+    return additions;
+}
+
+/**
+ * 运行一次 iverilog 编译；若因缺模块失败且模块索引能补齐，追加文件重试（最多 3 轮）。
+ * @param {{iverilog: string, env: NodeJS.ProcessEnv}} toolchain
+ * @param {string[]} commonArgs -g/-I/-y/-Y 等公共参数
+ * @param {string[]} inputFiles 首轮参与编译的文件
+ * @param {string} cwd
+ * @returns {Promise<{result: object, inputFiles: string[]}>}
+ */
+async function compileWithModuleResolution(toolchain, commonArgs, inputFiles, cwd) {
+    let files = [...inputFiles];
+    const compiledSet = new Set(files.map(f => path.resolve(f)));
+    let result = await runTool(toolchain.iverilog, [...commonArgs, ...files], { cwd, env: toolchain.env });
+
+    for (let round = 0; round < 3 && result.code !== 0; round++) {
+        // 既然缺模块，缓存里的目录/索引可能已过期（如刚新建的源文件），强制重新扫描
+        const { modules } = await scanWorkspaceSources(true);
+        const additions = resolveMissingModuleFiles(`${result.stderr}\n${result.stdout}`, modules, compiledSet);
+        if (additions.length === 0) break;
+        for (const file of additions) compiledSet.add(path.resolve(file));
+        files = files.concat(additions);
+        result = await runTool(toolchain.iverilog, [...commonArgs, ...files], { cwd, env: toolchain.env });
+    }
+    return { result, files };
+}
+
+// ---------------------------------------------------------------------------
 // 工具链探测（带缓存）
 // ---------------------------------------------------------------------------
 
@@ -459,17 +575,16 @@ function activateIverilog(context) {
             ...buildCommonArgs({
                 fileName: filePath,
                 standard: config.get('standard'),
-                includePaths: [fileDir, ...resolveConfigPaths(config.get('includePaths'), fileDir)],
-                libraryPaths: [fileDir, ...resolveConfigPaths(config.get('libraryPaths'), fileDir)],
+                includePaths: [fileDir, ...resolveConfigPaths(config.get('includePaths'), fileDir), ...(await scanWorkspaceSources()).dirs],
+                libraryPaths: [fileDir, ...resolveConfigPaths(config.get('libraryPaths'), fileDir), ...(await scanWorkspaceSources()).dirs],
                 extraArgs: ['-Y', '.sv', ...config.get('lintArgs', [])]
-            }),
-            lintTarget
+            })
         ];
 
         const gen = (lintGenerations.get(document.uri.toString()) || 0) + 1;
         lintGenerations.set(document.uri.toString(), gen);
 
-        const result = await runTool(toolchain.iverilog, args, { cwd: fileDir, env: toolchain.env });
+        const { result } = await compileWithModuleResolution(toolchain, args, [lintTarget], fileDir);
         if (tempFile) {
             try { fs.unlinkSync(tempFile); } catch (err) { /* 清理失败可忽略 */ }
         }
@@ -615,23 +730,28 @@ function activateIverilog(context) {
             ...buildCommonArgs({
                 fileName: filePath,
                 standard: config.get('standard'),
-                includePaths: [fileDir, ...resolveConfigPaths(config.get('includePaths'), fileDir)],
-                libraryPaths: [fileDir, ...resolveConfigPaths(config.get('libraryPaths'), fileDir)],
+                includePaths: [fileDir, ...resolveConfigPaths(config.get('includePaths'), fileDir), ...(await scanWorkspaceSources()).dirs],
+                libraryPaths: [fileDir, ...resolveConfigPaths(config.get('libraryPaths'), fileDir), ...(await scanWorkspaceSources()).dirs],
                 extraArgs: ['-Y', '.sv', ...config.get('lintArgs', [])]
             })
         ];
         const topModule = String(config.get('simTop') || '').trim();
         if (topModule) compileArgs.push('-s', topModule);
-        compileArgs.push('-o', vvpFile, filePath, ...extraFiles);
+        compileArgs.push('-o', vvpFile);
 
-        channel.appendLine(`$ ${formatCommandLine(toolchain.iverilog, compileArgs)}`);
-        const compile = await runTool(toolchain.iverilog, compileArgs, { cwd: fileDir, env: toolchain.env });
+        channel.appendLine(`$ ${formatCommandLine(toolchain.iverilog, [...compileArgs, filePath, ...extraFiles])}`);
+        const { result: compile } = await compileWithModuleResolution(toolchain, compileArgs, [filePath, ...extraFiles], fileDir);
         if (compile.stderr.trim()) channel.append(compile.stderr.endsWith('\n') ? compile.stderr : compile.stderr + '\n');
 
         if (compile.code !== 0) {
             const findings = parseCompilerOutput(`${compile.stderr}\n${compile.stdout}`, fileDir);
             applyDiagnostics(document, findings);
             channel.appendLine(`** 编译失败（exit ${compile.code}），仿真未运行 **`);
+            if (/Unknown module type|These modules were missing/.test(compile.stderr)
+                && !(config.get('simFiles') || []).length) {
+                channel.appendLine('提示：存在未解析模块。工作区目录已按「文件名=模块名」约定自动搜索；'
+                    + '若模块所在文件名与模块名不同，请确认模块已在工作区内定义，或在 svtools.iverilog.simFiles 配置额外源文件（如 "src/**/*.sv"）。');
+            }
             return;
         }
         applyDiagnostics(document, []);
@@ -761,6 +881,11 @@ function activateIverilog(context) {
         }),
         vscode.window.onDidChangeActiveTextEditor(() => updateStatusBar()),
 
+        // 文件增删/重命名后使工作区扫描缓存失效，新建的模块文件能立即被 lint/仿真解析
+        vscode.workspace.onDidCreateFiles(() => { workspaceScanCache = { dirs: [], modules: new Map(), expiresAt: 0 }; }),
+        vscode.workspace.onDidDeleteFiles(() => { workspaceScanCache = { dirs: [], modules: new Map(), expiresAt: 0 }; }),
+        vscode.workspace.onDidRenameFiles(() => { workspaceScanCache = { dirs: [], modules: new Map(), expiresAt: 0 }; }),
+
         vscode.commands.registerCommand('svtools.iverilog.lint', async () => {
             const editor = vscode.window.activeTextEditor;
             if (!editor) {
@@ -818,5 +943,8 @@ module.exports = {
     findCygwinBinDir,
     buildChildEnv,
     looksLikeMissingDll,
+    resolveMissingModuleFiles,
+    scanWorkspaceSources,
+    compileWithModuleResolution,
     formatCommandLine
 };

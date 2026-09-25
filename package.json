@@ -373,6 +373,11 @@
           "default": true,
           "description": "Run iverilog syntax check on save and report diagnostics in the Problems panel"
         },
+        "svtools.iverilog.scanWorkspace": {
+          "type": "boolean",
+          "default": true,
+          "description": "Scan the workspace for Verilog sources: add every directory containing them to -y/-I, and resolve missing modules by indexing module definitions (handles files whose name differs from the module name)"
+        },
         "svtools.iverilog.lintOnChange": {
           "type": "boolean",
           "default": true,
