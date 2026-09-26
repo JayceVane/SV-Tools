@@ -467,7 +467,7 @@ function buildWaveformHtml(vcd, meta) {
   <span id="zoomLabel"></span>
   <button id="zoomIn" title="放大">＋</button>
   <button id="zoomFit" title="适配全程">Fit</button>
-  <span class="hint">Ctrl+滚轮缩放 · 拖拽/滚轮平移 · 名称栏拖拽调序 · 模拟量行底边拖拽调高 · Ctrl 单选 / Shift 范围多选后右键分组（可命名）</span>
+  <span class="hint">Ctrl+滚轮缩放 · 左右滚轮（或 Shift+滚轮）平移时间轴 · 上下滚轮滚动信号行 · 名称栏拖拽调序 · Ctrl 单选 / Shift 范围多选后右键分组（可命名）</span>
 </footer>
 <script>
 const DATA = ${json};
@@ -1320,14 +1320,26 @@ const DATA = ${json};
   }
 
   document.getElementById('right').addEventListener('wheel', function (e) {
-    e.preventDefault();
     if (e.ctrlKey) {
+      e.preventDefault();
       zoomAt(e.deltaY < 0 ? 1.2 : 1 / 1.2, e.offsetX);
-    } else {
-      var delta = (e.deltaX !== 0 ? e.deltaX : e.deltaY) * viewSpan / plotW();
-      viewStart += delta;
+      return;
+    }
+    // 归一化 deltaMode（Firefox 按行/页，Chromium/WebKit 按像素）
+    var mul = e.deltaMode === 1 ? 33 : (e.deltaMode === 2 ? (scroller.clientHeight || 600) : 1);
+    var dx = e.deltaX * mul, dy = e.deltaY * mul;
+    var horiz = Math.abs(dx) > Math.abs(dy) || e.shiftKey;
+    if (horiz) {
+      // 左右滚轮（倾斜轮/触控板横扫，或 Shift+滚轮）：平移时间轴
+      e.preventDefault();
+      var amt = Math.abs(dx) > Math.abs(dy) ? dx : dy;
+      viewStart += amt * viewSpan / plotW();
       clampView();
       draw();
+    } else if (dy !== 0) {
+      // 上下滚轮：滚动查看上方/下方信号行（ruler 上滚动同样生效）
+      if (scroller.scrollHeight > scroller.clientHeight + 1) e.preventDefault();
+      scroller.scrollTop += dy;
     }
   }, { passive: false });
 
