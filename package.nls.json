@@ -49,5 +49,18 @@
   "cmd.iverilog_stopSimulation.title": "Icarus Verilog: Stop Simulation",
   "cmd.iverilog_openWaveform.title": "Icarus Verilog: Open VCD Waveform Viewer",
   "cmd.iverilog_waveformFromText.title": "VCD: Open as Waveform",
-  "cmd.iverilog_showText.title": "VCD: Show as Text"
+  "cmd.iverilog_showText.title": "VCD: Show as Text",
+  "cmd.vivado_runScript.title": "Vivado: Run TCL Script",
+  "cmd.vivado_runActiveScript.title": "Vivado: Run Current TCL Script",
+  "cmd.vivado_stop.title": "Vivado: Stop",
+  "cmd.vivado_createProject.title": "Vivado: Create Project",
+  "cfg.vivado_path.desc": "Vivado installation directory (e.g. D:/Xilinx/Vivado/2022.1, its bin directory, or full path to vivado.bat). Empty = auto-detect from XILINX_VIVADO, PATH and common install locations.",
+  "cfg.vivado_part.desc": "Default FPGA part for the project creation wizard (-part, e.g. xc7a35tcsg324-1). Leave empty to choose later in Vivado.",
+  "cfg.vivado_projectDir.desc": "Default project output directory (relative to workspace root) used by the project creation wizard",
+  "cfg.vivado_timeoutMs.desc": "Vivado batch timeout in milliseconds; 0 = no timeout (stop via command or status bar)",
+  "cfg.vivado_structure.desc": "Project structure template used by the project creation wizard: directory globs that classify files into sources / sim / constraints filesets, and the Vivado project output directory. Defaults follow the common src/sim/prj layout.",
+  "cfg.vivado_structure_sources.desc": "Globs for RTL source files added to fileset sources_1 (e.g. src, rtl/**)",
+  "cfg.vivado_structure_sim.desc": "Globs for testbench files added to fileset sim_1 (e.g. sim, tb/**); takes precedence over sources",
+  "cfg.vivado_structure_constraints.desc": "Globs for constraint files added to fileset constrs_1 (e.g. xdc/**, *.xdc)",
+  "cfg.vivado_structure_projectDir.desc": "Vivado project output directory relative to the workspace root (e.g. prj)"
 }

@@ -5,7 +5,13 @@ All notable changes to the SystemVerilog VSCode Extension will be documented in 
 ## [3.4.3] - 2026-09-26
 
 ### Added
-- **配置与命令中文本地化**：设置界面（Settings）中的全部配置项标题/描述与命令面板命令标题支持中文（`package.nls.zh-cn.json`），VSCode 界面语言为中文时自动生效，英文界面保持英文（51 条文案：38 项配置 + 12 个命令 + 配置节标题）
+- **Vivado TCL 集成与工程创建**
+  - **TCL 脚本运行**：命令面板 "Vivado: 运行 TCL 脚本"（工作区内选择）或 `.tcl` 编辑器右键 "运行当前 TCL 脚本"；以 `vivado -mode batch -nolog -nojournal -source` 执行，输出流式进入独立通道，状态栏显示运行状态，支持停止（Windows 进程树终止）与超时（`timeoutMs`，默认不限时）
+  - **工程创建向导**：工程名 → 工程目录 → 源文件多选（按工程结构模板预分类）→ 器件型号 → 顶层模块（工作区自动识别候选，被实例化的模块自动降权）；生成 `create_project` TCL 到 `.svtools/vivado/create_prj.tcl` 并可一键执行；工作区无源文件时可按模板创建目录骨架（`src/`、`sim/`、`prj/`）
+  - **工程结构模板**（`svtools.vivado.structure`，可完全自定义）：目录 glob 把文件划入 sources_1 / sim_1 / constrs_1 文件集与工程输出目录，默认 `src`/`rtl`→RTL、`sim`/`tb`→测试台（重叠时优先归 sim）、`constraints`/`xdc`/`*.xdc`→约束、工程目录 `prj`；未匹配文件以 tb_ 前缀启发兜底或手动勾选
+  - Vivado 自动探测（配置 `svtools.vivado.path` → `XILINX_VIVADO` → `PATH` → 常见安装位置），Windows 经 `cmd /c` 逐参引号调用 `vivado.bat`（Node 24 安全限制），脚本相对路径以其所在目录为 cwd
+  - runScript 返回 `Promise<{code, ms, issues}>` 结构化结果（供后续 AI Agent 工具复用）
+- **配置与命令中文本地化**：设置界面（Settings）中的全部配置项标题/描述与命令面板命令标题支持中文（`package.nls.zh-cn.json`），VSCode 界面语言为中文时自动生效，英文界面保持英文
 
 ## [3.4.2] - 2026-09-26
 

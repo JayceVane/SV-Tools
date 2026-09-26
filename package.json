@@ -2,7 +2,7 @@
   "name": "svtools",
   "displayName": "SystemVerilog Tools",
   "description": "Verilog/SystemVerilog formatter, module instantiation, testbench generation, and productivity tools (Rust native backend)",
-  "version": "3.4.3-beta1",
+  "version": "3.4.3-beta2",
   "publisher": "JayceVane",
   "author": {
     "name": "JayceVane",
@@ -155,6 +155,26 @@
         "title": "%cmd.iverilog_showText.title%",
         "category": "SystemVerilog Tools",
         "icon": "$(go-to-file)"
+      },
+      {
+        "command": "svtools.vivado.runScript",
+        "title": "%cmd.vivado_runScript.title%",
+        "category": "SystemVerilog Tools"
+      },
+      {
+        "command": "svtools.vivado.runActiveScript",
+        "title": "%cmd.vivado_runActiveScript.title%",
+        "category": "SystemVerilog Tools"
+      },
+      {
+        "command": "svtools.vivado.stop",
+        "title": "%cmd.vivado_stop.title%",
+        "category": "SystemVerilog Tools"
+      },
+      {
+        "command": "svtools.vivado.createProject",
+        "title": "%cmd.vivado_createProject.title%",
+        "category": "SystemVerilog Tools"
       }
     ],
     "customEditors": [
@@ -230,6 +250,11 @@
           "submenu": "svtools.submenu",
           "when": "editorLangId == verilog || editorLangId == systemverilog || editorLangId == system-verilog",
           "group": "2_modification"
+        },
+        {
+          "command": "svtools.vivado.runActiveScript",
+          "when": "resourceExtname == .tcl",
+          "group": "9_svtools"
         }
       ],
       "svtools.submenu": [
@@ -517,6 +542,74 @@
           "type": "boolean",
           "default": true,
           "description": "%cfg.iverilog_autoOpenWaveform.desc%"
+        },
+        "svtools.vivado.path": {
+          "type": "string",
+          "default": "",
+          "description": "%cfg.vivado_path.desc%"
+        },
+        "svtools.vivado.part": {
+          "type": "string",
+          "default": "",
+          "description": "%cfg.vivado_part.desc%"
+        },
+        "svtools.vivado.timeoutMs": {
+          "type": "number",
+          "default": 0,
+          "description": "%cfg.vivado_timeoutMs.desc%"
+        },
+        "svtools.vivado.structure": {
+          "type": "object",
+          "default": {
+            "sources": [
+              "src",
+              "rtl",
+              "rtl/**",
+              "src/**"
+            ],
+            "sim": [
+              "sim",
+              "tb",
+              "sim/**",
+              "tb/**"
+            ],
+            "constraints": [
+              "constraints",
+              "xdc",
+              "constraints/**",
+              "xdc/**",
+              "*.xdc"
+            ],
+            "projectDir": "prj"
+          },
+          "description": "%cfg.vivado_structure.desc%",
+          "properties": {
+            "sources": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "%cfg.vivado_structure_sources.desc%"
+            },
+            "sim": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "%cfg.vivado_structure_sim.desc%"
+            },
+            "constraints": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "%cfg.vivado_structure_constraints.desc%"
+            },
+            "projectDir": {
+              "type": "string",
+              "description": "%cfg.vivado_structure_projectDir.desc%"
+            }
+          }
         }
       }
     }

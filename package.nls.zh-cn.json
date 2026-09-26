@@ -49,5 +49,18 @@
   "cmd.iverilog_stopSimulation.title": "Icarus Verilog: 停止仿真",
   "cmd.iverilog_openWaveform.title": "Icarus Verilog: 打开 VCD 波形查看器",
   "cmd.iverilog_waveformFromText.title": "VCD: 以波形打开",
-  "cmd.iverilog_showText.title": "VCD: 以文本显示"
+  "cmd.iverilog_showText.title": "VCD: 以文本显示",
+  "cmd.vivado_runScript.title": "Vivado: 运行 TCL 脚本",
+  "cmd.vivado_runActiveScript.title": "Vivado: 运行当前 TCL 脚本",
+  "cmd.vivado_stop.title": "Vivado: 停止",
+  "cmd.vivado_createProject.title": "Vivado: 创建工程",
+  "cfg.vivado_path.desc": "Vivado 安装目录（如 D:/Xilinx/Vivado/2022.1，也接受其 bin 目录或 vivado.bat 全路径）。留空 = 从 XILINX_VIVADO、PATH 和常见安装位置自动探测。",
+  "cfg.vivado_part.desc": "工程创建向导的默认器件型号（-part，如 xc7a35tcsg324-1）。留空 = 建好后在 Vivado 中选择。",
+  "cfg.vivado_projectDir.desc": "工程创建向导默认的工程输出目录（相对工作区根目录）",
+  "cfg.vivado_timeoutMs.desc": "Vivado batch 超时时间（毫秒）；0 = 不限时（可通过命令或状态栏停止）",
+  "cfg.vivado_structure.desc": "工程创建向导使用的工程结构模板：按目录 glob 把文件划入 sources / sim / constraints 文件集，并指定 Vivado 工程输出目录。默认遵循 src/sim/prj 布局。",
+  "cfg.vivado_structure_sources.desc": "RTL 源文件 glob，加入 sources_1 文件集（如 src、rtl/**）",
+  "cfg.vivado_structure_sim.desc": "测试台文件 glob，加入 sim_1 文件集（如 sim、tb/**）；与 sources 重叠时优先归 sim",
+  "cfg.vivado_structure_constraints.desc": "约束文件 glob，加入 constrs_1 文件集（如 xdc/**、*.xdc）",
+  "cfg.vivado_structure_projectDir.desc": "Vivado 工程输出目录（相对工作区根，如 prj）"
 }
