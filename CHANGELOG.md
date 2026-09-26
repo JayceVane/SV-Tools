@@ -2,7 +2,7 @@
 
 All notable changes to the SystemVerilog VSCode Extension will be documented in this file.
 
-## [3.4.2] - 2026-09-25
+## [3.4.2] - 2026-09-26
 
 ### Added
 - **Icarus Verilog 集成：语法检查与仿真验证**

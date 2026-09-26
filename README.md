@@ -2,11 +2,13 @@
 
 一款适用于 Visual Studio Code 的 Verilog/SystemVerilog 代码格式化和生产力工具插件，改编自 Sublime Text SystemVerilog 插件和 Verilog-Gadget 插件。
 
-**版本**: v3.4.0
+**版本**: v3.4.2
 
 > **v3.0 重大更新**: 核心引擎使用 Rust 重构，无需 Python 依赖，性能大幅提升！
 >
 > **v3.4.0 重大更新**: 新增 tree-sitter 符号分析引擎、语法高亮、Go to Definition、Hover 悬浮、上下文感知补全、CLI 格式化器！
+>
+> **v3.4.2 重大更新**: **Icarus Verilog 工具链集成**（输入/保存自动 lint、一键仿真、跨文件模块解析）+ **内置 VCD 波形查看器**（双击 .vcd 直接打开，多选分组/拖拽调序/显示格式切换/边沿导航，零外部依赖）！
 
 ## 功能特性
 
