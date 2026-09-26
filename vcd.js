@@ -404,7 +404,7 @@ function buildWaveformHtml(vcd, meta) {
          border-left:2px solid transparent; }
   .sig:hover { background:var(--hover); }
   .sig.selected { background:var(--sel); border-left-color:var(--accent); }
-  .sig.multisel { background:rgba(156,220,254,.14); border-left-color:#9cdcfe; }
+  .sig.multisel { background:rgba(156,220,254,.2); border-left-color:#9cdcfe; }
   .sig .dot { width:9px; height:9px; flex:none; border-radius:2px; }
   .sig .dot.scalar { background:var(--accent); border-radius:50%; }
   .sig .dot.bus { background:var(--bus); }
@@ -467,7 +467,7 @@ function buildWaveformHtml(vcd, meta) {
   <span id="zoomLabel"></span>
   <button id="zoomIn" title="放大">＋</button>
   <button id="zoomFit" title="适配全程">Fit</button>
-  <span class="hint">Ctrl+滚轮缩放 · 拖拽/滚轮平移 · 模拟量行底边拖拽调高 · Shift 点树多选分组</span>
+  <span class="hint">Ctrl+滚轮缩放 · 拖拽/滚轮平移 · 模拟量行底边拖拽调高 · Shift 点树/波形行多选后右键分组</span>
 </footer>
 <script>
 const DATA = ${json};
@@ -582,7 +582,7 @@ const DATA = ${json};
     sigPanel.appendChild(bar);
     var hint = document.createElement('div');
     hint.className = 'hidden-note';
-    hint.textContent = '单击折叠/展开 · 双击层级=单独显示 · Shift 多选';
+    hint.textContent = '单击折叠/展开 · 双击层级=单独显示 · Shift 多选（树与波形行均可）';
     sigPanel.appendChild(hint);
 
     var selectedKeys = {};
@@ -650,6 +650,12 @@ const DATA = ${json};
   function multiSelCount() { var n = 0, k; for (k in multiSel) n++; return n; }
   function multiSelSignals() {
     return DATA.signals.filter(function (s) { return multiSel[keyOf(s)]; });
+  }
+  function toggleMultiSelOf(sig) {
+    var k = keyOf(sig);
+    if (multiSel[k]) delete multiSel[k]; else multiSel[k] = true;
+    renderTree();
+    draw();
   }
   function shiftSelect(idx) {
     var rows = treeSignalRows();
@@ -1052,11 +1058,17 @@ const DATA = ${json};
         ctx.fillStyle = 'rgba(255,213,79,.08)';
         ctx.fillRect(0, yTop, NAME_W, hh);
       }
+      if (multiSel[keyOf(sig)]) {
+        ctx.fillStyle = 'rgba(156,220,254,.16)';
+        ctx.fillRect(0, yTop, NAME_W, hh);
+        ctx.fillStyle = '#9cdcfe';
+        ctx.fillRect(0, yTop, 3, hh);
+      }
       ctx.fillStyle = sig.width > 1 ? '#ffcc80' : '#4fc3f7';
       ctx.beginPath();
       if (sig.width > 1) ctx.fillRect(10, y - 9, 8, 8);
       else { ctx.arc(14, y - 5, 4, 0, 7); ctx.fill(); }
-      ctx.fillStyle = i === edgeRow ? '#ffe9a8' : '#d4d4d4';
+      ctx.fillStyle = multiSel[keyOf(sig)] ? '#9cdcfe' : (i === edgeRow ? '#ffe9a8' : '#d4d4d4');
       ctx.fillText(truncText(ctx, sig.name, NAME_W - 46), 24, y);
       var f2 = sigFmt(sig);
       if (f2 !== 'hex') {
@@ -1151,10 +1163,10 @@ const DATA = ${json};
     ctx.lineJoin = 'miter'; ctx.lineCap = 'butt';
   }
 
-  function drawBus(ctx, sig, yTop, fill) {
+  function drawBus(ctx, sig, yTop, rowH, fill) {
     var list = sig.changes;
     var i0 = firstVisibleIdx(list);
-    var yT = yTop + 7, yB = yTop + ROW_H - 10, yM = yTop + ROW_H / 2;
+    var yT = yTop + 7, yB = yTop + rowH - 10, yM = yTop + rowH / 2;
     for (var i = i0; i < list.length; i++) {
       var t1 = Math.max(list[i].t, viewStart);
       if (t1 > viewEnd()) break;
@@ -1293,6 +1305,9 @@ const DATA = ${json};
     if (heightDrag || (dragging && dragging.moved)) return;
     var row = rowIndexAt(e.offsetY);
     var sig = selected[row];
+    // Shift+点击波形行：加入/移出多选（供右键分组/批量改格式）
+    if (e.shiftKey && sig) { toggleMultiSelOf(sig); return; }
+    if (multiSelCount() > 0) { multiSel = {}; renderTree(); }
     if (e.offsetX < NAME_W) {
       // 点名称栏：只选边沿导航信号，不动游标
       if (sig) applyCursor(cursorT === null ? 0 : cursorT, sig, false);
