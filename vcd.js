@@ -467,7 +467,7 @@ function buildWaveformHtml(vcd, meta) {
   <span id="zoomLabel"></span>
   <button id="zoomIn" title="放大">＋</button>
   <button id="zoomFit" title="适配全程">Fit</button>
-  <span class="hint">Ctrl+滚轮缩放 · 拖拽/滚轮平移 · 模拟量行底边拖拽调高 · Shift 点树/波形行多选后右键分组</span>
+  <span class="hint">Ctrl+滚轮缩放 · 拖拽/滚轮平移 · 名称栏拖拽调序 · 模拟量行底边拖拽调高 · Shift 点树/波形行多选后右键分组</span>
 </footer>
 <script>
 const DATA = ${json};
@@ -505,6 +505,10 @@ const DATA = ${json};
   var groups = {};             // key -> 自定义分组 id
   var groupNames = {};         // gid -> 组名
   var nextGid = 1;
+  var manualRank = {};         // key -> 手动排序号（名称栏拖拽调序，优先于分组/排序）
+  var showFullName = false;    // 名称栏显示全名（层级路径）还是简称
+  var reorderDrag = null;      // {fromIdx,toIdx,moved,startY} 名称栏拖拽调序状态
+  var suppressNextClick = false;
 
   var selected = [];           // 当前显示的行（applyRows 派生）
   var byId = {};               // key: id|path -> signal 对象
@@ -555,13 +559,15 @@ const DATA = ${json};
       bar.appendChild(b);
       return b;
     }
-    barBtn('名称排序', '按信号名排序显示（再点一次恢复原始顺序）', sortMode === 'name', function () {
+    barBtn('名称排序', '按信号名排序显示（再点一次恢复原始顺序，并清除拖拽手动排序）', sortMode === 'name', function () {
       sortMode = sortMode === 'name' ? 'default' : 'name';
+      manualRank = {};
       applyRows(); renderTree(); draw();
     });
-    barBtn('按模块分组', '按所属层级路径分组排列（有自定义分组时以其优先）', groupByScope, function () {
+    barBtn('按模块分组', '按所属层级路径分组排列（并清除拖拽手动排序）', groupByScope, function () {
       groupByScope = !groupByScope;
       if (groupByScope) sortMode = 'default';
+      manualRank = {};
       applyRows(); renderTree(); draw();
     });
     barBtn('常量', '显示/隐藏 parameter 常量（默认隐藏，显示时沉底到列表末尾）', showConst, function () {
@@ -578,6 +584,11 @@ const DATA = ${json};
       if (!soloScope) return;
       exitSolo();
       applyRows(); renderTree(); draw();
+    });
+    barBtn(showFullName ? '全名 ✓' : '全名', '波形名称栏显示完整层级路径 ↔ 短名（类似 Vivado）', showFullName, function () {
+      showFullName = !showFullName;
+      NAME_W = showFullName ? 300 : 185;
+      renderTree(); draw();
     });
     sigPanel.appendChild(bar);
     var hint = document.createElement('div');
@@ -693,7 +704,18 @@ const DATA = ${json};
     });
     var hasCustom = false, k;
     for (k in groups) { hasCustom = true; break; }
-    if (hasCustom) {
+    var hasManual = false;
+    for (k in manualRank) { hasManual = true; break; }
+    if (hasManual) {
+      // 手动拖拽排序优先（未参与拖拽的信号按原始顺序沉到后面）
+      normal.sort(function (a, b) {
+        var ra = manualRank[keyOf(a)], rb = manualRank[keyOf(b)];
+        if (ra === undefined) ra = Infinity;
+        if (rb === undefined) rb = Infinity;
+        if (ra !== rb) return ra - rb;
+        return (origIdx[keyOf(a)] || 0) - (origIdx[keyOf(b)] || 0);
+      });
+    } else if (hasCustom) {
       normal.sort(function (a, b) {
         var ga = groups[keyOf(a)] || 2147483647, gb = groups[keyOf(b)] || 2147483647;
         if (ga !== gb) return ga - gb;
@@ -716,6 +738,14 @@ const DATA = ${json};
   }
   function applyRows() {
     selected = computeRows().filter(function (s) { return checked[keyOf(s)]; });
+  }
+  function applyManualOrder(from, to) {
+    if (to === from || to === from + 1) return;
+    var arr = selected.slice();
+    var moved = arr.splice(from, 1)[0];
+    arr.splice(to > from ? to - 1 : to, 0, moved);
+    arr.forEach(function (s, i) { manualRank[keyOf(s)] = i; });
+    applyRows(); renderTree();
   }
   function enterSolo(scopePath) {
     soloScope = scopePath;
@@ -986,6 +1016,20 @@ const DATA = ${json};
       ctx.moveTo(0, layout.tops[i] + 0.5); ctx.lineTo(w, layout.tops[i] + 0.5);
     }
     ctx.stroke();
+    // 拖拽调序：插入位置指示线
+    if (reorderDrag && reorderDrag.moved) {
+      var iy = reorderDrag.toIdx >= selected.length
+        ? layout.total + 0.5
+        : layout.tops[reorderDrag.toIdx] + 0.5;
+      ctx.save();
+      ctx.strokeStyle = '#ffd54f'; ctx.lineWidth = 2; ctx.setLineDash([7, 4]);
+      ctx.beginPath(); ctx.moveTo(0, iy); ctx.lineTo(w, iy); ctx.stroke();
+      ctx.restore();
+      ctx.fillStyle = '#ffd54f';
+      ctx.beginPath();
+      ctx.moveTo(2, iy - 5); ctx.lineTo(10, iy); ctx.lineTo(2, iy + 5);
+      ctx.closePath(); ctx.fill();
+    }
     if (cursorT !== null) {
       var x = t2x(cursorT);
       if (x >= NAME_W && x <= w) {
@@ -1064,12 +1108,18 @@ const DATA = ${json};
         ctx.fillStyle = '#9cdcfe';
         ctx.fillRect(0, yTop, 3, hh);
       }
+      if (reorderDrag && i === reorderDrag.fromIdx) {
+        ctx.fillStyle = 'rgba(255,213,79,.18)';
+        ctx.fillRect(0, yTop, NAME_W, hh);
+        ctx.fillStyle = '#ffd54f';
+        ctx.fillRect(0, yTop, 3, hh);
+      }
       ctx.fillStyle = sig.width > 1 ? '#ffcc80' : '#4fc3f7';
       ctx.beginPath();
       if (sig.width > 1) ctx.fillRect(10, y - 9, 8, 8);
       else { ctx.arc(14, y - 5, 4, 0, 7); ctx.fill(); }
       ctx.fillStyle = multiSel[keyOf(sig)] ? '#9cdcfe' : (i === edgeRow ? '#ffe9a8' : '#d4d4d4');
-      ctx.fillText(truncText(ctx, sig.name, NAME_W - 46), 24, y);
+      ctx.fillText(truncText(ctx, showFullName ? sig.path : sig.name, NAME_W - 46), 24, y);
       var f2 = sigFmt(sig);
       if (f2 !== 'hex') {
         var badge = { bin: 'B', dec: 'D', sdec: 'S', analog: 'A' }[f2] || '';
@@ -1276,6 +1326,12 @@ const DATA = ${json};
         return;
       }
     }
+    // 名称栏：拖拽调整行顺序（类似 Vivado）
+    if (e.offsetX < NAME_W && row >= 0 && selected.length > 1) {
+      reorderDrag = { fromIdx: row, toIdx: row, moved: false, startY: e.clientY };
+      canvas.style.cursor = 'grabbing';
+      return;
+    }
     dragging = { x: e.clientX, viewStart: viewStart, moved: false };
   });
   window.addEventListener('mousemove', function (e) {
@@ -1285,6 +1341,19 @@ const DATA = ${json};
       draw();
       return;
     }
+    if (reorderDrag) {
+      if (Math.abs(e.clientY - reorderDrag.startY) > 3) reorderDrag.moved = true;
+      if (reorderDrag.moved) {
+        var rect = canvas.getBoundingClientRect ? canvas.getBoundingClientRect() : { top: 0 };
+        var y = e.clientY - (rect.top || 0);
+        var idx = rowIndexAt(y);
+        if (idx < 0) idx = y <= 0 ? 0 : selected.length - 1;
+        var mid = layout.tops[idx] + layout.hs[idx] / 2;
+        reorderDrag.toIdx = y > mid ? idx + 1 : idx;
+        draw();
+      }
+      return;
+    }
     if (!dragging) return;
     var dx = e.clientX - dragging.x;
     if (Math.abs(dx) > 3) dragging.moved = true;
@@ -1292,16 +1361,28 @@ const DATA = ${json};
     clampView();
     draw();
   });
-  window.addEventListener('mouseup', function () { heightDrag = null; dragging = null; });
+  window.addEventListener('mouseup', function () {
+    if (reorderDrag) {
+      if (reorderDrag.moved && reorderDrag.toIdx !== reorderDrag.fromIdx) {
+        applyManualOrder(reorderDrag.fromIdx, reorderDrag.toIdx);
+      }
+      if (reorderDrag.moved) suppressNextClick = true;
+      reorderDrag = null;
+      draw();
+    }
+    heightDrag = null; dragging = null;
+  });
   canvas.addEventListener('mousemove', function (e) {
     if (dragging || heightDrag) return;
     var row = rowIndexAt(e.offsetY);
     var near = row >= 0 && sigFmt(selected[row]) === 'analog' &&
       Math.abs(e.offsetY - (layout.tops[row] + layout.hs[row])) <= 4;
-    canvas.style.cursor = near ? 'ns-resize' : 'crosshair';
+    var inName = e.offsetX < NAME_W && row >= 0;
+    canvas.style.cursor = near ? 'ns-resize' : (inName ? 'grab' : 'crosshair');
   });
 
   canvas.addEventListener('click', function (e) {
+    if (suppressNextClick) { suppressNextClick = false; return; }
     if (heightDrag || (dragging && dragging.moved)) return;
     var row = rowIndexAt(e.offsetY);
     var sig = selected[row];
@@ -1406,6 +1487,7 @@ const DATA = ${json};
         groupNames[gid] = '组' + gid;
         multiSelSignals().forEach(function (s) { groups[keyOf(s)] = gid; });
         multiSel = {};
+        manualRank = {};   // 分组接管排列顺序
         applyRows(); renderTree(); hideMenu(); draw();
       };
       menuEl.appendChild(gItem);
