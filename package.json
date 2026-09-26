@@ -2,7 +2,7 @@
   "name": "svtools",
   "displayName": "SystemVerilog Tools",
   "description": "Verilog/SystemVerilog formatter, module instantiation, testbench generation, and productivity tools (Rust native backend)",
-  "version": "3.4.2",
+  "version": "3.4.3-beta1",
   "publisher": "JayceVane",
   "author": {
     "name": "JayceVane",
@@ -91,68 +91,68 @@
     "commands": [
       {
         "command": "svtools.formatDocument",
-        "title": "Format Document",
+        "title": "%cmd.formatDocument.title%",
         "category": "SystemVerilog Tools"
       },
       {
         "command": "svtools.moduleInstantiation",
-        "title": "Generate Module Instantiation",
+        "title": "%cmd.moduleInstantiation.title%",
         "category": "SystemVerilog Tools",
         "icon": "icon.png"
       },
       {
         "command": "svtools.generateTestbench",
-        "title": "Generate Testbench",
+        "title": "%cmd.generateTestbench.title%",
         "category": "SystemVerilog Tools"
       },
       {
         "command": "svtools.repeatCode",
-        "title": "Repeat Code with Numbers",
+        "title": "%cmd.repeatCode.title%",
         "category": "SystemVerilog Tools"
       },
       {
         "command": "svtools.alignCode",
-        "title": "Align Selected Code",
+        "title": "%cmd.alignCode.title%",
         "category": "SystemVerilog Tools"
       },
       {
         "command": "svtools.insertHeader",
-        "title": "Insert File Header",
+        "title": "%cmd.insertHeader.title%",
         "category": "SystemVerilog Tools"
       },
       {
         "command": "svtools.iverilog.lint",
-        "title": "Icarus Verilog: Lint Current File",
+        "title": "%cmd.iverilog_lint.title%",
         "category": "SystemVerilog Tools",
         "icon": "$(search)"
       },
       {
         "command": "svtools.iverilog.simulate",
-        "title": "Icarus Verilog: Run Simulation",
+        "title": "%cmd.iverilog_simulate.title%",
         "category": "SystemVerilog Tools",
         "icon": "$(play)"
       },
       {
         "command": "svtools.iverilog.stopSimulation",
-        "title": "Icarus Verilog: Stop Simulation",
+        "title": "%cmd.iverilog_stopSimulation.title%",
         "category": "SystemVerilog Tools",
         "icon": "$(debug-stop)"
       },
       {
         "command": "svtools.iverilog.openWaveform",
-        "title": "Icarus Verilog: Open VCD Waveform Viewer",
+        "title": "%cmd.iverilog_openWaveform.title%",
         "category": "SystemVerilog Tools",
         "icon": "$(pulse)"
       },
       {
         "command": "svtools.iverilog.waveformFromText",
-        "title": "VCD: Open as Waveform",
+        "title": "%cmd.iverilog_waveformFromText.title%",
         "category": "SystemVerilog Tools",
         "icon": "$(pulse)"
       },
       {
         "command": "svtools.iverilog.showText",
-        "title": "VCD: Show as Text",
+        "title": "%cmd.iverilog_showText.title%",
         "category": "SystemVerilog Tools",
         "icon": "$(go-to-file)"
       }
@@ -272,32 +272,32 @@
       ]
     },
     "configuration": {
-      "title": "SystemVerilog Tools",
+      "title": "%config.title%",
       "properties": {
         "svtools.tabSize": {
           "type": "number",
           "default": 4,
-          "description": "Number of spaces for indentation"
+          "description": "%cfg.tabSize.desc%"
         },
         "svtools.useTab": {
           "type": "boolean",
           "default": false,
-          "description": "Use tab for indentation"
+          "description": "%cfg.useTab.desc%"
         },
         "svtools.oneBindPerLine": {
           "type": "boolean",
           "default": true,
-          "description": "One port binding per line in module instance"
+          "description": "%cfg.oneBindPerLine.desc%"
         },
         "svtools.oneDeclPerLine": {
           "type": "boolean",
           "default": false,
-          "description": "One signal declaration per line"
+          "description": "%cfg.oneDeclPerLine.desc%"
         },
         "svtools.paramOneLine": {
           "type": "boolean",
           "default": true,
-          "description": "Keep parameters on one line if possible"
+          "description": "%cfg.paramOneLine.desc%"
         },
         "svtools.indentStyle": {
           "type": "string",
@@ -306,49 +306,49 @@
             "gnu"
           ],
           "default": "1tbs",
-          "description": "Indentation style"
+          "description": "%cfg.indentStyle.desc%"
         },
         "svtools.stripEmptyLine": {
           "type": "boolean",
           "default": true,
-          "description": "Strip empty lines"
+          "description": "%cfg.stripEmptyLine.desc%"
         },
         "svtools.maxConsecutiveEmptyLines": {
           "type": "number",
           "default": 1,
           "minimum": 0,
           "maximum": 10,
-          "description": "Maximum number of consecutive empty lines allowed (0 = remove all empty lines)"
+          "description": "%cfg.maxConsecutiveEmptyLines.desc%"
         },
         "svtools.instAlignPort": {
           "type": "boolean",
           "default": true,
-          "description": "Align instance ports"
+          "description": "%cfg.instAlignPort.desc%"
         },
         "svtools.ignoreTick": {
           "type": "boolean",
           "default": true,
-          "description": "Ignore preprocessor directives for indentation"
+          "description": "%cfg.ignoreTick.desc%"
         },
         "svtools.importSameLine": {
           "type": "boolean",
           "default": false,
-          "description": "Keep import on same line as module declaration"
+          "description": "%cfg.importSameLine.desc%"
         },
         "svtools.alignComma": {
           "type": "boolean",
           "default": true,
-          "description": "Align comma/semicolon"
+          "description": "%cfg.alignComma.desc%"
         },
         "svtools.instPrefix": {
           "type": "string",
           "default": "u_",
-          "description": "Default prefix for module instance name"
+          "description": "%cfg.instPrefix.desc%"
         },
         "svtools.includePortDeclarations": {
           "type": "boolean",
           "default": true,
-          "description": "Include signal declarations when generating module instantiation (input->reg, output->wire)"
+          "description": "%cfg.includePortDeclarations.desc%"
         },
         "svtools.reset": {
           "type": "array",
@@ -356,7 +356,7 @@
           "items": {
             "type": "string"
           },
-          "description": "Default asynchronous reset signal names"
+          "description": "%cfg.reset.desc%"
         },
         "svtools.sreset": {
           "type": "array",
@@ -364,7 +364,7 @@
           "items": {
             "type": "string"
           },
-          "description": "Default synchronous reset signal names"
+          "description": "%cfg.sreset.desc%"
         },
         "svtools.clock": {
           "type": "array",
@@ -376,7 +376,7 @@
           "items": {
             "type": "string"
           },
-          "description": "Default clock signal names"
+          "description": "%cfg.clock.desc%"
         },
         "svtools.waveType": {
           "type": "string",
@@ -387,58 +387,58 @@
             "vcd"
           ],
           "default": "fsdb",
-          "description": "Type of waveform dump"
+          "description": "%cfg.waveType.desc%"
         },
         "svtools.taskInit": {
           "type": "boolean",
           "default": true,
-          "description": "Generate init task in testbench"
+          "description": "%cfg.taskInit.desc%"
         },
         "svtools.taskDrive": {
           "type": "boolean",
           "default": true,
-          "description": "Generate drive task in testbench"
+          "description": "%cfg.taskDrive.desc%"
         },
         "svtools.headerTemplate": {
           "type": "string",
           "default": "",
-          "description": "Header template with placeholders: {FILE}, {DATE}, {TIME}, {YEAR}, {TABS}"
+          "description": "%cfg.headerTemplate.desc%"
         },
         "svtools.iverilog.path": {
           "type": "string",
           "default": "",
-          "description": "Icarus Verilog bin directory (or full path to iverilog executable). Empty = auto-detect from IVERILOG_HOME, PATH and common install locations."
+          "description": "%cfg.iverilog_path.desc%"
         },
         "svtools.iverilog.cygwinPath": {
           "type": "string",
           "default": "",
-          "description": "Directory containing cygwin1.dll, required by Cygwin builds of Icarus Verilog installed outside a Cygwin root. Empty = auto-detect."
+          "description": "%cfg.iverilog_cygwinPath.desc%"
         },
         "svtools.iverilog.lintOnSave": {
           "type": "boolean",
           "default": true,
-          "description": "Run iverilog syntax check on save and report diagnostics in the Problems panel"
+          "description": "%cfg.iverilog_lintOnSave.desc%"
         },
         "svtools.iverilog.scanWorkspace": {
           "type": "boolean",
           "default": true,
-          "description": "Scan the workspace for Verilog sources: add every directory containing them to -y/-I, and resolve missing modules by indexing module definitions (handles files whose name differs from the module name)"
+          "description": "%cfg.iverilog_scanWorkspace.desc%"
         },
         "svtools.iverilog.lintOnChange": {
           "type": "boolean",
           "default": true,
-          "description": "Run iverilog syntax check while typing (debounced, lints the unsaved buffer via a temp file)"
+          "description": "%cfg.iverilog_lintOnChange.desc%"
         },
         "svtools.iverilog.lintDebounceMs": {
           "type": "number",
           "default": 800,
           "minimum": 100,
-          "description": "Debounce delay in milliseconds for lint-on-type"
+          "description": "%cfg.iverilog_lintDebounceMs.desc%"
         },
         "svtools.iverilog.lintOnOpen": {
           "type": "boolean",
           "default": true,
-          "description": "Run iverilog syntax check when a Verilog file is opened"
+          "description": "%cfg.iverilog_lintOnOpen.desc%"
         },
         "svtools.iverilog.standard": {
           "type": "string",
@@ -453,7 +453,7 @@
             "2012"
           ],
           "default": "auto",
-          "description": "Language standard passed as -g. auto: .sv/.svh use 2012, .v/.vh use 2005; default: let iverilog decide"
+          "description": "%cfg.iverilog_standard.desc%"
         },
         "svtools.iverilog.lintArgs": {
           "type": "array",
@@ -463,7 +463,7 @@
           "default": [
             "-Wall"
           ],
-          "description": "Extra iverilog arguments for lint and simulation compile (e.g. -Wall)"
+          "description": "%cfg.iverilog_lintArgs.desc%"
         },
         "svtools.iverilog.includePaths": {
           "type": "array",
@@ -471,7 +471,7 @@
             "type": "string"
           },
           "default": [],
-          "description": "Include directories (-I), relative to the workspace root. The file's own directory is always included."
+          "description": "%cfg.iverilog_includePaths.desc%"
         },
         "svtools.iverilog.libraryPaths": {
           "type": "array",
@@ -479,7 +479,7 @@
             "type": "string"
           },
           "default": [],
-          "description": "Library directories (-y) for module-by-filename resolution, relative to the workspace root. The file's own directory is always included."
+          "description": "%cfg.iverilog_libraryPaths.desc%"
         },
         "svtools.iverilog.simFiles": {
           "type": "array",
@@ -487,12 +487,12 @@
             "type": "string"
           },
           "default": [],
-          "description": "Glob patterns of extra source files compiled together with the active file during simulation (e.g. src/*.v, tb/*.sv)"
+          "description": "%cfg.iverilog_simFiles.desc%"
         },
         "svtools.iverilog.simTop": {
           "type": "string",
           "default": "",
-          "description": "Top module for simulation (-s). Empty = let iverilog pick the root module"
+          "description": "%cfg.iverilog_simTop.desc%"
         },
         "svtools.iverilog.simArgs": {
           "type": "array",
@@ -500,23 +500,23 @@
             "type": "string"
           },
           "default": [],
-          "description": "Extra arguments passed to vvp at runtime (e.g. plusargs like +trace)"
+          "description": "%cfg.iverilog_simArgs.desc%"
         },
         "svtools.iverilog.simTimeoutMs": {
           "type": "number",
           "default": 0,
           "minimum": 0,
-          "description": "Simulation timeout in milliseconds; 0 = run until $finish (stop via command or status bar)"
+          "description": "%cfg.iverilog_simTimeoutMs.desc%"
         },
         "svtools.iverilog.waveViewer": {
           "type": "string",
           "default": "",
-          "description": "External waveform viewer executable (e.g. GTKWave). Empty = use the built-in VCD waveform viewer (webview panel; external program is used for .fst files)"
+          "description": "%cfg.iverilog_waveViewer.desc%"
         },
         "svtools.iverilog.autoOpenWaveform": {
           "type": "boolean",
           "default": true,
-          "description": "Automatically open the built-in waveform viewer when a simulation produces a new .vcd file"
+          "description": "%cfg.iverilog_autoOpenWaveform.desc%"
         }
       }
     }

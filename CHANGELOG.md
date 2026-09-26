@@ -2,6 +2,11 @@
 
 All notable changes to the SystemVerilog VSCode Extension will be documented in this file.
 
+## [3.4.3] - 2026-09-26
+
+### Added
+- **配置与命令中文本地化**：设置界面（Settings）中的全部配置项标题/描述与命令面板命令标题支持中文（`package.nls.zh-cn.json`），VSCode 界面语言为中文时自动生效，英文界面保持英文（51 条文案：38 项配置 + 12 个命令 + 配置节标题）
+
 ## [3.4.2] - 2026-09-26
 
 ### Added
