@@ -467,7 +467,7 @@ function buildWaveformHtml(vcd, meta) {
   <span id="zoomLabel"></span>
   <button id="zoomIn" title="放大">＋</button>
   <button id="zoomFit" title="适配全程">Fit</button>
-  <span class="hint">Ctrl+滚轮缩放 · 拖拽/滚轮平移 · 名称栏拖拽调序 · 模拟量行底边拖拽调高 · Shift 点树/波形行多选后右键分组</span>
+  <span class="hint">Ctrl+滚轮缩放 · 拖拽/滚轮平移 · 名称栏拖拽调序 · 模拟量行底边拖拽调高 · Ctrl 单选 / Shift 范围多选后右键分组（可命名）</span>
 </footer>
 <script>
 const DATA = ${json};
@@ -500,8 +500,9 @@ const DATA = ${json};
   var fmt = {};                // key -> 显示格式：'hex'(默认) | 'bin' | 'dec' | 'sdec' | 'analog'
   var heights = {};            // key -> 模拟量行高倍率
   var menuEl = null;           // 右键菜单元素
-  var multiSel = {};           // key -> true（Shift 多选，用于分组）
-  var lastTreeIdx = -1;        // 树中最近一次点击的信号行序号（Shift 范围选择锚点）
+  var multiSel = {};           // key -> true（Ctrl/Shift 多选，用于分组）
+  var lastTreeIdx = -1;        // 树中最近一次普通点击的信号行序号（Shift 范围选择锚点）
+  var lastWaveIdx = -1;        // 波形区最近一次普通点击的行序号（Shift 范围选择锚点）
   var groups = {};             // key -> 自定义分组 id
   var groupNames = {};         // gid -> 组名
   var nextGid = 1;
@@ -593,7 +594,7 @@ const DATA = ${json};
     sigPanel.appendChild(bar);
     var hint = document.createElement('div');
     hint.className = 'hidden-note';
-    hint.textContent = '单击折叠/展开 · 双击层级=单独显示 · Shift 多选（树与波形行均可）';
+    hint.textContent = '单击折叠/展开 · 双击层级=单独显示 · Ctrl 单选 / Shift 范围多选（树与波形行均可）';
     sigPanel.appendChild(hint);
 
     var selectedKeys = {};
@@ -634,6 +635,10 @@ const DATA = ${json};
             '<span>' + esc(node.name) + '</span>' +
             '<span class="w">' + (node.width > 1 ? node.width + 'b' : '') + '</span>';
           row.onclick = function (ev) {
+            if (ev && (ev.ctrlKey || ev.metaKey)) {
+              if (node.hasChanges) toggleMultiSelOf(byId[key] || node);
+              return;
+            }
             if (ev && ev.shiftKey) { shiftSelect(myIdx); return; }
             if (multiSelCount() > 0) { multiSel = {}; }
             lastTreeIdx = myIdx;
@@ -665,6 +670,15 @@ const DATA = ${json};
   function toggleMultiSelOf(sig) {
     var k = keyOf(sig);
     if (multiSel[k]) delete multiSel[k]; else multiSel[k] = true;
+    renderTree();
+    draw();
+  }
+  function waveRangeSelect(idx) {
+    if (lastWaveIdx < 0) lastWaveIdx = idx;
+    var lo = Math.min(lastWaveIdx, idx), hi = Math.max(lastWaveIdx, idx);
+    for (var i = lo; i <= hi && i < selected.length; i++) {
+      multiSel[keyOf(selected[i])] = true;
+    }
     renderTree();
     draw();
   }
@@ -746,6 +760,7 @@ const DATA = ${json};
     arr.splice(to > from ? to - 1 : to, 0, moved);
     arr.forEach(function (s, i) { manualRank[keyOf(s)] = i; });
     applyRows(); renderTree();
+    console.log('DBG after applyRows selected=', selected.slice(0, 3).map(function (s) { return s.name; }).join(','));
   }
   function enterSolo(scopePath) {
     soloScope = scopePath;
@@ -1386,9 +1401,11 @@ const DATA = ${json};
     if (heightDrag || (dragging && dragging.moved)) return;
     var row = rowIndexAt(e.offsetY);
     var sig = selected[row];
-    // Shift+点击波形行：加入/移出多选（供右键分组/批量改格式）
-    if (e.shiftKey && sig) { toggleMultiSelOf(sig); return; }
-    if (multiSelCount() > 0) { multiSel = {}; renderTree(); }
+    // Ctrl+点击：单选加/减；Shift+点击：范围多选（供右键分组/批量改格式）
+    if ((e.ctrlKey || e.metaKey) && sig) { toggleMultiSelOf(sig); return; }
+    if (e.shiftKey && sig) { waveRangeSelect(row); return; }
+    if (multiSelCount() > 0) { multiSel = {}; renderTree(); draw(); }
+    lastWaveIdx = row;
     if (e.offsetX < NAME_W) {
       // 点名称栏：只选边沿导航信号，不动游标
       if (sig) applyCursor(cursorT === null ? 0 : cursorT, sig, false);
@@ -1440,6 +1457,30 @@ const DATA = ${json};
     if (menuEl && menuEl.remove) menuEl.remove();
     menuEl = null;
   }
+  // 分组命名：把菜单项原位替换为输入框（Enter 确认 / Esc 取消）
+  function renameInput(itemEl, gid) {
+    itemEl.innerHTML = '';
+    var inp = document.createElement('input');
+    inp.type = 'text';
+    inp.value = groupNames[gid] || ('组' + gid);
+    inp.style.cssText = 'width:132px;background:#1e2126;color:#d4d4d4;border:1px solid #4fc3f7;' +
+      'border-radius:3px;padding:2px 6px;font-size:12px;outline:none;';
+    itemEl.appendChild(inp);
+    if (inp.focus) inp.focus();
+    if (inp.select) inp.select();
+    function commit() {
+      var v = String(inp.value).replace(/^\s+|\s+$/g, '');
+      if (v) groupNames[gid] = v;
+      hideMenu();
+      draw();
+    }
+    inp.onkeydown = function (ev) {
+      ev.stopPropagation();
+      if (ev.key === 'Enter') commit();
+      else if (ev.key === 'Escape') { hideMenu(); draw(); }
+    };
+    inp.onblur = function () { if (menuEl) commit(); };
+  }
   function showSigMenu(cx, cy, sigs) {
     hideMenu();
     if (!sigs.length) return;
@@ -1477,7 +1518,7 @@ const DATA = ${json};
     fmtItem.onmouseleave = function () { sub.style.display = 'none'; };
     menuEl.appendChild(fmtItem);
 
-    // 分组（Shift 多选 ≥2 时可用）
+    // 分组（Ctrl/Shift 多选 ≥2 时可用）：组员聚拢到第一个成员位置，其余行相对顺序不变
     if (multiSelCount() >= 2) {
       var gItem = document.createElement('div');
       gItem.className = 'ctxItem';
@@ -1487,13 +1528,29 @@ const DATA = ${json};
         groupNames[gid] = '组' + gid;
         multiSelSignals().forEach(function (s) { groups[keyOf(s)] = gid; });
         multiSel = {};
-        manualRank = {};   // 分组接管排列顺序
-        applyRows(); renderTree(); hideMenu(); draw();
+        var order = selected.slice();
+        var members = order.filter(function (s) { return groups[keyOf(s)] === gid; });
+        var firstPos = order.indexOf(members[0]);
+        var rest = order.filter(function (s) { return groups[keyOf(s)] !== gid; });
+        rest.slice(0, firstPos).concat(members, rest.slice(firstPos))
+          .forEach(function (s, i) { manualRank[keyOf(s)] = i; });
+        applyRows(); renderTree(); draw();
+        renameInput(gItem, gid);   // 分组后原位命名
       };
       menuEl.appendChild(gItem);
     }
-    // 解除分组（选中信号中有已分组者）
-    if (sigs.some(function (s) { return groups[keyOf(s)]; })) {
+    // 重命名 / 解除分组（选中信号中有已分组者）
+    var gidOf = null;
+    for (var gi = 0; gi < sigs.length; gi++) {
+      var g0 = groups[keyOf(sigs[gi])];
+      if (g0) { gidOf = g0; break; }
+    }
+    if (gidOf) {
+      var nItem = document.createElement('div');
+      nItem.className = 'ctxItem';
+      nItem.textContent = '✎ 重命名分组（' + (groupNames[gidOf] || ('组' + gidOf)) + '）';
+      nItem.onclick = function () { renameInput(nItem, gidOf); };
+      menuEl.appendChild(nItem);
       var uItem = document.createElement('div');
       uItem.className = 'ctxItem';
       uItem.textContent = '解除分组';
