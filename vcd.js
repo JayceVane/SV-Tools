@@ -335,8 +335,8 @@ function activateWaveViewer(context, deps) {
 
 /**
  * 生成波形查看器 webview HTML（内联全部脚本与样式，Canvas 视口窗口渲染）。
- * 视觉设计：左侧信号树（层级缩进、可折叠），右侧时间刻度尺 + 名称栏对齐列 + 波形区，
- * 支持边沿导航（点击波形行选目标信号，◀ 沿 / 沿 ▶ 或 ←/→ 键跳转）。
+ * 功能：信号树（折叠/排序/分组/单独显示/常量开关）、右键格式菜单（二级菜单，
+ * Hex/Bin/Dec/SDec/模拟量）、边沿导航、游标吸附、模拟量行高拖拽、Shift 多选分组。
  * @param {ReturnType<typeof parseVcd>} vcd
  * @param {{fileName: string, timescale: string, cspSource: string}} meta
  * @returns {string}
@@ -390,35 +390,26 @@ function buildWaveformHtml(vcd, meta) {
 
   #main { flex:1; display:flex; min-height:0; }
   #sigPanel { width:300px; min-width:210px; overflow:auto; border-right:1px solid var(--border);
-              background:var(--panel); padding:5px 0 14px; }
+              background:var(--panel); padding:0 0 14px; }
+  .treeBar { display:flex; gap:6px; padding:5px 8px; border-bottom:1px solid var(--border); }
+  .treeBar button { flex:none; font-size:11px; padding:2px 9px; }
+  .treeBar button.on { border-color:#3a5a74; color:#9cdcfe; background:#253340; }
   .scope { color:#9cdcfe; padding:4px 10px; cursor:pointer; white-space:nowrap;
            font-family:Consolas,monospace; font-size:13px; display:flex; align-items:center; }
   .scope:hover { color:#c8e1ff; }
   .scope.solo { color:#ffd54f; }
   .scope .tw { color:var(--faint); margin-right:6px; width:11px; display:inline-block; }
-  .treeBar { display:flex; gap:6px; padding:5px 8px; border-bottom:1px solid var(--border); }
-  .treeBar button { flex:none; font-size:11px; padding:2px 9px; }
-  .treeBar button.on { border-color:#3a5a74; color:#9cdcfe; background:#253340; }
   .sig { padding:4px 10px 4px 14px; cursor:pointer; white-space:nowrap; display:flex; gap:8px;
          align-items:center; font-family:Consolas,monospace; font-size:13px;
          border-left:2px solid transparent; }
   .sig:hover { background:var(--hover); }
   .sig.selected { background:var(--sel); border-left-color:var(--accent); }
+  .sig.multisel { background:rgba(156,220,254,.14); border-left-color:#9cdcfe; }
   .sig .dot { width:9px; height:9px; flex:none; border-radius:2px; }
   .sig .dot.scalar { background:var(--accent); border-radius:50%; }
   .sig .dot.bus { background:var(--bus); }
   .sig .w { color:var(--faint); font-size:12px; }
   .hidden-note { color:var(--faint); padding:7px 12px; font-size:12px; }
-  .ctxMenu { position:fixed; z-index:10; background:#252526; border:1px solid #454545;
-             border-radius:4px; padding:4px 0; min-width:170px;
-             box-shadow:0 4px 14px rgba(0,0,0,.45); font-size:12px; }
-  .ctxTitle { padding:4px 12px 5px; color:#8a8f98; font-size:11px;
-              border-bottom:1px solid #33373d; margin-bottom:3px; }
-  .ctxItem { padding:5px 14px; cursor:pointer; white-space:nowrap; }
-  .ctxItem:hover { background:#2a2d2e; }
-  .ctxItem.cur { color:#9cdcfe; }
-  .ctxItem.off { color:#5a5f66; cursor:default; }
-  .ctxItem.off:hover { background:transparent; }
 
   #right { flex:1; display:flex; flex-direction:column; min-width:0; }
   #cursorInfo { padding:5px 14px; background:var(--panel); border-bottom:1px solid var(--border);
@@ -440,6 +431,18 @@ function buildWaveformHtml(vcd, meta) {
               overflow:hidden; text-overflow:ellipsis; }
   #zoomLabel { color:var(--dim); min-width:130px; text-align:center; font-size:12px; }
   .hint { color:var(--faint); font-size:12px; margin-left:auto; }
+
+  .ctxMenu { position:fixed; z-index:10; background:#252526; border:1px solid #454545;
+             border-radius:4px; padding:4px 0; min-width:170px;
+             box-shadow:0 4px 14px rgba(0,0,0,.45); font-size:12px; }
+  .ctxMenu.sub { position:absolute; left:100%; top:-5px; display:none; min-width:150px; }
+  .ctxTitle { padding:4px 12px 5px; color:#8a8f98; font-size:11px;
+              border-bottom:1px solid #33373d; margin-bottom:3px; }
+  .ctxItem { padding:5px 14px; cursor:pointer; white-space:nowrap; position:relative; }
+  .ctxItem:hover { background:#2a2d2e; }
+  .ctxItem.cur { color:#9cdcfe; }
+  .ctxItem.off { color:#5a5f66; cursor:default; }
+  .ctxItem.off:hover { background:transparent; }
 </style>
 </head>
 <body>
@@ -451,7 +454,7 @@ function buildWaveformHtml(vcd, meta) {
 <div id="main">
   <div id="sigPanel"></div>
   <div id="right">
-    <div id="cursorInfo"><span class="t">点击波形行放游标并选为边沿导航信号</span></div>
+    <div id="cursorInfo"><span class="t">点击波形行放游标（边沿自动吸附）· 双击树层级单独显示</span></div>
     <canvas id="ruler" height="28"></canvas>
     <div id="waveScroller"><canvas id="waveCanvas"></canvas></div>
   </div>
@@ -464,7 +467,7 @@ function buildWaveformHtml(vcd, meta) {
   <span id="zoomLabel"></span>
   <button id="zoomIn" title="放大">＋</button>
   <button id="zoomFit" title="适配全程">Fit</button>
-  <span class="hint">Ctrl+滚轮缩放 · 拖拽/滚轮平移 · 点击刻度尺定位</span>
+  <span class="hint">Ctrl+滚轮缩放 · 拖拽/滚轮平移 · 模拟量行底边拖拽调高 · Shift 点树多选分组</span>
 </footer>
 <script>
 const DATA = ${json};
@@ -486,25 +489,38 @@ const DATA = ${json};
   var viewStart = 0, viewSpan = END;
   var cursorT = null;
   var edgeSig = null;          // 边沿导航目标信号
-  var dragging = null;
+  var dragging = null;         // 横向平移拖拽
+  var heightDrag = null;       // 模拟量行高拖拽
   var collapsed = {};          // scope 路径 -> 是否折叠
   var soloScope = null;        // 单独显示的 scope 路径（双击层级设置）
-  var soloPrevChecked = null;  // 进入 solo 前的勾选状态快照，退出时恢复
+  var soloPrevChecked = null;  // 进入 solo 前的勾选状态快照
   var sortMode = 'default';    // 'default'（VCD 原始顺序）| 'name'
   var groupByScope = false;    // 按模块分组显示
+  var showConst = false;       // 常量（parameter）显示开关，默认隐藏，显示时沉底
   var fmt = {};                // key -> 显示格式：'hex'(默认) | 'bin' | 'dec' | 'sdec' | 'analog'
+  var heights = {};            // key -> 模拟量行高倍率
   var menuEl = null;           // 右键菜单元素
+  var multiSel = {};           // key -> true（Shift 多选，用于分组）
+  var lastTreeIdx = -1;        // 树中最近一次点击的信号行序号（Shift 范围选择锚点）
+  var groups = {};             // key -> 自定义分组 id
+  var groupNames = {};         // gid -> 组名
+  var nextGid = 1;
 
-  var selected = [];           // 当前显示的行（applyRows 按 checked/排序/分组/单独显示派生）
+  var selected = [];           // 当前显示的行（applyRows 派生）
   var byId = {};               // key: id|path -> signal 对象
+  var origIdx = {};            // key -> DATA.signals 中的原始顺序
   var noChangeCount = 0;
   var checked = {};            // key -> 是否显示在波形区
-  DATA.signals.forEach(function (s) {
-    byId[s.id + '|' + s.path] = s;
-    if (s.changes.length > 0) checked[s.id + '|' + s.path] = true;
-    else noChangeCount++;
+  DATA.signals.forEach(function (s, i) {
+    var k = s.id + '|' + s.path;
+    byId[k] = s;
+    origIdx[k] = i;
+    if (s.changes.length > 0 && !isConstSig(s)) checked[k] = true;
+    else if (!isConstSig(s)) noChangeCount++;
   });
 
+  function keyOf(s) { return s.id + '|' + s.path; }
+  function isConstSig(s) { return /parameter/i.test(s.type); }
   function plotW() { return Math.max(canvas.clientWidth - NAME_W - 12, 50); }
   function viewEnd() { return viewStart + viewSpan; }
   function t2x(t) { return NAME_W + (t - viewStart) / viewSpan * plotW(); }
@@ -529,48 +545,52 @@ const DATA = ${json};
 
   function renderTree() {
     sigPanel.innerHTML = '';
-    // 视图工具条：排序 / 分组 / 清除单独显示
     var bar = document.createElement('div');
     bar.className = 'treeBar';
-    var bName = document.createElement('button');
-    bName.textContent = '名称排序';
-    bName.title = '按信号名排序显示（再点一次恢复原始顺序）';
-    bName.className = sortMode === 'name' ? 'on' : '';
-    bName.onclick = function () {
+    function barBtn(text, title, on, cb) {
+      var b = document.createElement('button');
+      b.textContent = text; b.title = title;
+      b.className = on ? 'on' : '';
+      b.onclick = cb;
+      bar.appendChild(b);
+      return b;
+    }
+    barBtn('名称排序', '按信号名排序显示（再点一次恢复原始顺序）', sortMode === 'name', function () {
       sortMode = sortMode === 'name' ? 'default' : 'name';
       applyRows(); renderTree(); draw();
-    };
-    var bGroup = document.createElement('button');
-    bGroup.textContent = '按模块分组';
-    bGroup.title = '按所属模块分组排列，并在波形区画分隔';
-    bGroup.className = groupByScope ? 'on' : '';
-    bGroup.onclick = function () {
+    });
+    barBtn('按模块分组', '按所属层级路径分组排列（有自定义分组时以其优先）', groupByScope, function () {
       groupByScope = !groupByScope;
       if (groupByScope) sortMode = 'default';
       applyRows(); renderTree(); draw();
-    };
-    var bAll = document.createElement('button');
-    bAll.textContent = '全部显示';
-    bAll.title = '退出单独显示，恢复之前的信号勾选状态';
-    bAll.className = soloScope ? 'on' : '';
-    bAll.onclick = function () {
+    });
+    barBtn('常量', '显示/隐藏 parameter 常量（默认隐藏，显示时沉底到列表末尾）', showConst, function () {
+      showConst = !showConst;
+      DATA.signals.forEach(function (s) {
+        if (isConstSig(s) && s.changes.length > 0) {
+          if (showConst) checked[keyOf(s)] = true;
+          else delete checked[keyOf(s)];
+        }
+      });
+      applyRows(); renderTree(); draw();
+    });
+    barBtn('全部显示', '退出单独显示，恢复之前的信号勾选状态', !!soloScope, function () {
       if (!soloScope) return;
       exitSolo();
       applyRows(); renderTree(); draw();
-    };
-    bar.appendChild(bName); bar.appendChild(bGroup); bar.appendChild(bAll);
+    });
     sigPanel.appendChild(bar);
     var hint = document.createElement('div');
     hint.className = 'hidden-note';
-    hint.textContent = '单击折叠/展开 · 双击层级=单独显示';
+    hint.textContent = '单击折叠/展开 · 双击层级=单独显示 · Shift 多选';
     sigPanel.appendChild(hint);
 
     var selectedKeys = {};
-    selected.forEach(function (s) { selectedKeys[s.id + '|' + s.path] = 1; });
+    selected.forEach(function (s) { selectedKeys[keyOf(s)] = 1; });
+    var flatIdx = -1;
     (function walk(nodes) {
       nodes.forEach(function (node) {
         if (node.children) {
-          // 折叠时 scope 行必须保留（▸），否则无法再次展开
           var isCollapsed = !!collapsed[node.path];
           var d = depthOf(node.path);
           var div = document.createElement('div');
@@ -591,20 +611,30 @@ const DATA = ${json};
           sigPanel.appendChild(div);
           if (!isCollapsed) walk(node.children);
         } else {
+          flatIdx++;
+          var myIdx = flatIdx; // 闭包按值捕获本行序号（共享变量在遍历后会保持末值）
           var pd = node.path.lastIndexOf('.') >= 0 ? depthOf(node.path.slice(0, node.path.lastIndexOf('.'))) + 1 : 0;
+          var key = keyOf(node);
           var row = document.createElement('div');
-          var key = node.id + '|' + node.path;
           var isSel = selectedKeys[key] === 1;
-          row.className = 'sig' + (isSel ? ' selected' : '');
+          row.className = 'sig' + (isSel ? ' selected' : '') + (multiSel[key] ? ' multisel' : '');
           row.style.paddingLeft = (14 + pd * 15) + 'px';
           row.innerHTML = '<span class="dot ' + (node.width > 1 ? 'bus' : 'scalar') + '"></span>' +
             '<span>' + esc(node.name) + '</span>' +
             '<span class="w">' + (node.width > 1 ? node.width + 'b' : '') + '</span>';
-          row.onclick = function () { toggleSignal(node); };
+          row.onclick = function (ev) {
+            if (ev && ev.shiftKey) { shiftSelect(myIdx); return; }
+            if (multiSelCount() > 0) { multiSel = {}; }
+            lastTreeIdx = myIdx;
+            toggleSignal(node);
+          };
           row.oncontextmenu = function (ev) {
             ev.preventDefault();
-            var full = byId[node.id + '|' + node.path];
-            if (full) showSigMenu(ev.clientX, ev.clientY, full);
+            lastTreeIdx = myIdx;
+            var full = byId[key];
+            if (!full) return;
+            var sigs = multiSel[key] ? multiSelSignals() : [full];
+            showSigMenu(ev.clientX, ev.clientY, sigs);
           };
           sigPanel.appendChild(row);
         }
@@ -613,52 +643,93 @@ const DATA = ${json};
     if (noChangeCount > 0) {
       var note = document.createElement('div');
       note.className = 'hidden-note';
-      note.textContent = '(' + noChangeCount + ' 个参数/无变更信号已隐藏)';
+      note.textContent = '(' + noChangeCount + ' 个无变更信号已隐藏)';
       sigPanel.appendChild(note);
     }
+  }
+  function multiSelCount() { var n = 0, k; for (k in multiSel) n++; return n; }
+  function multiSelSignals() {
+    return DATA.signals.filter(function (s) { return multiSel[keyOf(s)]; });
+  }
+  function shiftSelect(idx) {
+    var rows = treeSignalRows();
+    if (lastTreeIdx < 0) lastTreeIdx = idx;
+    var lo = Math.min(lastTreeIdx, idx), hi = Math.max(lastTreeIdx, idx);
+    for (var i = lo; i <= hi && i < rows.length; i++) {
+      var node = rows[i];
+      if (node.hasChanges) multiSel[keyOf(node)] = true;
+    }
+    renderTree();
+  }
+  function treeSignalRows() {
+    var arr = [];
+    (function walk(nodes) {
+      nodes.forEach(function (node) {
+        if (node.children) {
+          if (collapsed[node.path]) return;
+          walk(node.children);
+        } else arr.push(node);
+      });
+    })(DATA.tree.children);
+    return arr;
   }
   function scopeOf(sig) {
     var i = sig.path.lastIndexOf('.');
     return i >= 0 ? sig.path.slice(0, i) : '(顶层)';
   }
   function computeRows() {
-    var arr = [];
+    var normal = [], consts = [];
     DATA.signals.forEach(function (s) {
       if (s.changes.length === 0) return;
+      if (isConstSig(s)) { consts.push(s); return; }
       if (soloScope && s.path.slice(0, soloScope.length + 1) !== soloScope + '.') return;
-      arr.push(s);
+      normal.push(s);
     });
-    if (groupByScope) {
-      arr.sort(function (a, b) { return a.path < b.path ? -1 : a.path > b.path ? 1 : 0; });
+    var hasCustom = false, k;
+    for (k in groups) { hasCustom = true; break; }
+    if (hasCustom) {
+      normal.sort(function (a, b) {
+        var ga = groups[keyOf(a)] || 2147483647, gb = groups[keyOf(b)] || 2147483647;
+        if (ga !== gb) return ga - gb;
+        if (sortMode === 'name') {
+          var c = a.name < b.name ? -1 : a.name > b.name ? 1 : 0;
+          if (c) return c;
+        }
+        return (origIdx[keyOf(a)] || 0) - (origIdx[keyOf(b)] || 0);
+      });
+    } else if (groupByScope) {
+      normal.sort(function (a, b) { return a.path < b.path ? -1 : a.path > b.path ? 1 : 0; });
     } else if (sortMode === 'name') {
-      arr.sort(function (a, b) { return a.name < b.name ? -1 : a.name > b.name ? 1 : (a.path < b.path ? -1 : 1); });
+      normal.sort(function (a, b) { return a.name < b.name ? -1 : a.name > b.name ? 1 : (a.path < b.path ? -1 : 1); });
     }
-    return arr;
+    if (showConst) {
+      consts.sort(function (a, b) { return a.path < b.path ? -1 : a.path > b.path ? 1 : 0; });
+      return normal.concat(consts);   // 常量沉底
+    }
+    return normal;
   }
   function applyRows() {
-    selected = computeRows().filter(function (s) { return checked[s.id + '|' + s.path]; });
+    selected = computeRows().filter(function (s) { return checked[keyOf(s)]; });
   }
-  /** 进入 solo：快照当前勾选，自动勾选该层级下全部信号（其它层级被过滤不显示） */
   function enterSolo(scopePath) {
     soloScope = scopePath;
     soloPrevChecked = Object.assign({}, checked);
     DATA.signals.forEach(function (s) {
       if (s.changes.length > 0 && s.path.slice(0, scopePath.length + 1) === scopePath + '.') {
-        checked[s.id + '|' + s.path] = true;
+        checked[keyOf(s)] = true;
       }
     });
   }
-  /** 退出 solo：恢复进入前的勾选状态 */
   function exitSolo() {
     if (soloPrevChecked) { checked = soloPrevChecked; soloPrevChecked = null; }
     soloScope = null;
   }
   function toggleSignal(node) {
     if (!node.hasChanges) return;
-    var key = node.id + '|' + node.path;
+    var key = keyOf(node);
     if (checked[key]) {
       delete checked[key];
-      if (edgeSig && edgeSig.id === node.id && edgeSig.path === node.path) {
+      if (edgeSig && keyOf(edgeSig) === key) {
         edgeSig = null;
         navLabel.textContent = '边沿: (点击波形行选择)';
       }
@@ -670,7 +741,7 @@ const DATA = ${json};
     draw();
   }
 
-  // ---------- 可见变更定位 ----------
+  // ---------- 值定位 / 格式化 ----------
   function firstVisibleIdx(list) {
     var lo = 0, hi = list.length - 1, ans = 0;
     while (lo <= hi) {
@@ -693,9 +764,8 @@ const DATA = ${json};
     catch (e) { return null; }
   }
   function sigFmt(sig) {
-    return fmt[sig.id + '|' + sig.path] || (sig.type === 'real' ? 'analog' : 'hex');
+    return fmt[keyOf(sig)] || (sig.type === 'real' ? 'analog' : 'hex');
   }
-  /** 按信号格式格式化值（x/z 原样返回）。 */
   function fmtValue(sig, v) {
     if (sig.type === 'real') return v;
     if (/[^01]/.test(v)) return v;
@@ -706,7 +776,6 @@ const DATA = ${json};
     if (sigFmt(sig) === 'sdec') {
       try {
         var n = BigInt('0b' + v);
-        // VCD 值会省略前导零，符号位按声明的位宽判断（数值 ≥ 2^(width-1) 即为负）
         if (sig.width > 1 && n >= (BigInt(1) << BigInt(sig.width - 1))) {
           n -= (BigInt(1) << BigInt(sig.width));
         }
@@ -716,7 +785,6 @@ const DATA = ${json};
     var hx = hexOf(v);
     return hx !== null ? '0x' + hx : v;
   }
-  /** 值的数值形式（模拟量/有符号感知），x/z 或不可解析返回 null。 */
   function numOf(sig, v) {
     if (sig.type === 'real') { var r = Number(v); return isFinite(r) ? r : null; }
     if (/[^01]/.test(v)) return null;
@@ -744,7 +812,7 @@ const DATA = ${json};
       var pretty;
       if (sig.width > 1) {
         pretty = esc(fmtValue(sig, v));
-        if (fmt[sig.id + '|' + sig.path] && fmt[sig.id + '|' + sig.path] !== 'hex' && !/[^01]/.test(v)) {
+        if (fmt[keyOf(sig)] && fmt[keyOf(sig)] !== 'hex' && !/[^01]/.test(v)) {
           var hx = hexOf(v);
           if (hx !== null) pretty += ' <span class="t">(0x' + hx + ')</span>';
         }
@@ -756,7 +824,6 @@ const DATA = ${json};
     }
     return html;
   }
-
   function applyCursor(t, sig, recenter) {
     cursorT = Math.min(Math.max(t, 0), END);
     if (sig) {
@@ -774,7 +841,6 @@ const DATA = ${json};
     cursorInfo.innerHTML = cursorInfoHtml(cursorT, sig || edgeSig);
     draw();
   }
-
   function edgeStep(dir) {
     if (!edgeSig) {
       cursorInfo.innerHTML = '<span class="t">请先点击一个波形行，选它作为边沿导航信号</span>';
@@ -797,11 +863,34 @@ const DATA = ${json};
     applyCursor(t, edgeSig, true);
   }
 
+  // ---------- 行布局（模拟量行高可变） ----------
+  var layout = { tops: [], hs: [], total: 0 };
+  function rowHeightOf(sig) {
+    return sigFmt(sig) === 'analog' ? ROW_H * (heights[keyOf(sig)] || 1) : ROW_H;
+  }
+  function buildLayout() {
+    layout.tops = []; layout.hs = [];
+    var y = 0;
+    selected.forEach(function (s) {
+      var h = rowHeightOf(s);
+      layout.tops.push(y); layout.hs.push(h);
+      y += h;
+    });
+    layout.total = y;
+  }
+  function rowIndexAt(y) {
+    for (var i = 0; i < selected.length; i++) {
+      if (y >= layout.tops[i] && y < layout.tops[i] + layout.hs[i]) return i;
+    }
+    return -1;
+  }
+
   // ---------- 绘制 ----------
   function draw() {
+    buildLayout();
     var dpr = window.devicePixelRatio || 1;
     var w = Math.max(document.getElementById('right').clientWidth, 100);
-    var h = Math.max(selected.length * ROW_H + 8, scroller.clientHeight);
+    var h = Math.max(layout.total + 8, scroller.clientHeight);
     setup(canvas, w, h, dpr);
     setup(ruler, w, RULER_H, dpr);
     var ctx = canvas.getContext('2d');
@@ -812,14 +901,27 @@ const DATA = ${json};
     var ticks = computeTicks();
     drawGrid(ctx, w, ticks);
 
-    // 分组边界（按模块分组时）：行号 -> 组名
+    // 分组边界：自定义分组优先，其次按模块分组，常量块恒有分隔
     var groupStarts = {};
-    if (groupByScope) {
+    var hasCustom = false, k;
+    for (k in groups) { hasCustom = true; break; }
+    if (hasCustom) {
+      var prevC = null;
+      selected.forEach(function (s, i) {
+        var g = groups[keyOf(s)] || 0;
+        if (g !== prevC) { groupStarts[i] = g === 0 ? '(未分组)' : (groupNames[g] || ('组' + g)); prevC = g; }
+      });
+    } else if (groupByScope) {
       var prevG = null;
       selected.forEach(function (s, i) {
         var g = scopeOf(s);
         if (g !== prevG) { groupStarts[i] = g; prevG = g; }
       });
+    }
+    if (showConst) {
+      for (var ci = 0; ci < selected.length; ci++) {
+        if (isConstSig(selected[ci])) { groupStarts[ci] = '(常量)'; break; }
+      }
     }
 
     if (selected.length === 0) {
@@ -831,7 +933,6 @@ const DATA = ${json};
       return;
     }
 
-    // 边沿导航目标行高亮
     var edgeRow = -1;
     if (edgeSig) {
       for (var r = 0; r < selected.length; r++) {
@@ -840,47 +941,45 @@ const DATA = ${json};
     }
 
     selected.forEach(function (sig, i) {
-      var yTop = i * ROW_H;
+      var yTop = layout.tops[i], hh = layout.hs[i];
       if (i === edgeRow) {
         ctx.fillStyle = 'rgba(255,213,79,.06)';
-        ctx.fillRect(0, yTop, w, ROW_H);
+        ctx.fillRect(0, yTop, w, hh);
       } else if (i % 2) {
         ctx.fillStyle = 'rgba(255,255,255,.028)';
-        ctx.fillRect(0, yTop, w, ROW_H);
+        ctx.fillRect(0, yTop, w, hh);
       }
       var f = sigFmt(sig);
       var stroke = f === 'analog' ? '#4fc3f7' : (sig.width > 1 ? '#ffcc80' : '#4fc3f7');
       var fill = sig.width > 1 ? 'rgba(255,204,128,.14)' : 'rgba(79,195,247,.12)';
       ctx.strokeStyle = stroke; ctx.fillStyle = stroke; ctx.lineWidth = 1.5;
-      if (f === 'analog') drawAnalog(ctx, sig, yTop);
-      else if (sig.width === 1 && sig.type !== 'real') drawScalar(ctx, sig, yTop);
-      else drawBus(ctx, sig, yTop, fill);
+      if (f === 'analog') drawAnalog(ctx, sig, yTop, hh);
+      else if (sig.width === 1 && sig.type !== 'real') drawScalar(ctx, sig, yTop, hh);
+      else drawBus(ctx, sig, yTop, hh, fill);
     });
     finish(ctx, w, h, dpr, ticks, edgeRow, groupStarts);
   }
 
   function finish(ctx, w, h, dpr, ticks, edgeRow, groupStarts) {
-    // 分组分隔：波形区加强分隔线
-    if (groupByScope) {
-      ctx.strokeStyle = 'rgba(79,195,247,.28)';
-      ctx.beginPath();
-      for (var g in groupStarts) {
-        var gy = groupStarts[g] * ROW_H + 0.5;
-        if (gy > 0.5) { ctx.moveTo(0, gy); ctx.lineTo(w, gy); }
-      }
-      ctx.stroke();
-    }
-    // 名称栏（最后画，盖在波形起笔处）
-    drawNames(ctx, h, edgeRow, groupStarts);
-    // 行分隔线
-    ctx.strokeStyle = 'rgba(255,255,255,.05)';
+    // 分组加强分隔线（自定义分组 / 按模块分组 / 常量块）
+    ctx.strokeStyle = 'rgba(79,195,247,.28)';
     ctx.beginPath();
-    for (var i = 1; i <= selected.length; i++) {
-      if (groupByScope && groupStarts[i] !== undefined) continue; // 分组处已画加强线
-      ctx.moveTo(0, i * ROW_H + 0.5); ctx.lineTo(w, i * ROW_H + 0.5);
+    for (var g in groupStarts) {
+      var rowIdx = parseInt(g, 10);
+      if (rowIdx > 0) {
+        var yy = layout.tops[rowIdx] + 0.5;
+        ctx.moveTo(0, yy); ctx.lineTo(w, yy);
+      }
     }
     ctx.stroke();
-    // 游标竖线
+    drawNames(ctx, h, edgeRow, groupStarts);
+    ctx.strokeStyle = 'rgba(255,255,255,.05)';
+    ctx.beginPath();
+    for (var i = 1; i < selected.length; i++) {
+      if (groupStarts[i] !== undefined) continue; // 分组处已画加强线
+      ctx.moveTo(0, layout.tops[i] + 0.5); ctx.lineTo(w, layout.tops[i] + 0.5);
+    }
+    ctx.stroke();
     if (cursorT !== null) {
       var x = t2x(cursorT);
       if (x >= NAME_W && x <= w) {
@@ -892,6 +991,10 @@ const DATA = ${json};
     }
     drawRuler(w, dpr, ticks);
     zoomLabel.textContent = '可见 ' + fmtTime(viewSpan);
+  }
+  function hasCustomGroups() {
+    for (var k in groups) return true;
+    return false;
   }
 
   function setup(c, w, h, dpr) {
@@ -905,7 +1008,6 @@ const DATA = ${json};
     var pow = Math.pow(10, Math.floor(Math.log10(Math.max(targetSec, 1e-18))));
     var step = pow;
     [5, 2, 1].some(function (m) { if (targetSec <= m * pow) { step = m * pow; return true; } return false; });
-    // 双重保险：主刻度至少间隔视口的 1/14；异常时逐步加倍，硬上限 40 个
     var stepT = Math.max(step / SEC, viewSpan / 14);
     var guard = 0;
     while (viewSpan / stepT > 40 && guard++ < 20) stepT *= 2;
@@ -922,7 +1024,7 @@ const DATA = ${json};
     ctx.beginPath();
     ticks.forEach(function (t) {
       var x = t2x(t);
-      if (x >= NAME_W) { ctx.moveTo(x + 0.5, 0); ctx.lineTo(x + 0.5, selected.length * ROW_H); }
+      if (x >= NAME_W) { ctx.moveTo(x + 0.5, 0); ctx.lineTo(x + 0.5, layout.total); }
     });
     ctx.stroke();
   }
@@ -934,21 +1036,21 @@ const DATA = ${json};
     ctx.beginPath(); ctx.moveTo(NAME_W + 0.5, 0); ctx.lineTo(NAME_W + 0.5, h); ctx.stroke();
     ctx.font = '12px Consolas,monospace';
     selected.forEach(function (sig, i) {
-      var y = i * ROW_H + ROW_H / 2 + 4;
+      var yTop = layout.tops[i], hh = layout.hs[i];
       var isGroupStart = groupStarts && groupStarts[i] !== undefined;
+      var y = yTop + hh / 2 + 4;
       if (isGroupStart) {
-        // 分组标签行：淡蓝底带 + 层级路径小字，信号名下移避让
         ctx.fillStyle = 'rgba(79,195,247,.06)';
-        ctx.fillRect(0, i * ROW_H, NAME_W, ROW_H);
+        ctx.fillRect(0, yTop, NAME_W, hh);
         ctx.fillStyle = '#9cdcfe';
         ctx.font = '10px Consolas,monospace';
-        ctx.fillText(truncText(ctx, groupStarts[i], NAME_W - 20), 8, i * ROW_H + 11);
+        ctx.fillText(truncText(ctx, groupStarts[i], NAME_W - 20), 8, yTop + 11);
         ctx.font = '12px Consolas,monospace';
-        y = i * ROW_H + ROW_H - 8;
+        y = yTop + hh - 8;
       }
       if (i === edgeRow) {
         ctx.fillStyle = 'rgba(255,213,79,.08)';
-        ctx.fillRect(0, i * ROW_H, NAME_W, ROW_H);
+        ctx.fillRect(0, yTop, NAME_W, hh);
       }
       ctx.fillStyle = sig.width > 1 ? '#ffcc80' : '#4fc3f7';
       ctx.beginPath();
@@ -956,7 +1058,6 @@ const DATA = ${json};
       else { ctx.arc(14, y - 5, 4, 0, 7); ctx.fill(); }
       ctx.fillStyle = i === edgeRow ? '#ffe9a8' : '#d4d4d4';
       ctx.fillText(truncText(ctx, sig.name, NAME_W - 46), 24, y);
-      // 格式徽标（非默认格式时）
       var f2 = sigFmt(sig);
       if (f2 !== 'hex') {
         var badge = { bin: 'B', dec: 'D', sdec: 'S', analog: 'A' }[f2] || '';
@@ -987,7 +1088,6 @@ const DATA = ${json};
     ticks.forEach(function (t) {
       var x = t2x(t);
       ctx.moveTo(x + 0.5, RULER_H - 10); ctx.lineTo(x + 0.5, RULER_H);
-      // 标签防重叠：与上一个标签放不下就只画刻度线
       var label = fmtSeconds(t * SEC);
       var lw = ctx.measureText(label).width;
       if (x >= NAME_W - 4 && x - lastLabelEnd > 8 && x + lw <= w + 4) {
@@ -1085,7 +1185,6 @@ const DATA = ${json};
       ctx.fill(); ctx.stroke();
       var label = fmtValue(sig, v);
       var tw = ctx.measureText(label).width;
-      // 密集时段只画六边形不写值：段宽不足以从容放下标签时跳过
       if (x2 - x1 >= 48 && tw < x2 - x1 - 14) {
         var cx = (x1 + x2) / 2;
         ctx.fillStyle = 'rgba(26,28,31,.85)';
@@ -1096,11 +1195,10 @@ const DATA = ${json};
     }
   }
 
-  /** 模拟量渲染：值按全量程自动缩放为阶梯折线，x/z 处断开。 */
-  function drawAnalog(ctx, sig, yTop) {
+  function drawAnalog(ctx, sig, yTop, rowH) {
     var list = sig.changes;
     if (!list.length) return;
-    var yTopPad = yTop + 5, yBotPad = yTop + ROW_H - 7;
+    var yTopPad = yTop + 5, yBotPad = yTop + rowH - 7;
     var min = null, max = null, nums = [];
     for (var i = 0; i < list.length; i++) {
       var n0 = numOf(sig, list[i].value);
@@ -1121,7 +1219,7 @@ const DATA = ${json};
       if (x2 < NAME_W) { started = false; continue; }
       if (x1 > right) break;
       var n1 = nums[j];
-      if (n1 === null) { started = false; continue; }  // x/z：断开
+      if (n1 === null) { started = false; continue; }
       var y = yBotPad - (n1 - min) / (max - min) * (yBotPad - yTopPad);
       if (!started) { ctx.moveTo(Math.max(x1, NAME_W), y); started = true; }
       else ctx.lineTo(x1, y);
@@ -1157,9 +1255,24 @@ const DATA = ${json};
   }, { passive: false });
 
   canvas.addEventListener('mousedown', function (e) {
+    // 模拟量行底边 ±4px 热区：拖拽调整行高
+    var row = rowIndexAt(e.offsetY);
+    if (row >= 0 && sigFmt(selected[row]) === 'analog') {
+      var bottom = layout.tops[row] + layout.hs[row];
+      if (Math.abs(e.offsetY - bottom) <= 4) {
+        heightDrag = { key: keyOf(selected[row]), startY: e.clientY, startH: layout.hs[row] };
+        return;
+      }
+    }
     dragging = { x: e.clientX, viewStart: viewStart, moved: false };
   });
   window.addEventListener('mousemove', function (e) {
+    if (heightDrag) {
+      var newH = Math.min(Math.max(heightDrag.startH + (e.clientY - heightDrag.startY), 24), 240);
+      heights[heightDrag.key] = newH / ROW_H;
+      draw();
+      return;
+    }
     if (!dragging) return;
     var dx = e.clientX - dragging.x;
     if (Math.abs(dx) > 3) dragging.moved = true;
@@ -1167,78 +1280,37 @@ const DATA = ${json};
     clampView();
     draw();
   });
-  window.addEventListener('mouseup', function () { dragging = null; });
+  window.addEventListener('mouseup', function () { heightDrag = null; dragging = null; });
+  canvas.addEventListener('mousemove', function (e) {
+    if (dragging || heightDrag) return;
+    var row = rowIndexAt(e.offsetY);
+    var near = row >= 0 && sigFmt(selected[row]) === 'analog' &&
+      Math.abs(e.offsetY - (layout.tops[row] + layout.hs[row])) <= 4;
+    canvas.style.cursor = near ? 'ns-resize' : 'crosshair';
+  });
 
   canvas.addEventListener('click', function (e) {
-    if (dragging && dragging.moved) return;
+    if (heightDrag || (dragging && dragging.moved)) return;
+    var row = rowIndexAt(e.offsetY);
+    var sig = selected[row];
     if (e.offsetX < NAME_W) {
       // 点名称栏：只选边沿导航信号，不动游标
-      var row0 = Math.floor(e.offsetY / ROW_H);
-      if (selected[row0]) applyCursor(cursorT === null ? 0 : cursorT, selected[row0], false);
+      if (sig) applyCursor(cursorT === null ? 0 : cursorT, sig, false);
       return;
     }
-    var row = Math.floor(e.offsetY / ROW_H);
-    applyCursor(x2t(e.offsetX), selected[row] || null, false);
-  });
-
-  // ---------- 右键菜单：显示格式 / 移除 ----------
-  function hideMenu() {
-    if (menuEl && menuEl.remove) menuEl.remove();
-    menuEl = null;
-  }
-  function showSigMenu(cx, cy, sig) {
-    hideMenu();
-    var multi = sig.width > 1 || sig.type === 'real';
-    var key = sig.id + '|' + sig.path;
-    menuEl = document.createElement('div');
-    menuEl.className = 'ctxMenu';
-    menuEl.style.left = Math.min(cx, (window.innerWidth || 1600) - 190) + 'px';
-    menuEl.style.top = cy + 'px';
-    var title = document.createElement('div');
-    title.className = 'ctxTitle';
-    title.textContent = sig.name + ' · 显示格式';
-    menuEl.appendChild(title);
-    if (multi) {
-      var cur = sigFmt(sig);
-      [['hex', 'Hex 十六进制'], ['bin', 'Bin 二进制'], ['dec', 'Dec 无符号十进制'],
-       ['sdec', 'SDec 有符号十进制'], ['analog', 'Analog 模拟量']].forEach(function (it) {
-        var d = document.createElement('div');
-        d.className = 'ctxItem' + (cur === it[0] ? ' cur' : '');
-        d.textContent = it[1];
-        d.onclick = function () {
-          fmt[key] = it[0];
-          hideMenu();
-          draw();
-        };
-        menuEl.appendChild(d);
-      });
-    } else {
-      var off = document.createElement('div');
-      off.className = 'ctxItem off';
-      off.textContent = '1-bit 标量无格式选项';
-      menuEl.appendChild(off);
+    var tCand = x2t(e.offsetX);
+    if (sig && sig.changes.length) {
+      // 边沿吸附：点击位置 8px 内的最近跳变
+      var snapTicks = 8 / plotW() * viewSpan;
+      var best = null, bestD = snapTicks;
+      for (var i = 0; i < sig.changes.length; i++) {
+        var d = Math.abs(sig.changes[i].t - tCand);
+        if (d <= bestD) { bestD = d; best = sig.changes[i].t; }
+        if (sig.changes[i].t > tCand + snapTicks) break;
+      }
+      if (best !== null) tCand = best;
     }
-    var rm = document.createElement('div');
-    rm.className = 'ctxItem';
-    rm.textContent = '✕ 移除该信号';
-    rm.onclick = function () {
-      hideMenu();
-      delete checked[key];
-      if (edgeSig && edgeSig.id === sig.id && edgeSig.path === sig.path) edgeSig = null;
-      applyRows(); renderTree(); draw();
-    };
-    menuEl.appendChild(rm);
-    document.body.appendChild(menuEl);
-  }
-  canvas.addEventListener('contextmenu', function (e) {
-    e.preventDefault();
-    var row = Math.floor(e.offsetY / ROW_H);
-    var sig = selected[row];
-    if (sig) showSigMenu(e.clientX, e.clientY, sig);
-  });
-  document.addEventListener('mousedown', function (e) {
-    if (menuEl && menuEl.contains && menuEl.contains(e.target)) return;
-    hideMenu();
+    applyCursor(tCand, sig || null, false);
   });
 
   document.getElementById('prevEdge').onclick = function () { edgeStep(-1); };
@@ -1248,7 +1320,6 @@ const DATA = ${json};
     else if (e.key === 'ArrowRight') { e.preventDefault(); edgeStep(1); }
   });
 
-  // 点击刻度尺：概览条区居中跳转，刻度区放游标
   ruler.addEventListener('click', function (e) {
     if (e.offsetX < NAME_W) return;
     if (e.offsetY >= RULER_H - 9) {
@@ -1267,6 +1338,103 @@ const DATA = ${json};
     viewStart = 0; viewSpan = END; clampView(); draw();
   };
   window.addEventListener('resize', draw);
+
+  // ---------- 右键菜单：二级格式菜单 / 分组 / 移除 ----------
+  function hideMenu() {
+    if (menuEl && menuEl.remove) menuEl.remove();
+    menuEl = null;
+  }
+  function showSigMenu(cx, cy, sigs) {
+    hideMenu();
+    if (!sigs.length) return;
+    var anyMulti = sigs.length > 1;
+    menuEl = document.createElement('div');
+    menuEl.className = 'ctxMenu';
+    menuEl.style.left = Math.min(cx, (window.innerWidth || 1600) - 190) + 'px';
+    menuEl.style.top = cy + 'px';
+    var title = document.createElement('div');
+    title.className = 'ctxTitle';
+    title.textContent = anyMulti ? (sigs.length + ' 个信号') : (sigs[0].name);
+    menuEl.appendChild(title);
+
+    // 显示格式 ▸（二级菜单）
+    var fmtItem = document.createElement('div');
+    fmtItem.className = 'ctxItem';
+    fmtItem.textContent = '显示格式 ▸';
+    var sub = document.createElement('div');
+    sub.className = 'ctxMenu sub';
+    var cur = sigs.length === 1 ? sigFmt(sigs[0]) : null;
+    [['hex', 'Hex 十六进制'], ['bin', 'Bin 二进制'], ['dec', 'Dec 无符号十进制'],
+     ['sdec', 'SDec 有符号十进制'], ['analog', 'Analog 模拟量']].forEach(function (it) {
+      var d = document.createElement('div');
+      d.className = 'ctxItem' + (cur === it[0] ? ' cur' : '');
+      d.textContent = it[1];
+      d.onclick = function () {
+        sigs.forEach(function (s) { fmt[keyOf(s)] = it[0]; });
+        hideMenu();
+        draw();
+      };
+      sub.appendChild(d);
+    });
+    fmtItem.appendChild(sub);
+    fmtItem.onmouseenter = function () { sub.style.display = 'block'; };
+    fmtItem.onmouseleave = function () { sub.style.display = 'none'; };
+    menuEl.appendChild(fmtItem);
+
+    // 分组（Shift 多选 ≥2 时可用）
+    if (multiSelCount() >= 2) {
+      var gItem = document.createElement('div');
+      gItem.className = 'ctxItem';
+      gItem.textContent = '✦ 分组（' + multiSelCount() + ' 个信号）';
+      gItem.onclick = function () {
+        var gid = nextGid++;
+        groupNames[gid] = '组' + gid;
+        multiSelSignals().forEach(function (s) { groups[keyOf(s)] = gid; });
+        multiSel = {};
+        applyRows(); renderTree(); hideMenu(); draw();
+      };
+      menuEl.appendChild(gItem);
+    }
+    // 解除分组（选中信号中有已分组者）
+    if (sigs.some(function (s) { return groups[keyOf(s)]; })) {
+      var uItem = document.createElement('div');
+      uItem.className = 'ctxItem';
+      uItem.textContent = '解除分组';
+      uItem.onclick = function () {
+        sigs.forEach(function (s) { delete groups[keyOf(s)]; });
+        applyRows(); renderTree(); hideMenu(); draw();
+      };
+      menuEl.appendChild(uItem);
+    }
+
+    var rm = document.createElement('div');
+    rm.className = 'ctxItem';
+    rm.textContent = anyMulti ? ('✕ 移除 ' + sigs.length + ' 个信号') : '✕ 移除该信号';
+    rm.onclick = function () {
+      hideMenu();
+      sigs.forEach(function (s) { delete checked[keyOf(s)]; });
+      if (edgeSig && sigs.indexOf(edgeSig) >= 0) {
+        edgeSig = null;
+        navLabel.textContent = '边沿: (点击波形行选择)';
+      }
+      multiSel = {};
+      applyRows(); renderTree(); draw();
+    };
+    menuEl.appendChild(rm);
+    document.body.appendChild(menuEl);
+  }
+  canvas.addEventListener('contextmenu', function (e) {
+    e.preventDefault();
+    var row = rowIndexAt(e.offsetY);
+    var sig = selected[row];
+    if (!sig) return;
+    var sigs = multiSel[keyOf(sig)] ? multiSelSignals() : [sig];
+    showSigMenu(e.clientX, e.clientY, sigs);
+  });
+  document.addEventListener('mousedown', function (e) {
+    if (menuEl && menuEl.contains && menuEl.contains(e.target)) return;
+    hideMenu();
+  });
 
   function esc(s) {
     return String(s).replace(/[&<>"]/g, function (c) {
