@@ -170,10 +170,54 @@ assign signal_8 = 8;
   cat file.sv | svtools.exe            # 从 stdin 读取
   ```
 
+### 语法检查与仿真 (Icarus Verilog)
+
+内置 [Icarus Verilog](http://iverilog.icarus.com/) 集成，无需额外插件即可完成 **lint** 与 **仿真验证**：
+
+#### Lint 语法检查
+- **输入（防抖）/ 打开 / 保存 `.v` / `.sv` 文件时自动运行** `iverilog -tnull`，诊断结果进入 Problems 面板，可点击跳转；未保存的缓冲区内容通过临时文件参与检查，边改边看
+- 每次 lint 会在 "SystemVerilog Tools · Icarus Verilog" 输出通道留一行 `[lint] 文件 → N 错误, M 警告 (耗时)` 轨迹，方便确认自动触发是否生效
+- 自动按扩展名选择语言标准（`.sv` → `-g2012`，`.v` → `-g2005`），可用 `svtools.iverilog.standard` 覆盖
+- **跨文件模块解析**：工作区内所有含 Verilog 文件的目录自动加入 `-y`/`-I`（文件名=模块名约定）；模块名与文件名不一致时，通过工作区模块索引自动把定义文件补进编译（lint 与仿真均生效，可关闭 `scanWorkspace`）
+- 同目录模块自动解析（`-y <文件目录> -Y .sv`），支持 include / 库目录配置
+- 也可手动执行：命令面板 → "SystemVerilog Tools: Icarus Verilog: Lint Current File"（手动触发会强制重新探测工具链）
+
+#### 仿真验证
+- 状态栏 **▶ iverilog 仿真** 按钮（或命令面板 "Icarus Verilog: Run Simulation"）一键完成 **编译 + vvp 运行**
+- 输出流式打印到 "SystemVerilog Tools · Icarus Verilog" 输出通道，回显实际命令行
+- 编译错误同样进入 Problems 面板；运行中可随时停止（Stop Simulation 命令 / 再次点击状态栏重新运行）
+- 支持超时自动停止（`simTimeoutMs`）、多文件工程（`simFiles` glob）、自定义 top（`simTop`）与 vvp 参数（`simArgs`）
+
+#### 内置波形查看器
+- **双击 `.vcd` 文件直接以波形面板打开**（内置查看器是 .vcd 的默认编辑器）；标签页右上角有 **波形 ↔ 文本** 切换按钮
+- 仿真产生 `.vcd` 后**自动打开波形面板**（`autoOpenWaveform` 可关闭），零外部依赖
+- Canvas 渲染：标量时钟/信号画高低电平与 x/z 中轴带，总线画六边形段（半透明填充）并居中标注 `0x` 十六进制与二进制值
+- **常量开关**：工具条"常量"按钮批量显示/隐藏 parameter 常量（默认隐藏，显示时沉底到列表末尾并带"(常量)"分组标签）
+- **右键切换显示格式**：右键任意信号（信号树或波形行）→ 二级菜单选择 Hex 十六进制 / Bin 二进制 / Dec 无符号十进制 / SDec 有符号十进制 / **Analog 模拟量**（阶梯折线，按信号全量程自动缩放，x/z 断开）；名称栏显示格式徽标（B/D/S/A），游标读值随格式联动
+- **拖拽调整行顺序**：按住波形名称栏（光标变 ✋）上下拖拽即可调序（类似 Vivado），虚线+箭头指示插入位置；手动排序优先，"名称排序"/"按模块分组"/新建分组会恢复自动排序
+- **全名/简称切换**：工具栏"全名"按钮切换波形名称栏显示完整层级路径（如 `tb_sfifo.u_sfifo.wdata`）或短名，全名模式自动加宽名称栏
+- **模拟量行高拖拽**：模拟量行底边（光标变 ↕）可拖拽调整行高（24~240px），看得更清楚
+- **Ctrl 单选 / Shift 范围多选 + 右键分组**：信号树与波形行统一——Ctrl+点击加/减选单个信号，Shift+点击选锚点至当前的范围（名称栏浅蓝高亮反馈）；右键"✦ 分组"把组员**聚拢到第一个成员位置**（其余行相对顺序不变，Vivado 式），分组后可**原位输入组名**（回车确认），右键还提供"重命名分组/解除分组"；普通点击清除多选
+- **边沿吸附**：左键点击波形时自动吸附到 8px 内最近的信号跳变沿，游标精确落在边沿上
+- **滚轮方向区分**：**上下滚轮滚动查看上方/下方信号行**，**左右滚轮（倾斜轮/触控板横扫，或 Shift+滚轮）平移时间轴**，Ctrl+滚轮缩放（在刻度尺上滚动同样有效）；波形内容不满一屏时上下滚为无操作
+- 左侧信号树按 scope 层级缩进展示，**单击折叠/展开层级（▸/▾）**；点击信号加/删波形行（带类型圆点/方点标记）
+- **快速单独显示某模块**：双击信号树中的层级，波形区只显示该模块（含子层级）的信号；"全部显示"退出并恢复之前的勾选状态
+- **排序与分组**：树面板工具条支持按名称排序、按模块分组（波形区绘制分组分隔线与层级标签），一键切回原始顺序
+- **边沿导航**：点击波形行选目标信号，`◀ 沿 / 沿 ▶` 按钮（或 ←/→ 方向键）跳转到该信号的上一/下一个边沿并自动居中
+- 点击波形放置游标并显示该时刻信号值；Ctrl+滚轮缩放、Fit 一键适配、拖拽/滚轮平移、点击刻度尺定位
+- 偏好外部工具（如 GTKWave）时配置 `waveViewer` 即可改走外部程序（`.fst` 等格式也走外部）；也可随时命令面板 "Open VCD Waveform Viewer" 手动打开任意 `.vcd`
+
+#### 工具链定位
+自动探测顺序：`svtools.iverilog.path` 配置 → `IVERILOG_HOME` 环境变量 → `PATH` → 常见安装目录。
+**Cygwin 构建的 iverilog**（安装在 Cygwin 根目录之外）缺 `cygwin1.dll` 时会自动定位同级的 Cygwin 安装目录并注入子进程 PATH；也可通过 `svtools.iverilog.cygwinPath` 显式指定。
+
+> 提示：仿真会在工作区下生成 `.svtools/sim/` 缓存目录（存放 `.vvp` 编译产物），建议加入 `.gitignore`。
+
 ## 系统要求
 
 - Visual Studio Code 1.74.0 或更高版本
 - **无需安装 Python**（v3.0+ 使用 Rust 原生模块）
+- 语法检查 / 仿真功能需要 [Icarus Verilog](http://iverilog.icarus.com/)（可选，未安装不影响其他功能）
 
 ## 安装方法
 
@@ -254,6 +298,23 @@ assign signal_8 = 8;
 | `taskInit` | boolean | true | 在测试台中生成 init 任务 |
 | `taskDrive` | boolean | true | 在测试台中生成 drive 任务 |
 | `headerTemplate` | string | "" | 文件头模板（使用占位符） |
+| `iverilog.path` | string | "" | Icarus Verilog bin 目录或 iverilog 全路径；空 = 自动探测 |
+| `iverilog.cygwinPath` | string | "" | cygwin1.dll 所在目录（Cygwin 构建装在 Cygwin 根外时需要）；空 = 自动探测 |
+| `iverilog.lintOnSave` | boolean | true | 保存时自动 lint |
+| `iverilog.scanWorkspace` | boolean | true | 扫描工作区源码：所有含 Verilog 文件的目录自动加入 -y/-I；模块名≠文件名时按模块索引补编译（lint 与仿真都生效） |
+| `iverilog.lintOnChange` | boolean | true | 输入时自动 lint（防抖，检查未保存的缓冲区内容） |
+| `iverilog.lintDebounceMs` | number | 800 | 输入触发 lint 的防抖延迟（毫秒） |
+| `iverilog.lintOnOpen` | boolean | true | 打开文件时自动 lint |
+| `iverilog.standard` | string | "auto" | 语言标准（-g）；auto: `.sv`→2012 / `.v`→2005 |
+| `iverilog.lintArgs` | array | ["-Wall"] | lint 与仿真编译的额外 iverilog 参数 |
+| `iverilog.includePaths` | array | [] | include 目录（-I），相对工作区根 |
+| `iverilog.libraryPaths` | array | [] | 模块库目录（-y），相对工作区根 |
+| `iverilog.simFiles` | array | [] | 仿真时额外编译的源文件 glob（如 `src/*.v`） |
+| `iverilog.simTop` | string | "" | 仿真 top 模块（-s）；空 = iverilog 自动选根模块 |
+| `iverilog.simArgs` | array | [] | vvp 运行参数（如 plusargs） |
+| `iverilog.simTimeoutMs` | number | 0 | 仿真超时毫秒数；0 = 不限制 |
+| `iverilog.waveViewer` | string | "" | 外部波形查看器路径；空 = 使用内置 VCD 波形面板（.fst 等格式仍走外部） |
+| `iverilog.autoOpenWaveform` | boolean | true | 仿真产生新 `.vcd` 后自动打开内置波形查看器 |
 
 > **注意**: v3.0+ 已移除 `pythonPath` 配置项，因为不再需要 Python 依赖。
 
@@ -287,6 +348,12 @@ assign signal_8 = 8;
 - `svtools.repeatCode` - 重复代码并编号
 - `svtools.alignCode` - 对齐选中的代码
 - `svtools.insertHeader` - 插入文件头
+
+### 仿真命令（Icarus Verilog）
+- `svtools.iverilog.lint` - 对当前文件运行 iverilog 语法检查
+- `svtools.iverilog.simulate` - 编译并运行仿真（vvp），返回 Promise 供脚本/Agent 调用
+- `svtools.iverilog.stopSimulation` - 停止正在运行的仿真
+- `svtools.iverilog.openWaveform` - 打开 VCD 文件到内置波形查看器
 
 ## 快捷键
 

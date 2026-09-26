@@ -2,7 +2,7 @@
   "name": "svtools",
   "displayName": "SystemVerilog Tools",
   "description": "Verilog/SystemVerilog formatter, module instantiation, testbench generation, and productivity tools (Rust native backend)",
-  "version": "3.4.1",
+  "version": "3.4.2",
   "publisher": "JayceVane",
   "author": {
     "name": "JayceVane",
@@ -119,6 +119,54 @@
         "command": "svtools.insertHeader",
         "title": "Insert File Header",
         "category": "SystemVerilog Tools"
+      },
+      {
+        "command": "svtools.iverilog.lint",
+        "title": "Icarus Verilog: Lint Current File",
+        "category": "SystemVerilog Tools",
+        "icon": "$(search)"
+      },
+      {
+        "command": "svtools.iverilog.simulate",
+        "title": "Icarus Verilog: Run Simulation",
+        "category": "SystemVerilog Tools",
+        "icon": "$(play)"
+      },
+      {
+        "command": "svtools.iverilog.stopSimulation",
+        "title": "Icarus Verilog: Stop Simulation",
+        "category": "SystemVerilog Tools",
+        "icon": "$(debug-stop)"
+      },
+      {
+        "command": "svtools.iverilog.openWaveform",
+        "title": "Icarus Verilog: Open VCD Waveform Viewer",
+        "category": "SystemVerilog Tools",
+        "icon": "$(pulse)"
+      },
+      {
+        "command": "svtools.iverilog.waveformFromText",
+        "title": "VCD: Open as Waveform",
+        "category": "SystemVerilog Tools",
+        "icon": "$(pulse)"
+      },
+      {
+        "command": "svtools.iverilog.showText",
+        "title": "VCD: Show as Text",
+        "category": "SystemVerilog Tools",
+        "icon": "$(go-to-file)"
+      }
+    ],
+    "customEditors": [
+      {
+        "viewType": "svtoolsWaveViewer",
+        "displayName": "VCD 波形查看器",
+        "selector": [
+          {
+            "filenamePattern": "*.vcd"
+          }
+        ],
+        "priority": "option"
       }
     ],
     "keybindings": [
@@ -160,6 +208,18 @@
       }
     ],
     "menus": {
+      "editor/title": [
+        {
+          "command": "svtools.iverilog.waveformFromText",
+          "group": "navigation",
+          "when": "resourceExtname == .vcd && !activeCustomEditorId"
+        },
+        {
+          "command": "svtools.iverilog.showText",
+          "group": "navigation",
+          "when": "activeCustomEditorId == svtoolsWaveViewer"
+        }
+      ],
       "editor/context": [
         {
           "command": "svtools.formatDocument",
@@ -192,6 +252,22 @@
         {
           "command": "svtools.insertHeader",
           "group": "3_gadget"
+        },
+        {
+          "command": "svtools.iverilog.lint",
+          "group": "4_simulation"
+        },
+        {
+          "command": "svtools.iverilog.simulate",
+          "group": "4_simulation"
+        },
+        {
+          "command": "svtools.iverilog.stopSimulation",
+          "group": "4_simulation"
+        },
+        {
+          "command": "svtools.iverilog.openWaveform",
+          "group": "4_simulation"
         }
       ]
     },
@@ -327,6 +403,120 @@
           "type": "string",
           "default": "",
           "description": "Header template with placeholders: {FILE}, {DATE}, {TIME}, {YEAR}, {TABS}"
+        },
+        "svtools.iverilog.path": {
+          "type": "string",
+          "default": "",
+          "description": "Icarus Verilog bin directory (or full path to iverilog executable). Empty = auto-detect from IVERILOG_HOME, PATH and common install locations."
+        },
+        "svtools.iverilog.cygwinPath": {
+          "type": "string",
+          "default": "",
+          "description": "Directory containing cygwin1.dll, required by Cygwin builds of Icarus Verilog installed outside a Cygwin root. Empty = auto-detect."
+        },
+        "svtools.iverilog.lintOnSave": {
+          "type": "boolean",
+          "default": true,
+          "description": "Run iverilog syntax check on save and report diagnostics in the Problems panel"
+        },
+        "svtools.iverilog.scanWorkspace": {
+          "type": "boolean",
+          "default": true,
+          "description": "Scan the workspace for Verilog sources: add every directory containing them to -y/-I, and resolve missing modules by indexing module definitions (handles files whose name differs from the module name)"
+        },
+        "svtools.iverilog.lintOnChange": {
+          "type": "boolean",
+          "default": true,
+          "description": "Run iverilog syntax check while typing (debounced, lints the unsaved buffer via a temp file)"
+        },
+        "svtools.iverilog.lintDebounceMs": {
+          "type": "number",
+          "default": 800,
+          "minimum": 100,
+          "description": "Debounce delay in milliseconds for lint-on-type"
+        },
+        "svtools.iverilog.lintOnOpen": {
+          "type": "boolean",
+          "default": true,
+          "description": "Run iverilog syntax check when a Verilog file is opened"
+        },
+        "svtools.iverilog.standard": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "default",
+            "1995",
+            "2001",
+            "2005",
+            "2005-sv",
+            "2009",
+            "2012"
+          ],
+          "default": "auto",
+          "description": "Language standard passed as -g. auto: .sv/.svh use 2012, .v/.vh use 2005; default: let iverilog decide"
+        },
+        "svtools.iverilog.lintArgs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "-Wall"
+          ],
+          "description": "Extra iverilog arguments for lint and simulation compile (e.g. -Wall)"
+        },
+        "svtools.iverilog.includePaths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Include directories (-I), relative to the workspace root. The file's own directory is always included."
+        },
+        "svtools.iverilog.libraryPaths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Library directories (-y) for module-by-filename resolution, relative to the workspace root. The file's own directory is always included."
+        },
+        "svtools.iverilog.simFiles": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Glob patterns of extra source files compiled together with the active file during simulation (e.g. src/*.v, tb/*.sv)"
+        },
+        "svtools.iverilog.simTop": {
+          "type": "string",
+          "default": "",
+          "description": "Top module for simulation (-s). Empty = let iverilog pick the root module"
+        },
+        "svtools.iverilog.simArgs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Extra arguments passed to vvp at runtime (e.g. plusargs like +trace)"
+        },
+        "svtools.iverilog.simTimeoutMs": {
+          "type": "number",
+          "default": 0,
+          "minimum": 0,
+          "description": "Simulation timeout in milliseconds; 0 = run until $finish (stop via command or status bar)"
+        },
+        "svtools.iverilog.waveViewer": {
+          "type": "string",
+          "default": "",
+          "description": "External waveform viewer executable (e.g. GTKWave). Empty = use the built-in VCD waveform viewer (webview panel; external program is used for .fst files)"
+        },
+        "svtools.iverilog.autoOpenWaveform": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically open the built-in waveform viewer when a simulation produces a new .vcd file"
         }
       }
     }
