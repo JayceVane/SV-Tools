@@ -2,7 +2,7 @@
   "name": "svtools",
   "displayName": "SystemVerilog Tools",
   "description": "Verilog/SystemVerilog formatter, module instantiation, testbench generation, and productivity tools (Rust native backend)",
-  "version": "3.4.3-beta3",
+  "version": "3.4.3-beta4",
   "publisher": "JayceVane",
   "author": {
     "name": "JayceVane",
@@ -164,7 +164,8 @@
       {
         "command": "svtools.vivado.runActiveScript",
         "title": "%cmd.vivado_runActiveScript.title%",
-        "category": "SystemVerilog Tools"
+        "category": "SystemVerilog Tools",
+        "icon": "$(play)"
       },
       {
         "command": "svtools.vivado.stop",
@@ -274,6 +275,12 @@
           "alt": "svtools.vivado.removeFromFileset",
           "group": "navigation@1",
           "when": "(resourceExtname == .sv || resourceExtname == .v || resourceExtname == .svh || resourceExtname == .vh) && svtools.vivado.hasProject"
+        },
+        {
+          "command": "svtools.vivado.runActiveScript",
+          "alt": "svtools.vivado.runScript",
+          "group": "navigation@0",
+          "when": "resourceExtname == .tcl"
         }
       ],
       "editor/context": [
