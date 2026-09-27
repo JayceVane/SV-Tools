@@ -62,5 +62,10 @@
   "cfg.vivado_structure_sources.desc": "Globs for RTL source files added to fileset sources_1 (e.g. src, rtl/**)",
   "cfg.vivado_structure_sim.desc": "Globs for testbench files added to fileset sim_1 (e.g. sim, tb/**); takes precedence over sources",
   "cfg.vivado_structure_constraints.desc": "Globs for constraint files added to fileset constrs_1 (e.g. xdc/**, *.xdc)",
-  "cfg.vivado_structure_projectDir.desc": "Vivado project output directory relative to the workspace root (e.g. prj)"
+  "cfg.vivado_structure_projectDir.desc": "Vivado project output directory relative to the workspace root (e.g. prj)",
+  "cmd.vivado_addToFileset.title": "Vivado: Add File to Project",
+  "cmd.vivado_removeFromFileset.title": "Vivado: Remove File from Project",
+  "cmd.vivado_simulate.title": "Vivado: Simulate Current File (xsim)",
+  "cmd.simulate_pick.title": "Simulate…",
+  "cfg.vivado_simRuntime.desc": "Vivado xsim simulation runtime (xsim.simulate.runtime), e.g. 1000ns or all"
 }

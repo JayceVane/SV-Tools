@@ -2,7 +2,7 @@
   "name": "svtools",
   "displayName": "SystemVerilog Tools",
   "description": "Verilog/SystemVerilog formatter, module instantiation, testbench generation, and productivity tools (Rust native backend)",
-  "version": "3.4.3-beta2",
+  "version": "3.4.3-beta3",
   "publisher": "JayceVane",
   "author": {
     "name": "JayceVane",
@@ -175,6 +175,30 @@
         "command": "svtools.vivado.createProject",
         "title": "%cmd.vivado_createProject.title%",
         "category": "SystemVerilog Tools"
+      },
+      {
+        "command": "svtools.vivado.addToFileset",
+        "title": "%cmd.vivado_addToFileset.title%",
+        "category": "SystemVerilog Tools",
+        "icon": "$(add)"
+      },
+      {
+        "command": "svtools.vivado.removeFromFileset",
+        "title": "%cmd.vivado_removeFromFileset.title%",
+        "category": "SystemVerilog Tools",
+        "icon": "$(remove)"
+      },
+      {
+        "command": "svtools.vivado.simulate",
+        "title": "%cmd.vivado_simulate.title%",
+        "category": "SystemVerilog Tools",
+        "icon": "$(play)"
+      },
+      {
+        "command": "svtools.simulate.pick",
+        "title": "%cmd.simulate_pick.title%",
+        "category": "SystemVerilog Tools",
+        "icon": "$(play)"
       }
     ],
     "customEditors": [
@@ -238,6 +262,18 @@
           "command": "svtools.iverilog.showText",
           "group": "navigation",
           "when": "activeCustomEditorId == svtoolsWaveViewer"
+        },
+        {
+          "command": "svtools.simulate.pick",
+          "alt": "svtools.vivado.simulate",
+          "group": "navigation@0",
+          "when": "(resourceExtname == .sv || resourceExtname == .v || resourceExtname == .svh || resourceExtname == .vh) && activeCustomEditorId != svtoolsWaveViewer"
+        },
+        {
+          "command": "svtools.vivado.addToFileset",
+          "alt": "svtools.vivado.removeFromFileset",
+          "group": "navigation@1",
+          "when": "(resourceExtname == .sv || resourceExtname == .v || resourceExtname == .svh || resourceExtname == .vh) && svtools.vivado.hasProject"
         }
       ],
       "editor/context": [
@@ -610,6 +646,11 @@
               "description": "%cfg.vivado_structure_projectDir.desc%"
             }
           }
+        },
+        "svtools.vivado.simRuntime": {
+          "type": "string",
+          "default": "1000ns",
+          "description": "%cfg.vivado_simRuntime.desc%"
         }
       }
     }

@@ -62,5 +62,10 @@
   "cfg.vivado_structure_sources.desc": "RTL 源文件 glob，加入 sources_1 文件集（如 src、rtl/**）",
   "cfg.vivado_structure_sim.desc": "测试台文件 glob，加入 sim_1 文件集（如 sim、tb/**）；与 sources 重叠时优先归 sim",
   "cfg.vivado_structure_constraints.desc": "约束文件 glob，加入 constrs_1 文件集（如 xdc/**、*.xdc）",
-  "cfg.vivado_structure_projectDir.desc": "Vivado 工程输出目录（相对工作区根，如 prj）"
+  "cfg.vivado_structure_projectDir.desc": "Vivado 工程输出目录（相对工作区根，如 prj）",
+  "cmd.vivado_addToFileset.title": "Vivado: 添加文件进工程",
+  "cmd.vivado_removeFromFileset.title": "Vivado: 从工程移除文件",
+  "cmd.vivado_simulate.title": "Vivado: 仿真当前文件 (xsim)",
+  "cmd.simulate_pick.title": "仿真…",
+  "cfg.vivado_simRuntime.desc": "Vivado xsim 仿真运行时长（xsim.simulate.runtime），如 1000ns 或 all"
 }

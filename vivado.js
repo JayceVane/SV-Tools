@@ -168,6 +168,74 @@ function extractVivadoIssues(lines) {
     return issues.slice(0, 50);
 }
 
+/** 取文件中第一个 module 声明的模块名（无则空串）。 */
+function firstModuleName(text) {
+    const m = String(text || '').match(/\bmodule\s+([A-Za-z_][A-Za-z0-9_]*)/);
+    return m ? m[1] : '';
+}
+
+/** 生成"把文件加入已存在工程指定文件集"的增量 TCL（已存在则跳过）。 */
+function buildAddFilesScript(xprPath, file, fileset, isSv) {
+    return [
+        'open_project ' + tclQuote(xprPath),
+        'set fs [get_filesets ' + tclQuote(fileset) + ']',
+        'set f ' + tclQuote(file),
+        'if {[llength [get_files -quiet -of $fs $f]] == 0} {',
+        '    add_files -fileset $fs $f',
+        '    puts "SVTOOLS_ADDED $f"',
+        '} else {',
+        '    puts "SVTOOLS_ALREADY_IN $f"',
+        '}',
+        isSv ? 'catch { set_property file_type SystemVerilog [get_files -of $fs $f] }' : '',
+        'update_compile_order -fileset $fs',
+        'puts "SVTOOLS_DONE"'
+    ].filter(Boolean).join('\n') + '\n';
+}
+
+/** 生成"把文件移出工程（按文件名在指定文件集内匹配）"的增量 TCL。 */
+function buildRemoveFilesScript(xprPath, file, fileset) {
+    const base = path.basename(String(file));
+    return [
+        'open_project ' + tclQuote(xprPath),
+        'set fs [get_filesets ' + tclQuote(fileset) + ']',
+        'set removed 0',
+        'foreach f [get_files -quiet -of $fs] {',
+        '    if {[string match -nocase *' + base.replace(/[\\{}$"]/g, '') + ' $f]} {',
+        '        remove_files $f',
+        '        set removed 1',
+        '    }',
+        '}',
+        'puts [expr {$removed ? "SVTOOLS_REMOVED" : "SVTOOLS_NOT_IN_PRJ"}]',
+        'puts "SVTOOLS_DONE"'
+    ].join('\n') + '\n';
+}
+
+/**
+ * 生成 xsim 行为仿真 TCL：打开工程（缺文件先补入）→ 当前文件模块置为 sim_1 顶层 → launch_simulation。
+ * @param {{xprPath:string, top:string, file:string, isSv:boolean, runtime:string}} o
+ */
+function buildSimulateScript(o) {
+    const L = [
+        'open_project ' + tclQuote(o.xprPath),
+        'set fs [get_filesets sim_1]',
+        'set f ' + tclQuote(o.file)
+    ];
+    if (o.file) {
+        L.push('if {[llength [get_files -quiet -of $fs $f]] == 0} {');
+        L.push('    add_files -fileset $fs $f');
+        L.push(o.isSv ? '    catch { set_property file_type SystemVerilog [get_files -of $fs $f] }' : '');
+        L.push('}');
+    }
+    if (o.top) {
+        L.push('set_property top ' + tclQuote(o.top) + ' [get_filesets sim_1]');
+        L.push('update_compile_order -fileset sim_1');
+    }
+    L.push('set_property -name {xsim.simulate.runtime} -value ' + tclQuote(o.runtime || '1000ns') + ' -objects [get_filesets sim_1]');
+    L.push('launch_simulation');
+    L.push('puts "SVTOOLS_SIM_DONE"');
+    return L.filter(Boolean).join('\n') + '\n';
+}
+
 /** 匹配工程结构模板的 glob：'src'/'src/**'（目录前缀）、'*.xdc'（扩展名）。 */
 function matchGlobList(relPath, patterns) {
     const rel = String(relPath || '').replace(/\\/g, '/');
@@ -239,6 +307,113 @@ function activateVivado(context, deps) {
         return binDirCache;
     }
 
+    // ---------------- Vivado 工程探测（决定标签页按钮显隐） ----------------
+
+    async function findProjectXpr() {
+        const ws = vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders[0];
+        if (!ws) return null;
+        const uris = await vscode.workspace.findFiles('**/*.xpr', '**/{node_modules,vivado_prj,.svtools}/**', 20);
+        if (uris.length) return uris[0].fsPath;
+        // 兜底：结构模板工程目录
+        const st = getStructure();
+        const guess = path.join(ws.uri.fsPath, st.projectDir);
+        try {
+            const entries = await vscode.workspace.fs.readDirectory(vscode.Uri.file(guess));
+            const xpr = entries.find(e => e[0].toLowerCase().endsWith('.xpr'));
+            if (xpr) return path.join(guess, xpr[0]);
+        } catch (e) { /* 目录不存在 */ }
+        return null;
+    }
+
+    let hasProjectCtx = false;
+    async function refreshProjectContext() {
+        const xpr = await findProjectXpr();
+        if (!!xpr !== hasProjectCtx) {
+            hasProjectCtx = !!xpr;
+            vscode.commands.executeCommand('setContext', 'svtools.vivado.hasProject', hasProjectCtx);
+        }
+        return xpr;
+    }
+
+    /** 当前编辑器若是 Verilog 源文件返回 {path, isSv, rel}，否则提示并返回 null。 */
+    function currentVerilogFile() {
+        const editor = vscode.window.activeTextEditor;
+        if (!editor) { vscode.window.showErrorMessage('没有活动编辑器'); return null; }
+        const f = editor.document.fileName;
+        if (!/\.(sv|v|svh|vh)$/i.test(f)) {
+            vscode.window.showErrorMessage('当前文件不是 Verilog/SystemVerilog 源文件');
+            return null;
+        }
+        return { path: f, isSv: /\.(sv|svh)$/i.test(f), doc: editor.document };
+    }
+
+    /** 按结构模板判断文件应进哪个文件集。 */
+    function filesetOf(absFile, rootDir) {
+        const rel = path.relative(rootDir, absFile);
+        if (matchGlobList(rel, getStructure().sim)) return 'sim_1';
+        return 'sources_1';
+    }
+
+    async function runIncrementalTcl(name, scriptBody) {
+        const ws = vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders[0];
+        if (!ws) { vscode.window.showErrorMessage('请先打开一个工作区'); return; }
+        const xpr = await refreshProjectContext();
+        if (!xpr) { vscode.window.showErrorMessage('未找到 Vivado 工程（.xpr），请先运行 "Vivado: 创建工程"'); return; }
+        const scriptPath = path.join(ws.uri.fsPath, '.svtools', 'vivado', name);
+        fs.mkdirSync(path.dirname(scriptPath), { recursive: true });
+        fs.writeFileSync(scriptPath, scriptBody);
+        return runScript(scriptPath);
+    }
+
+    async function addCurrentToProject() {
+        const cur = currentVerilogFile();
+        if (!cur) return;
+        const ws = vscode.workspace.workspaceFolders[0];
+        const fs1 = filesetOf(cur.path, ws.uri.fsPath);
+        const pick = await vscode.window.showQuickPick(
+            [{ label: 'sources_1（RTL 源文件）', value: 'sources_1' }, { label: 'sim_1（仿真/测试台）', value: 'sim_1' }],
+            { placeHolder: '加入哪个文件集（按工程结构模板预判为 ' + fs1 + '）' });
+        if (!pick) return;
+        vscode.window.showInformationMessage('正在把 ' + path.basename(cur.path) + ' 加入 ' + pick.value + '…');
+        return runIncrementalTcl('add_file.tcl', buildAddFilesScript(await refreshProjectContext(), cur.path, pick.value, cur.isSv));
+    }
+
+    async function removeCurrentFromProject() {
+        const cur = currentVerilogFile();
+        if (!cur) return;
+        const ws = vscode.workspace.workspaceFolders[0];
+        const fs1 = filesetOf(cur.path, ws.uri.fsPath);
+        return runIncrementalTcl('remove_file.tcl', buildRemoveFilesScript(await refreshProjectContext(), cur.path, fs1));
+    }
+
+    /** Vivado xsim 行为仿真：当前文件置为 sim_1 顶层。 */
+    async function simulateWithVivado() {
+        const cur = currentVerilogFile();
+        if (!cur) return;
+        const top = firstModuleName(cur.doc.getText());
+        if (!top) { vscode.window.showErrorMessage('当前文件里没有找到 module 声明'); return; }
+        const cfg = vscode.workspace.getConfiguration('svtools.vivado');
+        const runtime = cfg.get('simRuntime', '1000ns') || '1000ns';
+        const xpr = await refreshProjectContext();
+        if (!xpr) { vscode.window.showErrorMessage('未找到 Vivado 工程（.xpr），请先运行 "Vivado: 创建工程"'); return; }
+        vscode.window.showInformationMessage('Vivado xsim 仿真：顶层 ' + top + '（runtime ' + runtime + '）');
+        return runIncrementalTcl('simulate.tcl',
+            buildSimulateScript({ xprPath: xpr, top, file: cur.path, isSv: cur.isSv, runtime }));
+    }
+
+    /** 标签页 ▶ 按钮：选择仿真引擎。 */
+    async function simulatePick() {
+        const engine = await vscode.window.showQuickPick(
+            [
+                { label: '$(chip) Icarus Verilog', description: 'iverilog 编译 + vvp（无需 Vivado 工程）', value: 'iverilog' },
+                { label: '$(circuit-board) Vivado xsim', description: '行为仿真，当前文件置为 sim_1 顶层（需 Vivado 工程）', value: 'vivado' }
+            ],
+            { placeHolder: '选择仿真引擎' });
+        if (!engine) return;
+        if (engine.value === 'iverilog') return vscode.commands.executeCommand('svtools.iverilog.simulate');
+        return simulateWithVivado();
+    }
+
     /** 运行 TCL 脚本。返回 Promise<{code, ms, issues}>（供命令与 AI Agent 工具复用）。 */
     function runScript(scriptPath, opts) {
         return new Promise((resolve) => {
@@ -292,6 +467,7 @@ function activateVivado(context, deps) {
                 } else {
                     log('[vivado] 退出 code=' + code + (reason ? ' (' + reason + ')' : '') + '，耗时 ' + (ms / 1000).toFixed(1) + 's');
                 }
+                refreshProjectContext();   // create_project 等操作可能新建/删除了 .xpr
                 resolve({ code: code, ms: ms, issues: issues });
             };
 
@@ -443,12 +619,10 @@ function activateVivado(context, deps) {
         const scriptDir = path.join(ws.uri.fsPath, '.svtools', 'vivado');
         await vscode.workspace.fs.createDirectory(vscode.Uri.file(scriptDir));
         const scriptPath = path.join(scriptDir, 'create_prj.tcl');
-        const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(scriptPath));
-        const edit = new vscode.WorkspaceEdit();
-        edit.insert(vscode.Uri.file(scriptPath), new vscode.Position(0, 0), script);
-        await vscode.workspace.applyEdit(edit);
-        await doc.save();
-        vscode.window.showTextDocument(doc);
+        // 直接写文件（openTextDocument 对不存在的文件会报错，不能先用）
+        await vscode.workspace.fs.writeFile(vscode.Uri.file(scriptPath), Buffer.from(script, 'utf8'));
+        vscode.window.showTextDocument(await vscode.workspace.openTextDocument(vscode.Uri.file(scriptPath)));
+        refreshProjectContext();
 
         // 8. 立即运行？
         const run = await vscode.window.showInformationMessage(
@@ -489,11 +663,18 @@ function activateVivado(context, deps) {
             return runScript(editor.document.fileName);
         }),
         vscode.commands.registerCommand('svtools.vivado.stop', () => stopRun()),
-        vscode.commands.registerCommand('svtools.vivado.createProject', () => createProject())
+        vscode.commands.registerCommand('svtools.vivado.createProject', () => createProject()),
+        vscode.commands.registerCommand('svtools.vivado.addToFileset', () => addCurrentToProject()),
+        vscode.commands.registerCommand('svtools.vivado.removeFromFileset', () => removeCurrentFromProject()),
+        vscode.commands.registerCommand('svtools.vivado.simulate', () => simulateWithVivado()),
+        vscode.commands.registerCommand('svtools.simulate.pick', () => simulatePick()),
+        vscode.workspace.onDidChangeWorkspaceFolders(() => refreshProjectContext())
     );
+    refreshProjectContext();
 
     return {
-        runScript, stopRun, createProject,
+        runScript, stopRun, createProject, simulateWithVivado,
+        refreshProjectContext,
         resolveBinDir
     };
 }
@@ -608,6 +789,10 @@ module.exports = {
     tclQuote,
     tclList,
     buildCreateProjectScript,
+    buildAddFilesScript,
+    buildRemoveFilesScript,
+    buildSimulateScript,
+    firstModuleName,
     extractVivadoIssues,
     matchGlobList,
     classifyFiles,

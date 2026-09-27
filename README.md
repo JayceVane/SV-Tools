@@ -17,6 +17,7 @@
 
 ### Vivado TCL 集成与工程创建
 - **运行 TCL 脚本**：命令面板 "Vivado: 运行 TCL 脚本"（工作区内选择）或 `.tcl` 编辑器右键 "运行当前 TCL 脚本"；batch 模式执行，输出流式进入独立通道，状态栏运行指示，支持停止与超时
+- **sv/v 标签页按钮**：▶ 仿真（弹出引擎选择 Icarus Verilog / Vivado xsim——xsim 自动把当前文件模块置为 sim_1 顶层并补入缺失文件，`simRuntime` 控制时长）；工作区有 Vivado 工程时显示 ⊕（左键加入工程 / 右键移出），无工程时不显示
 - **工程创建向导**（"Vivado: 创建工程"）：工程名 → 工程目录 → 源文件多选（自动预分类）→ 器件 → 顶层模块（自动识别候选）；生成 `create_project` 脚本到 `.svtools/vivado/create_prj.tcl` 并可一键执行；工作区为空时可按模板创建目录骨架
 - **工程结构模板**（`svtools.vivado.structure`，可自定义）：默认按 `src`/`rtl` → RTL 源码、`sim`/`tb` → 测试台、`constraints`/`xdc` → 约束、`prj` → 工程输出目录的布局（与常见工程模板一致）；目录 glob 可任意改写适配自定义结构
 - Vivado 自动探测（配置 → `XILINX_VIVADO` → `PATH` → 常见安装位置），`svtools.vivado.path` 可显式指定如 `D:\DevKit\Xilinx\Vivado\2022.1`
