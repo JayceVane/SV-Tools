@@ -2,6 +2,29 @@
 
 All notable changes to the SystemVerilog VSCode Extension will be documented in this file.
 
+## [3.4.3] - 2026-09-28
+
+### Added
+- **Vivado TCL 集成与工程创建**
+  - **TCL 脚本运行**：命令面板 "Vivado: 运行 TCL 脚本"（工作区内选择）或 `.tcl` 编辑器右键 "运行当前 TCL 脚本"；以 `vivado -mode batch -nolog -nojournal -source` 执行，输出流式进入独立通道，状态栏显示运行状态，支持停止（Windows 进程树终止）与超时（`timeoutMs`，默认不限时）
+  - **工程创建向导**：工程名 → 工程目录 → 源文件多选（按工程结构模板预分类）→ **器件选型详情页（webview 单页：系列/封装/速度筛选下拉联动 + 搜索框输入即联想 + 器件表格可排序 + 选中详情条，双击或回车确定；首次经 `get_parts` 导出器件库并缓存，之后秒开）** → 顶层模块（工作区自动识别候选，被实例化的模块自动降权）；生成 `create_project` TCL 到 `.svtools/vivado/create_prj.tcl` 并可一键执行；工作区无源文件时可按模板创建目录骨架（`src/`、`sim/`、`prj/`）
+  - **代码结构**：Vivado 能力按大项拆分为 `vivado/` 文件夹多模块（`index.js` 集成层 + `toolchain.js` 工具链定位 + `tclgen.js` TCL 生成 + `structure.js` 工程结构模板 + `parts.js` 器件库 + `scan.js` 工作区扫描），纯函数层不依赖 vscode 可独立单测；`require('./vivado')` 兼容不变
+  - **工程结构模板**（`svtools.vivado.structure`，可完全自定义）：目录 glob 把文件划入 sources_1 / sim_1 / constrs_1 文件集与工程输出目录，默认 `src`/`rtl`→RTL、`sim`/`tb`→测试台（重叠时优先归 sim）、`constraints`/`xdc`/`*.xdc`→约束、工程目录 `prj`；未匹配文件以 tb_ 前缀启发兜底或手动勾选
+  - Vivado 自动探测（配置 `svtools.vivado.path` → `XILINX_VIVADO` → `PATH` → 常见安装位置），Windows 经 `cmd /c` 逐参引号调用 `vivado.bat`（Node 24 安全限制），脚本相对路径以其所在目录为 cwd
+  - **sv/v 标签页右上角按钮**：▶ 仿真按钮弹出引擎选择（Icarus Verilog / Vivado xsim，xsim 将当前文件模块自动置为 sim_1 顶层并补入缺失文件，`simRuntime` 默认空 = 跑到 `$finish`，可设具体时长如 1000ns）；工作区存在 Vivado 工程（.xpr）时额外显示 ⊕ 加入工程（左键添加 / 右键移除，文件集按结构模板预判可选），无工程时不显示；`.tcl` 标签页右上角 ▶ 直接运行当前脚本（右键按钮弹出工作区脚本选择）
+  - runScript 返回 `Promise<{code, ms, issues}>` 结构化结果（供后续 AI Agent 工具复用）
+- **配置与命令中文本地化**：设置界面（Settings）中的全部配置项标题/描述与命令面板命令标题支持中文（`package.nls.zh-cn.json`），VSCode 界面语言为中文时自动生效，英文界面保持英文
+- **波形查看器**（3.4.3 测试期间迭代）：
+  - **总线跳变改为 X 交叉**：陡峭对角交叉线替代六边形斜坡过渡，密集跳变不再有"波浪/曲线"视觉；填充改为整条带半透明一次铺满
+  - **x/z 状态分色**：x 红（#ef5350）、z 深蓝（#7986cb），标量与总线一致，总线混合值含 x 优先红
+  - **全名切换入口加到波形区底部工具栏**（Fit 旁"全名/简称"按钮，与信号树顶部按钮状态同步）——信号树面板收起时也能切换
+  - **"全部显示"按钮仅在单独显示（solo）模式激活时出现**，平时不占位
+
+### Fixed
+- **工程创建向导崩溃**（cannot open …/create_prj.tcl）：脚本落盘改为 `writeFile` 直接写入——原先 `openTextDocument` 对尚不存在的文件直接抛错
+- **xsim 仿真被 1000ns 截断**：`simRuntime` 默认改为空 = `run all` 跑到测试台 `$finish`（原固定 1000ns 提前截断；runtime 空串直接传 `{}` 会导致 tb.tcl 无 run 命令、一条激励都不跑）
+- **timescale 单位变体兼容**：`parseTimescaleSeconds` 支持 VCD 标准的 `sec`/`msec`/`nsec` 等长写法（原只认短写法，遇长写法静默按 ns 假定导致刻度错 10^n 倍）；无法识别时标题区显式提示"按 ns 假定，刻度可能不准"
+
 ## [3.4.2] - 2026-09-26
 
 ### Added

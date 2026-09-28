@@ -169,10 +169,11 @@ function parseNumber(text) {
  * @returns {number|null} 秒数；无法解析返回 null
  */
 function parseTimescaleSeconds(timescale) {
-    const m = String(timescale || '').trim().match(/^(\d+(?:\.\d+)?)\s*(s|ms|us|ns|ps|fs)$/i);
+    // 兼容 VCD 标准变体：s/sec、ms/msec、us/usec、ns/nsec、ps/psec、fs/fsec（大小写不敏感、允许空格）
+    const m = String(timescale || '').trim().match(/^(\d+(?:\.\d+)?)\s*(sec|s|ms|msec|us|usec|ns|nsec|ps|psec|fs|fsec)$/i);
     if (!m) return null;
     const value = parseFloat(m[1]);
-    const unitFactors = { s: 1, ms: 1e-3, us: 1e-6, ns: 1e-9, ps: 1e-12, fs: 1e-15 };
+    const unitFactors = { s: 1, sec: 1, ms: 1e-3, msec: 1e-3, us: 1e-6, usec: 1e-6, ns: 1e-9, nsec: 1e-9, ps: 1e-12, psec: 1e-12, fs: 1e-15, fsec: 1e-15 };
     return value * unitFactors[m[2].toLowerCase()];
 }
 
@@ -467,6 +468,7 @@ function buildWaveformHtml(vcd, meta) {
   <span id="zoomLabel"></span>
   <button id="zoomIn" title="放大">＋</button>
   <button id="zoomFit" title="适配全程">Fit</button>
+  <button id="fullNameBtn" title="波形名称栏：完整层级路径 ↔ 短名（类似 Vivado）">全名</button>
   <span class="hint">Ctrl+滚轮缩放 · 左右滚轮（或 Shift+滚轮）平移时间轴 · 上下滚轮滚动信号行 · 名称栏拖拽调序 · Ctrl 单选 / Shift 范围多选后右键分组（可命名）</span>
 </footer>
 <script>
@@ -476,6 +478,14 @@ const DATA = ${json};
 /* 波形渲染（视口窗口模型）：只画 [viewStart, viewStart+viewSpan] 窗口内的变更段 */
 (function () {
   var RULER_H = 28, ROW_H = 30, NAME_W = 185, EDGE = 7;
+  var X_COLOR = '#ef5350';      // x 状态：红
+  var Z_COLOR = '#7986cb';      // z 状态：深蓝（indigo）
+  /** 总线值含 x → 红；否则含 z → 深蓝；正常二进制 → null。 */
+  function xzColor(v) {
+    if (/x/i.test(v)) return X_COLOR;
+    if (/z/i.test(v)) return Z_COLOR;
+    return null;
+  }
   var canvas = document.getElementById('waveCanvas');
   var ruler = document.getElementById('ruler');
   var scroller = document.getElementById('waveScroller');
@@ -581,14 +591,16 @@ const DATA = ${json};
       });
       applyRows(); renderTree(); draw();
     });
-    barBtn('全部显示', '退出单独显示，恢复之前的信号勾选状态', !!soloScope, function () {
-      if (!soloScope) return;
-      exitSolo();
-      applyRows(); renderTree(); draw();
-    });
-    barBtn(showFullName ? '全名 ✓' : '全名', '波形名称栏显示完整层级路径 ↔ 短名（类似 Vivado）', showFullName, function () {
+    if (soloScope) {
+      barBtn('全部显示', '退出单独显示（双击层级进入的模式），恢复之前的信号勾选状态', true, function () {
+        exitSolo();
+        applyRows(); renderTree(); draw();
+      });
+    }
+    barBtn(showFullName ? '全名 ✓' : '全名', '波形名称栏显示完整层级路径 ↔ 短名（底部工具栏"全名"按钮同功能）', showFullName, function () {
       showFullName = !showFullName;
       NAME_W = showFullName ? 300 : 185;
+      syncFullNameBtn();
       renderTree(); draw();
     });
     sigPanel.appendChild(bar);
@@ -1214,8 +1226,16 @@ const DATA = ${json};
         var y = levelY(yTop, v);
         ctx.moveTo(x1, y); ctx.lineTo(x2 + 1, y);
       } else {
+        // x 红 / z 深蓝：先冲刷主路径，再用独立路径画该段
+        ctx.stroke();
+        ctx.save();
+        ctx.strokeStyle = v === 'z' ? Z_COLOR : X_COLOR;
+        ctx.beginPath();
         ctx.moveTo(x1, yXm - 3); ctx.lineTo(x2 + 1, yXm - 3);
         ctx.moveTo(x1, yXm + 3); ctx.lineTo(x2 + 1, yXm + 3);
+        ctx.stroke();
+        ctx.restore();
+        ctx.beginPath();
       }
       if (i + 1 < list.length && list[i + 1].t <= viewEnd() && x2 > NAME_W) {
         var vN = list[i + 1].value;
@@ -1232,44 +1252,71 @@ const DATA = ${json};
     var list = sig.changes;
     var i0 = firstVisibleIdx(list);
     var yT = yTop + 7, yB = yTop + rowH - 10, yM = yTop + rowH / 2;
+    // 收集可见段
+    var segs = [];
     for (var i = i0; i < list.length; i++) {
       var t1 = Math.max(list[i].t, viewStart);
       if (t1 > viewEnd()) break;
       var t2 = (i + 1 < list.length) ? list[i + 1].t : viewEnd();
       var x1 = Math.max(t2x(t1), NAME_W), x2 = Math.min(t2x(t2), t2x(viewEnd()));
       if (x2 - x1 < 1) continue;
-      var v = list[i].value;
-      if (/[^01]/.test(v)) {
+      segs.push({ x1: x1, x2: x2, v: list[i].value });
+    }
+    if (!segs.length) return;
+    // 整条带半透明填充（一次铺满，跳变处不再各自收边）
+    ctx.fillStyle = fill;
+    ctx.fillRect(segs[0].x1, yT, segs[segs.length - 1].x2 - segs[0].x1, yB - yT);
+    // 上下水平线 + 跳变处 X 交叉（陡峭对角线，避免六边形斜坡连成"波浪"）
+    ctx.beginPath();
+    for (var s = 0; s < segs.length; s++) {
+      var sg = segs[s];
+      var xz = xzColor(sg.v);
+      var w = Math.min(3, (sg.x2 - sg.x1) / 4);
+      var lStart = (s === 0) ? sg.x1 : sg.x1 + w;
+      var rEnd = (s === segs.length - 1) ? sg.x2 : sg.x2 - w;
+      if (!xz && rEnd > lStart) {
+        ctx.moveTo(lStart, yT); ctx.lineTo(rEnd, yT);
+        ctx.moveTo(lStart, yB); ctx.lineTo(rEnd, yB);
+      }
+      if (xz) {
+        // x 红 / z 深蓝：冲刷主路径后独立描边三横线
+        ctx.stroke();
         ctx.save();
-        ctx.strokeStyle = '#ef5350';
+        ctx.strokeStyle = xz;
         ctx.beginPath();
-        ctx.moveTo(x1, yM - 3); ctx.lineTo(x2, yM - 3);
-        ctx.moveTo(x1, yM); ctx.lineTo(x2, yM);
-        ctx.moveTo(x1, yM + 3); ctx.lineTo(x2, yM + 3);
+        ctx.moveTo(sg.x1, yM - 3); ctx.lineTo(sg.x2, yM - 3);
+        ctx.moveTo(sg.x1, yM); ctx.lineTo(sg.x2, yM);
+        ctx.moveTo(sg.x1, yM + 3); ctx.lineTo(sg.x2, yM + 3);
         ctx.stroke();
         ctx.restore();
-        ctx.strokeStyle = '#ffcc80';
-        continue;
+        ctx.beginPath();
       }
-      if (x2 - x1 < 4) continue;
-      var pad = Math.min(EDGE, (x2 - x1) / 3);
-      ctx.fillStyle = fill;
-      ctx.beginPath();
-      ctx.moveTo(x1 + pad, yT); ctx.lineTo(x2 - pad, yT);
-      ctx.lineTo(x2, yM); ctx.lineTo(x2 - pad, yB);
-      ctx.lineTo(x1 + pad, yB); ctx.lineTo(x1, yM);
-      ctx.closePath();
-      ctx.fill(); ctx.stroke();
-      var label = fmtValue(sig, v);
-      var tw = ctx.measureText(label).width;
-      if (x2 - x1 >= 48 && tw < x2 - x1 - 14) {
-        var cx = (x1 + x2) / 2;
-        ctx.fillStyle = 'rgba(26,28,31,.85)';
-        ctx.fillRect(cx - tw / 2 - 4, yM - 8, tw + 8, 16);
-        ctx.fillStyle = '#ffe0b2';
-        ctx.fillText(label, cx - tw / 2, yM + 4);
+      // 段间过渡：正常段对正常段 → X 交叉；涉 x/z 段 → 垂直分隔线
+      if (s < segs.length - 1) {
+        var nXz = xzColor(segs[s + 1].v);
+        var bx = sg.x2;
+        if (!xz && !nXz && w > 0.5) {
+          ctx.moveTo(bx - w, yT); ctx.lineTo(bx + w, yB);
+          ctx.moveTo(bx - w, yB); ctx.lineTo(bx + w, yT);
+        } else {
+          ctx.moveTo(bx, yT); ctx.lineTo(bx, yB);
+        }
       }
     }
+    ctx.stroke();
+    // 值标签（沿用 ≥48px 段宽阈值）
+    segs.forEach(function (sg) {
+      if (/[^01]/.test(sg.v)) return;
+      if (sg.x2 - sg.x1 < 48) return;
+      var label = fmtValue(sig, sg.v);
+      var tw = ctx.measureText(label).width;
+      if (tw >= sg.x2 - sg.x1 - 14) return;
+      var cx = (sg.x1 + sg.x2) / 2;
+      ctx.fillStyle = 'rgba(26,28,31,.85)';
+      ctx.fillRect(cx - tw / 2 - 4, yM - 8, tw + 8, 16);
+      ctx.fillStyle = '#ffe0b2';
+      ctx.fillText(label, cx - tw / 2, yM + 4);
+    });
   }
 
   function drawAnalog(ctx, sig, yTop, rowH) {
@@ -1462,6 +1509,18 @@ const DATA = ${json};
   document.getElementById('zoomFit').onclick = function () {
     viewStart = 0; viewSpan = END; clampView(); draw();
   };
+  var fullNameBtn = document.getElementById('fullNameBtn');
+  function syncFullNameBtn() {
+    fullNameBtn.textContent = showFullName ? '简称' : '全名';
+    fullNameBtn.className = showFullName ? 'accent' : '';
+  }
+  fullNameBtn.onclick = function () {
+    showFullName = !showFullName;
+    NAME_W = showFullName ? 300 : 185;
+    syncFullNameBtn();
+    renderTree(); draw();
+  };
+  syncFullNameBtn();
   window.addEventListener('resize', draw);
 
   // ---------- 右键菜单：二级格式菜单 / 分组 / 移除 ----------
@@ -1609,7 +1668,8 @@ const DATA = ${json};
   }
 
   document.getElementById('title').textContent = DATA.fileName;
-  document.getElementById('tsInfo').textContent = 'timescale: ' + (DATA.timescale || '(未声明)');
+  document.getElementById('tsInfo').textContent = 'timescale: ' + (DATA.timescale || '(未声明)') +
+    (typeof DATA.secondsPerTime === 'number' ? '' : '（无法识别，时间按 ns 假定，刻度可能不准）');
   document.getElementById('endTime').textContent = 'end: ' + fmtTime(END) + ' (' + END + ' ticks)';
   applyRows();
   renderTree();
