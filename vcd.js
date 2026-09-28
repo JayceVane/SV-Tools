@@ -477,6 +477,14 @@ const DATA = ${json};
 /* 波形渲染（视口窗口模型）：只画 [viewStart, viewStart+viewSpan] 窗口内的变更段 */
 (function () {
   var RULER_H = 28, ROW_H = 30, NAME_W = 185, EDGE = 7;
+  var X_COLOR = '#ef5350';      // x 状态：红
+  var Z_COLOR = '#7986cb';      // z 状态：深蓝（indigo）
+  /** 总线值含 x → 红；否则含 z → 深蓝；正常二进制 → null。 */
+  function xzColor(v) {
+    if (/x/i.test(v)) return X_COLOR;
+    if (/z/i.test(v)) return Z_COLOR;
+    return null;
+  }
   var canvas = document.getElementById('waveCanvas');
   var ruler = document.getElementById('ruler');
   var scroller = document.getElementById('waveScroller');
@@ -1217,8 +1225,16 @@ const DATA = ${json};
         var y = levelY(yTop, v);
         ctx.moveTo(x1, y); ctx.lineTo(x2 + 1, y);
       } else {
+        // x 红 / z 深蓝：先冲刷主路径，再用独立路径画该段
+        ctx.stroke();
+        ctx.save();
+        ctx.strokeStyle = v === 'z' ? Z_COLOR : X_COLOR;
+        ctx.beginPath();
         ctx.moveTo(x1, yXm - 3); ctx.lineTo(x2 + 1, yXm - 3);
         ctx.moveTo(x1, yXm + 3); ctx.lineTo(x2 + 1, yXm + 3);
+        ctx.stroke();
+        ctx.restore();
+        ctx.beginPath();
       }
       if (i + 1 < list.length && list[i + 1].t <= viewEnd() && x2 > NAME_W) {
         var vN = list[i + 1].value;
@@ -1253,24 +1269,32 @@ const DATA = ${json};
     ctx.beginPath();
     for (var s = 0; s < segs.length; s++) {
       var sg = segs[s];
-      var bad = /[^01]/.test(sg.v);
+      var xz = xzColor(sg.v);
       var w = Math.min(3, (sg.x2 - sg.x1) / 4);
       var lStart = (s === 0) ? sg.x1 : sg.x1 + w;
       var rEnd = (s === segs.length - 1) ? sg.x2 : sg.x2 - w;
-      if (!bad && rEnd > lStart) {
+      if (!xz && rEnd > lStart) {
         ctx.moveTo(lStart, yT); ctx.lineTo(rEnd, yT);
         ctx.moveTo(lStart, yB); ctx.lineTo(rEnd, yB);
       }
-      if (bad) {
+      if (xz) {
+        // x 红 / z 深蓝：冲刷主路径后独立描边三横线
+        ctx.stroke();
+        ctx.save();
+        ctx.strokeStyle = xz;
+        ctx.beginPath();
         ctx.moveTo(sg.x1, yM - 3); ctx.lineTo(sg.x2, yM - 3);
         ctx.moveTo(sg.x1, yM); ctx.lineTo(sg.x2, yM);
         ctx.moveTo(sg.x1, yM + 3); ctx.lineTo(sg.x2, yM + 3);
+        ctx.stroke();
+        ctx.restore();
+        ctx.beginPath();
       }
       // 段间过渡：正常段对正常段 → X 交叉；涉 x/z 段 → 垂直分隔线
       if (s < segs.length - 1) {
-        var nBad = /[^01]/.test(segs[s + 1].v);
+        var nXz = xzColor(segs[s + 1].v);
         var bx = sg.x2;
-        if (!bad && !nBad && w > 0.5) {
+        if (!xz && !nXz && w > 0.5) {
           ctx.moveTo(bx - w, yT); ctx.lineTo(bx + w, yB);
           ctx.moveTo(bx - w, yB); ctx.lineTo(bx + w, yT);
         } else {
