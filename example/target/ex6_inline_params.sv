@@ -8,17 +8,22 @@ interface axi_if #(
     parameter ID_W   = 4
 ) ();
 
-    logic[ID_W-1:0] awid;logic[ADDR_W-1:0] awaddr;
-    logic[7:0] awlen;logic[2:0] awsize;logic awvalid; logic awready;
+    logic [  ID_W-1:0] awid   ;
+    logic [ADDR_W-1:0] awaddr ;
+    logic [       7:0] awlen  ;
+    logic [       2:0] awsize ;
+    logic              awvalid;
+    logic              awready;
 
     modport master (
-        output awid,awaddr,awlen,awsize,awvalid,input awready
+        output awid, awaddr, awlen, awsize, awvalid,
+        input awready
     );
 
 endinterface
 
 module consumer (
-    axi_if.masteraxi
+    axi_if.master axi
 );
 
     logic [DATA_W-1:0] captured;

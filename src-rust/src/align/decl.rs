@@ -10,7 +10,11 @@ pub fn align_decl(txt: &str, options: &FormatOptions, indent: &str, indent_space
     )
     .unwrap();
 
-    let lines: Vec<&str> = txt.split('\n').collect();
+    let lines: Vec<String> = txt
+        .split('\n')
+        .map(crate::parser::patterns::normalize_compact_decl)
+        .collect();
+    let lines: Vec<&str> = lines.iter().map(|s| s.as_str()).collect();
     // Group by (indent_level, attribute_prefix) for proper alignment
     let mut lines_match: Vec<(&str, Option<regex::Captures>, usize, String)> = Vec::new();
     let mut len_max: HashMap<(usize, String), DeclWidths> = HashMap::new();

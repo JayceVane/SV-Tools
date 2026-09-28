@@ -377,7 +377,7 @@ impl VerilogBeautifier {
                 }
 
                 if matches!(self.block_state, BlockState::Decl)
-                    && !RE_DECL_FULL.is_match(line.trim())
+                    && !is_decl_line(line.trim())
                 {
                     if self.options.reindent_only() {
                         txt_new.push_str(&block);
@@ -493,7 +493,7 @@ impl VerilogBeautifier {
                 .contains(&self.state.as_str())
                 && !mod_import
             {
-                let is_decl_match = RE_DECL_FULL.is_match(line.trim());
+                let is_decl_match = is_decl_line(line.trim());
 
                 // Handle declaration state - accumulate lines without processing
                 // When block_state is Text/Decl/StructAssign and this is a declaration,
@@ -757,6 +757,8 @@ impl VerilogBeautifier {
                                     block_tmp = block_tmp.replace(&old, &new);
                                 }
                             }
+                            // 语句块（for/if 体等）内简单赋值的运算符列对齐见
+                            // beautify_text 末尾的统一后处理（align_stmt_ops）
                             block = block_tmp;
                             if !block.ends_with('\n') {
                                 block.push('\n');
@@ -976,6 +978,17 @@ impl VerilogBeautifier {
         }
 
         txt_new.push_str(&block);
+
+        // 语句级赋值运算符对齐（语句块内逐条流式写出，此处统一后处理）：
+        // "arbase<=expr;" / "arvalid<=expr;" → '<=' 列对齐（ex3 的 for 体）
+        if !self.options.reindent_only() {
+            txt_new = crate::align::assign::align_stmt_ops(
+                &txt_new,
+                &self.options,
+                &self.indent,
+            );
+        }
+
         txt_new
     }
 
@@ -1099,7 +1112,7 @@ impl VerilogBeautifier {
         } else if matches!(self.block_state, BlockState::Text) {
             let tmp = clean_comment(txt).trim().to_string();
             // Check for declaration first (before instance)
-            if RE_DECL_FULL.is_match(&tmp) {
+            if is_decl_line(&tmp) {
                 self.block_state = BlockState::Decl;
             } else {
                 // Try to match instance pattern on the full text first,
