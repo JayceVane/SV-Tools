@@ -22,6 +22,7 @@
 
 const { spawn } = require('child_process');
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 
 const OUTPUT_CHANNEL_TITLE = 'SystemVerilog Tools · Vivado';
@@ -172,6 +173,52 @@ function extractVivadoIssues(lines) {
 function firstModuleName(text) {
     const m = String(text || '').match(/\bmodule\s+([A-Za-z_][A-Za-z0-9_]*)/);
     return m ? m[1] : '';
+}
+
+/** 生成器件库导出 TCL（vivado batch 无工程模式跑，输出 name|family|package|speed 行）。 */
+function buildExportPartsScript(outPath) {
+    const tclPath = String(outPath).replace(/\\/g, '/');
+    return [
+        'set fh [open ' + tclQuote(tclPath) + ' w]',
+        'fconfigure $fh -encoding utf-8',
+        'foreach p [get_parts *] {',
+        '  puts $fh "$p|[get_property FAMILY $p]|[get_property PACKAGE $p]|[get_property SPEED $p]"',
+        '}',
+        'close $fh',
+        'puts "SVTOOLS_PARTS_EXPORTED"'
+    ].join('\n') + '\n';
+}
+
+/** 解析器件库 dump 文本（跳过非法行），按名称排序。 */
+function parsePartsDump(text) {
+    const parts = [];
+    const seen = new Set();
+    String(text || '').split(/\r?\n/).forEach(function (line) {
+        const seg = line.split('|');
+        if (seg.length < 4 || !/^xc|^x[au]/i.test(seg[0])) return;
+        const p = { name: seg[0], family: seg[1], pkg: seg[2], speed: seg[3] };
+        if (seen.has(p.name)) return;
+        seen.add(p.name);
+        parts.push(p);
+    });
+    parts.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+    return parts;
+}
+
+/** 汇总筛选维度（按选中项动态重算时使用）。 */
+function partFilterOptions(parts) {
+    const fam = new Set(), pkg = new Set(), spd = new Set();
+    parts.forEach(p => { fam.add(p.family); pkg.add(p.pkg); spd.add(p.speed); });
+    const s = a => Array.from(a).sort();
+    return { families: s(fam), packages: s(pkg), speeds: s(spd) };
+}
+
+/** 按已选维度过滤器件列表。 */
+function filterParts(parts, sel) {
+    return parts.filter(p =>
+        (!sel.family || p.family === sel.family) &&
+        (!sel.pkg || p.pkg === sel.pkg) &&
+        (!sel.speed || p.speed === sel.speed));
 }
 
 /** 生成"把文件加入已存在工程指定文件集"的增量 TCL（已存在则跳过）。 */
@@ -414,6 +461,76 @@ function activateVivado(context, deps) {
         return simulateWithVivado();
     }
 
+    // ---------------- 器件选型（Vivado 向导式：系列 → 封装 → 速度 → 搜索选择） ----------------
+
+    let partsCache = null;   // null=未加载 []=空库
+    async function loadPartsCatalog() {
+        if (partsCache !== null) return partsCache;
+        const binDir = resolveBinDir();
+        if (!binDir) return (partsCache = []);
+        const ver = path.basename(path.dirname(binDir)) || 'unknown';   // 如 2022.1
+        const cacheDir = context.globalStoragePath || path.join(os.homedir(), '.svtools');
+        const dumpPath = path.join(cacheDir, 'vivado_parts_' + ver + '.txt');
+        try {
+            if (!fs.existsSync(dumpPath)) {
+                fs.mkdirSync(cacheDir, { recursive: true });
+                const scriptPath = path.join(cacheDir, 'export_parts.tcl');
+                fs.writeFileSync(scriptPath, buildExportPartsScript(dumpPath));
+                status('$(database) 导出 Vivado 器件库…');
+                try {
+                    await runScript(scriptPath, { quiet: true, timeoutMs: 120000 });
+                } finally { status(null); }
+            }
+            partsCache = parsePartsDump(fs.readFileSync(dumpPath, 'utf8'));
+        } catch (e) {
+            partsCache = [];
+        }
+        return partsCache;
+    }
+
+    /** Vivado 风格逐级筛选选型；返回 part 字符串（''=不设置），undefined=用户取消。 */
+    async function pickPart(defaultPart) {
+        const parts = await loadPartsCatalog();
+        const MANUAL = '\u0000manual';
+        const NONE = '\u0000none';
+        if (!parts.length) {
+            // 导不出库（无 Vivado / 结构变化）：回退手输
+            const v = await vscode.window.showInputBox({
+                prompt: '器件型号（-part，如 xc7a35tcsg324-1，可留空后在 Vivado 中选择）',
+                value: defaultPart || ''
+            });
+            return v === undefined ? undefined : v.trim();
+        }
+        const sel = { family: '', pkg: '', speed: '' };
+        // 系列 → 封装 → 速度等级（每级可"(全部)"跳过，Esc 取消整个选型）
+        for (const [key, title, dim] of [['family', '系列 Family', 'families'], ['pkg', '封装 Package', 'packages'], ['speed', '速度等级 Speed', 'speeds']]) {
+            const pool = key === 'family' ? parts : filterParts(parts, sel);
+            const values = partFilterOptions(pool)[dim];
+            if (values.length <= 1) { sel[key] = key === 'family' && values.length === 1 ? values[0] : ''; continue; }
+            const pick = await vscode.window.showQuickPick(
+                [{ label: '(全部)', value: '' }].concat(values.map(v => ({ label: v, value: v, picked: v === sel[key] })))
+                    .concat(key === 'family' ? [{ label: '(手动输入型号…)', value: MANUAL }] : []),
+                { placeHolder: '筛选 · ' + title + '（当前候选 ' + pool.length + ' 个）' });
+            if (pick === undefined) return undefined;
+            if (pick.value === MANUAL) {
+                const v = await vscode.window.showInputBox({ prompt: '手动输入器件型号（-part）', value: defaultPart || '' });
+                return v === undefined ? undefined : v.trim();
+            }
+            sel[key] = pick.value;
+        }
+        const pool = filterParts(parts, sel);
+        const pick = await vscode.window.showQuickPick(
+            [{ label: '(不设置，建好后在 Vivado 中选择)', value: NONE }]
+                .concat(pool.map(p => ({
+                    label: p.name,
+                    description: p.family + ' · ' + p.pkg + ' · ' + p.speed,
+                    picked: p.name === defaultPart
+                }))),
+            { placeHolder: '选择器件（共 ' + pool.length + ' 个，输入可搜索，如 xc7z100）' });
+        if (pick === undefined) return undefined;
+        return pick.value === NONE ? '' : pick.value;
+    }
+
     /** 运行 TCL 脚本。返回 Promise<{code, ms, issues}>（供命令与 AI Agent 工具复用）。 */
     function runScript(scriptPath, opts) {
         return new Promise((resolve) => {
@@ -437,7 +554,7 @@ function activateVivado(context, deps) {
             const args = buildBatchArgs(scriptPath, (opts && opts.tclArgs) || [], (opts && opts.extraArgs) || []);
             const cwd = (opts && opts.cwd) || path.dirname(scriptPath);
 
-            out.show(true);
+            if (!(opts && opts.quiet)) out.show(true);
             log('————————————————————————————————————');
             log('[vivado] ' + bat + ' ' + args.join(' '));
             log('[vivado] cwd: ' + cwd);
@@ -592,11 +709,8 @@ function activateVivado(context, deps) {
         const sims = picks.filter(p => p.grp === 'sim').map(p => p.abs);
         const constraints = picks.filter(p => p.grp === 'constrs').map(p => p.abs);
 
-        // 5. 器件型号
-        const part = await vscode.window.showInputBox({
-            prompt: '器件型号（-part，如 xc7z100ffg900-2，可留空后在 Vivado 中选择）',
-            value: cfg.get('part', '') || ''
-        });
+        // 5. 器件型号（Vivado 式逐级筛选：系列 → 封装 → 速度 → 搜索选择）
+        const part = await pickPart(cfg.get('part', '') || '');
         if (part === undefined) return;
 
         // 6. 顶层模块
@@ -792,6 +906,10 @@ module.exports = {
     buildAddFilesScript,
     buildRemoveFilesScript,
     buildSimulateScript,
+    buildExportPartsScript,
+    parsePartsDump,
+    partFilterOptions,
+    filterParts,
     firstModuleName,
     extractVivadoIssues,
     matchGlobList,
