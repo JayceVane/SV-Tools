@@ -7,7 +7,7 @@ All notable changes to the SystemVerilog VSCode Extension will be documented in 
 ### Added
 - **Vivado TCL 集成与工程创建**
   - **TCL 脚本运行**：命令面板 "Vivado: 运行 TCL 脚本"（工作区内选择）或 `.tcl` 编辑器右键 "运行当前 TCL 脚本"；以 `vivado -mode batch -nolog -nojournal -source` 执行，输出流式进入独立通道，状态栏显示运行状态，支持停止（Windows 进程树终止）与超时（`timeoutMs`，默认不限时）
-  - **工程创建向导**：工程名 → 工程目录 → 源文件多选（按工程结构模板预分类）→ 器件型号 → 顶层模块（工作区自动识别候选，被实例化的模块自动降权）；生成 `create_project` TCL 到 `.svtools/vivado/create_prj.tcl` 并可一键执行；工作区无源文件时可按模板创建目录骨架（`src/`、`sim/`、`prj/`）
+  - **工程创建向导**：工程名 → 工程目录 → 源文件多选（按工程结构模板预分类）→ **器件选型（Vivado 向导式：系列 → 封装 → 速度等级逐级筛选 + 关键字搜索；首次经 `get_parts` 导出器件库并缓存，之后秒开）** → 顶层模块（工作区自动识别候选，被实例化的模块自动降权）；生成 `create_project` TCL 到 `.svtools/vivado/create_prj.tcl` 并可一键执行；工作区无源文件时可按模板创建目录骨架（`src/`、`sim/`、`prj/`）
   - **工程结构模板**（`svtools.vivado.structure`，可完全自定义）：目录 glob 把文件划入 sources_1 / sim_1 / constrs_1 文件集与工程输出目录，默认 `src`/`rtl`→RTL、`sim`/`tb`→测试台（重叠时优先归 sim）、`constraints`/`xdc`/`*.xdc`→约束、工程目录 `prj`；未匹配文件以 tb_ 前缀启发兜底或手动勾选
   - Vivado 自动探测（配置 `svtools.vivado.path` → `XILINX_VIVADO` → `PATH` → 常见安装位置），Windows 经 `cmd /c` 逐参引号调用 `vivado.bat`（Node 24 安全限制），脚本相对路径以其所在目录为 cwd
   - **sv/v 标签页右上角按钮**：▶ 仿真按钮弹出引擎选择（Icarus Verilog / Vivado xsim，xsim 将当前文件模块自动置为 sim_1 顶层并补入缺失文件，`simRuntime` 控制运行时长）；工作区存在 Vivado 工程（.xpr）时额外显示 ⊕ 加入工程（左键添加 / 右键移除，文件集按结构模板预判可选），无工程时不显示
