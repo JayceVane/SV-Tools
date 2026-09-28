@@ -2,6 +2,18 @@
 
 All notable changes to the SystemVerilog VSCode Extension will be documented in this file.
 
+## [3.4.4] - 2026-09-28
+
+### Fixed
+- **module/interface `#(...)` 参数列表三处严重破坏**（用户报告于 issue #3 后续反馈）：
+  - **参数值错位/丢失**：参数对齐重建误输出"当前值与下一个参数值的字典序最小者"（`values[i].min(values[i+1])` 移植笔误）——`parameter BC = DATA_WIDTH>>3` 会变成 `= 0`、最后一个参数值变成空
+  - **尾逗号丢失**：`parameter A = 16 ,// comment` 形态下补逗号判定被行尾注释遮挡，且逗号会被补到注释之后；现按去注释文本判定并插在注释之前
+  - **同行多参数整体丢失**：`parameter ADDR_W=32,parameter ID_W=4` 同行写多个参数时，行首锚定的解析每行只识别第一个，其余参数在格式化后消失（ex2 的 `ID_W=4` 场景）；现已预拆行，全部保留
+- **assign 表达式破行格式化后多出空行**（issue #3）：`assign x = (` 或行尾 `||` 等悬空运算符的破行不再被错误切断语句块
+
+### Added
+- **Golden 格式化测试基建**：`example/` 放格式化前输入、`example/target/` 放期望输出，`node test/golden_test.js` 自动比对 + 幂等双检；新增 issue #3 破行 assign、aurora 参数注释、interface 同行参数三个回归用例，后续新发现的格式化问题按此流程持续加用例
+
 ## [3.4.3] - 2026-09-28
 
 ### Added

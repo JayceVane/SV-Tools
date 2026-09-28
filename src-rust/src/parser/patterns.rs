@@ -131,3 +131,9 @@ mod tests {
         }
     }
 }
+
+/// 行尾悬空运算符（assign/表达式破行续行判定，issue #3）：
+/// "a ||" / "a +" / "a ?" 等行尾运算符表示语句未写完，下一行仍是同一语句。
+pub static RE_LINE_ENDS_WITH_OP: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?:\|\||&&|<<|>>|\*\*|[-+*/%&|^:?])\s*$").unwrap()
+});

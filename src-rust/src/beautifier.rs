@@ -219,7 +219,15 @@ impl VerilogBeautifier {
                 if matches!(self.block_state, BlockState::Assign)
                     && w != "assign"
                     && !w.starts_with(|c: char| c == ' ' || c == '\t')
+                    && self.state != "("
+                    && !RE_LINE_ENDS_WITH_OP.is_match(
+                        clean_comment(&block).lines().last().unwrap_or("").trim_end(),
+                    )
                 {
+                    // 注：state == "(" 或块尾行以悬空运算符结尾表示 assign 表达式
+                    // 破行未写完（如 "assign x = (\n  a || b);" / "assign x = a ||\n  b;"），
+                    // 此时不能切断块——否则块只剩第一行，align_assign 会因尾部
+                    // 换行多补一个空行（issue #3）
                     txt_new.push_str(&self.align_assign(&block, 2));
                     block.clear();
                     self.block_state = BlockState::None;

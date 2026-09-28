@@ -13,7 +13,7 @@ pub fn split_on_comma(txt: &str) -> Vec<String> {
 
     for c in txt.chars() {
         if c == ',' && lvl == 0 {
-            result.push(s.clone());
+            result.push(s.trim().to_string());
             s.clear();
         } else {
             s.push(c);
@@ -112,7 +112,13 @@ pub fn align_module_port(
 
     // Add optional parameter declaration
     if let Some(params_match) = m.name("params") {
-        let param_txt = params_match.as_str().trim();
+        // 规范化：同行多个 parameter（"parameter A=1,parameter B=2"）拆成独立行，
+        // 否则行首锚定的参数正则每行只识别第一个，其余参数在重建时丢失
+        let param_txt = Regex::new(r"\s*,\s*((?:parameter|localparam)\b)")
+            .unwrap()
+            .replace_all(params_match.as_str().trim(), ",\n$1")
+            .to_string();
+        let param_txt = param_txt.as_str();
         let re_param_str = r"(?m)^[ \t]*(?:(?P<parameter>parameter|localparam)\s+)?(?P<type>[\w\:]+\b)?[ \t]*(?P<sign>signed|unsigned\b)?[ \t]*(?P<bw>(?:\[[\w\*\(\)\/><\:\-\+`\$\s]+\][ \t]*)*)[ \t]*(?P<param>\w+)\b\s*=\s*(?P<value>[^\n]*?)(?P<comment>$|//.*?$)";
         let re_param = Regex::new(re_param_str).unwrap();
 
@@ -243,23 +249,22 @@ pub fn align_module_port(
                             ));
                             l_new.push_str(&format!(
                                 " = {:<width$}",
-                                values.get(param_idx).cloned().unwrap_or_default().min(
-                                    values.get(param_idx + 1).cloned().unwrap_or_default()
-                                ),
+                                values.get(param_idx).cloned().unwrap_or_default(),
                                 width = len_value
                             ));
                             param_idx += 1;
+
+                            // 尾逗号：注释可能跟在逗号后（"16 ,// note"），须用去注释
+                            // 文本判定，且要插在注释之前而不是行尾
+                            let had_comma = clean_comment(l).trim_end().ends_with(',');
+                            if had_comma {
+                                l_new.push(',');
+                            }
 
                             if let Some(comment) = m_param.name("comment") {
                                 if !comment.as_str().is_empty() {
                                     l_new.push_str(&format!(" {}", comment.as_str()));
                                 }
-                            }
-
-                            // Add trailing comma if original line had one
-                            let l_trimmed = l.trim_end();
-                            if l_trimmed.ends_with(',') && !l_new.trim_end().ends_with(',') {
-                                l_new.push(',');
                             }
                         } else {
                             l_new.push_str(l);
