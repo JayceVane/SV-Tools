@@ -525,8 +525,8 @@ impl VerilogBeautifier {
                     let mut skip_block_handled = false;
                     let block_tmp = match &self.block_state {
                         BlockState::Module | BlockState::Interface => {
-                            let (result, remaining) =
-                                self.align_module_port(&(block.clone() + &line), ilvl - 1);
+                            let input = block.clone() + &line;
+                            let (result, remaining) = self.align_module_port(&input, ilvl - 1);
                             line.clear();
                             block_ended = true;
                             // If there's remaining content after the module declaration,
@@ -537,7 +537,14 @@ impl VerilogBeautifier {
                                 self.block_state = BlockState::None;
                                 skip_block_handled = true;
                             }
-                            result
+                            if result.is_empty() {
+                                // 无端口头部（`module m;`）或无法解析：原样保留。
+                                // 返回空会让 line 已被 clear 的内容丢失（模块名被吞），
+                                // 且无名 Module 块会吞掉后续语句（声明行丢失）
+                                input
+                            } else {
+                                result
+                            }
                         }
                         BlockState::TaskFuncDecl => {
                             let (result, remaining) =
@@ -643,7 +650,7 @@ impl VerilogBeautifier {
                             for m in RE_INST_FULL.captures_iter(&block[9.min(block.len())..]) {
                                 let itype = m.name("itype").map(|x| x.as_str()).unwrap_or("");
                                 let iname = m.name("iname").map(|x| x.as_str()).unwrap_or("");
-                                if !["else", "begin", "end"].contains(&itype)
+                                if !["else", "begin", "end", "fork", "join", "join_any", "join_none"].contains(&itype)
                                     && !["if", "for", "foreach"].contains(&iname)
                                 {
                                     let inst_start = 9 + m.get(0).unwrap().start();
@@ -723,7 +730,7 @@ impl VerilogBeautifier {
                                             "parameter",
                                         ];
                                         if !decl_keywords.contains(&itype)
-                                            && !["else", "begin", "end", "assert", "cover"]
+                                            && !["else", "begin", "end", "assert", "cover", "fork", "join", "join_any", "join_none"]
                                                 .contains(&itype)
                                             && ![
                                                 "task", "function", "property", "sequence",
@@ -1045,11 +1052,19 @@ impl VerilogBeautifier {
             {
                 return String::new();
             }
-            if (w == "function" || w == "task") && ["import", "export"].contains(&w_d.prev1()) {
+            // import/export function = 外部声明；with function sample(..) =
+            // covergroup 采样头子句，都不是块
+            if (w == "function" || w == "task")
+                && ["import", "export", "with"].contains(&w_d.prev1())
+            {
                 return String::new();
             }
-            // `disable fork;` is a statement, not a fork block
-            if w == "fork" && w_d.prev1() == "disable" {
+            // `disable fork;` / `wait fork;` are statements, not a fork block
+            if w == "fork" && ["disable", "wait"].contains(&w_d.prev1()) {
+                return String::new();
+            }
+            // modport 列表里的 clocking 是接口句柄引用，不是 clocking 块
+            if w == "clocking" && self.state == "(" {
                 return String::new();
             }
 
@@ -1156,7 +1171,7 @@ impl VerilogBeautifier {
                         "parameter",
                     ];
                     if !decl_keywords.contains(&itype)
-                        && !["else", "begin", "end", "assert", "cover", "if"].contains(&itype)
+                        && !["else", "begin", "end", "assert", "cover", "if", "fork", "join", "join_any", "join_none"].contains(&itype)
                         && !["task", "function", "property", "sequence", "checker"].contains(&itype)
                         && !["if", "for", "foreach"].contains(&iname)
                     {

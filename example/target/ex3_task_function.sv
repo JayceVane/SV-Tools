@@ -28,6 +28,6 @@ function automatic logic[7:0] get_checksum (
 
     logic[7:0] sum=0;
     for(int i = 0; i < len; i++) sum += data[i];
-    return  sum;
+    return sum;
 
 endfunction

@@ -48,7 +48,13 @@ pub fn align_decl(txt: &str, options: &FormatOptions, indent: &str, indent_space
                             } else {
                                 widths.type_user = widths.type_user.max(t.len());
                             }
-                            widths.type_full = widths.type_full.max(t.len());
+                            // 限定类型（`pkg::type`）的列宽须含 scope 前缀，
+                            // 否则重建时 t 比列宽长、名字与类型粘连（pkt_tq）
+                            let scope_len = m
+                                .name("scope")
+                                .map(|s| s.as_str().len())
+                                .unwrap_or(0);
+                            widths.type_full = widths.type_full.max(scope_len + t.len());
                         }
                         5 => widths.sign = widths.sign.max(w.len()),
                         6 => {
@@ -150,7 +156,12 @@ pub fn align_decl(txt: &str, options: &FormatOptions, indent: &str, indent_space
                 } else {
                     t.push_str(tp);
                 }
-                if m.name("bw").is_some() {
+                // bw 组可为空匹配（is_some 但内容为空）：空时不得走填充路径，
+                // 否则多补一个空格（class c / property p / bins b 等无位宽声明）
+                if m.name("bw")
+                    .map(|b| !b.as_str().trim().is_empty())
+                    .unwrap_or(false)
+                {
                     t = format!("{:<width$}", t, width = len_type);
                     let bw_clean = Regex::new(r"\s*")
                         .unwrap()
@@ -201,7 +212,11 @@ pub fn align_decl(txt: &str, options: &FormatOptions, indent: &str, indent_space
                 }
             }
 
-            l.push_str(&format!("{:<width$}", t, width = len_type_full));
+            // 重建列宽下限：t（含 scope 前缀）去掉尾部既有填充后至少留一个
+            // 空格再接名字。直接用 t.len()+1 会给本就带尾随空格的 t（标准类型
+            // 的 len_type 填充、bw_sum+1 填充）多补一列
+            let pad_to = std::cmp::max(len_type_full, t.trim_end().len() + 1);
+            l.push_str(&format!("{:<width$}", t, width = pad_to));
             let d = l.clone(); // save for signal list repetition
 
             if let Some(sl) = m.name("sig_list") {
@@ -469,5 +484,22 @@ mod tests {
         assert!(result.contains("31:0"), "31:0 missing in output");
         assert!(result.contains("15:0"), "15:0 missing in output");
         assert!(result.contains("mark_debug"), "attribute missing in output");
+    }
+}
+
+#[cfg(test)]
+mod dbgdecl {
+    use super::*;
+    use crate::config::FormatOptions;
+
+    #[test]
+    fn dbg_align_decl_spaces() {
+        let options = FormatOptions::default();
+        let txt = "    class c;\n";
+        println!("=== class ===\n{}", align_decl(txt, &options, "    ", "    "));
+        let txt2 = "    property p_valid_ready;\n";
+        println!("=== property ===\n{}", align_decl(txt2, &options, "    ", "    "));
+        let txt3 = "    bins low = {[0:127]};\n";
+        println!("=== bins ===\n{}", align_decl(txt3, &options, "    ", "    "));
     }
 }
