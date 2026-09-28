@@ -2,7 +2,7 @@
   "name": "svtools",
   "displayName": "SystemVerilog Tools",
   "description": "Verilog/SystemVerilog formatter, module instantiation, testbench generation, and productivity tools (Rust native backend)",
-  "version": "3.4.3-beta6",
+  "version": "3.4.3-beta7",
   "publisher": "JayceVane",
   "author": {
     "name": "JayceVane",
@@ -656,7 +656,7 @@
         },
         "svtools.vivado.simRuntime": {
           "type": "string",
-          "default": "1000ns",
+          "default": "",
           "description": "%cfg.vivado_simRuntime.desc%"
         }
       }

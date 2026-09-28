@@ -138,7 +138,10 @@ function buildSimulateScript(o) {
         L.push('set_property top ' + tclQuote(o.top) + ' [get_filesets sim_1]');
         L.push('update_compile_order -fileset sim_1');
     }
-    L.push('set_property -name {xsim.simulate.runtime} -value ' + tclQuote(o.runtime || '1000ns') + ' -objects [get_filesets sim_1]');
+    // runtime 空串 → 'all'（run all 跑到 $finish）；未传时保持 1000ns 兼容
+    const rt = (o.runtime === undefined || o.runtime === null) ? '1000ns'
+        : (String(o.runtime) === '' ? 'all' : String(o.runtime));
+    L.push('set_property -name {xsim.simulate.runtime} -value ' + tclQuote(rt) + ' -objects [get_filesets sim_1]');
     L.push('launch_simulation');
     L.push('puts "SVTOOLS_SIM_DONE"');
     return L.filter(Boolean).join('\n') + '\n';

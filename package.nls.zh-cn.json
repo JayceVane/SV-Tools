@@ -67,5 +67,5 @@
   "cmd.vivado_removeFromFileset.title": "Vivado: 从工程移除文件",
   "cmd.vivado_simulate.title": "Vivado: 仿真当前文件 (xsim)",
   "cmd.simulate_pick.title": "仿真…",
-  "cfg.vivado_simRuntime.desc": "Vivado xsim 仿真运行时长（xsim.simulate.runtime），如 1000ns 或 all"
+  "cfg.vivado_simRuntime.desc": "Vivado xsim 仿真运行时长（xsim.simulate.runtime），如 1000ns。留空 = 跑到 $finish（xsim -runall）"
 }

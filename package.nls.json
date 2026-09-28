@@ -67,5 +67,5 @@
   "cmd.vivado_removeFromFileset.title": "Vivado: Remove File from Project",
   "cmd.vivado_simulate.title": "Vivado: Simulate Current File (xsim)",
   "cmd.simulate_pick.title": "Simulate…",
-  "cfg.vivado_simRuntime.desc": "Vivado xsim simulation runtime (xsim.simulate.runtime), e.g. 1000ns or all"
+  "cfg.vivado_simRuntime.desc": "Vivado xsim simulation runtime (xsim.simulate.runtime), e.g. 1000ns. Empty = run until $finish (xsim -runall)"
 }

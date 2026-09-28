@@ -151,10 +151,10 @@ function activateVivado(context, deps) {
         const top = firstModuleName(cur.doc.getText());
         if (!top) { vscode.window.showErrorMessage('当前文件里没有找到 module 声明'); return; }
         const cfg = vscode.workspace.getConfiguration('svtools.vivado');
-        const runtime = cfg.get('simRuntime', '1000ns') || '1000ns';
+        const runtime = String(cfg.get('simRuntime', '') || '');   // 空 = 跑到 $finish（xsim -runall）
         const xpr = await refreshProjectContext();
         if (!xpr) { vscode.window.showErrorMessage('未找到 Vivado 工程（.xpr），请先运行 "Vivado: 创建工程"'); return; }
-        vscode.window.showInformationMessage('Vivado xsim 仿真：顶层 ' + top + '（runtime ' + runtime + '）');
+        vscode.window.showInformationMessage('Vivado xsim 仿真：顶层 ' + top + (runtime ? '（runtime ' + runtime + '）' : '（跑到 $finish）'));
         return runIncrementalTcl('simulate.tcl',
             buildSimulateScript({ xprPath: xpr, top, file: cur.path, isSv: cur.isSv, runtime }));
     }
