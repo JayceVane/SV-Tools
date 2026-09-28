@@ -169,10 +169,11 @@ function parseNumber(text) {
  * @returns {number|null} 秒数；无法解析返回 null
  */
 function parseTimescaleSeconds(timescale) {
-    const m = String(timescale || '').trim().match(/^(\d+(?:\.\d+)?)\s*(s|ms|us|ns|ps|fs)$/i);
+    // 兼容 VCD 标准变体：s/sec、ms/msec、us/usec、ns/nsec、ps/psec、fs/fsec（大小写不敏感、允许空格）
+    const m = String(timescale || '').trim().match(/^(\d+(?:\.\d+)?)\s*(sec|s|ms|msec|us|usec|ns|nsec|ps|psec|fs|fsec)$/i);
     if (!m) return null;
     const value = parseFloat(m[1]);
-    const unitFactors = { s: 1, ms: 1e-3, us: 1e-6, ns: 1e-9, ps: 1e-12, fs: 1e-15 };
+    const unitFactors = { s: 1, sec: 1, ms: 1e-3, msec: 1e-3, us: 1e-6, usec: 1e-6, ns: 1e-9, nsec: 1e-9, ps: 1e-12, psec: 1e-12, fs: 1e-15, fsec: 1e-15 };
     return value * unitFactors[m[2].toLowerCase()];
 }
 
@@ -1667,7 +1668,8 @@ const DATA = ${json};
   }
 
   document.getElementById('title').textContent = DATA.fileName;
-  document.getElementById('tsInfo').textContent = 'timescale: ' + (DATA.timescale || '(未声明)');
+  document.getElementById('tsInfo').textContent = 'timescale: ' + (DATA.timescale || '(未声明)') +
+    (typeof DATA.secondsPerTime === 'number' ? '' : '（无法识别，时间按 ns 假定，刻度可能不准）');
   document.getElementById('endTime').textContent = 'end: ' + fmtTime(END) + ' (' + END + ' ticks)';
   applyRows();
   renderTree();
