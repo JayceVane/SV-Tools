@@ -50,7 +50,9 @@ for (const f of inputs) {
         check(`${f}: 缺少 golden（example/target/${f}）`, false, '请格式化后校对并固化期望输出');
         continue;
     }
-    const target = fs.readFileSync(targetPath, 'utf8');
+    // 行尾归一（编辑器可能把 target 存成 CRLF，格式化输出为 LF）
+    const norm = s => s.replace(/\r\n/g, '\n');
+    const target = norm(fs.readFileSync(targetPath, 'utf8'));
 
     // 1. 格式化输出 == golden
     let out;

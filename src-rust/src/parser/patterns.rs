@@ -61,6 +61,41 @@ pub static RE_DECL_FULL: LazyLock<Regex> = LazyLock::new(|| {
     .unwrap()
 });
 
+/// 紧凑声明（类型与位宽之间无空格、无初值）：`logic[ID_W-1:0] awid;`
+/// 命中后由 align_decl 规范化（补类型后空格、位宽右对齐、名字/分号列对齐）；
+/// 带初值的紧凑声明（`logic[7:0] sum=0;`）不匹配，保持原样。
+pub static RE_DECL_COMPACT: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r#"^[ \t]*(?:\(\*.*?\*\)[ \t]*)*(?:(?P<param>localparam|parameter|local|protected)\s+)?(?P<scope>\w+\:\:)?(?P<type>[A-Za-z_]\w*)(?P<bw>(?:\[[\w\*\(\)\/><\:\-\+`\$\s]+\][ \t]*)+)(?P<name>[A-Za-z_]\w*)[ \t]*(?P<array>(?:\[[\w\*\(\)\/><\:\-\+`\$\s]+\][ \t]*)*)?;[ \t]*(?P<comment>.*)"#,
+    )
+    .unwrap()
+});
+
+/// 声明行判定：完整声明（类型与位宽之间可有空格）或紧凑声明。
+pub fn is_decl_line(line: &str) -> bool {
+    RE_DECL_FULL.is_match(line) || RE_DECL_COMPACT.is_match(line)
+}
+
+/// 紧凑声明规范化：在类型与位宽之间补一个空格，使既有的 align_decl
+/// （要求 `type` 后跟空白）可以识别并参与对齐。非紧凑声明原样返回。
+pub fn normalize_compact_decl(line: &str) -> String {
+    if !RE_DECL_COMPACT.is_match(line) {
+        return line.to_string();
+    }
+    if let Some(c) = RE_DECL_COMPACT.captures(line) {
+        let type_m = c.name("type").unwrap();
+        let bw_m = c.name("bw").unwrap();
+        if type_m.end() == bw_m.start() {
+            let mut out = String::with_capacity(line.len() + 1);
+            out.push_str(&line[..type_m.end()]);
+            out.push(' ');
+            out.push_str(&line[type_m.end()..]);
+            return out;
+        }
+    }
+    line.to_string()
+}
+
 /// Module instance regex (supports with/without port connections)
 /// Matches: type [params] name ( or type [params] name ;
 pub static RE_INST_FULL: LazyLock<Regex> = LazyLock::new(|| {

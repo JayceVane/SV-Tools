@@ -186,6 +186,10 @@ pub fn align_module_port(
                 let lines: Vec<&str> = param_txt.split('\n').collect();
                 let mut last_kw = last_param.to_string();
                 let mut param_idx: usize = 0;
+                // 组内是否存在带尾逗号的参数行（无逗号行据此补占位空格对齐注释列）
+                let any_comma_in_group = lines.iter().any(|l| {
+                    clean_comment(l).trim_end().ends_with(',')
+                });
 
                 for (i, line) in lines.iter().enumerate() {
                     let l = line.trim();
@@ -255,10 +259,13 @@ pub fn align_module_port(
                             param_idx += 1;
 
                             // 尾逗号：注释可能跟在逗号后（"16 ,// note"），须用去注释
-                            // 文本判定，且要插在注释之前而不是行尾
+                            // 文本判定，且要插在注释之前而不是行尾；无逗号的行补一个
+                            // 占位空格，使整组注释起点列对齐
                             let had_comma = clean_comment(l).trim_end().ends_with(',');
                             if had_comma {
                                 l_new.push(',');
+                            } else if any_comma_in_group {
+                                l_new.push(' ');
                             }
 
                             if let Some(comment) = m_param.name("comment") {
@@ -574,8 +581,10 @@ pub fn align_module_port(
                         }
                         l_new.push(' ');
                     } else {
-                        // Interface port
-                        l_new.push_str(&format!("{:<width$}", dir, width = max_prefix_len + 1));
+                        // Interface port（如 `axi_if.master axi`）：类型与端口名之间
+                        // 至少保留一个空格；同一列表中若有方向端口，则对齐到其前缀列。
+                        let width = (max_prefix_len + 1).max(dir.len() + 1);
+                        l_new.push_str(&format!("{:<width$}", dir, width = width));
                     }
 
                     // Port list

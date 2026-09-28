@@ -8,7 +8,7 @@ module aurora_core #(
     parameter STRB_WIDTH = 2            , // STROBE bus width
     parameter BC         = DATA_WIDTH>>3, //Byte count
     parameter ISUFC      = 0            , //If UFC send 1
-    parameter REM_WIDTH  = 1             // REM bus width
+    parameter REM_WIDTH  = 1              // REM bus width
 ) (
     // AXI4-S input signals
     input  wire                      AXI4_S_IP_TX_TVALID,
