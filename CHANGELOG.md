@@ -2,6 +2,22 @@
 
 All notable changes to the SystemVerilog VSCode Extension will be documented in this file.
 
+## [3.4.5] - 2026-09-28
+
+### Fixed
+- **格式化引擎按用户校对后的 golden 基准全面对齐**（`node test/golden_test.js` 7 用例 14 项全绿，含幂等；真实工程样例输出零漂移）：
+  - **CRLF 输入产生伪空行**：preprocess 入口统一行尾归一——此前 `\r` 被语句拆分当作行内剩余内容，每条语句后多出空行，同一文件 LF/CRLF 输出不一致
+  - **语句拆行规则**：单行 `begin ... end` 紧凑写法整行保留；`begin` 后同行有语句且本行无闭合 `end` 才断行；`endcase`/`end` 前有内容时断行（`end end` 拆两行）
+  - **case 项对齐此前从未生效**：对齐正则含 `(?!:)` 前瞻，Rust regex 不支持导致整趟对齐被静默跳过；改为无前瞻正则 + 紧凑/规范双模式——同行多语句的紧凑风格保留（`4'd0:result<=x;`），一句一行时补运算符空格（`result <= x;`）
+  - **续行空白压缩破坏既有对齐**：assign 对齐的非匹配行统一压缩空格，会把已对齐的 assign 组 / case 项 / 实例端口列填充压掉；现仅对破行表达式中间片段（行尾悬空运算符）压缩，完整语句行原样保留
+  - **行续接（反斜杠结尾）被拆断**：宏 / 断言多行语句整行保留
+  - **语句块内赋值列对齐**：for / if 体等语句块的 `<=`/`=` 操作符列对齐
+  - **单行 for 头运算符空格规范化**：`for(int i=0;i<len;i++) sum+=data[i];` → `for(int i = 0; i < len; i++) sum += data[i];`
+  - **modport 按方向拆行**：`modport master(output a,b,input c);` → `output a, b,` 与 `input c` 两行，逗号后补空格
+  - **紧凑声明参与对齐**：`logic[ID_W-1:0] awid;`（类型与位宽间无空格、无初值）现参与声明对齐（位宽右对齐、名字/分号列）；带初值的保持原样
+  - **interface 端口丢空格**：`axi_if.master axi` 不再被格式化成 `axi_if.masteraxi`
+- golden 用例扩充至 7 个（新增 ex1.1 条件块展开、ex5 参数注释列对齐、ex6 声明对齐 / modport / interface 端口），全部含幂等校验；ex2 与 ex6 的 interface 输入段相同，target 已统一为对齐形式
+
 ## [3.4.4] - 2026-09-28
 
 ### Fixed
