@@ -109,6 +109,9 @@ pub fn align_assign(
                 && lines_match
                     .iter()
                     .any(|(l, _, _, _)| count_depth0_semicolons(l) >= 2);
+            // 语句未写完判定（仅 assign 趟 mask==2）：上一条非空行不以 ';' 结尾
+            // 时语句跨行（多行拼接/破行），其内部空行是格式化残留，丢弃。
+            let mut prev_semi = true;
             for (_, (line, caps, ilvl_val, len_idx)) in lines_match.iter().enumerate() {
                 if let Some(m) = caps {
                     if is_case_group {
@@ -137,6 +140,7 @@ pub fn align_assign(
                         } else {
                             txt_new_tmp.push_str(&format!("{}\n", line.trim_end()));
                         }
+                        prev_semi = line.trim_end().ends_with(';');
                         continue;
                     }
                     let mut l = String::new();
@@ -162,8 +166,13 @@ pub fn align_assign(
                         m.name("statement").unwrap().as_str(),
                         width = ml
                     );
+                    prev_semi = l.trim_end().ends_with(';');
                     txt_new_tmp.push_str(&format!("{}\n", l.trim_end()));
                 } else {
+                    // 语句未写完（多行拼接/破行）内部的空行是格式化残留，丢弃
+                    if mask_op == 2 && line.trim().is_empty() && !prev_semi {
+                        continue;
+                    }
                     // 续行：代码区内连续空格压缩为单个（含错误对齐残留的宽空格），
                     // 行尾注释之前的手工对齐空格保留。
                     // 仅破行表达式的中间片段（以运算符结尾，如 "a == b   ||"）需要
@@ -174,6 +183,7 @@ pub fn align_assign(
                     } else {
                         txt_new_tmp.push_str(&format!("{}\n", normalize_code_spaces(line)));
                     }
+                    prev_semi = !line.trim().is_empty() && line.trim_end().ends_with(';');
                 }
             }
 

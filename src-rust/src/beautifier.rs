@@ -220,14 +220,16 @@ impl VerilogBeautifier {
                     && w != "assign"
                     && !w.starts_with(|c: char| c == ' ' || c == '\t')
                     && self.state != "("
-                    && !RE_LINE_ENDS_WITH_OP.is_match(
-                        clean_comment(&block).lines().last().unwrap_or("").trim_end(),
-                    )
+                    && self.state != "{"
+                    && !assign_block_unbalanced(&block)
+                    && !RE_LINE_ENDS_WITH_OP.is_match(&last_nonempty_line(&block))
                 {
-                    // 注：state == "(" 或块尾行以悬空运算符结尾表示 assign 表达式
-                    // 破行未写完（如 "assign x = (\n  a || b);" / "assign x = a ||\n  b;"），
-                    // 此时不能切断块——否则块只剩第一行，align_assign 会因尾部
-                    // 换行多补一个空行（issue #3）
+                    // 注：state == "(" / "{"、块内括号未闭合（多行拼接
+                    // "assign x = {\n  a,\n  b};" 的 `};` 独占一行时，行首 state_end
+                    // 已先弹出 "{"，须靠括号深度兜底）或块尾行以悬空运算符结尾，
+                    // 都表示 assign 表达式破行未写完，此时不能切断块——否则块只剩
+                    // 已写部分，align_assign 会因尾部换行多补一个空行（issue #3
+                    // 及其花括号变体）
                     txt_new.push_str(&self.align_assign(&block, 2));
                     block.clear();
                     self.block_state = BlockState::None;
@@ -1266,6 +1268,48 @@ impl VerilogBeautifier {
             &self.indent_space,
         )
     }
+}
+
+/// assign 块的最后一条非空代码行（去注释）。悬空运算符判定不能用
+/// lines().last()：块尾已积累空行时会取到空串使守卫失效，语句被错误切断
+/// （多行拼接/破行链条中有空行时一次与二次格式化分段不同 → 幂等破坏）。
+fn last_nonempty_line(block: &str) -> String {
+    clean_comment(block)
+        .lines()
+        .rev()
+        .find(|l| !l.trim().is_empty())
+        .map(|l| l.trim_end().to_string())
+        .unwrap_or_default()
+}
+
+/// assign 块内 `{`/`(` 括号深度是否大于 0（多行拼接/破行表达式跨行未完）。
+/// 闭合行（`} ;`）独占一行时，行首 state_end 会先弹出 "{" 状态，单靠
+/// state 判定会漏判，须按块内括号深度兜底（clean_comment 已剥注释，字符串保留）。
+fn assign_block_unbalanced(block: &str) -> bool {
+    let code = clean_comment(block);
+    let mut depth_paren = 0i32;
+    let mut depth_brace = 0i32;
+    let mut in_str = false;
+    let mut chars = code.chars().peekable();
+    while let Some(c) = chars.next() {
+        if in_str {
+            if c == '\\' {
+                chars.next();
+            } else if c == '"' {
+                in_str = false;
+            }
+            continue;
+        }
+        match c {
+            '"' => in_str = true,
+            '(' => depth_paren += 1,
+            ')' => depth_paren -= 1,
+            '{' => depth_brace += 1,
+            '}' => depth_brace -= 1,
+            _ => {}
+        }
+    }
+    depth_paren > 0 || depth_brace > 0
 }
 
 #[cfg(test)]
