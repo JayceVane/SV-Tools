@@ -27,7 +27,9 @@ test_format.rs
 temp/
 *.tmp
 test-inst.js
-test/
+# test/ 下仅本地产物不入库；golden 格式化测试入库（例外须用 test/* 形式才生效）
+test/*
+!test/golden_test.js
 
 # OS
 .DS_Store
