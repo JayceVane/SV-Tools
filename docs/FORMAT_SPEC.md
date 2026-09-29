@@ -248,6 +248,9 @@ covergroup 内 bins 名与 `{…}` 集合按列对齐（ex8）。
    modport 按方向展开（§8.6）。
 5. **sequence/property/assert**：块头与体之间**不插入空行**（v3.4.1 修复）；
    `|->`/`|=>`/`##[1:3]` 等时序运算符两侧空格保持。
+   **体内空格归一化**：词间空白折叠为单个空格；`(` 后与 `)`/`,`/`;` 前的空格
+   删除（`$rose(valid  )` → `$rose(valid)`；`property   p;` → `property p;`）。
+   只删多余空格，不补缺失的运算符空格；字符串与注释不动（ex12）。
 6. **fork/join 族**：`join`/`join_any`/`join_none` 独立成行、与 fork 对齐缩进；
    `wait fork;` / `disable fork;` 是普通语句（不得误判为实例化）。
 7. **do/while**：`do @(posedge clk);` 与 `while (!ready);` 各自独立成行（用户换行时保留）。
