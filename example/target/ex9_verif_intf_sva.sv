@@ -38,12 +38,10 @@ module assertions (
 );
 
     sequence s_handshake;
-
         valid ##1 ready;
     endsequence
 
     property p_valid_ready;
-
         @(posedge clk) disable iff (!rst_n) valid |-> ##[1:3] ready;
     endproperty
 
@@ -51,7 +49,6 @@ module assertions (
         else $error("valid without ready, %0t", $time);
 
     property p_stable;
-
         @(posedge clk) $rose(valid) |=> wdata == $past(wdata);
     endproperty
 

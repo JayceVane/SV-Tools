@@ -76,6 +76,23 @@ pub fn is_decl_line(line: &str) -> bool {
     RE_DECL_FULL.is_match(line) || RE_DECL_COMPACT.is_match(line)
 }
 
+/// SV 块构造头（sequence/property/checker，由 endsequence/endproperty/
+/// endchecker 闭合）。形如声明（`sequence s_handshake;`）但不是数据声明，
+/// 不得进 Decl 对齐——否则块头与块体之间会多出一个空行。
+pub fn is_sv_block_header(line: &str) -> bool {
+    let t = line.trim_start();
+    ["sequence", "property", "checker"].iter().any(|k| {
+        t.starts_with(k)
+            && t[k.len()..]
+                .starts_with(|c: char| c.is_whitespace() || c == '(')
+    })
+}
+
+/// 声明行判定（排除块构造头）。
+pub fn is_decl_line_excl_blocks(line: &str) -> bool {
+    is_decl_line(line) && !is_sv_block_header(line)
+}
+
 /// 紧凑声明规范化：在类型与位宽之间补一个空格，使既有的 align_decl
 /// （要求 `type` 后跟空白）可以识别并参与对齐。非紧凑声明原样返回。
 pub fn normalize_compact_decl(line: &str) -> String {

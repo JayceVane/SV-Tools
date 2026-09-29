@@ -379,7 +379,7 @@ impl VerilogBeautifier {
                 }
 
                 if matches!(self.block_state, BlockState::Decl)
-                    && !is_decl_line(line.trim())
+                    && !is_decl_line_excl_blocks(line.trim())
                 {
                     if self.options.reindent_only() {
                         txt_new.push_str(&block);
@@ -495,7 +495,9 @@ impl VerilogBeautifier {
                 .contains(&self.state.as_str())
                 && !mod_import
             {
-                let is_decl_match = is_decl_line(line.trim());
+                // sequence/property/checker 头形如声明但不进 Decl（块构造，
+                // 否则头与体之间多出空行）
+                let is_decl_match = is_decl_line_excl_blocks(line.trim());
 
                 // Handle declaration state - accumulate lines without processing
                 // When block_state is Text/Decl/StructAssign and this is a declaration,
@@ -1129,7 +1131,7 @@ impl VerilogBeautifier {
         } else if matches!(self.block_state, BlockState::Text) {
             let tmp = clean_comment(txt).trim().to_string();
             // Check for declaration first (before instance)
-            if is_decl_line(&tmp) {
+            if is_decl_line_excl_blocks(&tmp) {
                 self.block_state = BlockState::Decl;
             } else {
                 // Try to match instance pattern on the full text first,
