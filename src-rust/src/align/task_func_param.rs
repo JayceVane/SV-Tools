@@ -51,6 +51,13 @@ pub fn align_task_func_param(
         return (txt_new, String::new());
     }
 
+    // 单行参数列表保持单行：源码未换行的 `function new(bit [7:0] a = 0);`
+    // 不拆成多行对齐（用户显式换行的多行列表才走对齐展开）
+    if !args_content.contains('\n') {
+        let txt_new = format!("{}({});\n", header, args_trimmed);
+        return (txt_new, remaining);
+    }
+
     // Use the same port alignment regex as align_module_port
     let re_port = Regex::new(
         r#"(?m)^[ \t]*(?P<dir>[\w\.]+)[ \t]+(?P<var>var|ref\b)?[ \t]*(?P<type>[\w\:]+\b)?[ \t]*(?P<sign>signed|unsigned\b)?[ \t]*(?P<bw>(?:\[[\w\*\(\)\/><\:\-\+`\$\s]+\][ \t]*)*)[ \t]*(?P<ports>(?P<port1>\w+)(?:[ \t]*,[ \t]*\w+)*)[ \t]*(?P<comment>,?.*)"#,

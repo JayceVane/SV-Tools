@@ -330,8 +330,10 @@ impl VerilogBeautifier {
                     let tmp = clean_comment(&last_line).trim().to_string();
 
                     if !tmp.is_empty() {
+                        // 行尾 `\}`（constraint { ...; } 等单行花括号块）视为
+                        // 语句结束，不给后续行 +1 缩进
                         let m = Regex::new(
-                            r"(;|\{|\bend|\bendcase|\bendgenerate)$|^\}$|(begin(\s*\:\s*[\w\$]+)?)$|(case(?:x|z)?)\s*\(.*\)$|(`\w+)\s*(\(.*\))?$|^ *(`\w+)\b"
+                            r"(;|\}|\{|\bend|\bendcase|\bendgenerate)$|^\}$|(begin(\s*\:\s*[\w\$]+)?)$|(case(?:x|z)?)\s*\(.*\)$|(`\w+)\s*(\(.*\))?$|^ *(`\w+)\b"
                         ).unwrap().find(&tmp);
 
                         if m.is_none() {
@@ -390,8 +392,32 @@ impl VerilogBeautifier {
                     self.block_state = BlockState::None;
                 }
 
+                // 多行 constraint 块的内联 `}`（"...; }"）：拆到独立行，
+                // 缩进取块首行。`constraint` 开头的行是块头（单行块整行
+                // 保持）；`}` 前无内容（已独立成行）不动。
+                if line.trim_end().ends_with('}')
+                    && line.trim_end() != "}"
+                    && !line.trim_start().starts_with("constraint")
+                {
+                    let first = block.lines().find(|l| !l.trim().is_empty());
+                    if let Some(first) = first {
+                        if first.trim_start().starts_with("constraint") {
+                            let cur = line.trim_end();
+                            if let Some(pos) = cur.rfind('}') {
+                                let before = cur[..pos].trim_end();
+                                if !before.is_empty() {
+                                    let base_indent =
+                                        &first[..first.len() - first.trim_start().len()];
+                                    line = format!("{}\n{}}}", before, base_indent);
+                                }
+                            }
+                        }
+                    }
+                }
+
                 block.push_str(line.trim_end());
                 block.push('\n');
+
                 line.clear();
                 original_indent.clear();
                 has_indent = false;
@@ -511,19 +537,27 @@ impl VerilogBeautifier {
                     // Don't set block_handled - let lines accumulate
                 }
                 // Handle other block states that need immediate processing
-                else if matches!(
+                else if (matches!(
                     self.block_state,
-                    BlockState::Module
+                    BlockState::None
+                        | BlockState::Module
                         | BlockState::Interface
                         | BlockState::Instance
                         | BlockState::Text
                         | BlockState::Package
                         | BlockState::TaskFuncDecl
-                ) || (matches!(
-                    self.block_state,
-                    BlockState::Struct | BlockState::StructAssign | BlockState::Enum
                 ) && self.state != "{")
+                    || (matches!(
+                        self.block_state,
+                        BlockState::Struct | BlockState::StructAssign | BlockState::Enum
+                    ) && self.state != "{")
                 {
+                    // state == "{"（constraint { ...; } / with { ...; } 等花括号块）
+                    // 时不在 `;` 处切断——否则单行块被拆（`}` 被甩到下一行）；
+                    // 块闭合时由换行处理的 constraint-close 触发统一 flush。
+                    // None：以块关键字开头的行（class/covergroup/sequence 等，
+                    // process_word 提前 return 不设置 block_state）在 `;` 处
+                    // 独立 flush——否则滞留 block 污染下一行的声明判定。
                     let mut skip_block_handled = false;
                     let block_tmp = match &self.block_state {
                         BlockState::Module | BlockState::Interface => {
@@ -943,6 +977,7 @@ impl VerilogBeautifier {
                 self.block_state = BlockState::None;
                 block_handled = false;
             }
+
 
             // Update word history
             if !w.trim().is_empty() || w_d.last() != "\n" {

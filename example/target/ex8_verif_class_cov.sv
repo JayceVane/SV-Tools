@@ -13,25 +13,20 @@ package vf1_pkg;
     } pkt_t;
 
     class trans;
-
         rand bit [7:0] addr;
         rand bit [31:0] data;
         rand int len;
         bit ok;
 
-        constraint c_addr { addr inside {[0:100], 200};
-        }
+        constraint c_addr { addr inside {[0:100], 200}; }
         constraint c_len {
             len > 0;
             len < 16;
             solve addr before len;
         }
-        constraint c_data { data dist {8'h00 := 1, 8'hFF :/ 2, [1:127] := 5};
-        }
+        constraint c_data { data dist {8'h00 := 1, 8'hFF :/ 2, [1:127] := 5}; }
 
-        function new (
-            bit [7:0] a = 0
-        );
+        function new(bit [7:0] a = 0);
 
             addr = a;
             data = '0;
@@ -48,9 +43,7 @@ package vf1_pkg;
 
         static int count;
 
-        function new (
-            int  p = 0
-        );
+        function new(int p = 0);
 
             super.new();
             port = p;

@@ -130,6 +130,10 @@ mod tests {
 fn split_statements(text: &str) -> String {
     let mut out_lines: Vec<String> = Vec::new();
     let mut in_block_comment = false;
+    // 花括号深度跨行持续（constraint / struct 块体可能跨行；
+    // 圆括号深度逐行重置即可——括号内 `;` 属 for 头，跨行表达式
+    // 的 `;` 只会出现在行尾）
+    let mut brace_depth: i32 = 0;
     for line in text.split('\n') {
         // 行续接（`\` 结尾，常用于宏/断言多行语句）：整行原样保留
         if line.trim_end().ends_with('\\') {
@@ -195,6 +199,10 @@ fn split_statements(text: &str) -> String {
                 depth += 1;
             } else if c == ')' {
                 depth -= 1;
+            } else if c == '{' {
+                brace_depth += 1;
+            } else if c == '}' {
+                brace_depth -= 1;
             }
             cur.push(c);
 
@@ -249,8 +257,10 @@ fn split_statements(text: &str) -> String {
                 }
             }
 
-            if c == ';' && depth == 0 {
-                // 前瞻：跳过空白；后续是行尾注释或已到行尾则保持同行，否则断行
+            if c == ';' && depth == 0 && brace_depth == 0 {
+                // 前瞻：跳过空白；后续是行尾注释或已到行尾则保持同行，否则断行。
+                // 花括号深度 > 0（constraint { ...; } / struct { ...; } 等）不拆，
+                // 单行块保持单行
                 let mut j = i + 1;
                 while j < chars.len() && (chars[j] == ' ' || chars[j] == '\t') {
                     j += 1;
