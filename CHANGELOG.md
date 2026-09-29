@@ -2,6 +2,21 @@
 
 All notable changes to the SystemVerilog VSCode Extension will be documented in this file.
 
+## [3.4.6] - 2026-09-28
+
+### Fixed
+- **assign 多行拼接 `{` 破行空行**（issue #3 花括号变体）：闭合行 `};` 独占一行时不再被切断产生空行；悬空运算符判定改取最后一条非空行（块尾空行不再使守卫失效）；未写完语句内部的空行残留自动清除（曾被旧版格式化损坏的文件重新格式化即可自愈）
+- **SystemVerilog 验证代码六处破坏修复**（用类/约束/covergroup/clocking/断言/fork 压测发现）：
+  - `module m;` 无端口头部模块名被吞，且无名 Module 块吞掉后续声明行（`logic clk = 0;` 二次格式化整行消失）
+  - 空 bw 捕获组幻影空格：无位宽用户类型声明多补一列（`class  c;` / `return  sum;`）
+  - 限定类型（`pkg::type`）列宽不含 scope 前缀，名字与类型粘连（`pkt_tq`）、二次格式化吞行
+  - 裸 `fork` 块被误判为模块实例（DOTALL 跨行匹配 `fork generator (`），整块被实例对齐重排；`join_none repeat()` 同理
+  - `wait fork;` / `disable fork;` 不再推 fork 块状态（验证代码高频语句）
+  - `covergroup with function sample(...)` 的采样头子句不再误推块状态；`clocking` 块体正确缩进（modport 列表内的 clocking 引用除外）
+
+### Added
+- golden 格式化用例扩充至 11 个：新增 ex7（assign 多行拼接）、ex8（类/约束/covergroup）、ex9（interface/clocking/modport/SVA）、ex10（testbench/fork/mailbox/队列），全部含幂等校验
+
 ## [3.4.5] - 2026-09-28
 
 ### Fixed
