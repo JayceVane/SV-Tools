@@ -17,7 +17,6 @@ interface bus_if #(parameter DW = 32
         default input #1step output #2;
         output wdata, valid;
         input  ready, resp ;
-
     endclocking
 
     modport drv (

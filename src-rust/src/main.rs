@@ -176,7 +176,7 @@ fn format_text(text: &str, options: &FormatOptions) -> String {
     let mut beautifier = svtools::beautifier::VerilogBeautifier::new(options.clone());
     let formatted = beautifier.beautify_text(&preprocessed);
     let max_empty = options.max_consecutive_empty_lines();
-    svtools::postprocess::postprocess_text(&formatted, max_empty)
+    svtools::blank_rules::normalize_blank_lines(&formatted, max_empty)
 }
 
 fn print_usage(program: &str) {

@@ -380,7 +380,12 @@ impl VerilogBeautifier {
                     }
                 }
 
+                // Decl 块不在空行处切断：声明组内的空行参与累积但不参与
+                // 对齐宽度计算。否则"用户用空行分组的声明"与空行删除后的
+                // 二次格式化会产生不同的对齐宽度（非幂等，sfp_dma_rx 的
+                // dbg 声明组）
                 if matches!(self.block_state, BlockState::Decl)
+                    && !line.trim().is_empty()
                     && !is_decl_line_excl_blocks(line.trim())
                 {
                     if self.options.reindent_only() {
@@ -470,6 +475,16 @@ impl VerilogBeautifier {
                 if block_ended && !w.trim().is_empty() && (w != "/" || w_d.last() != "/") {
                     line = line.trim_end().to_string();
                     line.push('\n');
+                    // `end else ...`：end 在行中触发 state_end flush 后，else
+                    // 分支被移到新行——须补当前层级缩进，否则落在第 0 列
+                    // （buf_sync_addr 的 generate 链）。其余续行保持原行为。
+                    if w == "else" {
+                        let mut ilvl_tmp = ilvl + split_always;
+                        for (_, v) in &split {
+                            ilvl_tmp += v.count;
+                        }
+                        line.push_str(&self.indent.repeat(ilvl_tmp));
+                    }
                     block_ended = false;
                 }
                 line.push_str(w);

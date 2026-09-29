@@ -62,7 +62,12 @@ pub fn align_assign(
         for l in &lines {
             let m = re.captures(l);
             ilvl_prev = ilvl;
-            ilvl = get_indent_level(l, options, indent, indent_space) as isize;
+            // 空行透明：空行缩进按 0 计会把对齐组切断，且空行的增删
+            // （如块内空行删除规则）会让两遍格式化算出不同组宽——
+            // 空行不更新缩进，继承前一非空行，组判定只看代码行
+            if !l.trim().is_empty() {
+                ilvl = get_indent_level(l, options, indent, indent_space) as isize;
+            }
 
             let idx = if ilvl_glob {
                 ilvl
@@ -231,12 +236,13 @@ fn align_semicolons(txt: &str) -> String {
     let mut max_semi_pos: HashMap<usize, usize> = HashMap::new();
 
     // First pass: calculate indent level groups and find max content length (before semicolon)
+    // 空行透明：不切组。空行增删（块内空行删除规则）不应改变对齐组宽，
+    // 否则两遍格式化宽度漂移（reg_ctrl 的 case default 项）
     let mut current_group: usize = 0;
     let mut prev_indent: usize = 0;
     for l in &lines {
         let trimmed = l.trim_end();
         if trimmed.is_empty() {
-            current_group += 1; // blank lines separate alignment groups
             continue;
         }
         let indent = l.len() - l.trim_start().len();
@@ -262,7 +268,6 @@ fn align_semicolons(txt: &str) -> String {
     for l in &lines {
         let trimmed = l.trim_end();
         if trimmed.is_empty() {
-            current_group += 1; // blank lines separate alignment groups
             result.push_str(l);
             result.push('\n');
             continue;
@@ -343,13 +348,13 @@ pub fn align_stmt_ops(txt: &str, options: &FormatOptions, indent: &str) -> Strin
         .unwrap();
     let lines: Vec<&str> = txt.split('\n').collect();
 
-    // 第一遍：分组（缩进变化或空行分段），统计 name 最大宽度
+    // 第一遍：分组（缩进变化分段），统计 name 最大宽度。
+    // 空行透明：不重置缩进（空行增删不改变对齐组宽，保证幂等）
     let mut widths: HashMap<usize, usize> = HashMap::new();
     let mut group = 0usize;
     let mut prev_indent: Option<usize> = None;
     for l in &lines {
         if l.trim().is_empty() {
-            prev_indent = None;
             continue;
         }
         let ilvl = get_indent_level(l, options, indent, indent);
@@ -366,13 +371,12 @@ pub fn align_stmt_ops(txt: &str, options: &FormatOptions, indent: &str) -> Strin
         }
     }
 
-    // 第二遍：重写匹配行
+    // 第二遍：重写匹配行（空行透明，见第一遍注释）
     let mut out = String::new();
     group = 0;
     prev_indent = None;
     for l in &lines {
         if l.trim().is_empty() {
-            prev_indent = None;
             out.push_str(l);
             out.push('\n');
             continue;

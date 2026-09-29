@@ -46,23 +46,18 @@ module vf3_tb_top;
     end
 
     task automatic generator();
-
         vf1_pkg::trans t;
-
         repeat (10) begin
             assert (t.randomize() with { len inside {[1:8]}; })
                 else $error("randomize failed");
             mb_gen2drv.put(t);
             q.push_back(t.pkt);
         end
-
     endtask
 
     task automatic driver();
-
         forever begin
             vf1_pkg::pkt_t p;
-
             mb_gen2drv.get(p);
             @(posedge clk);
             bus_if_i.wdata <= p.data;
@@ -71,20 +66,16 @@ module vf3_tb_top;
             while (!bus_if_i.ready);
             bus_if_i.valid <= 1'b0;
         end
-
     endtask
 
     task automatic monitor();
-
         forever begin
             @(posedge clk);
             if (bus_if_i.valid && bus_if_i.ready) begin
                 assoc["hit"]++;
                 $display("%0t got pkt", $time);
             end
-
         end
-
     endtask
 
 endmodule

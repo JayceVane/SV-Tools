@@ -1,6 +1,7 @@
 pub mod align;
 pub mod analyzer;
 pub mod beautifier;
+pub mod blank_rules;
 pub mod codegen;
 pub mod config;
 pub mod parser;
@@ -24,9 +25,9 @@ fn format_text(text: String, options: FormatOptions) -> Result<String> {
     let mut beautifier = beautifier::VerilogBeautifier::new(options.clone());
     let formatted = beautifier.beautify_text(&preprocessed);
 
-    // Postprocess: control empty lines
+    // Postprocess: 空行规则 pass（spec §6，替代单纯折叠）
     let max_empty = options.max_consecutive_empty_lines();
-    let result = postprocess::postprocess_text(&formatted, max_empty);
+    let result = blank_rules::normalize_blank_lines(&formatted, max_empty);
 
     Ok(result)
 }
