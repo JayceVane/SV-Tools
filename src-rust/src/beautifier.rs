@@ -383,14 +383,14 @@ impl VerilogBeautifier {
                     }
                 }
 
-                // Decl 块不在空行处切断：声明组内的空行参与累积但不参与
-                // 对齐宽度计算。否则"用户用空行分组的声明"与空行删除后的
-                // 二次格式化会产生不同的对齐宽度（非幂等，sfp_dma_rx 的
-                // dbg 声明组）
-                if matches!(self.block_state, BlockState::Decl)
-                    && !line.trim().is_empty()
-                    && !is_decl_line_excl_blocks(line.trim())
-                {
+                // Decl 组边界判定：非声明行、或实例化头（名字后紧跟 `(`）
+                // 触发 flush。空行不作为组边界（块内空行会被 blank_rules
+                // 删除，两遍格式化需一致的分组——sfp_dma_rx 的 dbg 声明组
+                // 幂等）；滞留声明组遇到实例行由 `;` 处理的专门分支善后
+                let decl_boundary = !line.trim().is_empty()
+                    && (!is_decl_line_excl_blocks(line.trim())
+                        || RE_INST_PORTS.is_match(line.trim_start()));
+                if matches!(self.block_state, BlockState::Decl) && decl_boundary {
                     if self.options.reindent_only() {
                         txt_new.push_str(&block);
                     } else {
@@ -485,9 +485,6 @@ impl VerilogBeautifier {
                 }
 
                 if block_ended && !w.trim().is_empty() && (w != "/" || w_d.last() != "/") {
-                    if std::env::var("SVDBG_FLUSH").is_ok() {
-                        eprintln!(">>> SYNTH-NL w=[{}] line=[{}]", w, line);
-                    }
                     line = line.trim_end().to_string();
                     line.push('\n');
                     // `end else ...`：end 在行中触发 state_end flush 后，else
@@ -552,13 +549,33 @@ impl VerilogBeautifier {
                 && !mod_import
             {
                 // sequence/property/checker 头形如声明但不进 Decl（块构造，
-                // 否则头与体之间多出空行）
-                let is_decl_match = is_decl_line_excl_blocks(line.trim());
+                // 否则头与体之间多出空行）；实例化头（名字后紧跟 `(`）同样
+                // 排除——否则走"置 Decl 不 flush"分支，连续单行实例被攒进
+                // 同一次对齐调用（粘连/误展开）
+                let is_decl_match = is_decl_line_excl_blocks(line.trim())
+                    && !RE_INST_PORTS.is_match(line.trim_start());
 
+                // Decl 组滞留中遇到实例行（块内空行透明策略下声明组可能
+                // 尚未 flush）：声明组经 align_decl 先落盘，实例独立走
+                // align_instance（单行保持/多行对齐）——否则声明+实例攒进
+                // 一次调用（连续单行实例粘连、误展开的根源）
+                if matches!(self.block_state, BlockState::Decl)
+                    && RE_INST_PORTS.is_match(line.trim_start())
+                {
+                    if !block.trim().is_empty() {
+                        txt_new.push_str(&self.align_decl(&block));
+                        block.clear();
+                    }
+                    let inst_out = self.align_instance(&line, ilvl);
+                    txt_new.push_str(&inst_out);
+                    line.clear();
+                    self.block_state = BlockState::None;
+                    block_ended = true;
+                }
                 // Handle declaration state - accumulate lines without processing
                 // When block_state is Text/Decl/StructAssign and this is a declaration,
                 // just set the state and continue (don't process yet)
-                if matches!(
+                else if matches!(
                     self.block_state,
                     BlockState::Text | BlockState::Decl | BlockState::StructAssign
                 ) && is_decl_match
@@ -944,9 +961,6 @@ impl VerilogBeautifier {
                     } else {
                         block = self.align_assign(&(block.clone() + &line), 7);
                     }
-                    if std::env::var("SVDBG_FLUSH").is_ok() {
-                        eprintln!(">>> ALWAYS-FLUSH w=[{}] block:\n---\n{}---", w, block);
-                    }
                     // Ensure block ends with newline so subsequent code starts on a new line
                     if !block.ends_with('\n') {
                         block.push('\n');
@@ -1217,8 +1231,10 @@ impl VerilogBeautifier {
             }
         } else if matches!(self.block_state, BlockState::Text) {
             let tmp = clean_comment(txt).trim().to_string();
-            // Check for declaration first (before instance)
-            if is_decl_line_excl_blocks(&tmp) {
+            // Check for declaration first (before instance).
+            // 实例化头（名字后紧跟 `(`）排除——否则实例行滞留 Decl 状态
+            // 不 flush，连续单行实例被攒进同一次对齐调用
+            if is_decl_line_excl_blocks(&tmp) && !RE_INST_PORTS.is_match(&tmp) {
                 self.block_state = BlockState::Decl;
             } else {
                 // Try to match instance pattern on the full text first,
