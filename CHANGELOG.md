@@ -2,20 +2,34 @@
 
 All notable changes to the SystemVerilog VSCode Extension will be documented in this file.
 
-## [3.4.6] - 2026-09-28
-
-### Fixed
-- **assign 多行拼接 `{` 破行空行**（issue #3 花括号变体）：闭合行 `};` 独占一行时不再被切断产生空行；悬空运算符判定改取最后一条非空行（块尾空行不再使守卫失效）；未写完语句内部的空行残留自动清除（曾被旧版格式化损坏的文件重新格式化即可自愈）
-- **SystemVerilog 验证代码六处破坏修复**（用类/约束/covergroup/clocking/断言/fork 压测发现）：
-  - `module m;` 无端口头部模块名被吞，且无名 Module 块吞掉后续声明行（`logic clk = 0;` 二次格式化整行消失）
-  - 空 bw 捕获组幻影空格：无位宽用户类型声明多补一列（`class  c;` / `return  sum;`）
-  - 限定类型（`pkg::type`）列宽不含 scope 前缀，名字与类型粘连（`pkt_tq`）、二次格式化吞行
-  - 裸 `fork` 块被误判为模块实例（DOTALL 跨行匹配 `fork generator (`），整块被实例对齐重排；`join_none repeat()` 同理
-  - `wait fork;` / `disable fork;` 不再推 fork 块状态（验证代码高频语句）
-  - `covergroup with function sample(...)` 的采样头子句不再误推块状态；`clocking` 块体正确缩进（modport 列表内的 clocking 引用除外）
+## [3.4.6] - 2026-09-29
 
 ### Added
-- golden 格式化用例扩充至 11 个：新增 ex7（assign 多行拼接）、ex8（类/约束/covergroup）、ex9（interface/clocking/modport/SVA）、ex10（testbench/fork/mailbox/队列），全部含幂等校验
+- **格式化规范 `docs/FORMAT_SPEC.md`**：格式化器唯一权威行为定义——术语（语句/块/容器）、11+2 个配置项、预处理/缩进/空行/对齐/单行保留全量规则、专项构造规则、golden 测试约定；实现与规范冲突先修实现对齐规范
+- **单行/多行双轨对齐架构**：用户未换行的语句走单行对齐逻辑（紧凑），显式换行的走多行对齐逻辑（列对齐）
+- **行内紧凑开关 `svtools.inlineCompact`**（默认开）：单行语句（系统任务调用、`else $error(...)`、单行模块例化、task 头等）词间空白折叠、括号/逗号/分号紧邻空格删除、只删不补；关闭则保持原有空格
+- **行间紧凑开关 `svtools.blankCompact`**（默认开）：关闭为保持模式——不插入、不删除空行仅折叠，硬不变量"格式化不得新增空行"；为此格式化器内部空行伪影源头全部消除（声明组尾部换行、对齐多趟 split 尾空元素、行中 flush 种子空行、EOF 尾随换行）
+- CLI 新增 `--no-inline-compact` / `--no-blank-compact`
+- golden 格式化用例扩充至 14 个：新增 ex7（assign 多行拼接）、ex8（类/约束/covergroup）、ex9（interface/clocking/modport/SVA）、ex10（testbench/fork/mailbox/队列）、ex11（tb_top + 单/多行 constraint）、ex12（property/sequence 空格归一化）、ex13（单行紧凑），全部含幂等校验
+
+### Fixed
+- **空行规则统一裁决**（`blank_rules.rs`，spec §6）：块内（task/function/property/sequence/covergroup/clocking 体、begin/end、case、fork、constraint `{}`、多行括号续行）删除全部空行；块级边界保证 [1, max] 空行分隔；语句间保留折叠——替换原先依赖两处"事故性空行"（align_decl 尾部伪影 + flush 后种子空行）的不一致行为
+- **单行写法保留**：单行 `constraint {...;}`、单行参数列表 `function new(bit [7:0] a = 0);`、单行模块例化保持单行不展开；用户显式换行才展开（constraint 内联 `}` 拆独立行、参数逐行对齐）。根因：preprocess 花括号深度跨行累计、行尾 `\}` 不在语句结束正则、task_func_param 无条件展开
+- **sequence/property 块头与块体之间多出空行**（块头形似声明被分进 Decl 对齐）
+- **property/sequence 体内空格归一化**：`property   p;` → `property p;`、`$rose(valid  )` → `$rose(valid)`、`|=>   wdata` → `|=> wdata`（只删不补，字符串/注释保护）
+- **`end else if (...) begin` 的 else 落在第 0 列**（generate 链常见写法，buf_wrapper 三件套非幂等根因）；else 分支前不留空行
+- **modport 列表续行中的 `clocking` 字样被误判为 clocking 块头**，上下文永不闭合导致后续空行整段被删
+- **对齐分组空行敏感导致的幂等破坏**：空行曾把对齐组切断（空行缩进算 0），空行增删使两遍格式化算出不同列宽（sfp_dma_rx 的 dbg 声明组、reg_ctrl 的 case default 等 7 文件）——现对齐分组对空行透明，Decl 块不在空行切断
+- **`$display("x", f());` 在 `repeat + wait fork` 后被从字符串闭合处断行**：string-end 处理器语句中途回收 line 所致；comment-block-end 同机理（属性 + 行中块注释的 `;` 甩到独立行）——中途回收收窄为仅整体 flush 时进行；`is_decl_line` 判定前剥离行中块注释
+- **assign 多行拼接 `{` 破行空行**（issue #3 花括号变体）：闭合行 `};` 独占一行时不再被切断产生空行；悬空运算符判定改取最后一条非空行；未写完语句内部的空行残留自动清除（被旧版损坏的文件重新格式化即可自愈）
+- **SystemVerilog 验证代码六处破坏修复**（用类/约束/covergroup/clocking/断言/fork 压测发现）：
+  - `module m;` 无端口头部模块名被吞，且无名 Module 块吞掉后续声明行
+  - 空 bw 捕获组幻影空格：无位宽用户类型声明多补一列（`class  c;` / `return  sum;`）
+  - 限定类型（`pkg::type`）列宽不含 scope 前缀，名字与类型粘连（`pkt_tq`）、二次格式化吞行
+  - 裸 `fork` 块被误判为模块实例（DOTALL 跨行匹配），整块被实例对齐重排；`join_none repeat()` 同理
+  - `wait fork;` / `disable fork;` 不再推 fork 块状态
+  - `covergroup with function sample(...)` 的采样头子句不再误推块状态；`clocking` 块体正确缩进
+- 实测工程 120 文件幂等校验从 38 文件样本扩展：111/120 稳定（余 9 个为历史存量问题，见 spec 待办）
 
 ## [3.4.5] - 2026-09-28
 
