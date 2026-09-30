@@ -19,7 +19,6 @@ interface axi_if #(
         output awid, awaddr, awlen, awsize, awvalid,
         input awready
     );
-
 endinterface
 
 module consumer (
@@ -27,7 +26,6 @@ module consumer (
 );
 
     logic [DATA_W-1:0] captured;
-
     assign captured = axi.awaddr;
 
 endmodule

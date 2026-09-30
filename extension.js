@@ -70,7 +70,9 @@ async function formatDocument(document, range = null) {
         alignComma: config.get('alignComma', true),
         paramOneLine: config.get('paramOneLine', true),
         importSameLine: config.get('importSameLine', false),
-        instAlignPort: config.get('instAlignPort', true)
+        instAlignPort: config.get('instAlignPort', true),
+        inlineCompact: config.get('inlineCompact', true),
+        blankCompact: config.get('blankCompact', true)
     };
 
     try {

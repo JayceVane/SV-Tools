@@ -53,6 +53,13 @@ export interface FormatOptions {
   importSameLine?: boolean
   alignComma?: boolean
   maxConsecutiveEmptyLines?: number
+  /** 行内紧凑：单行语句（用户未自行换行）内主动删除多余空格（spec §7.1） */
+  inlineCompact?: boolean
+  /**
+   * 行间紧凑：主动删除多余空行（块内全删、块间折叠至 max；spec §6）。
+   * 关闭时保持用户空行、不插入，仅折叠至 max（且格式化不得新增空行）
+   */
+  blankCompact?: boolean
 }
 export interface GadgetOptions {
   instPrefix?: string

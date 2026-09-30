@@ -3,7 +3,7 @@ use regex::Regex;
 /// Preprocess text: if using 1tbs style, merge standalone 'begin' to previous line.
 ///
 /// This replicates `FormatterDaemon::preprocess_text` from daemon.py.
-pub fn preprocess_text(text: &str, indent_style: &str) -> String {
+pub fn preprocess_text(text: &str, indent_style: &str, inline_compact: bool) -> String {
     // 行尾归一：CRLF/CR → LF。残留的 \r 会被语句拆分当作行内剩余内容，
     // 在每条语句后插入伪空行，破坏后续对齐分组（同一文件 LF/CRLF 结果不一致）。
     let text = text.replace("\r\n", "\n").replace('\r', "\n");
@@ -14,6 +14,19 @@ pub fn preprocess_text(text: &str, indent_style: &str) -> String {
     let text = normalize_inline_for(&text);
     // modport 列表按方向拆行（`output a,b,input c` → 两行）
     let text = expand_modport(&text);
+    // property/sequence 体多余空格归一化（spec §9.5）
+    let text = if inline_compact {
+        normalize_prop_seq_bodies(&text)
+    } else {
+        text
+    };
+    // 单行语句紧凑：用户未自行换行的整语句，词间空白折叠、括号/逗号/分号
+    // 紧邻空格删除（spec §7.1 单行对齐逻辑）；多行语句交给列对齐逻辑
+    let text = if inline_compact {
+        compact_single_line_stmts(&text)
+    } else {
+        text
+    };
 
     if indent_style != "1tbs" {
         return text;
@@ -96,29 +109,53 @@ mod tests {
     #[test]
     fn test_preprocess_1tbs_merge_begin() {
         let input = "module foo\nbegin\nendmodule";
-        let result = preprocess_text(input, "1tbs");
+        let result = preprocess_text(input, "1tbs", true);
         assert_eq!(result, "module foo begin\nendmodule");
     }
 
     #[test]
     fn test_preprocess_1tbs_no_merge() {
         let input = "assign x = 1;\nbegin";
-        let result = preprocess_text(input, "1tbs");
+        let result = preprocess_text(input, "1tbs", true);
         assert_eq!(result, "assign x = 1;\nbegin");
     }
 
     #[test]
     fn test_preprocess_gnu_noop() {
         let input = "module foo\nbegin\nendmodule";
-        let result = preprocess_text(input, "gnu");
+        let result = preprocess_text(input, "gnu", true);
         assert_eq!(result, input);
     }
 
     #[test]
     fn test_preprocess_crlf_normalized() {
         let input = "module foo (\r\ninput a\r\n);\r\nendmodule";
-        let result = preprocess_text(input, "1tbs");
+        let result = preprocess_text(input, "1tbs", true);
         assert!(!result.contains('\r'), "CR must be stripped: {:?}", result);
+    }
+
+    #[test]
+    fn test_prop_seq_spacing_normalized() {
+        let input = "property   p_stable;\n    @(posedge clk) $rose(valid  ) |=>   wdata   ==      $past(  wdata  );\nendproperty";
+        let result = preprocess_text(input, "1tbs", true);
+        assert!(
+            result.contains("property p_stable;"),
+            "header collapsed: {:?}",
+            result
+        );
+        assert!(
+            result.contains("@(posedge clk) $rose(valid) |=> wdata == $past(wdata);"),
+            "body collapsed: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_prop_seq_spacing_string_comment_kept() {
+        let input = "property p;\n    $display(\"a  b\");   // keep   me\nendproperty";
+        let result = preprocess_text(input, "1tbs", true);
+        assert!(result.contains("\"a  b\""), "string kept: {:?}", result);
+        assert!(result.contains("// keep   me"), "comment kept: {:?}", result);
     }
 }
 
@@ -130,6 +167,10 @@ mod tests {
 fn split_statements(text: &str) -> String {
     let mut out_lines: Vec<String> = Vec::new();
     let mut in_block_comment = false;
+    // 花括号深度跨行持续（constraint / struct 块体可能跨行；
+    // 圆括号深度逐行重置即可——括号内 `;` 属 for 头，跨行表达式
+    // 的 `;` 只会出现在行尾）
+    let mut brace_depth: i32 = 0;
     for line in text.split('\n') {
         // 行续接（`\` 结尾，常用于宏/断言多行语句）：整行原样保留
         if line.trim_end().ends_with('\\') {
@@ -195,6 +236,10 @@ fn split_statements(text: &str) -> String {
                 depth += 1;
             } else if c == ')' {
                 depth -= 1;
+            } else if c == '{' {
+                brace_depth += 1;
+            } else if c == '}' {
+                brace_depth -= 1;
             }
             cur.push(c);
 
@@ -249,8 +294,10 @@ fn split_statements(text: &str) -> String {
                 }
             }
 
-            if c == ';' && depth == 0 {
-                // 前瞻：跳过空白；后续是行尾注释或已到行尾则保持同行，否则断行
+            if c == ';' && depth == 0 && brace_depth == 0 {
+                // 前瞻：跳过空白；后续是行尾注释或已到行尾则保持同行，否则断行。
+                // 花括号深度 > 0（constraint { ...; } / struct { ...; } 等）不拆，
+                // 单行块保持单行
                 let mut j = i + 1;
                 while j < chars.len() && (chars[j] == ' ' || chars[j] == '\t') {
                     j += 1;
@@ -435,8 +482,224 @@ fn respace_ops(s: &str) -> String {
     out.trim().to_string()
 }
 
-/// modport 列表按方向拆行：`modport master(output a,b,input c);`
-/// → `modport master (\noutput a, b,\ninput c\n);`（逗号后补空格）。
+/// property/sequence 体内多余空格归一化（spec §9.5）：
+/// - 块头 `property   p;` → `property p;`（词间空格折叠）
+/// - 体行 `@(posedge clk) $rose(valid  ) |=>   wdata == $past(  wdata  );`
+///   → `@(posedge clk) $rose(valid) |=> wdata == $past(wdata);`
+/// 仅删多余空格（折叠为单个 + 删括号/逗号/分号紧邻空格），不补缺失的
+/// 运算符空格。字符串字面量与行尾注释不动；含块注释的行保守跳过。
+fn normalize_prop_seq_bodies(text: &str) -> String {
+    let re_head = Regex::new(r"^\s*(property|sequence)\b").unwrap();
+    let re_end = Regex::new(r"^\s*(endproperty|endsequence)\b").unwrap();
+    let mut out: Vec<String> = Vec::new();
+    let mut in_body = false;
+    for line in text.split('\n') {
+        if in_body {
+            if re_end.is_match(line) {
+                in_body = false;
+                out.push(line.to_string());
+            } else {
+                out.push(normalize_expr_line(line));
+            }
+            continue;
+        }
+        if re_head.is_match(line) {
+            in_body = true;
+            out.push(normalize_expr_line(line));
+            continue;
+        }
+        out.push(line.to_string());
+    }
+    out.join("\n")
+}
+
+/// 表达式行空格归一化：缩进保留；代码区空白串折叠为单个空格；
+/// `(`、`[` 后与 `)`、`]`、`,`、`;` 前的空格删除。字符串字面量原样；
+/// 行尾注释原样（与代码间保留单个空格）。
+fn normalize_expr_line(line: &str) -> String {
+    // 行尾注释切分（代码区不含 //）
+    let bytes = line.as_bytes();
+    let mut comment_start = line.len();
+    let mut in_str = false;
+    let mut esc = false;
+    for i in 0..bytes.len().saturating_sub(1) {
+        if in_str {
+            if esc {
+                esc = false;
+                continue;
+            }
+            if bytes[i] == b'\\' {
+                esc = true;
+            } else if bytes[i] == b'"' {
+                in_str = false;
+            }
+            continue;
+        }
+        if bytes[i] == b'"' {
+            in_str = true;
+        } else if bytes[i] == b'/' && bytes[i + 1] == b'/' {
+            comment_start = i;
+            break;
+        }
+    }
+    let (code, comment) = line.split_at(comment_start);
+    if code.contains("/*") {
+        // 块注释保守跳过
+        return line.to_string();
+    }
+
+    let cb = code.as_bytes();
+    let indent_end = code.len() - code.trim_start().len();
+    let mut out = String::with_capacity(code.len());
+    // 掩码状态：逐字符扫描，字符串内原样复制
+    let mut i = indent_end;
+    let mut in_str = false;
+    while i < cb.len() {
+        let c = cb[i] as char;
+        if in_str {
+            out.push(c);
+            if c == '\\' && i + 1 < cb.len() {
+                out.push(cb[i + 1] as char);
+                i += 2;
+                continue;
+            }
+            if c == '"' {
+                in_str = false;
+            }
+            i += 1;
+            continue;
+        }
+        if c == '"' {
+            in_str = true;
+            out.push(c);
+            i += 1;
+            continue;
+        }
+        if c == ' ' || c == '\t' {
+            // 空白串折叠：吃掉整个串，按下一个非空白字符决定输出
+            let mut j = i;
+            while j < cb.len() && (cb[j] == b' ' || cb[j] == b'\t') {
+                j += 1;
+            }
+            if j >= cb.len() {
+                break; // 行尾空白丢弃（trim）
+            }
+            let next = cb[j] as char;
+            let prev = out.as_bytes().last().copied().unwrap_or(b' ') as char;
+            // `)`/`]`/`,`/`;` 前不留空格；`(`/`[`/`!` 后不留空格；其余折叠为单个
+            if next == ')' || next == ']' || next == ',' || next == ';' {
+                // 不输出空格
+            } else if prev == '(' || prev == '[' || prev == '!' {
+                // 不输出空格
+            } else {
+                out.push(' ');
+            }
+            i = j;
+            continue;
+        }
+        out.push(c);
+        i += 1;
+    }
+
+    let code_out = out.trim_end();
+    let mut result = String::with_capacity(code_out.len() + comment.len() + 1);
+    result.push_str(code_out);
+    // 注释与代码间保留单个空格（删多余）
+    if !comment.is_empty() && !code_out.is_empty() {
+        result.push(' ');
+    }
+    result.push_str(comment);
+    result
+}
+
+/// 单行语句紧凑（spec §7.1 单行对齐逻辑）：用户未自行换行的完整语句
+/// （语句拆行后单行、括号平衡、以 `;` 结束）做词间空白折叠与括号/逗号/
+/// 分号紧邻空格删除——系统任务调用、`else $error(...)`、单行模块例化等。
+/// 多行语句（用户显式换行）不在此处理，交给列对齐逻辑（§8）；
+/// 宏行（`` ` `` 开头）与含块注释的行保守跳过。
+fn compact_single_line_stmts(text: &str) -> String {
+    let mut out: Vec<String> = Vec::new();
+    for line in text.split('\n') {
+        out.push(if is_single_line_stmt(line) {
+            normalize_expr_line(line)
+        } else {
+            line.to_string()
+        });
+    }
+    out.join("\n")
+}
+
+/// 判定是否"单行语句"：非空、非宏行、代码区（去行尾注释）以 `;` 结束、
+/// 括号/方括号/花括号平衡且中途不为负（负数是跨行语句的收尾行）。
+fn is_single_line_stmt(line: &str) -> bool {
+    let trimmed_start = line.trim_start();
+    if trimmed_start.is_empty() || trimmed_start.starts_with('`') {
+        return false;
+    }
+    let bytes = line.as_bytes();
+    let mut comment_start = line.len();
+    let mut in_str = false;
+    let mut esc = false;
+    for i in 0..bytes.len().saturating_sub(1) {
+        if in_str {
+            if esc {
+                esc = false;
+                continue;
+            }
+            if bytes[i] == b'\\' {
+                esc = true;
+            } else if bytes[i] == b'"' {
+                in_str = false;
+            }
+            continue;
+        }
+        if bytes[i] == b'"' {
+            in_str = true;
+        } else if bytes[i] == b'/' && bytes[i + 1] == b'/' {
+            comment_start = i;
+            break;
+        }
+    }
+    let code = &line[..comment_start];
+    if code.contains("/*") {
+        return false;
+    }
+    let t = code.trim_end();
+    if !t.ends_with(';') {
+        return false;
+    }
+    let mut depth = 0i32;
+    let mut in_str = false;
+    let mut esc = false;
+    for &b in t.as_bytes() {
+        if in_str {
+            if esc {
+                esc = false;
+                continue;
+            }
+            if b == b'\\' {
+                esc = true;
+            } else if b == b'"' {
+                in_str = false;
+            }
+            continue;
+        }
+        match b {
+            b'"' => in_str = true,
+            b'(' | b'{' | b'[' => depth += 1,
+            b')' | b'}' | b']' => {
+                depth -= 1;
+                if depth < 0 {
+                    return false;
+                }
+            }
+            _ => {}
+        }
+    }
+    depth == 0
+}
+
+/// modport 列表按方向拆行：`modport master(output a,b,input c);`/// → `modport master (\noutput a, b,\ninput c\n);`（逗号后补空格）。
 /// 缩进交由 beautifier（modport 的括号会推入 "(" 状态）。
 fn expand_modport(text: &str) -> String {
     let re_head = Regex::new(r"^([ \t]*modport[ \t]+\w+[ \t]*)\((.*)\)[ \t]*;?[ \t]*$").unwrap();

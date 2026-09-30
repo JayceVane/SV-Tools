@@ -20,6 +20,11 @@ pub struct FormatOptions {
     pub import_same_line: Option<bool>,
     pub align_comma: Option<bool>,
     pub max_consecutive_empty_lines: Option<i32>,
+    /// 行内紧凑：单行语句（用户未自行换行）内主动删除多余空格（spec §7.1）
+    pub inline_compact: Option<bool>,
+    /// 行间紧凑：主动删除多余空行（块内全删、块间折叠至 max；spec §6）。
+    /// 关闭时保持用户空行、不插入，仅折叠至 max（且格式化不得新增空行）
+    pub blank_compact: Option<bool>,
 }
 
 impl Default for FormatOptions {
@@ -38,6 +43,8 @@ impl Default for FormatOptions {
             import_same_line: Some(false),
             align_comma: Some(true),
             max_consecutive_empty_lines: Some(1),
+            inline_compact: Some(true),
+            blank_compact: Some(true),
         }
     }
 }
@@ -81,6 +88,12 @@ impl FormatOptions {
     }
     pub fn max_consecutive_empty_lines(&self) -> i32 {
         self.max_consecutive_empty_lines.unwrap_or(1)
+    }
+    pub fn inline_compact(&self) -> bool {
+        self.inline_compact.unwrap_or(true)
+    }
+    pub fn blank_compact(&self) -> bool {
+        self.blank_compact.unwrap_or(true)
     }
 }
 

@@ -46,7 +46,12 @@ pub fn align_assign(
             Err(_) => continue,
         };
 
-        let lines: Vec<&str> = txt_new.split('\n').collect();
+        let mut lines: Vec<&str> = txt_new.split('\n').collect();
+        // 尾部空元素是"以 \n 结尾"的终止符标记，不是内容行——不剥掉的话
+        // 每趟正则都会多补一个换行（mask 7 三趟叠加出两个伪影空行）
+        if txt_new.ends_with('\n') {
+            lines.pop();
+        }
         let mut lines_match: Vec<(&str, Option<regex::Captures>, usize, isize)> = Vec::new();
         let mut matched = false;
         let mut ilvl: isize = -1;
@@ -62,7 +67,12 @@ pub fn align_assign(
         for l in &lines {
             let m = re.captures(l);
             ilvl_prev = ilvl;
-            ilvl = get_indent_level(l, options, indent, indent_space) as isize;
+            // 空行透明：空行缩进按 0 计会把对齐组切断，且空行的增删
+            // （如块内空行删除规则）会让两遍格式化算出不同组宽——
+            // 空行不更新缩进，继承前一非空行，组判定只看代码行
+            if !l.trim().is_empty() {
+                ilvl = get_indent_level(l, options, indent, indent_space) as isize;
+            }
 
             let idx = if ilvl_glob {
                 ilvl
@@ -109,6 +119,9 @@ pub fn align_assign(
                 && lines_match
                     .iter()
                     .any(|(l, _, _, _)| count_depth0_semicolons(l) >= 2);
+            // 语句未写完判定（仅 assign 趟 mask==2）：上一条非空行不以 ';' 结尾
+            // 时语句跨行（多行拼接/破行），其内部空行是格式化残留，丢弃。
+            let mut prev_semi = true;
             for (_, (line, caps, ilvl_val, len_idx)) in lines_match.iter().enumerate() {
                 if let Some(m) = caps {
                     if is_case_group {
@@ -137,6 +150,7 @@ pub fn align_assign(
                         } else {
                             txt_new_tmp.push_str(&format!("{}\n", line.trim_end()));
                         }
+                        prev_semi = line.trim_end().ends_with(';');
                         continue;
                     }
                     let mut l = String::new();
@@ -162,8 +176,13 @@ pub fn align_assign(
                         m.name("statement").unwrap().as_str(),
                         width = ml
                     );
+                    prev_semi = l.trim_end().ends_with(';');
                     txt_new_tmp.push_str(&format!("{}\n", l.trim_end()));
                 } else {
+                    // 语句未写完（多行拼接/破行）内部的空行是格式化残留，丢弃
+                    if mask_op == 2 && line.trim().is_empty() && !prev_semi {
+                        continue;
+                    }
                     // 续行：代码区内连续空格压缩为单个（含错误对齐残留的宽空格），
                     // 行尾注释之前的手工对齐空格保留。
                     // 仅破行表达式的中间片段（以运算符结尾，如 "a == b   ||"）需要
@@ -174,6 +193,7 @@ pub fn align_assign(
                     } else {
                         txt_new_tmp.push_str(&format!("{}\n", normalize_code_spaces(line)));
                     }
+                    prev_semi = !line.trim().is_empty() && line.trim_end().ends_with(';');
                 }
             }
 
@@ -217,16 +237,21 @@ fn get_indent_level(
 /// Finds the max line length (excluding the semicolon) per indent group,
 /// then pads shorter lines so all semicolons line up vertically.
 fn align_semicolons(txt: &str) -> String {
-    let lines: Vec<&str> = txt.split('\n').collect();
+    let mut lines: Vec<&str> = txt.split('\n').collect();
+    // 尾部空元素是终止符标记，不是内容行（否则每层处理多补一个换行）
+    if txt.ends_with('\n') {
+        lines.pop();
+    }
     let mut max_semi_pos: HashMap<usize, usize> = HashMap::new();
 
     // First pass: calculate indent level groups and find max content length (before semicolon)
+    // 空行透明：不切组。空行增删（块内空行删除规则）不应改变对齐组宽，
+    // 否则两遍格式化宽度漂移（reg_ctrl 的 case default 项）
     let mut current_group: usize = 0;
     let mut prev_indent: usize = 0;
     for l in &lines {
         let trimmed = l.trim_end();
         if trimmed.is_empty() {
-            current_group += 1; // blank lines separate alignment groups
             continue;
         }
         let indent = l.len() - l.trim_start().len();
@@ -252,7 +277,6 @@ fn align_semicolons(txt: &str) -> String {
     for l in &lines {
         let trimmed = l.trim_end();
         if trimmed.is_empty() {
-            current_group += 1; // blank lines separate alignment groups
             result.push_str(l);
             result.push('\n');
             continue;
@@ -331,15 +355,19 @@ fn count_depth0_semicolons(line: &str) -> usize {
 pub fn align_stmt_ops(txt: &str, options: &FormatOptions, indent: &str) -> String {
     let re = Regex::new(r"^(?P<indent>[ \t]*)(?P<name>[A-Za-z_]\w*)[ \t]*(?P<op><=|=)[ \t]*(?P<rhs>[^=].*)$")
         .unwrap();
-    let lines: Vec<&str> = txt.split('\n').collect();
+    let mut lines: Vec<&str> = txt.split('\n').collect();
+    // 尾部空元素是终止符标记，不是内容行（否则文件末尾多补一个换行）
+    if txt.ends_with('\n') {
+        lines.pop();
+    }
 
-    // 第一遍：分组（缩进变化或空行分段），统计 name 最大宽度
+    // 第一遍：分组（缩进变化分段），统计 name 最大宽度。
+    // 空行透明：不重置缩进（空行增删不改变对齐组宽，保证幂等）
     let mut widths: HashMap<usize, usize> = HashMap::new();
     let mut group = 0usize;
     let mut prev_indent: Option<usize> = None;
     for l in &lines {
         if l.trim().is_empty() {
-            prev_indent = None;
             continue;
         }
         let ilvl = get_indent_level(l, options, indent, indent);
@@ -356,13 +384,12 @@ pub fn align_stmt_ops(txt: &str, options: &FormatOptions, indent: &str) -> Strin
         }
     }
 
-    // 第二遍：重写匹配行
+    // 第二遍：重写匹配行（空行透明，见第一遍注释）
     let mut out = String::new();
     group = 0;
     prev_indent = None;
     for l in &lines {
         if l.trim().is_empty() {
-            prev_indent = None;
             out.push_str(l);
             out.push('\n');
             continue;

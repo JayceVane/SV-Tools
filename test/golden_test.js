@@ -30,7 +30,9 @@ function format(text) {
         alignComma: true,
         paramOneLine: true,
         importSameLine: false,
-        instAlignPort: true
+        instAlignPort: true,
+        inlineCompact: true,
+        blankCompact: true
     });
 }
 

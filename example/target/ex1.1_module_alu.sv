@@ -14,7 +14,6 @@ module alu #(
     output reg [DW-1:0]  result   ,
     output               zero, overflow
 );
-
     reg zero_flag,overflow_flag;
 
     always @(posedge clk or negedge rst_n) begin
@@ -36,5 +35,4 @@ module alu #(
 
     assign zero     = zero_flag;
     assign overflow = overflow_flag;
-
 endmodule

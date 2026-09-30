@@ -172,6 +172,9 @@ impl VerilogBeautifier {
         let mut split_always: usize = 0;
         let mut last_split: Option<SplitInfo> = None;
         let mut split_else = false;
+        // 行中 flush 已含行终止符时，跳过紧随的换行 token 给 block 播种的
+        // 空行（种子伪影空行的来源，块头/块尾多余空行的根源之一）
+        let mut skip_terminator_nl = false;
 
         let tokens = crate::tokenizer::tokenize(txt);
 
@@ -220,14 +223,16 @@ impl VerilogBeautifier {
                     && w != "assign"
                     && !w.starts_with(|c: char| c == ' ' || c == '\t')
                     && self.state != "("
-                    && !RE_LINE_ENDS_WITH_OP.is_match(
-                        clean_comment(&block).lines().last().unwrap_or("").trim_end(),
-                    )
+                    && self.state != "{"
+                    && !assign_block_unbalanced(&block)
+                    && !RE_LINE_ENDS_WITH_OP.is_match(&last_nonempty_line(&block))
                 {
-                    // 注：state == "(" 或块尾行以悬空运算符结尾表示 assign 表达式
-                    // 破行未写完（如 "assign x = (\n  a || b);" / "assign x = a ||\n  b;"），
-                    // 此时不能切断块——否则块只剩第一行，align_assign 会因尾部
-                    // 换行多补一个空行（issue #3）
+                    // 注：state == "(" / "{"、块内括号未闭合（多行拼接
+                    // "assign x = {\n  a,\n  b};" 的 `};` 独占一行时，行首 state_end
+                    // 已先弹出 "{"，须靠括号深度兜底）或块尾行以悬空运算符结尾，
+                    // 都表示 assign 表达式破行未写完，此时不能切断块——否则块只剩
+                    // 已写部分，align_assign 会因尾部换行多补一个空行（issue #3
+                    // 及其花括号变体）
                     txt_new.push_str(&self.align_assign(&block, 2));
                     block.clear();
                     self.block_state = BlockState::None;
@@ -328,8 +333,10 @@ impl VerilogBeautifier {
                     let tmp = clean_comment(&last_line).trim().to_string();
 
                     if !tmp.is_empty() {
+                        // 行尾 `\}`（constraint { ...; } 等单行花括号块）视为
+                        // 语句结束，不给后续行 +1 缩进
                         let m = Regex::new(
-                            r"(;|\{|\bend|\bendcase|\bendgenerate)$|^\}$|(begin(\s*\:\s*[\w\$]+)?)$|(case(?:x|z)?)\s*\(.*\)$|(`\w+)\s*(\(.*\))?$|^ *(`\w+)\b"
+                            r"(;|\}|\{|\bend|\bendcase|\bendgenerate)$|^\}$|(begin(\s*\:\s*[\w\$]+)?)$|(case(?:x|z)?)\s*\(.*\)$|(`\w+)\s*(\(.*\))?$|^ *(`\w+)\b"
                         ).unwrap().find(&tmp);
 
                         if m.is_none() {
@@ -376,8 +383,13 @@ impl VerilogBeautifier {
                     }
                 }
 
+                // Decl 块不在空行处切断：声明组内的空行参与累积但不参与
+                // 对齐宽度计算。否则"用户用空行分组的声明"与空行删除后的
+                // 二次格式化会产生不同的对齐宽度（非幂等，sfp_dma_rx 的
+                // dbg 声明组）
                 if matches!(self.block_state, BlockState::Decl)
-                    && !is_decl_line(line.trim())
+                    && !line.trim().is_empty()
+                    && !is_decl_line_excl_blocks(line.trim())
                 {
                     if self.options.reindent_only() {
                         txt_new.push_str(&block);
@@ -388,8 +400,41 @@ impl VerilogBeautifier {
                     self.block_state = BlockState::None;
                 }
 
-                block.push_str(line.trim_end());
-                block.push('\n');
+                // 多行 constraint 块的内联 `}`（"...; }"）：拆到独立行，
+                // 缩进取块首行。`constraint` 开头的行是块头（单行块整行
+                // 保持）；`}` 前无内容（已独立成行）不动。
+                if line.trim_end().ends_with('}')
+                    && line.trim_end() != "}"
+                    && !line.trim_start().starts_with("constraint")
+                {
+                    let first = block.lines().find(|l| !l.trim().is_empty());
+                    if let Some(first) = first {
+                        if first.trim_start().starts_with("constraint") {
+                            let cur = line.trim_end();
+                            if let Some(pos) = cur.rfind('}') {
+                                let before = cur[..pos].trim_end();
+                                if !before.is_empty() {
+                                    let base_indent =
+                                        &first[..first.len() - first.trim_start().len()];
+                                    line = format!("{}\n{}}}", before, base_indent);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // 行中 flush 已含终止符时，本行的换行 token 不再向 block 播种
+                // 空行（skip_terminator_nl 恰好跳过一个——用户紧随的空行
+                // （连续第二个 \n）不受影响）
+                let skip_seed = skip_terminator_nl
+                    && line.trim().is_empty()
+                    && block.is_empty();
+                skip_terminator_nl = false;
+                if !skip_seed {
+                    block.push_str(line.trim_end());
+                    block.push('\n');
+                }
+
                 line.clear();
                 original_indent.clear();
                 has_indent = false;
@@ -440,8 +485,21 @@ impl VerilogBeautifier {
                 }
 
                 if block_ended && !w.trim().is_empty() && (w != "/" || w_d.last() != "/") {
+                    if std::env::var("SVDBG_FLUSH").is_ok() {
+                        eprintln!(">>> SYNTH-NL w=[{}] line=[{}]", w, line);
+                    }
                     line = line.trim_end().to_string();
                     line.push('\n');
+                    // `end else ...`：end 在行中触发 state_end flush 后，else
+                    // 分支被移到新行——须补当前层级缩进，否则落在第 0 列
+                    // （buf_sync_addr 的 generate 链）。其余续行保持原行为。
+                    if w == "else" {
+                        let mut ilvl_tmp = ilvl + split_always;
+                        for (_, v) in &split {
+                            ilvl_tmp += v.count;
+                        }
+                        line.push_str(&self.indent.repeat(ilvl_tmp));
+                    }
                     block_ended = false;
                 }
                 line.push_str(w);
@@ -493,7 +551,9 @@ impl VerilogBeautifier {
                 .contains(&self.state.as_str())
                 && !mod_import
             {
-                let is_decl_match = is_decl_line(line.trim());
+                // sequence/property/checker 头形如声明但不进 Decl（块构造，
+                // 否则头与体之间多出空行）
+                let is_decl_match = is_decl_line_excl_blocks(line.trim());
 
                 // Handle declaration state - accumulate lines without processing
                 // When block_state is Text/Decl/StructAssign and this is a declaration,
@@ -507,35 +567,53 @@ impl VerilogBeautifier {
                     // Don't set block_handled - let lines accumulate
                 }
                 // Handle other block states that need immediate processing
-                else if matches!(
+                else if (matches!(
                     self.block_state,
-                    BlockState::Module
+                    BlockState::None
+                        | BlockState::Module
                         | BlockState::Interface
                         | BlockState::Instance
                         | BlockState::Text
                         | BlockState::Package
                         | BlockState::TaskFuncDecl
-                ) || (matches!(
-                    self.block_state,
-                    BlockState::Struct | BlockState::StructAssign | BlockState::Enum
                 ) && self.state != "{")
+                    || (matches!(
+                        self.block_state,
+                        BlockState::Struct | BlockState::StructAssign | BlockState::Enum
+                    ) && self.state != "{")
                 {
+                    // state == "{"（constraint { ...; } / with { ...; } 等花括号块）
+                    // 时不在 `;` 处切断——否则单行块被拆（`}` 被甩到下一行）；
+                    // 块闭合时由换行处理的 constraint-close 触发统一 flush。
+                    // None：以块关键字开头的行（class/covergroup/sequence 等，
+                    // process_word 提前 return 不设置 block_state）在 `;` 处
+                    // 独立 flush——否则滞留 block 污染下一行的声明判定。
                     let mut skip_block_handled = false;
                     let block_tmp = match &self.block_state {
                         BlockState::Module | BlockState::Interface => {
-                            let (result, remaining) =
-                                self.align_module_port(&(block.clone() + &line), ilvl - 1);
+                            let input = block.clone() + &line;
+                            let (result, remaining) = self.align_module_port(&input, ilvl - 1);
                             line.clear();
                             block_ended = true;
                             // If there's remaining content after the module declaration,
                             // output result and set remaining as new block
                             if !remaining.is_empty() && !result.is_empty() {
                                 txt_new.push_str(&result);
+                                if result.ends_with('\n') {
+                                    skip_terminator_nl = true;
+                                }
                                 block = remaining;
                                 self.block_state = BlockState::None;
                                 skip_block_handled = true;
                             }
-                            result
+                            if result.is_empty() {
+                                // 无端口头部（`module m;`）或无法解析：原样保留。
+                                // 返回空会让 line 已被 clear 的内容丢失（模块名被吞），
+                                // 且无名 Module 块会吞掉后续语句（声明行丢失）
+                                input
+                            } else {
+                                result
+                            }
                         }
                         BlockState::TaskFuncDecl => {
                             let (result, remaining) =
@@ -544,6 +622,9 @@ impl VerilogBeautifier {
                             block_ended = true;
                             if !remaining.is_empty() && !result.is_empty() {
                                 txt_new.push_str(&result);
+                                if result.ends_with('\n') {
+                                    skip_terminator_nl = true;
+                                }
                                 block = remaining;
                                 self.block_state = BlockState::None;
                                 skip_block_handled = true;
@@ -641,7 +722,7 @@ impl VerilogBeautifier {
                             for m in RE_INST_FULL.captures_iter(&block[9.min(block.len())..]) {
                                 let itype = m.name("itype").map(|x| x.as_str()).unwrap_or("");
                                 let iname = m.name("iname").map(|x| x.as_str()).unwrap_or("");
-                                if !["else", "begin", "end"].contains(&itype)
+                                if !["else", "begin", "end", "fork", "join", "join_any", "join_none"].contains(&itype)
                                     && !["if", "for", "foreach"].contains(&iname)
                                 {
                                     let inst_start = 9 + m.get(0).unwrap().start();
@@ -721,7 +802,7 @@ impl VerilogBeautifier {
                                             "parameter",
                                         ];
                                         if !decl_keywords.contains(&itype)
-                                            && !["else", "begin", "end", "assert", "cover"]
+                                            && !["else", "begin", "end", "assert", "cover", "fork", "join", "join_any", "join_none"]
                                                 .contains(&itype)
                                             && ![
                                                 "task", "function", "property", "sequence",
@@ -779,9 +860,11 @@ impl VerilogBeautifier {
             // Comment block end
             else if self.state == "comment_block" && w_d.last() == "*" && w == "/" {
                 self.state_update(None);
-                block.push_str(&line);
-                line.clear();
+                // 与 string-end 同理：仅语句即将整体 flush 时回收 line，
+                // 避免语句中途拆分（`wire x /* c */;` 的 `;` 被甩到独立行）
                 if self.block_state.is_none() {
+                    block.push_str(&line);
+                    line.clear();
                     block_handled = true;
                 }
             }
@@ -803,9 +886,14 @@ impl VerilogBeautifier {
             // String end
             else if self.state == "string" && w == "\"" {
                 self.state_update(None);
-                block.push_str(&line);
-                line.clear();
+                // 仅在语句即将整体 flush（block_state 空）时回收 line：
+                // 语句中途把 line 搬进 block 再清空，会让残缺的前半句进入
+                // Decl/Text 的换行 flush（align_decl 处理不完整行），
+                // 后半句成为独立行——`$display("x", f());` 在 wait fork 后
+                // 被从字符串后断开即此机理
                 if self.block_state.is_none() {
+                    block.push_str(&line);
+                    line.clear();
                     block_handled = true;
                 }
             }
@@ -855,6 +943,9 @@ impl VerilogBeautifier {
                         block.push_str(&line);
                     } else {
                         block = self.align_assign(&(block.clone() + &line), 7);
+                    }
+                    if std::env::var("SVDBG_FLUSH").is_ok() {
+                        eprintln!(">>> ALWAYS-FLUSH w=[{}] block:\n---\n{}---", w, block);
                     }
                     // Ensure block ends with newline so subsequent code starts on a new line
                     if !block.ends_with('\n') {
@@ -927,11 +1018,18 @@ impl VerilogBeautifier {
 
             // Add block to text
             if block_handled {
+                // 仅行中 flush（词 token 触发，如 `;`/`end`）需要跳过紧随的
+                // 终止符换行——注释行等在换行 token 处理中 flush 的块已含
+                // 终止符，再设标志会吃掉紧随的用户空行
+                if block.ends_with('\n') && w != "\n" {
+                    skip_terminator_nl = true;
+                }
                 txt_new.push_str(&block);
                 block.clear();
                 self.block_state = BlockState::None;
                 block_handled = false;
             }
+
 
             // Update word history
             if !w.trim().is_empty() || w_d.last() != "\n" {
@@ -1043,11 +1141,19 @@ impl VerilogBeautifier {
             {
                 return String::new();
             }
-            if (w == "function" || w == "task") && ["import", "export"].contains(&w_d.prev1()) {
+            // import/export function = 外部声明；with function sample(..) =
+            // covergroup 采样头子句，都不是块
+            if (w == "function" || w == "task")
+                && ["import", "export", "with"].contains(&w_d.prev1())
+            {
                 return String::new();
             }
-            // `disable fork;` is a statement, not a fork block
-            if w == "fork" && w_d.prev1() == "disable" {
+            // `disable fork;` / `wait fork;` are statements, not a fork block
+            if w == "fork" && ["disable", "wait"].contains(&w_d.prev1()) {
+                return String::new();
+            }
+            // modport 列表里的 clocking 是接口句柄引用，不是 clocking 块
+            if w == "clocking" && self.state == "(" {
                 return String::new();
             }
 
@@ -1112,7 +1218,7 @@ impl VerilogBeautifier {
         } else if matches!(self.block_state, BlockState::Text) {
             let tmp = clean_comment(txt).trim().to_string();
             // Check for declaration first (before instance)
-            if is_decl_line(&tmp) {
+            if is_decl_line_excl_blocks(&tmp) {
                 self.block_state = BlockState::Decl;
             } else {
                 // Try to match instance pattern on the full text first,
@@ -1154,7 +1260,7 @@ impl VerilogBeautifier {
                         "parameter",
                     ];
                     if !decl_keywords.contains(&itype)
-                        && !["else", "begin", "end", "assert", "cover", "if"].contains(&itype)
+                        && !["else", "begin", "end", "assert", "cover", "if", "fork", "join", "join_any", "join_none"].contains(&itype)
                         && !["task", "function", "property", "sequence", "checker"].contains(&itype)
                         && !["if", "for", "foreach"].contains(&iname)
                     {
@@ -1266,6 +1372,48 @@ impl VerilogBeautifier {
             &self.indent_space,
         )
     }
+}
+
+/// assign 块的最后一条非空代码行（去注释）。悬空运算符判定不能用
+/// lines().last()：块尾已积累空行时会取到空串使守卫失效，语句被错误切断
+/// （多行拼接/破行链条中有空行时一次与二次格式化分段不同 → 幂等破坏）。
+fn last_nonempty_line(block: &str) -> String {
+    clean_comment(block)
+        .lines()
+        .rev()
+        .find(|l| !l.trim().is_empty())
+        .map(|l| l.trim_end().to_string())
+        .unwrap_or_default()
+}
+
+/// assign 块内 `{`/`(` 括号深度是否大于 0（多行拼接/破行表达式跨行未完）。
+/// 闭合行（`} ;`）独占一行时，行首 state_end 会先弹出 "{" 状态，单靠
+/// state 判定会漏判，须按块内括号深度兜底（clean_comment 已剥注释，字符串保留）。
+fn assign_block_unbalanced(block: &str) -> bool {
+    let code = clean_comment(block);
+    let mut depth_paren = 0i32;
+    let mut depth_brace = 0i32;
+    let mut in_str = false;
+    let mut chars = code.chars().peekable();
+    while let Some(c) = chars.next() {
+        if in_str {
+            if c == '\\' {
+                chars.next();
+            } else if c == '"' {
+                in_str = false;
+            }
+            continue;
+        }
+        match c {
+            '"' => in_str = true,
+            '(' => depth_paren += 1,
+            ')' => depth_paren -= 1,
+            '{' => depth_brace += 1,
+            '}' => depth_brace -= 1,
+            _ => {}
+        }
+    }
+    depth_paren > 0 || depth_brace > 0
 }
 
 #[cfg(test)]

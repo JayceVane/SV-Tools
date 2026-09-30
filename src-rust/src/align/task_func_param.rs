@@ -51,6 +51,13 @@ pub fn align_task_func_param(
         return (txt_new, String::new());
     }
 
+    // 单行参数列表保持单行：源码未换行的 `function new(bit [7:0] a = 0);`
+    // 不拆成多行对齐（用户显式换行的多行列表才走对齐展开）
+    if !args_content.contains('\n') {
+        let txt_new = format!("{}({});\n", header, args_trimmed);
+        return (txt_new, remaining);
+    }
+
     // Use the same port alignment regex as align_module_port
     let re_port = Regex::new(
         r#"(?m)^[ \t]*(?P<dir>[\w\.]+)[ \t]+(?P<var>var|ref\b)?[ \t]*(?P<type>[\w\:]+\b)?[ \t]*(?P<sign>signed|unsigned\b)?[ \t]*(?P<bw>(?:\[[\w\*\(\)\/><\:\-\+`\$\s]+\][ \t]*)*)[ \t]*(?P<ports>(?P<port1>\w+)(?:[ \t]*,[ \t]*\w+)*)[ \t]*(?P<comment>,?.*)"#,
@@ -245,8 +252,34 @@ pub fn align_task_func_param(
                         }
                         l_new.push(' ');
                     } else {
-                        // Non-direction (interface port style)
-                        l_new.push_str(&format!("{:<width$}", dir, width = max_prefix_len + 1));
+                        // 非方向参数（类构造器 "type [bw] name = default"、
+                        // 接口句柄等）：位宽必须保留（原实现只输出 dir，
+                        // `bit [7:0] a = 0` 的 `[7:0]` 被吞）
+                        l_new.push_str(dir);
+                        let bw_raw = m_port.name("bw").map(|x| x.as_str()).unwrap_or("");
+                        if !bw_raw.trim().is_empty() {
+                            let bw_clean = Regex::new(r"\s*").unwrap().replace_all(bw_raw, "");
+                            let mut bw_s = String::new();
+                            for (bi, inner) in Regex::new(r"\[(.+?)\]")
+                                .unwrap()
+                                .find_iter(&bw_clean)
+                                .enumerate()
+                            {
+                                let content = &inner.as_str()[1..inner.as_str().len() - 1];
+                                let w = len_bw_a.get(bi).unwrap_or(&0);
+                                bw_s.push_str(&format!("[{:>width$}]", content, width = w));
+                            }
+                            l_new.push_str(&format!(" {}", bw_s));
+                        }
+                        let current_len = l_new.len() - indent.repeat(ilvl + 1).len();
+                        let target = (max_prefix_len + 1).max(current_len + 1);
+                        if current_len < target {
+                            l_new.push_str(&format!(
+                                "{:width$}",
+                                "",
+                                width = target - current_len
+                            ));
+                        }
                     }
 
                     // Port name
