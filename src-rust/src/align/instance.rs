@@ -36,6 +36,18 @@ pub fn align_instance(
     }
     txt_work = chars.collect();
 
+    // 单行例化保持单行（spec §8.3 / §7.1 单行对齐逻辑）：整条实例语句
+    // 在单行内（用户未自行换行）时不展开多行对齐，仅享受 preprocess 的
+    // 空格紧凑；行内紧凑关闭时原样返回。行首空白已被上面的循环吃掉，
+    // 需按当前层级重新补缩进。modport 不在此列——走实例对齐路径展开
+    // 多行（ex9 golden 形态）
+    if !txt_work.contains('\n')
+        && txt_work.trim_end().ends_with(';')
+        && !txt_work.trim_start().starts_with("modport")
+    {
+        return format!("{}{}{}", leading_newlines, indent.repeat(ilvl), txt_work);
+    }
+
     // Find module type
     let txt_clean = crate::parser::comments::clean_comment(&txt_work);
     let m_type = match Regex::new(r"^[ \t]*\n?(?P<mtype>(?:(?:bind\s+[\w\.]+\s+)?[ \t]*)?\w+)")

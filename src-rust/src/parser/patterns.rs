@@ -72,8 +72,32 @@ pub static RE_DECL_COMPACT: LazyLock<Regex> = LazyLock::new(|| {
 });
 
 /// 声明行判定：完整声明（类型与位宽之间可有空格）或紧凑声明。
+/// 行中块注释（`wire x /* synthesis */;`）会遮蔽声明形态，导致 Decl 组
+/// 提前 flush、属性前缀与声明被拆到两组——判定前先剥离块注释。
 pub fn is_decl_line(line: &str) -> bool {
-    RE_DECL_FULL.is_match(line) || RE_DECL_COMPACT.is_match(line)
+    let stripped = strip_block_comments(line);
+    RE_DECL_FULL.is_match(&stripped) || RE_DECL_COMPACT.is_match(&stripped)
+}
+
+/// 剥离行内 `/* */` 块注释（替换为单个空格；未闭合的保守返回原文）。
+fn strip_block_comments(line: &str) -> String {
+    if !line.contains("/*") {
+        return line.to_string();
+    }
+    let mut out = String::with_capacity(line.len());
+    let mut rest = line;
+    while let Some(start) = rest.find("/*") {
+        out.push_str(&rest[..start]);
+        match rest[start + 2..].find("*/") {
+            Some(end) => {
+                out.push(' ');
+                rest = &rest[start + 2 + end + 2..];
+            }
+            None => return line.to_string(),
+        }
+    }
+    out.push_str(rest);
+    out
 }
 
 /// SV 块构造头（sequence/property/checker，由 endsequence/endproperty/

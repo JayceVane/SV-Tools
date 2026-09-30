@@ -172,6 +172,9 @@ impl VerilogBeautifier {
         let mut split_always: usize = 0;
         let mut last_split: Option<SplitInfo> = None;
         let mut split_else = false;
+        // 行中 flush 已含行终止符时，跳过紧随的换行 token 给 block 播种的
+        // 空行（种子伪影空行的来源，块头/块尾多余空行的根源之一）
+        let mut skip_terminator_nl = false;
 
         let tokens = crate::tokenizer::tokenize(txt);
 
@@ -420,8 +423,17 @@ impl VerilogBeautifier {
                     }
                 }
 
-                block.push_str(line.trim_end());
-                block.push('\n');
+                // 行中 flush 已含终止符时，本行的换行 token 不再向 block 播种
+                // 空行（skip_terminator_nl 恰好跳过一个——用户紧随的空行
+                // （连续第二个 \n）不受影响）
+                let skip_seed = skip_terminator_nl
+                    && line.trim().is_empty()
+                    && block.is_empty();
+                skip_terminator_nl = false;
+                if !skip_seed {
+                    block.push_str(line.trim_end());
+                    block.push('\n');
+                }
 
                 line.clear();
                 original_indent.clear();
@@ -473,6 +485,9 @@ impl VerilogBeautifier {
                 }
 
                 if block_ended && !w.trim().is_empty() && (w != "/" || w_d.last() != "/") {
+                    if std::env::var("SVDBG_FLUSH").is_ok() {
+                        eprintln!(">>> SYNTH-NL w=[{}] line=[{}]", w, line);
+                    }
                     line = line.trim_end().to_string();
                     line.push('\n');
                     // `end else ...`：end 在行中触发 state_end flush 后，else
@@ -584,6 +599,9 @@ impl VerilogBeautifier {
                             // output result and set remaining as new block
                             if !remaining.is_empty() && !result.is_empty() {
                                 txt_new.push_str(&result);
+                                if result.ends_with('\n') {
+                                    skip_terminator_nl = true;
+                                }
                                 block = remaining;
                                 self.block_state = BlockState::None;
                                 skip_block_handled = true;
@@ -604,6 +622,9 @@ impl VerilogBeautifier {
                             block_ended = true;
                             if !remaining.is_empty() && !result.is_empty() {
                                 txt_new.push_str(&result);
+                                if result.ends_with('\n') {
+                                    skip_terminator_nl = true;
+                                }
                                 block = remaining;
                                 self.block_state = BlockState::None;
                                 skip_block_handled = true;
@@ -839,9 +860,11 @@ impl VerilogBeautifier {
             // Comment block end
             else if self.state == "comment_block" && w_d.last() == "*" && w == "/" {
                 self.state_update(None);
-                block.push_str(&line);
-                line.clear();
+                // 与 string-end 同理：仅语句即将整体 flush 时回收 line，
+                // 避免语句中途拆分（`wire x /* c */;` 的 `;` 被甩到独立行）
                 if self.block_state.is_none() {
+                    block.push_str(&line);
+                    line.clear();
                     block_handled = true;
                 }
             }
@@ -863,9 +886,14 @@ impl VerilogBeautifier {
             // String end
             else if self.state == "string" && w == "\"" {
                 self.state_update(None);
-                block.push_str(&line);
-                line.clear();
+                // 仅在语句即将整体 flush（block_state 空）时回收 line：
+                // 语句中途把 line 搬进 block 再清空，会让残缺的前半句进入
+                // Decl/Text 的换行 flush（align_decl 处理不完整行），
+                // 后半句成为独立行——`$display("x", f());` 在 wait fork 后
+                // 被从字符串后断开即此机理
                 if self.block_state.is_none() {
+                    block.push_str(&line);
+                    line.clear();
                     block_handled = true;
                 }
             }
@@ -915,6 +943,9 @@ impl VerilogBeautifier {
                         block.push_str(&line);
                     } else {
                         block = self.align_assign(&(block.clone() + &line), 7);
+                    }
+                    if std::env::var("SVDBG_FLUSH").is_ok() {
+                        eprintln!(">>> ALWAYS-FLUSH w=[{}] block:\n---\n{}---", w, block);
                     }
                     // Ensure block ends with newline so subsequent code starts on a new line
                     if !block.ends_with('\n') {
@@ -987,6 +1018,12 @@ impl VerilogBeautifier {
 
             // Add block to text
             if block_handled {
+                // 仅行中 flush（词 token 触发，如 `;`/`end`）需要跳过紧随的
+                // 终止符换行——注释行等在换行 token 处理中 flush 的块已含
+                // 终止符，再设标志会吃掉紧随的用户空行
+                if block.ends_with('\n') && w != "\n" {
+                    skip_terminator_nl = true;
+                }
                 txt_new.push_str(&block);
                 block.clear();
                 self.block_state = BlockState::None;

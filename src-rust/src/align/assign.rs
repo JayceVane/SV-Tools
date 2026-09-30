@@ -46,7 +46,12 @@ pub fn align_assign(
             Err(_) => continue,
         };
 
-        let lines: Vec<&str> = txt_new.split('\n').collect();
+        let mut lines: Vec<&str> = txt_new.split('\n').collect();
+        // 尾部空元素是"以 \n 结尾"的终止符标记，不是内容行——不剥掉的话
+        // 每趟正则都会多补一个换行（mask 7 三趟叠加出两个伪影空行）
+        if txt_new.ends_with('\n') {
+            lines.pop();
+        }
         let mut lines_match: Vec<(&str, Option<regex::Captures>, usize, isize)> = Vec::new();
         let mut matched = false;
         let mut ilvl: isize = -1;
@@ -232,7 +237,11 @@ fn get_indent_level(
 /// Finds the max line length (excluding the semicolon) per indent group,
 /// then pads shorter lines so all semicolons line up vertically.
 fn align_semicolons(txt: &str) -> String {
-    let lines: Vec<&str> = txt.split('\n').collect();
+    let mut lines: Vec<&str> = txt.split('\n').collect();
+    // 尾部空元素是终止符标记，不是内容行（否则每层处理多补一个换行）
+    if txt.ends_with('\n') {
+        lines.pop();
+    }
     let mut max_semi_pos: HashMap<usize, usize> = HashMap::new();
 
     // First pass: calculate indent level groups and find max content length (before semicolon)
@@ -346,7 +355,11 @@ fn count_depth0_semicolons(line: &str) -> usize {
 pub fn align_stmt_ops(txt: &str, options: &FormatOptions, indent: &str) -> String {
     let re = Regex::new(r"^(?P<indent>[ \t]*)(?P<name>[A-Za-z_]\w*)[ \t]*(?P<op><=|=)[ \t]*(?P<rhs>[^=].*)$")
         .unwrap();
-    let lines: Vec<&str> = txt.split('\n').collect();
+    let mut lines: Vec<&str> = txt.split('\n').collect();
+    // 尾部空元素是终止符标记，不是内容行（否则文件末尾多补一个换行）
+    if txt.ends_with('\n') {
+        lines.pop();
+    }
 
     // 第一遍：分组（缩进变化分段），统计 name 最大宽度。
     // 空行透明：不重置缩进（空行增删不改变对齐组宽，保证幂等）

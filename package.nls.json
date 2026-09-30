@@ -12,6 +12,8 @@
   "cfg.ignoreTick.desc": "Ignore preprocessor directives for indentation",
   "cfg.importSameLine.desc": "Keep import on same line as module declaration",
   "cfg.alignComma.desc": "Align comma/semicolon",
+  "cfg.inlineCompact.desc": "Inline compact: collapse extra spaces within single-line statements (keywords, variables, operators; e.g. else $error(\"x\", $time))",
+  "cfg.blankCompact.desc": "Interline compact: actively remove extra blank lines (removed inside blocks, folded between blocks). Off: keep user blank lines and never add new ones",
   "cfg.instPrefix.desc": "Default prefix for module instance name",
   "cfg.includePortDeclarations.desc": "Include signal declarations when generating module instantiation (input->reg, output->wire)",
   "cfg.reset.desc": "Default asynchronous reset signal names",

@@ -90,6 +90,12 @@ fn main() {
                     std::process::exit(1);
                 }));
             }
+            "--no-inline-compact" => {
+                options.inline_compact = Some(false);
+            }
+            "--no-blank-compact" => {
+                options.blank_compact = Some(false);
+            }
             "-" => {
                 // Read from stdin
                 let mut text = String::new();
@@ -172,11 +178,18 @@ fn main() {
 
 fn format_text(text: &str, options: &FormatOptions) -> String {
     let indent_style = options.indent_style().to_string();
-    let preprocessed = svtools::preprocess::preprocess_text(text, &indent_style);
+    let preprocessed =
+        svtools::preprocess::preprocess_text(text, &indent_style, options.inline_compact());
+    if std::env::var("SVDBG_PRE").is_ok() {
+        eprintln!("=== PRE ===\n{}=== ENDPRE ===", preprocessed);
+    }
     let mut beautifier = svtools::beautifier::VerilogBeautifier::new(options.clone());
     let formatted = beautifier.beautify_text(&preprocessed);
+    if std::env::var("SVDBG_FMT").is_ok() {
+        eprintln!("=== FMT ===\n{}=== ENDFMT ===", formatted);
+    }
     let max_empty = options.max_consecutive_empty_lines();
-    svtools::blank_rules::normalize_blank_lines(&formatted, max_empty)
+    svtools::blank_rules::normalize_blank_lines(&formatted, max_empty, options.blank_compact())
 }
 
 fn print_usage(program: &str) {
@@ -204,6 +217,8 @@ OPTIONS:
     --no-inst-align         Disable instance port alignment
     --one-decl-per-line     Put each declaration on its own line
     --max-empty-lines <N>   Max consecutive empty lines (default: 1)
+    --no-inline-compact     Disable single-line statement space compaction
+    --no-blank-compact      Disable active blank-line rules (preserve user blanks)
     -h, --help              Show this help
     -V, --version           Show version
 

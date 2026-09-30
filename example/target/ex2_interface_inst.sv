@@ -21,7 +21,6 @@ interface axi_if #(
         output awid, awaddr, awlen, awsize, awvalid,
         input awready
     );
-
 endinterface
 
 module top #(

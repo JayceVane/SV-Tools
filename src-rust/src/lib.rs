@@ -19,7 +19,7 @@ fn format_text(text: String, options: FormatOptions) -> Result<String> {
     let indent_style = options.indent_style().to_string();
 
     // Preprocess: merge standalone 'begin' for 1tbs style
-    let preprocessed = preprocess::preprocess_text(&text, &indent_style);
+    let preprocessed = preprocess::preprocess_text(&text, &indent_style, options.inline_compact());
 
     // Core formatting
     let mut beautifier = beautifier::VerilogBeautifier::new(options.clone());
@@ -27,7 +27,7 @@ fn format_text(text: String, options: FormatOptions) -> Result<String> {
 
     // Postprocess: 空行规则 pass（spec §6，替代单纯折叠）
     let max_empty = options.max_consecutive_empty_lines();
-    let result = blank_rules::normalize_blank_lines(&formatted, max_empty);
+    let result = blank_rules::normalize_blank_lines(&formatted, max_empty, options.blank_compact());
 
     Ok(result)
 }

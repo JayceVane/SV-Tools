@@ -358,8 +358,10 @@ pub fn align_decl(txt: &str, options: &FormatOptions, indent: &str, indent_space
         idx += 1;
     }
 
-    if !txt.ends_with('\n') {
-        txt_new.pop(); // remove trailing newline
+    // 输入以 \n 结尾时输出保留单个终止符（split 尾空元素曾被当作空行多补
+    // 一个换行——块间伪影空行的来源之一，现由 blank_rules 统一裁决）
+    if txt.ends_with('\n') {
+        txt_new.pop();
     }
     txt_new
 }

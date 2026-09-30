@@ -254,8 +254,10 @@ impl LineInfo {
     }
 }
 
-/// 空行规则主入口。`max_empty` 语义见 spec §3/§6。
-pub fn normalize_blank_lines(text: &str, max_empty: i32) -> String {
+/// 空行规则主入口。`max_empty` 语义见 spec §3/§6；`blank_compact` 为
+/// 行间紧凑开关：true=按 §6 主动裁决（块内删除/块间保证）；false=保持
+/// 模式——不插入、不删除，仅折叠至 max（格式化不得新增空行，§6.7）。
+pub fn normalize_blank_lines(text: &str, max_empty: i32, blank_compact: bool) -> String {
     if max_empty < 0 {
         return text.to_string();
     }
@@ -272,6 +274,9 @@ pub fn normalize_blank_lines(text: &str, max_empty: i32) -> String {
     let mut brace = 0i32;
     let mut ctx: Vec<Ctx> = Vec::new();
     let mut infos: Vec<LineInfo> = Vec::with_capacity(lines.len());
+    // 容器头跨行括号未闭合（`module m (` …）：其 `);` 收尾行是头的一部分，
+    // 不是块闭合行——其后与首个成员之间不插空行（§6.2 注）
+    let mut header_paren_open = false;
 
     for line in &lines {
         let (clean, nb) = strip_comments(line, in_block);
@@ -332,6 +337,15 @@ pub fn normalize_blank_lines(text: &str, max_empty: i32) -> String {
         }
 
         let is_comment = !LineInfo::is_blank(line) && clean.trim().is_empty();
+        // 容器头收尾判定先于 paren_closed：头闭合行的 `);` 不是块闭合行
+        let mut header_close = false;
+        if header_paren_open && paren == 0 {
+            header_close = true;
+            header_paren_open = false;
+        }
+        if paren > 0 && CONTAINER_OPEN.contains(&first_sig.as_str()) {
+            header_paren_open = true;
+        }
         infos.push(LineInfo {
             first_word,
             first_sig,
@@ -339,7 +353,10 @@ pub fn normalize_blank_lines(text: &str, max_empty: i32) -> String {
             is_comment,
             ends_semi: clean.trim_end().ends_with(';'),
             has_begin,
-            paren_closed: paren_before > 0 && paren == 0 && clean.trim_start().starts_with(')'),
+            paren_closed: paren_before > 0
+                && paren == 0
+                && clean.trim_start().starts_with(')')
+                && !header_close,
             ctx: ctx.clone(),
             paren,
             brace,
@@ -368,12 +385,18 @@ pub fn normalize_blank_lines(text: &str, max_empty: i32) -> String {
     let terminator = lines.len() - 1;
 
     for (i, line) in lines.iter().enumerate() {
-        // split 的最后一个空元素是行尾终止符（文本以 \n 结尾时），不是空行。
-        // 文件末尾不留空行（spec §6.5）：仅块注释未闭合时原样保留
+        // split 的最后一个空元素是行尾终止符（文本以 \n 结束时），不是空行。
+        // 文件末尾不留空行（spec §6.5）：仅块注释未闭合时原样保留；
+        // 保持模式（行间紧凑关）下保留折叠至 max
         if i == terminator && line.is_empty() {
             if let Some(a) = last_nonblank.map(|k| &infos[k]) {
                 if a.in_block {
                     for l in &pending_blanks {
+                        out.push((*l).to_string());
+                    }
+                } else if !blank_compact {
+                    let keep = pending_blanks.len().min(max);
+                    for l in pending_blanks.iter().take(keep) {
                         out.push((*l).to_string());
                     }
                 }
@@ -393,6 +416,7 @@ pub fn normalize_blank_lines(text: &str, max_empty: i32) -> String {
             i,
             &pending_blanks,
             max,
+            blank_compact,
             &mut out,
         );
         pending_blanks.clear();
@@ -404,7 +428,8 @@ pub fn normalize_blank_lines(text: &str, max_empty: i32) -> String {
     out.join("\n")
 }
 
-/// 裁决非空行 i（A）与非空行 j（B）之间的空行串。
+/// 裁决非空行 i（A）与非空行 j（B）之间的空行串。`compact=false` 为保持
+/// 模式（§6.7）：不插入、不删除，仅折叠至 max。
 #[allow(clippy::too_many_arguments)]
 fn flush_gap(
     infos: &[LineInfo],
@@ -413,6 +438,7 @@ fn flush_gap(
     b_idx: usize,
     blanks: &[&str],
     max: usize,
+    compact: bool,
     out: &mut Vec<String>,
 ) {
     let run = blanks.len();
@@ -435,16 +461,17 @@ fn flush_gap(
         return;
     }
 
-    // 块内（NoBlank 上下文 / 括号花括号续行）：删除所有空行（spec §6.1）
-    if a.in_noblank() {
+    // 块内（NoBlank 上下文 / 括号花括号续行）：删除所有空行（spec §6.1）。
+    // 保持模式下保留（仅折叠）
+    if compact && a.in_noblank() {
         return;
     }
 
     let b = &infos[b_idx];
 
     // if/else 链延续：行首 `else`/`else if` 与其前的 `end` 同属一条语句，
-    // 中间不留空行（spec §6.2 注）
-    if b.first_word == "else" {
+    // 中间不留空行（spec §6.2 注）；保持模式除外
+    if compact && b.first_word == "else" {
         return;
     }
 
@@ -462,8 +489,12 @@ fn flush_gap(
     } else {
         b.block_open_side()
     };
-    let need = (a.block_close_side() && !b_closes_container)
-        || (b_group_opens && !a.is_comment && !a_opens_container);
+    let need = if compact {
+        (a.block_close_side() && !b_closes_container)
+            || (b_group_opens && !a.is_comment && !a_opens_container)
+    } else {
+        false
+    };
     let keep = if need {
         run.max(1).min(max)
     } else {
@@ -485,7 +516,7 @@ mod tests {
     use super::*;
 
     fn norm(s: &str) -> String {
-        normalize_blank_lines(s, 1)
+        normalize_blank_lines(s, 1, true)
     }
 
     #[test]
@@ -568,7 +599,7 @@ mod tests {
     #[test]
     fn test_max_zero_removes_allowed_blanks() {
         let input = "module m;\n    task t();\n        a = 1;\n    endtask\n\n    task u();\n        b = 2;\n    endtask\nendmodule\n";
-        let out = normalize_blank_lines(input, 0);
+        let out = normalize_blank_lines(input, 0, true);
         assert_eq!(
             out,
             "module m;\n    task t();\n        a = 1;\n    endtask\n    task u();\n        b = 2;\n    endtask\nendmodule\n"
@@ -578,7 +609,7 @@ mod tests {
     #[test]
     fn test_negative_passthrough() {
         let input = "module m;\n\n\n\n    logic a;\nendmodule\n";
-        assert_eq!(normalize_blank_lines(input, -1), input);
+        assert_eq!(normalize_blank_lines(input, -1, true), input);
     }
 
     #[test]

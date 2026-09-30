@@ -38,7 +38,6 @@ package vf1_pkg;
 
     class drv extends trans;
         int port;
-
         static int count;
 
         function new(int p = 0);
