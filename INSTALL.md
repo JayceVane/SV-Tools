@@ -20,7 +20,7 @@
 ├── vivado/                         # Vivado TCL 执行、器件库、工程创建向导
 ├── syntaxes/systemverilog.tmLanguage.json
 ├── templates/header_template.txt   # 文件头模板
-├── svtools.win32-x64-msvc.node     # Rust 原生模块（运行时加载，随仓库提交）
+├── svtools.win32-x64-msvc.node     # Rust 原生模块（运行时加载；本地产物，不入库）
 ├── src-rust/                       # Rust 源码：格式化核心 + napi 绑定 + CLI
 │   ├── src/{beautifier,preprocess,blank_rules,align,codegen,analyzer}/
 │   └── package.json                # napi 构建脚本
@@ -32,18 +32,22 @@
 
 ## 本地运行（F5）
 
+原生模块 `svtools.win32-x64-msvc.node` 不再随仓库提交（23MB 的二进制每次发版都会留在历史里），
+首次 clone 必须先自备：
+
 ```bash
 npm install
 npm run build:native   # napi release 构建，并把 .node 复制到仓库根目录
 npm test               # golden 用例全部通过再进宿主
 ```
 
+不想装 Rust 工具链的话，从 GitHub Releases 下载对应 tag 的 `.node` 放到仓库根目录即可，
+效果与 `build:native` 相同。
+
 然后按 `F5` 启动扩展开发宿主，在宿主窗口打开任意 `.sv`/`.v` 文件：
 
 - `Shift+Alt+F` 格式化文档
 - `Ctrl+Shift+C` 生成模块例化、`Ctrl+Shift+T` 生成 testbench、`Ctrl+Shift+X` 对齐选中文本
-
-只改 JS 层时可以跳过 `build:native`，仓库根目录已带预编译的 `.node`。
 
 ## 格式化改动的验证方式
 

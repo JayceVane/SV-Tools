@@ -42,13 +42,21 @@ function loadNativeModule() {
     }
 }
 
+// 原生模块不再随仓库提交，缺失时的提示必须给出可执行的补救路径
+const NATIVE_MISSING_HINT = '缺少 Rust 原生模块 svtools.win32-x64-msvc.node。请在扩展目录执行 npm run build:native（需 Rust 工具链），或从 GitHub Releases 下载对应平台的 .node 放入该目录后重新加载窗口。';
+
+function reportNativeMissing() {
+    vscode.window.showErrorMessage(`SystemVerilog Tools: ${NATIVE_MISSING_HINT}`);
+    return null;
+}
+
 /**
  * Format Verilog/SystemVerilog code using native module
  */
 async function formatDocument(document, range = null) {
     const native = loadNativeModule();
     if (!native) {
-        vscode.window.showErrorMessage('svtools native module not loaded');
+        reportNativeMissing();
         return null;
     }
 
@@ -92,7 +100,7 @@ async function formatDocument(document, range = null) {
 async function generateModuleInstance() {
     const native = loadNativeModule();
     if (!native) {
-        vscode.window.showErrorMessage('svtools native module not loaded');
+        reportNativeMissing();
         return;
     }
 
@@ -131,7 +139,7 @@ async function generateModuleInstance() {
 async function generateTestbench() {
     const native = loadNativeModule();
     if (!native) {
-        vscode.window.showErrorMessage('svtools native module not loaded');
+        reportNativeMissing();
         return;
     }
 
@@ -179,7 +187,7 @@ async function generateTestbench() {
 async function repeatCodeWithNumbers() {
     const native = loadNativeModule();
     if (!native) {
-        vscode.window.showErrorMessage('svtools native module not loaded');
+        reportNativeMissing();
         return;
     }
 
@@ -247,7 +255,7 @@ async function repeatCodeWithNumbers() {
 async function alignSelectedCode() {
     const native = loadNativeModule();
     if (!native) {
-        vscode.window.showErrorMessage('svtools native module not loaded');
+        reportNativeMissing();
         return;
     }
 
@@ -277,7 +285,7 @@ async function alignSelectedCode() {
 async function insertHeaderTemplate() {
     const native = loadNativeModule();
     if (!native) {
-        vscode.window.showErrorMessage('svtools native module not loaded');
+        reportNativeMissing();
         return;
     }
 

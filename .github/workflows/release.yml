@@ -1,0 +1,45 @@
+name: Release 附件
+
+# 原生模块与 vsix 不再进版本库（历史里的 23MB 对象是仓库膨胀的唯一来源），
+# 改为随 tag 发布到 GitHub Releases 供下载与回溯。
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  assets:
+    name: 构建并上传 .node 与 vsix
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: 安装 napi CLI
+        run: npm ci --prefix src-rust
+
+      - name: 构建原生模块
+        run: node scripts/build-native.js
+
+      - name: 打包 vsix（打包前自动跑 golden 测试）
+        run: |
+          npm install
+          npm run package
+        shell: bash
+
+      - name: 上传到 Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --generate-notes
+          gh release upload "$TAG" svtools.win32-x64-msvc.node svtools-*.vsix --clobber
+        shell: bash

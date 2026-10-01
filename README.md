@@ -242,16 +242,16 @@ assign signal_8 = 8;
 ### 从源码安装
 
 1. 克隆或下载本仓库
-2. 打开 VSCode
-3. 按 `F5` 打开新的扩展开发宿主窗口，插件会自动加载
-4. 或者打包插件：
+2. 自备 Rust 原生模块（仓库不再提交 `.node`）：
    ```bash
    npm install
-   # 构建 Rust 原生模块（需要 Rust 工具链 + napi），产物自动复制到扩展根目录
-   npm run build:native
-   # 校验格式化行为（golden 用例 + 幂等断言）
-   npm test
-   # 打包
+   npm run build:native   # 需要 Rust 工具链，产物自动复制到仓库根目录
+   ```
+   没有 Rust 工具链时，从 GitHub Releases 下载对应 tag 的 `svtools.win32-x64-msvc.node` 放到根目录
+3. 按 `F5` 打开扩展开发宿主窗口，在宿主里打开任意 `.sv`/`.v` 文件
+4. 校验并打包：
+   ```bash
+   npm test       # golden 用例 + 幂等断言
    npm run package
    ```
    然后在 VSCode 中安装生成的 `svtools-<版本>.vsix` 文件
@@ -588,7 +588,7 @@ SV-Tools/
 ├── vivado/                         # Vivado TCL 执行、器件库探测、工程创建向导
 ├── package.json                    # 扩展清单（命令、45 项配置、快捷键、语法、自定义编辑器）
 ├── package.nls.json / .zh-cn.json  # 命令与配置的中英文案
-├── svtools.win32-x64-msvc.node     # Rust 编译的原生模块（运行时从根目录加载）
+├── svtools.win32-x64-msvc.node     # Rust 编译的原生模块（运行时从根目录加载；本地产物，不入库）
 ├── syntaxes/systemverilog.tmLanguage.json
 ├── templates/header_template.txt
 ├── scripts/build-native.js         # napi 构建并把 .node 复制到根目录
@@ -630,7 +630,9 @@ SV-Tools/
 本插件已修复 Windows 平台中文乱码问题，强制使用 UTF-8 编码。如仍有问题，请检查文件保存编码是否为 UTF-8。
 
 ### 找不到原生模块
-确保 `svtools.win32-x64-msvc.node`（Windows）或对应的 `.node` 文件存在于扩展目录中。
+从市场或 `.vsix` 安装的用户不会遇到（`.node` 已打进包内）。源码运行时需要根目录存在
+`svtools.win32-x64-msvc.node`：执行 `npm run build:native` 生成，或从 GitHub Releases
+下载对应 tag 的那一份放到仓库根目录，然后重新加载窗口。
 
 ## 致谢
 

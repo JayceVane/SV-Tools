@@ -11,6 +11,8 @@ All notable changes to the SystemVerilog VSCode Extension will be documented in 
 
 ### Changed
 - **仓库瘦身**：移除 v2 Python 后端（`python/`）与其进程管理器 `processManager.js`、根目录一次性调试脚本与输出文件；napi 构建产物 `src-rust/svtools.*.node` 不再入库（运行时只加载根目录那份）
+- **原生模块不再入库**：`svtools.win32-x64-msvc.node`（23MB）改为由 `npm run build:native` 产出或从 GitHub Releases 下载，`.gitignore` 收掉全部 `*.node`；新增 `.github/workflows/release.yml`，随 tag 构建并把 `.node` 与 vsix 上传为 Release 附件
+- 原生模块缺失时的报错从 "native module not loaded" 改为给出可执行补救路径（构建命令 / Releases）
 - `svtools.reset` / `svtools.sreset` 默认值改为 `["rst_n","reset_n"]` / `["sreset","srst"]`，与 README 及 Rust 内置默认一致；此前清单里的空数组覆盖了内置默认，例化/testbench 生成不会自动识别复位
 - `svtools.maxConsecutiveEmptyLines` 下限放开到 `-1`（完全不处理空行，spec §3 早已定义）
 - 文档同步：README 版本号（v3.4.2 → v3.4.6）/配置表补全（`inlineCompact`、`blankCompact`、`vivado.*`）/项目结构/源码安装步骤改为 `npm run build:native`；INSTALL、CONTRIBUTING、PUBLISH 去除 Python 时代内容
