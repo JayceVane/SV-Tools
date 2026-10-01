@@ -2,6 +2,22 @@
 
 All notable changes to the SystemVerilog VSCode Extension will be documented in this file.
 
+## [3.4.7-beta1] - 2026-10-02
+
+### Added
+- **npm scripts**：`npm test`（golden 用例 + 幂等断言）、`npm run build:native`（napi 构建并把 `.node` 复制到根目录）、`npm run package`；`vsce` 打包前经 `vscode:prepublish` 自动跑 golden 测试
+- **CI**（`.github/workflows/ci.yml`）：windows-latest 上从源码构建原生模块后运行 golden 测试，格式化回归在 PR 上即被拦住
+- 45 项配置在设置面板按使用动线分组排列（缩进与空行 → 换行与对齐 → 代码生成 → Icarus Verilog → Vivado），由 `order` 字段固定顺序
+
+### Changed
+- **仓库瘦身**：移除 v2 Python 后端（`python/`）与其进程管理器 `processManager.js`、根目录一次性调试脚本与输出文件；napi 构建产物 `src-rust/svtools.*.node` 不再入库（运行时只加载根目录那份）
+- `svtools.reset` / `svtools.sreset` 默认值改为 `["rst_n","reset_n"]` / `["sreset","srst"]`，与 README 及 Rust 内置默认一致；此前清单里的空数组覆盖了内置默认，例化/testbench 生成不会自动识别复位
+- `svtools.maxConsecutiveEmptyLines` 下限放开到 `-1`（完全不处理空行，spec §3 早已定义）
+- 文档同步：README 版本号（v3.4.2 → v3.4.6）/配置表补全（`inlineCompact`、`blankCompact`、`vivado.*`）/项目结构/源码安装步骤改为 `npm run build:native`；INSTALL、CONTRIBUTING、PUBLISH 去除 Python 时代内容
+
+### Fixed
+- `stripEmptyLine` 配置项在设置界面可见但从未传给原生模块（勾了没反应），现按配置生效
+
 ## [3.4.6] - 2026-09-29
 
 ### Added

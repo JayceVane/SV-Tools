@@ -2,18 +2,20 @@
 
 一款适用于 Visual Studio Code 的 Verilog/SystemVerilog 代码格式化和生产力工具插件，改编自 Sublime Text SystemVerilog 插件和 Verilog-Gadget 插件。
 
-**版本**: v3.4.2
+**版本**: v3.4.7-beta1（预览版）
 
 > **v3.0 重大更新**: 核心引擎使用 Rust 重构，无需 Python 依赖，性能大幅提升！
 >
 > **v3.4.0 重大更新**: 新增 tree-sitter 符号分析引擎、语法高亮、Go to Definition、Hover 悬浮、上下文感知补全、CLI 格式化器！
 >
 > **v3.4.2 重大更新**: **Icarus Verilog 工具链集成**（输入/保存自动 lint、一键仿真、跨文件模块解析）+ **内置 VCD 波形查看器**（双击 .vcd 直接打开，多选分组/拖拽调序/显示格式切换/边沿导航，零外部依赖）！
+>
+> **v3.4.6 重大更新**: 格式化行为收敛为**规范驱动**——[`docs/FORMAT_SPEC.md`](docs/FORMAT_SPEC.md) 是格式化器的唯一权威定义；空行规则统一裁决（块内删除、块间分隔）、单行/多行双轨对齐、新增 `inlineCompact` / `blankCompact` 开关；golden 用例逐条带**幂等校验**（格式化两次结果不变）。
 
 ## 功能特性
 
 ### 中文支持
-- 设置界面（Settings）与命令面板的标题/描述跟随 VSCode 界面语言自动切换中文/英文（42 项配置 + 16 个命令）
+- 设置界面（Settings）与命令面板的标题/描述跟随 VSCode 界面语言自动切换中文/英文（45 项配置 + 20 个命令）
 
 ### Vivado TCL 集成与工程创建
 - **运行 TCL 脚本**：命令面板 "Vivado: 运行 TCL 脚本"（工作区内选择）或 `.tcl` 编辑器右键 "运行当前 TCL 脚本"；batch 模式执行，输出流式进入独立通道，状态栏运行指示，支持停止与超时
@@ -244,17 +246,15 @@ assign signal_8 = 8;
 3. 按 `F5` 打开新的扩展开发宿主窗口，插件会自动加载
 4. 或者打包插件：
    ```bash
-   cd vscode-extension
    npm install
-   # 构建 Rust 原生模块（需要 Rust 工具链）
-   cd src-rust && cargo build --release
-   cp target/release/svtools.dll ../  # Windows
-   # 或 cp target/release/libsvtools.so ../  # Linux
-   # 或 cp target/release/libsvtools.dylib ../  # macOS
-   
-   vsce package
+   # 构建 Rust 原生模块（需要 Rust 工具链 + napi），产物自动复制到扩展根目录
+   npm run build:native
+   # 校验格式化行为（golden 用例 + 幂等断言）
+   npm test
+   # 打包
+   npm run package
    ```
-   然后在 VSCode 中安装生成的 `.vsix` 文件
+   然后在 VSCode 中安装生成的 `svtools-<版本>.vsix` 文件
 
 ## 使用方法
 
@@ -285,50 +285,79 @@ assign signal_8 = 8;
 
 ## 配置选项
 
-所有配置都在 `svtools` 配置项下，可在 VSCode 设置中搜索 `svtools` 进行配置：
+所有配置都在 `svtools` 配置项下，可在 VSCode 设置中搜索 `svtools` 进行配置。下表按设置面板中的顺序分组（格式化 → 换行与对齐 → 代码生成 → Icarus Verilog → Vivado）：
+
+**格式化 · 缩进与空行**
 
 | 配置项 | 类型 | 默认值 | 说明 |
 |--------|------|--------|------|
 | `tabSize` | number | 4 | 缩进使用的空格数量 |
 | `useTab` | boolean | false | 使用 Tab 字符进行缩进 |
+| `indentStyle` | string | "1tbs" | 缩进风格（"1tbs" 或 "gnu"） |
+| `ignoreTick` | boolean | true | 预处理器指令行（`` `ifdef `` 等）保持第 0 列原样 |
+| `maxConsecutiveEmptyLines` | number | 1 | 允许的最大连续空行数（0 = 允许处也不留空行；-1 = 完全不处理空行） |
+| `stripEmptyLine` | boolean | true | 删除对齐/展开过程中产生的多余空行 |
+| `inlineCompact` | boolean | true | 行内紧凑：单行语句内主动删除多余空格；关闭则保持原有空格 |
+| `blankCompact` | boolean | true | 行间紧凑：块内删除空行、块间保证分隔；关闭则保持用户空行且格式化不新增空行 |
+
+**格式化 · 换行与对齐**
+
+| 配置项 | 类型 | 默认值 | 说明 |
+|--------|------|--------|------|
 | `oneBindPerLine` | boolean | true | 模块实例化时每个端口绑定单独一行 |
 | `oneDeclPerLine` | boolean | false | 每个信号声明单独一行 |
 | `paramOneLine` | boolean | true | 尽可能将参数保持在一行 |
-| `indentStyle` | string | "1tbs" | 缩进风格（"1tbs" 或 "gnu"） |
-| `stripEmptyLine` | boolean | true | 删除多余的空行 |
-| `maxConsecutiveEmptyLines` | number | 1 | 允许的最大连续空行数（0 = 移除所有空行） |
-| `instAlignPort` | boolean | true | 对齐模块实例化端口 |
-| `ignoreTick` | boolean | true | 缩进时忽略预处理器指令 |
 | `importSameLine` | boolean | false | 将 import 语句与模块声明保持在同一行 |
 | `alignComma` | boolean | true | 对齐逗号/分号 |
+| `instAlignPort` | boolean | true | 对齐模块实例化端口 |
+
+**代码生成（Verilog-Gadget）**
+
+| 配置项 | 类型 | 默认值 | 说明 |
+|--------|------|--------|------|
 | `instPrefix` | string | "u_" | 模块实例名称默认前缀 |
 | `includePortDeclarations` | boolean | true | 生成模块实例化时是否包含端口声明 |
+| `clock` | array | ["clk", "uclk", "cclk"] | 时钟信号名称列表 |
 | `reset` | array | ["rst_n", "reset_n"] | 异步复位信号名称列表 |
 | `sreset` | array | ["sreset", "srst"] | 同步复位信号名称列表 |
-| `clock` | array | ["clk", "uclk", "cclk"] | 时钟信号名称列表 |
-| `waveType` | string | "fsdb" | 波形dump类型 (fsdb/vpd/shm/vcd) |
+| `waveType` | string | "fsdb" | 波形 dump 类型（fsdb/vpd/shm/vcd） |
 | `taskInit` | boolean | true | 在测试台中生成 init 任务 |
 | `taskDrive` | boolean | true | 在测试台中生成 drive 任务 |
-| `headerTemplate` | string | "" | 文件头模板（使用占位符） |
+| `headerTemplate` | string | "" | 文件头模板（空 = 内置模板，占位符 `{FILE}` `{DATE}` 等） |
+
+**Icarus Verilog（语法检查与仿真）**
+
+| 配置项 | 类型 | 默认值 | 说明 |
+|--------|------|--------|------|
 | `iverilog.path` | string | "" | Icarus Verilog bin 目录或 iverilog 全路径；空 = 自动探测 |
 | `iverilog.cygwinPath` | string | "" | cygwin1.dll 所在目录（Cygwin 构建装在 Cygwin 根外时需要）；空 = 自动探测 |
+| `iverilog.standard` | string | "auto" | 语言标准（-g）；auto: `.sv`→2012 / `.v`→2005 |
 | `iverilog.lintOnSave` | boolean | true | 保存时自动 lint |
-| `iverilog.scanWorkspace` | boolean | true | 扫描工作区源码：所有含 Verilog 文件的目录自动加入 -y/-I；模块名≠文件名时按模块索引补编译（lint 与仿真都生效） |
 | `iverilog.lintOnChange` | boolean | true | 输入时自动 lint（防抖，检查未保存的缓冲区内容） |
 | `iverilog.lintDebounceMs` | number | 800 | 输入触发 lint 的防抖延迟（毫秒） |
 | `iverilog.lintOnOpen` | boolean | true | 打开文件时自动 lint |
-| `iverilog.standard` | string | "auto" | 语言标准（-g）；auto: `.sv`→2012 / `.v`→2005 |
 | `iverilog.lintArgs` | array | ["-Wall"] | lint 与仿真编译的额外 iverilog 参数 |
 | `iverilog.includePaths` | array | [] | include 目录（-I），相对工作区根 |
 | `iverilog.libraryPaths` | array | [] | 模块库目录（-y），相对工作区根 |
+| `iverilog.scanWorkspace` | boolean | true | 扫描工作区源码：所有含 Verilog 文件的目录自动加入 -y/-I；模块名≠文件名时按模块索引补编译（lint 与仿真都生效） |
 | `iverilog.simFiles` | array | [] | 仿真时额外编译的源文件 glob（如 `src/*.v`） |
 | `iverilog.simTop` | string | "" | 仿真 top 模块（-s）；空 = iverilog 自动选根模块 |
 | `iverilog.simArgs` | array | [] | vvp 运行参数（如 plusargs） |
 | `iverilog.simTimeoutMs` | number | 0 | 仿真超时毫秒数；0 = 不限制 |
-| `iverilog.waveViewer` | string | "" | 外部波形查看器路径；空 = 使用内置 VCD 波形面板（.fst 等格式仍走外部） |
 | `iverilog.autoOpenWaveform` | boolean | true | 仿真产生新 `.vcd` 后自动打开内置波形查看器 |
+| `iverilog.waveViewer` | string | "" | 外部波形查看器路径；空 = 使用内置 VCD 波形面板（.fst 等格式仍走外部） |
 
-> **注意**: v3.0+ 已移除 `pythonPath` 配置项，因为不再需要 Python 依赖。
+**Vivado（TCL 与工程）**
+
+| 配置项 | 类型 | 默认值 | 说明 |
+|--------|------|--------|------|
+| `vivado.path` | string | "" | Vivado 安装目录（也接受其 bin 目录或 vivado.bat 全路径）；空 = 从 `XILINX_VIVADO`、PATH 和常见安装位置自动探测 |
+| `vivado.part` | string | "" | 工程创建向导的默认器件（-part，如 xc7a35tcsg324-1）；空 = 向导中逐级选择 |
+| `vivado.timeoutMs` | number | 0 | Vivado batch 超时时间（毫秒）；0 = 不限时（可由状态栏/命令停止） |
+| `vivado.simRuntime` | string | "" | xsim 仿真运行时长（`xsim.simulate.runtime`，如 1000ns）；空 = 跑到 `$finish` |
+| `vivado.structure` | object | src/rtl + sim/tb + constraints/xdc + prj | 工程结构模板：按目录 glob 把文件划入 sources / sim / constraints 文件集并指定工程输出目录 |
+
+> **注意**: v3.0+ 已移除 `pythonPath` 配置项，因为不再需要 Python 依赖。格式化规则的权威定义见 [`docs/FORMAT_SPEC.md`](docs/FORMAT_SPEC.md)。
 
 ### 配置示例
 
@@ -552,26 +581,35 @@ endfunction
 ## 项目结构
 
 ```
-vscode-extension/
-├── extension.js           # VSCode 扩展入口（格式化 + Provider 注册）
-├── package.json           # 扩展清单文件
-├── svtools.win32-x64-msvc.node  # Rust 编译的原生模块
-├── syntaxes/              # TextMate 语法文件
-│   └── systemverilog.tmLanguage.json
-├── templates/             # 模板文件
-│   └── header_template.txt
-└── src-rust/              # Rust 源码
-    ├── Cargo.toml
+SV-Tools/
+├── extension.js                    # 扩展入口：命令注册、格式化 Provider、Provider 装配
+├── iverilog.js                     # Icarus Verilog lint / 仿真 / 波形联动
+├── vcd.js                          # 内置 VCD 波形查看器（自定义编辑器 + Canvas 渲染）
+├── vivado/                         # Vivado TCL 执行、器件库探测、工程创建向导
+├── package.json                    # 扩展清单（命令、45 项配置、快捷键、语法、自定义编辑器）
+├── package.nls.json / .zh-cn.json  # 命令与配置的中英文案
+├── svtools.win32-x64-msvc.node     # Rust 编译的原生模块（运行时从根目录加载）
+├── syntaxes/systemverilog.tmLanguage.json
+├── templates/header_template.txt
+├── scripts/build-native.js         # napi 构建并把 .node 复制到根目录
+├── docs/FORMAT_SPEC.md             # 格式化行为的唯一权威规范
+├── example/ + example/target/      # golden 输入与期望输出
+├── test/golden_test.js             # golden 比对 + 幂等断言
+├── .github/workflows/ci.yml        # 构建原生模块后跑 golden 测试
+└── src-rust/                       # Rust 源码
     ├── src/
-    │   ├── lib.rs         # napi-rs 入口
-    │   ├── main.rs        # CLI 格式化器入口
-    │   ├── beautifier.rs  # 格式化核心
-    │   ├── tokenizer.rs   # 词法分析
-    │   ├── parser/        # 语法解析
-    │   ├── align/         # 对齐算法
-    │   ├── codegen/       # 代码生成
-    │   └── analyzer/      # tree-sitter 符号分析 (v3.4.0+)
-    └── build.rs
+    │   ├── lib.rs                  # napi-rs 入口
+    │   ├── main.rs                 # CLI 格式化器入口
+    │   ├── config.rs               # 配置项与默认值
+    │   ├── preprocess.rs           # 语句切分、续行、CRLF 归一
+    │   ├── beautifier.rs           # 格式化核心（缩进、块结构）
+    │   ├── align/                  # 端口/声明/例化/任务参数对齐
+    │   ├── blank_rules.rs          # 空行统一裁决（spec §6）
+    │   ├── postprocess.rs          # 收尾归一
+    │   ├── parser/                 # 模块与端口解析
+    │   ├── codegen/                # 例化 / testbench / 重复 / 对齐代码生成
+    │   └── analyzer/               # tree-sitter 符号分析（Outline/Hover/补全）
+    └── Cargo.toml
 ```
 
 ## 调试

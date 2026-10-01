@@ -15,6 +15,7 @@ src-rust/.gitignore
 # Rust test executables
 src-rust/*.exe
 src-rust/*.pdb
+src-rust/*.txt
 
 # Duplicate node file (napi build creates both)
 src-rust/svtools.node
@@ -38,6 +39,10 @@ test*.sv
 test*.txt
 test/
 example.sv
+# 开发期资源：golden 用例、CI、构建脚本不进包
+example/**
+.github/**
+scripts/**
 convert_svg.py
 verify_keywords.py
 

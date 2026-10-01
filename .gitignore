@@ -22,6 +22,8 @@ build/
 *.exe
 *.pdb
 test_format.rs
+# napi 构建产物（运行时只加载根目录的 svtools.win32-x64-msvc.node）
+src-rust/*.node
 
 # Temporary files
 temp/

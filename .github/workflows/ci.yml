@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  golden:
+    name: Golden 格式化测试
+    # 原生模块与测试用例按 Windows x64 产物组织（extension.js 加载 svtools.win32-x64-msvc.node）
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: 安装 napi CLI
+        run: npm ci --prefix src-rust
+
+      - name: 构建原生模块并复制到根目录
+        run: node scripts/build-native.js
+
+      - name: 运行 golden 测试（输出比对 + 幂等断言）
+        run: node test/golden_test.js

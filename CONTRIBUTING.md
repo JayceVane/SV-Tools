@@ -12,7 +12,6 @@ When creating a bug report, please include:
 - **VSCode version**
 - **Extension version**
 - **Operating system**
-- **Python version**
 - **Steps to reproduce** the issue
 - **Expected behavior** vs **actual behavior**
 - **Sample code** that demonstrates the issue
@@ -32,20 +31,34 @@ Enhancement suggestions are welcome! Please provide:
    ```bash
    npm install
    ```
-3. Open the project in VSCode
-4. Press `F5` to launch Extension Development Host
+3. Build the Rust native module (needed for formatter changes, requires `cargo`):
+   ```bash
+   npm run build:native
+   ```
+4. Run the golden formatter tests before opening a PR:
+   ```bash
+   npm test
+   ```
+5. Open the project in VSCode and press `F5` to launch Extension Development Host
+
+Formatter behaviour is defined by `docs/FORMAT_SPEC.md`; when implementation and spec
+disagree, fix the implementation. If the spec itself is wrong, change the spec together
+with a golden case in `example/`, then the code.
 
 ## Code Style
 
 ### JavaScript
-- Use 2 spaces for indentation
+- Use 4 spaces for indentation
 - Follow existing code style
 - Add JSDoc comments for functions
 
-### Python
-- Follow PEP 8 style guide
-- Use 4 spaces for indentation
-- Add docstrings for modules and functions
+### Rust
+- Use 4 spaces for indentation and follow the surrounding style (the tree is not
+  `cargo fmt`-normalised, so don't reformat files you aren't changing)
+- Every formatting change needs a golden case: `example/<name>.sv` plus its expected
+  output in `example/target/<name>.sv`
+- Idempotency is a hard requirement — formatting the golden output again must be
+  byte-identical (`npm test` asserts this)
 
 ## Submitting Changes
 
@@ -90,7 +103,7 @@ By contributing, you agree that your contributions will be licensed under the Ap
 ## Contact
 
 - **Maintainer**: JayceVane <JayceVane@163.com>
-- **Issues**: https://github.com/JayceVane/SystemVerilog/issues
+- **Issues**: https://github.com/JayceVane/SV-Tools/issues
 
 ## Code of Conduct
 

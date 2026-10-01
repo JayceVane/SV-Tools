@@ -2,7 +2,7 @@
   "name": "svtools",
   "displayName": "SystemVerilog Tools",
   "description": "Verilog/SystemVerilog formatter, module instantiation, testbench generation, and productivity tools (Rust native backend)",
-  "version": "3.4.6",
+  "version": "3.4.7-beta1",
   "publisher": "JayceVane",
   "author": {
     "name": "JayceVane",
@@ -48,6 +48,12 @@
     "onLanguage:systemverilog"
   ],
   "main": "./extension.js",
+  "scripts": {
+    "test": "node test/golden_test.js",
+    "build:native": "node scripts/build-native.js",
+    "package": "vsce package",
+    "vscode:prepublish": "npm test"
+  },
   "contributes": {
     "languages": [
       {
@@ -343,31 +349,19 @@
       "title": "%config.title%",
       "properties": {
         "svtools.tabSize": {
+          "order": 10,
           "type": "number",
           "default": 4,
           "description": "%cfg.tabSize.desc%"
         },
         "svtools.useTab": {
+          "order": 11,
           "type": "boolean",
           "default": false,
           "description": "%cfg.useTab.desc%"
         },
-        "svtools.oneBindPerLine": {
-          "type": "boolean",
-          "default": true,
-          "description": "%cfg.oneBindPerLine.desc%"
-        },
-        "svtools.oneDeclPerLine": {
-          "type": "boolean",
-          "default": false,
-          "description": "%cfg.oneDeclPerLine.desc%"
-        },
-        "svtools.paramOneLine": {
-          "type": "boolean",
-          "default": true,
-          "description": "%cfg.paramOneLine.desc%"
-        },
         "svtools.indentStyle": {
+          "order": 12,
           "type": "string",
           "enum": [
             "1tbs",
@@ -376,75 +370,88 @@
           "default": "1tbs",
           "description": "%cfg.indentStyle.desc%"
         },
-        "svtools.stripEmptyLine": {
-          "type": "boolean",
-          "default": true,
-          "description": "%cfg.stripEmptyLine.desc%"
-        },
-        "svtools.maxConsecutiveEmptyLines": {
-          "type": "number",
-          "default": 1,
-          "minimum": 0,
-          "maximum": 10,
-          "description": "%cfg.maxConsecutiveEmptyLines.desc%"
-        },
-        "svtools.instAlignPort": {
-          "type": "boolean",
-          "default": true,
-          "description": "%cfg.instAlignPort.desc%"
-        },
         "svtools.ignoreTick": {
+          "order": 13,
           "type": "boolean",
           "default": true,
           "description": "%cfg.ignoreTick.desc%"
         },
-        "svtools.importSameLine": {
-          "type": "boolean",
-          "default": false,
-          "description": "%cfg.importSameLine.desc%"
+        "svtools.maxConsecutiveEmptyLines": {
+          "order": 20,
+          "type": "number",
+          "default": 1,
+          "minimum": -1,
+          "maximum": 10,
+          "description": "%cfg.maxConsecutiveEmptyLines.desc%"
         },
-        "svtools.alignComma": {
+        "svtools.stripEmptyLine": {
+          "order": 21,
           "type": "boolean",
           "default": true,
-          "description": "%cfg.alignComma.desc%"
+          "description": "%cfg.stripEmptyLine.desc%"
         },
         "svtools.inlineCompact": {
+          "order": 22,
           "type": "boolean",
           "default": true,
           "description": "%cfg.inlineCompact.desc%"
         },
         "svtools.blankCompact": {
+          "order": 23,
           "type": "boolean",
           "default": true,
           "description": "%cfg.blankCompact.desc%"
         },
+        "svtools.oneBindPerLine": {
+          "order": 30,
+          "type": "boolean",
+          "default": true,
+          "description": "%cfg.oneBindPerLine.desc%"
+        },
+        "svtools.oneDeclPerLine": {
+          "order": 31,
+          "type": "boolean",
+          "default": false,
+          "description": "%cfg.oneDeclPerLine.desc%"
+        },
+        "svtools.paramOneLine": {
+          "order": 32,
+          "type": "boolean",
+          "default": true,
+          "description": "%cfg.paramOneLine.desc%"
+        },
+        "svtools.importSameLine": {
+          "order": 33,
+          "type": "boolean",
+          "default": false,
+          "description": "%cfg.importSameLine.desc%"
+        },
+        "svtools.alignComma": {
+          "order": 40,
+          "type": "boolean",
+          "default": true,
+          "description": "%cfg.alignComma.desc%"
+        },
+        "svtools.instAlignPort": {
+          "order": 41,
+          "type": "boolean",
+          "default": true,
+          "description": "%cfg.instAlignPort.desc%"
+        },
         "svtools.instPrefix": {
+          "order": 50,
           "type": "string",
           "default": "u_",
           "description": "%cfg.instPrefix.desc%"
         },
         "svtools.includePortDeclarations": {
+          "order": 51,
           "type": "boolean",
           "default": true,
           "description": "%cfg.includePortDeclarations.desc%"
         },
-        "svtools.reset": {
-          "type": "array",
-          "default": [],
-          "items": {
-            "type": "string"
-          },
-          "description": "%cfg.reset.desc%"
-        },
-        "svtools.sreset": {
-          "type": "array",
-          "default": [],
-          "items": {
-            "type": "string"
-          },
-          "description": "%cfg.sreset.desc%"
-        },
         "svtools.clock": {
+          "order": 52,
           "type": "array",
           "default": [
             "clk",
@@ -456,7 +463,32 @@
           },
           "description": "%cfg.clock.desc%"
         },
+        "svtools.reset": {
+          "order": 53,
+          "type": "array",
+          "default": [
+            "rst_n",
+            "reset_n"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "description": "%cfg.reset.desc%"
+        },
+        "svtools.sreset": {
+          "order": 54,
+          "type": "array",
+          "default": [
+            "sreset",
+            "srst"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "description": "%cfg.sreset.desc%"
+        },
         "svtools.waveType": {
+          "order": 60,
           "type": "string",
           "enum": [
             "fsdb",
@@ -468,57 +500,37 @@
           "description": "%cfg.waveType.desc%"
         },
         "svtools.taskInit": {
+          "order": 61,
           "type": "boolean",
           "default": true,
           "description": "%cfg.taskInit.desc%"
         },
         "svtools.taskDrive": {
+          "order": 62,
           "type": "boolean",
           "default": true,
           "description": "%cfg.taskDrive.desc%"
         },
         "svtools.headerTemplate": {
+          "order": 63,
           "type": "string",
           "default": "",
           "description": "%cfg.headerTemplate.desc%"
         },
         "svtools.iverilog.path": {
+          "order": 70,
           "type": "string",
           "default": "",
           "description": "%cfg.iverilog_path.desc%"
         },
         "svtools.iverilog.cygwinPath": {
+          "order": 71,
           "type": "string",
           "default": "",
           "description": "%cfg.iverilog_cygwinPath.desc%"
         },
-        "svtools.iverilog.lintOnSave": {
-          "type": "boolean",
-          "default": true,
-          "description": "%cfg.iverilog_lintOnSave.desc%"
-        },
-        "svtools.iverilog.scanWorkspace": {
-          "type": "boolean",
-          "default": true,
-          "description": "%cfg.iverilog_scanWorkspace.desc%"
-        },
-        "svtools.iverilog.lintOnChange": {
-          "type": "boolean",
-          "default": true,
-          "description": "%cfg.iverilog_lintOnChange.desc%"
-        },
-        "svtools.iverilog.lintDebounceMs": {
-          "type": "number",
-          "default": 800,
-          "minimum": 100,
-          "description": "%cfg.iverilog_lintDebounceMs.desc%"
-        },
-        "svtools.iverilog.lintOnOpen": {
-          "type": "boolean",
-          "default": true,
-          "description": "%cfg.iverilog_lintOnOpen.desc%"
-        },
         "svtools.iverilog.standard": {
+          "order": 72,
           "type": "string",
           "enum": [
             "auto",
@@ -533,7 +545,33 @@
           "default": "auto",
           "description": "%cfg.iverilog_standard.desc%"
         },
+        "svtools.iverilog.lintOnSave": {
+          "order": 73,
+          "type": "boolean",
+          "default": true,
+          "description": "%cfg.iverilog_lintOnSave.desc%"
+        },
+        "svtools.iverilog.lintOnChange": {
+          "order": 74,
+          "type": "boolean",
+          "default": true,
+          "description": "%cfg.iverilog_lintOnChange.desc%"
+        },
+        "svtools.iverilog.lintDebounceMs": {
+          "order": 75,
+          "type": "number",
+          "default": 800,
+          "minimum": 100,
+          "description": "%cfg.iverilog_lintDebounceMs.desc%"
+        },
+        "svtools.iverilog.lintOnOpen": {
+          "order": 76,
+          "type": "boolean",
+          "default": true,
+          "description": "%cfg.iverilog_lintOnOpen.desc%"
+        },
         "svtools.iverilog.lintArgs": {
+          "order": 77,
           "type": "array",
           "items": {
             "type": "string"
@@ -544,6 +582,7 @@
           "description": "%cfg.iverilog_lintArgs.desc%"
         },
         "svtools.iverilog.includePaths": {
+          "order": 78,
           "type": "array",
           "items": {
             "type": "string"
@@ -552,6 +591,7 @@
           "description": "%cfg.iverilog_includePaths.desc%"
         },
         "svtools.iverilog.libraryPaths": {
+          "order": 79,
           "type": "array",
           "items": {
             "type": "string"
@@ -559,7 +599,14 @@
           "default": [],
           "description": "%cfg.iverilog_libraryPaths.desc%"
         },
+        "svtools.iverilog.scanWorkspace": {
+          "order": 80,
+          "type": "boolean",
+          "default": true,
+          "description": "%cfg.iverilog_scanWorkspace.desc%"
+        },
         "svtools.iverilog.simFiles": {
+          "order": 85,
           "type": "array",
           "items": {
             "type": "string"
@@ -568,11 +615,13 @@
           "description": "%cfg.iverilog_simFiles.desc%"
         },
         "svtools.iverilog.simTop": {
+          "order": 86,
           "type": "string",
           "default": "",
           "description": "%cfg.iverilog_simTop.desc%"
         },
         "svtools.iverilog.simArgs": {
+          "order": 87,
           "type": "array",
           "items": {
             "type": "string"
@@ -581,37 +630,50 @@
           "description": "%cfg.iverilog_simArgs.desc%"
         },
         "svtools.iverilog.simTimeoutMs": {
+          "order": 88,
           "type": "number",
           "default": 0,
           "minimum": 0,
           "description": "%cfg.iverilog_simTimeoutMs.desc%"
         },
-        "svtools.iverilog.waveViewer": {
-          "type": "string",
-          "default": "",
-          "description": "%cfg.iverilog_waveViewer.desc%"
-        },
         "svtools.iverilog.autoOpenWaveform": {
+          "order": 90,
           "type": "boolean",
           "default": true,
           "description": "%cfg.iverilog_autoOpenWaveform.desc%"
         },
+        "svtools.iverilog.waveViewer": {
+          "order": 91,
+          "type": "string",
+          "default": "",
+          "description": "%cfg.iverilog_waveViewer.desc%"
+        },
         "svtools.vivado.path": {
+          "order": 100,
           "type": "string",
           "default": "",
           "description": "%cfg.vivado_path.desc%"
         },
         "svtools.vivado.part": {
+          "order": 101,
           "type": "string",
           "default": "",
           "description": "%cfg.vivado_part.desc%"
         },
         "svtools.vivado.timeoutMs": {
+          "order": 102,
           "type": "number",
           "default": 0,
           "description": "%cfg.vivado_timeoutMs.desc%"
         },
+        "svtools.vivado.simRuntime": {
+          "order": 103,
+          "type": "string",
+          "default": "",
+          "description": "%cfg.vivado_simRuntime.desc%"
+        },
         "svtools.vivado.structure": {
+          "order": 104,
           "type": "object",
           "default": {
             "sources": [
@@ -663,11 +725,6 @@
               "description": "%cfg.vivado_structure_projectDir.desc%"
             }
           }
-        },
-        "svtools.vivado.simRuntime": {
-          "type": "string",
-          "default": "",
-          "description": "%cfg.vivado_simRuntime.desc%"
         }
       }
     }

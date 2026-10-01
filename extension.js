@@ -63,6 +63,7 @@ async function formatDocument(document, range = null) {
         useTab: config.get('useTab', false),
         nbSpace: config.get('tabSize', 4),
         maxConsecutiveEmptyLines: config.get('maxConsecutiveEmptyLines', 1),
+        stripEmptyLine: config.get('stripEmptyLine', true),
         reindentOnly: false,
         ignoreTick: config.get('ignoreTick', true),
         oneDeclPerLine: config.get('oneDeclPerLine', false),
