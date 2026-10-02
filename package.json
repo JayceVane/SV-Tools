@@ -2,7 +2,7 @@
   "name": "svtools",
   "displayName": "SystemVerilog Tools",
   "description": "Verilog/SystemVerilog formatter, module instantiation, testbench generation, and productivity tools (Rust native backend)",
-  "version": "3.4.7-beta2",
+  "version": "3.4.7-beta3",
   "publisher": "JayceVane",
   "author": {
     "name": "JayceVane",
@@ -401,6 +401,14 @@
           "type": "boolean",
           "default": true,
           "description": "%cfg.blankCompact.desc%"
+        },
+        "svtools.portNameGap": {
+          "order": 24,
+          "type": "number",
+          "default": 2,
+          "minimum": 1,
+          "maximum": 8,
+          "description": "%cfg.portNameGap.desc%"
         },
         "svtools.oneBindPerLine": {
           "order": 30,

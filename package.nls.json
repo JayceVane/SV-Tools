@@ -14,6 +14,7 @@
   "cfg.alignComma.desc": "Align comma/semicolon",
   "cfg.inlineCompact.desc": "Inline compact: collapse extra spaces within single-line statements (keywords, variables, operators; e.g. else $error(\"x\", $time))",
   "cfg.blankCompact.desc": "Interline compact: actively remove extra blank lines (removed inside blocks, folded between blocks). Off: keep user blank lines and never add new ones",
+  "cfg.portNameGap.desc": "Gap (spaces) between the widest direction/type/range prefix and the port name column in module/interface port lists (1-8)",
   "cfg.instPrefix.desc": "Default prefix for module instance name",
   "cfg.includePortDeclarations.desc": "Include signal declarations when generating module instantiation (input->reg, output->wire)",
   "cfg.reset.desc": "Default asynchronous reset signal names",

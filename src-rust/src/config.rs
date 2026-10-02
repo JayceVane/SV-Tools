@@ -25,6 +25,8 @@ pub struct FormatOptions {
     /// 行间紧凑：主动删除多余空行（块内全删、块间折叠至 max；spec §6）。
     /// 关闭时保持用户空行、不插入，仅折叠至 max（且格式化不得新增空行）
     pub blank_compact: Option<bool>,
+    /// 模块/接口头端口表：名称列与最宽前缀之间的空格数（spec §9.13，≥1）
+    pub port_name_gap: Option<u32>,
 }
 
 impl Default for FormatOptions {
@@ -45,6 +47,7 @@ impl Default for FormatOptions {
             max_consecutive_empty_lines: Some(1),
             inline_compact: Some(true),
             blank_compact: Some(true),
+            port_name_gap: Some(2),
         }
     }
 }
@@ -94,6 +97,10 @@ impl FormatOptions {
     }
     pub fn blank_compact(&self) -> bool {
         self.blank_compact.unwrap_or(true)
+    }
+    pub fn port_name_gap(&self) -> usize {
+        // 0 或缺省按 2；上限 8 防误配产生超宽列
+        self.port_name_gap.unwrap_or(2).clamp(1, 8) as usize
     }
 }
 

@@ -14,6 +14,7 @@
   "cfg.alignComma.desc": "对齐逗号/分号",
   "cfg.inlineCompact.desc": "行内紧凑：单行语句内主动删除多余空格（关键词、变量、运算符之间，如 else $error(\"x\", $time)）",
   "cfg.blankCompact.desc": "行间紧凑：主动删除多余空行（块内删除、块间折叠）。关闭则保持用户空行且不新增空行",
+  "cfg.portNameGap.desc": "模块/接口头端口表中名称列与最宽前缀（方向/类型/位宽）之间的空格数（1-8）",
   "cfg.instPrefix.desc": "模块实例名的默认前缀",
   "cfg.includePortDeclarations.desc": "生成模块实例化时附带信号声明（input 生成 reg，output 生成 wire）",
   "cfg.reset.desc": "默认的异步复位信号名列表",

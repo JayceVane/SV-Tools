@@ -81,7 +81,8 @@ async function formatDocument(document, range = null) {
         importSameLine: config.get('importSameLine', false),
         instAlignPort: config.get('instAlignPort', true),
         inlineCompact: config.get('inlineCompact', true),
-        blankCompact: config.get('blankCompact', true)
+        blankCompact: config.get('blankCompact', true),
+        portNameGap: config.get('portNameGap', 2)
     };
 
     try {
