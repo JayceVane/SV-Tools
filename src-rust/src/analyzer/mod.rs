@@ -693,10 +693,16 @@ endmodule
         // Module name must not be picked from (* ... *) attribute
         assert_eq!(result.symbols.len(), 1);
         assert_eq!(result.symbols[0].name, "aurora_64b66b_0_EXAMPLE_AXI_TO_LL");
-        // Net/var names must not be picked from dimension expressions
+        // Net/var names must not be picked from dimension expressions.
+        // 模块级 parameter 声明本身按设计进入 children（大纲展示参数）；
+        // 需要防的是维度表达式 [0:(DATA_WIDTH-1)] 里的参数引用产生重复项
         let names: Vec<&str> = result.symbols[0].children.iter().map(|c| c.name.as_str()).collect();
         assert!(names.contains(&"LL_OP_DATA_INT"), "missing LL_OP_DATA_INT: {:?}", names);
         assert!(names.contains(&"i_rem"), "missing i_rem: {:?}", names);
-        assert!(!names.contains(&"DATA_WIDTH"), "DATA_WIDTH should not be a child name");
+        assert!(
+            names.iter().filter(|n| **n == "DATA_WIDTH").count() <= 1,
+            "DATA_WIDTH duplicated from dimension refs: {:?}",
+            names
+        );
     }
 }

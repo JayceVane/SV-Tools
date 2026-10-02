@@ -70,7 +70,10 @@ mod tests {
     fn test_backtick_token() {
         let txt = "`ifdef DEBUG\n`endif";
         let tokens = tokenize(txt);
+        // 序列：[Word("`ifdef"), Space, Word("DEBUG"), Newline, Word("`endif")]
         assert!(matches!(&tokens[0], Token::Word(s) if s == "`ifdef"));
-        assert!(matches!(&tokens[2], Token::Word(s) if s == "`endif"));
+        assert!(matches!(&tokens[2], Token::Word(s) if s == "DEBUG"));
+        assert!(matches!(&tokens[3], Token::Newline));
+        assert!(matches!(&tokens[4], Token::Word(s) if s == "`endif"));
     }
 }
