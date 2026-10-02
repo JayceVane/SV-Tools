@@ -3,10 +3,10 @@
 // ============================================================================
 
 module carry_sel_adder (
-    input  wire [7:0]    a, b,
-    input  wire          cin ,
-    output wire [7:0]    sum ,
-    output wire          cout
+    input  wire [7:0]  a, b,
+    input  wire        cin ,
+    output wire [7:0]  sum ,
+    output wire        cout
 );
 
     wire [3:0] a0, b0, sum0, a1, b1, sum1;

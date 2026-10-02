@@ -3,8 +3,8 @@
 // ============================================================================
 
 module tb (
-    input logic          clk, rst_n, valid, ready,
-    input logic [7:0]    data
+    input logic        clk, rst_n, valid, ready,
+    input logic [7:0]  data
 );
 
     // 单行例化：保持单行 + 紧凑

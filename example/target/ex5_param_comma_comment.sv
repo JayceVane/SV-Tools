@@ -11,13 +11,13 @@ module aurora_core #(
     parameter REM_WIDTH  = 1              // REM bus width
 ) (
     // AXI4-S input signals
-    input  wire                      AXI4_S_IP_TX_TVALID,
-    output wire                      AXI4_S_IP_TX_TREADY,
-    input  wire [DATA_WIDTH-1:0]     AXI4_S_IP_TX_TDATA ,
-    input  wire [STRB_WIDTH-1:0]     AXI4_S_IP_TX_TKEEP ,
-    input  wire                      DCM_NOT_LOCKED_IN  ,
-    input  wire                      USER_CLK_OUT       ,
-    input  wire                      SYNC_RESET_IN
+    input  wire                   AXI4_S_IP_TX_TVALID,
+    output wire                   AXI4_S_IP_TX_TREADY,
+    input  wire [DATA_WIDTH-1:0]  AXI4_S_IP_TX_TDATA ,
+    input  wire [STRB_WIDTH-1:0]  AXI4_S_IP_TX_TKEEP ,
+    input  wire                   DCM_NOT_LOCKED_IN  ,
+    input  wire                   USER_CLK_OUT       ,
+    input  wire                   SYNC_RESET_IN
 );
 
     wire [DATA_WIDTH-1:0] mcd_data ;
