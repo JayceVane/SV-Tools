@@ -25,7 +25,8 @@ pub struct FormatOptions {
     /// 行间紧凑：主动删除多余空行（块内全删、块间折叠至 max；spec §6）。
     /// 关闭时保持用户空行、不插入，仅折叠至 max（且格式化不得新增空行）
     pub blank_compact: Option<bool>,
-    /// 模块/接口头端口表：名称列与最宽前缀之间的空格数（spec §9.13，≥1）
+    /// 模块/接口头端口表与 task/function 参数表：名称列与最宽前缀之间的
+    /// 空格数（spec §9.13，≥1）
     pub port_name_gap: Option<u32>,
 }
 
