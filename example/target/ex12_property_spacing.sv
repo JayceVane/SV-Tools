@@ -3,8 +3,8 @@
 // ============================================================================
 
 module m (
-    input logic          clk, rst_n, valid,
-    input logic [7:0]    wdata
+    input logic        clk, rst_n, valid,
+    input logic [7:0]  wdata
 );
 
     property p_stable;

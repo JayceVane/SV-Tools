@@ -23,6 +23,7 @@ function format(text) {
         useTab: false,
         nbSpace: 4,
         maxConsecutiveEmptyLines: 1,
+        stripEmptyLine: true,
         reindentOnly: false,
         ignoreTick: true,
         oneDeclPerLine: false,

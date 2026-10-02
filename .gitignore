@@ -18,7 +18,9 @@ __pycache__/
 dist/
 build/
 
-# Rust
+# Rust / napi 构建产物
+# 原生模块不再入库：开发者跑 npm run build:native，或从 GitHub Releases 下载 .node
+*.node
 *.exe
 *.pdb
 test_format.rs

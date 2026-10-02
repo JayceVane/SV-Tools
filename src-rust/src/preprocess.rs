@@ -10,8 +10,12 @@ pub fn preprocess_text(text: &str, indent_style: &str, inline_compact: bool) -> 
 
     // 语句拆行（一行一句；对齐/缩进的基础）——先于 begin 合并
     let text = split_statements(&text);
-    // 单行 for（for 头 + 内联单条语句）运算符空格规范化
-    let text = normalize_inline_for(&text);
+    // for 头/内联体运算符空格规范化（inlineCompact；关闭则保持原有空格）
+    let text = if inline_compact {
+        normalize_inline_for(&text)
+    } else {
+        text
+    };
     // modport 列表按方向拆行（`output a,b,input c` → 两行）
     let text = expand_modport(&text);
     // property/sequence 体多余空格归一化（spec §9.5）
@@ -444,10 +448,24 @@ fn normalize_for_line(line: &str) -> String {
     if !rest.starts_with('(') {
         return line.to_string();
     }
+    // 平衡括号扫描跳过字符串字面量内的括号（`$display("a)b")`）
     let mut depth = 0i32;
     let mut close: Option<usize> = None;
+    let mut in_str = false;
+    let mut esc = false;
     for (idx, ch) in rest.char_indices() {
+        if in_str {
+            if esc {
+                esc = false;
+            } else if ch == '\\' {
+                esc = true;
+            } else if ch == '"' {
+                in_str = false;
+            }
+            continue;
+        }
         match ch {
+            '"' => in_str = true,
             '(' => depth += 1,
             ')' => {
                 depth -= 1;
@@ -456,7 +474,6 @@ fn normalize_for_line(line: &str) -> String {
                     break;
                 }
             }
-            '"' => return line.to_string(),
             _ => {}
         }
     }
@@ -466,20 +483,65 @@ fn normalize_for_line(line: &str) -> String {
     };
     let header = &rest[1..end_idx];
     let body = rest[end_idx + 1..].trim_start();
-    if body.is_empty() || body.starts_with("begin") {
-        return line.to_string();
+    // for 头归一化：词间空白折叠 + 运算符/分号前后单空格（字符串字面量
+    // 内逐字节不动）。块状 `for(...) begin` 与单行体同样适用——头部风格
+    // 不应随体形态分裂
+    let header_norm = normalize_code_fragment(header);
+    if body.is_empty() {
+        return format!("{}for({})", &line[..indent_len], header_norm);
     }
-    let header = respace_ops(header);
-    let body = respace_ops(body);
-    format!("{}for({}) {}", &line[..indent_len], header, body)
+    if body.starts_with("begin") {
+        // begin 及其后内容（begin: label 等）保持原样
+        return format!("{}for({}) {}", &line[..indent_len], header_norm, body);
+    }
+    let body_norm = normalize_code_fragment(body);
+    format!("{}for({}) {}", &line[..indent_len], header_norm, body_norm)
+}
+
+/// 代码片段空格归一化：字符串字面量外的空白串折叠为单个空格，比较/
+/// 赋值/移位/复合赋值运算符与分号前后规范为单空格（含补齐缺失），
+/// 字符串字面量内逐字节保留（`"a=b  c"` 不受影响）。
+fn normalize_code_fragment(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut seg = String::new();
+    let mut in_str = false;
+    let mut esc = false;
+    for ch in s.chars() {
+        if in_str {
+            seg.push(ch);
+            if esc {
+                esc = false;
+            } else if ch == '\\' {
+                esc = true;
+            } else if ch == '"' {
+                // 字符串段逐字节保留
+                out.push_str(&seg);
+                seg.clear();
+                in_str = false;
+            }
+        } else if ch == '"' {
+            out.push_str(&respace_ops(&seg));
+            seg.clear();
+            seg.push(ch);
+            in_str = true;
+        } else {
+            seg.push(ch);
+        }
+    }
+    if !seg.is_empty() {
+        out.push_str(&respace_ops(&seg));
+    }
+    // 段内不做 trim（会吃掉闭引号前运算符空格）；整体首尾 trim 安全：
+    // 首尾若为字符串段则以 " 开头/结尾，不受影响
+    out.trim().to_string()
 }
 
 fn respace_ops(s: &str) -> String {
     let re_op = Regex::new(r"\s*(==|!=|<=|>=|<<|>>|\+=|-=|\*=|/=|%=|=|<|>)\s*").unwrap();
     let out = re_op.replace_all(s, " $1 ");
-    let re_sc = Regex::new(r";\s*").unwrap();
-    let out = re_sc.replace_all(&out, "; ");
-    out.trim().to_string()
+    let out = Regex::new(r"[ \t]+").unwrap().replace_all(&out, " ");
+    let re_sc = Regex::new(r"\s*;\s*").unwrap();
+    re_sc.replace_all(&out, "; ").into_owned()
 }
 
 /// property/sequence 体内多余空格归一化（spec §9.5）：
@@ -769,4 +831,158 @@ fn expand_modport(text: &str) -> String {
         i += 1;
     }
     out.join("\n")
+}
+
+// ── `pragma protect 加密区切分 ─────────────────────────────────
+// Xilinx/Synopsys 加密 IP 的 BASE64 载荷行长（如 line_length=76）是编码
+// 规范的一部分，重排/删空格会破坏解密；且长串无 `;`/关键字的行会让
+// 对齐器以二次方变慢（万行加密文件需数十分钟）。整区原样透传。
+
+pub enum ProtectSegment {
+    Code(String),
+    Protected(String),
+}
+
+/// 把文本切成交替的普通代码段与 `` `pragma protect `` 加密区（含起止行）。
+/// 未闭合的加密区余下全部透传——宁可不格式化也不损坏载荷。
+pub fn split_protected_regions(text: &str) -> Vec<ProtectSegment> {
+    let re_begin = Regex::new(r"^[ \t]*`(?:pragma[ \t]+)?protect[ \t]+begin_protected").unwrap();
+    let re_end = Regex::new(r"^[ \t]*`(?:pragma[ \t]+)?protect[ \t]+end_protected").unwrap();
+
+    let mut segments = Vec::new();
+    let mut code_start = 0usize;
+    let mut region_start: Option<usize> = None;
+    let bytes = text.as_bytes();
+    let mut pos = 0usize;
+    while pos < bytes.len() {
+        let line_end = text[pos..].find('\n').map(|i| pos + i + 1).unwrap_or(bytes.len());
+        let line = &text[pos..line_end];
+        if region_start.is_none() && re_begin.is_match(line) {
+            if pos > code_start {
+                segments.push(ProtectSegment::Code(text[code_start..pos].to_string()));
+            }
+            region_start = Some(pos);
+        } else if region_start.is_some() && re_end.is_match(line) {
+            segments.push(ProtectSegment::Protected(
+                text[region_start.unwrap()..line_end].to_string(),
+            ));
+            region_start = None;
+            code_start = line_end;
+        }
+        pos = line_end;
+    }
+    if let Some(rs) = region_start {
+        segments.push(ProtectSegment::Protected(text[rs..].to_string()));
+    } else if code_start < bytes.len() {
+        // 纯空白尾段直接透传，避免空段走管线丢失换行
+        if text[code_start..].trim().is_empty() {
+            segments.push(ProtectSegment::Protected(text[code_start..].to_string()));
+        } else {
+            segments.push(ProtectSegment::Code(text[code_start..].to_string()));
+        }
+    }
+    segments
+}
+
+#[cfg(test)]
+mod protect_tests {
+    use super::*;
+
+    #[test]
+    fn test_fully_wrapped_passthrough() {
+        let txt = "`pragma protect begin_protected\n`pragma protect data_block\nABcd+/12\n`pragma protect end_protected\n";
+        let segs = split_protected_regions(txt);
+        assert_eq!(segs.len(), 1);
+        match &segs[0] {
+            ProtectSegment::Protected(s) => assert_eq!(s, txt),
+            _ => panic!("expected Protected"),
+        }
+    }
+
+    #[test]
+    fn test_code_around_region() {
+        let txt = "module a;\nendmodule\n`protect begin_protected\nZZZZ\n`protect end_protected\nmodule b;\nendmodule\n";
+        let segs = split_protected_regions(txt);
+        assert_eq!(segs.len(), 3);
+        match &segs[0] {
+            ProtectSegment::Code(s) => assert!(s.contains("module a")),
+            _ => panic!("expected Code"),
+        }
+        match &segs[1] {
+            ProtectSegment::Protected(s) => {
+                assert!(s.starts_with("`protect begin_protected"));
+                assert!(s.ends_with("end_protected\n"));
+            }
+            _ => panic!("expected Protected"),
+        }
+        match &segs[2] {
+            ProtectSegment::Code(s) => assert!(s.contains("module b")),
+            _ => panic!("expected Code"),
+        }
+    }
+
+    #[test]
+    fn test_unclosed_region_tail_passthrough() {
+        let txt = "module a;\nendmodule\n`pragma protect begin_protected\nQQQQ\n";
+        let segs = split_protected_regions(txt);
+        assert_eq!(segs.len(), 2);
+        match &segs[1] {
+            ProtectSegment::Protected(s) => assert!(s.contains("QQQQ")),
+            _ => panic!("expected Protected"),
+        }
+    }
+
+    #[test]
+    fn test_no_region_single_code() {
+        let txt = "module a;\nendmodule\n";
+        let segs = split_protected_regions(txt);
+        assert_eq!(segs.len(), 1);
+        matches!(segs[0], ProtectSegment::Code(_));
+    }
+}
+
+#[cfg(test)]
+mod for_norm_tests {
+    use super::*;
+
+    #[test]
+    fn test_for_header_block_form() {
+        // 块状 for 头归一化（用户报：task 内 for(...) begin 不删多余空格）
+        let out = normalize_for_line("        for(int   i=0;i    <  iter;i++) begin");
+        assert_eq!(out, "        for(int i = 0; i < iter; i++) begin");
+    }
+
+    #[test]
+    fn test_for_header_inline_body() {
+        let out = normalize_for_line("    for(int   i    = 0; i    <  len;   i++) sum += data[i];");
+        assert_eq!(out, "    for(int i = 0; i < len; i++) sum += data[i];");
+    }
+
+    #[test]
+    fn test_for_body_string_literal_protected() {
+        // 字符串字面量内的 = 与空格逐字节保留（既有 bug：respace 曾把
+        // "a=b  c" 改成 "a = b  c"）
+        let out = normalize_for_line("        for(i=0;i<2;i++) $display(\"a=b  c\");");
+        assert_eq!(out, "        for(i = 0; i < 2; i++) $display(\"a=b  c\");");
+    }
+
+    #[test]
+    fn test_for_header_string_literal() {
+        // 头内字符串：括号扫描跳过字符串，字面量内容不动
+        let out = normalize_for_line("for(string s=\"x)y\";s!=\"\";s=s.next) begin");
+        assert_eq!(out, "for(string s = \"x)y\"; s != \"\"; s = s.next) begin");
+    }
+
+    #[test]
+    fn test_for_multiline_header_untouched() {
+        // 头跨行（用户显式换行）不处理
+        let line = "        for(int i = 0;";
+        assert_eq!(normalize_for_line(line), line);
+    }
+
+    #[test]
+    fn test_for_shift_op() {
+        let out = normalize_for_line("for(i=0;i<64;i=i<<1) begin");
+        assert_eq!(out, "for(i = 0; i < 64; i = i << 1) begin");
+    }
 }

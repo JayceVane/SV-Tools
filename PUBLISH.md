@@ -1,6 +1,6 @@
 # VSCode 插件发布指南
 
-本文档说明如何将 SystemVerilog Align Formatter 插件发布到 VSCode 应用市场。
+本文档说明如何将 SystemVerilog Tools（扩展 ID `svtools`）发布到 VSCode 应用市场。
 
 ---
 
@@ -71,19 +71,15 @@ vsce --version
 
 ## 打包插件
 
-在 `vscode-extension` 目录下运行：
+在仓库根目录运行：
 
 ```bash
-cd vscode-extension
-
-# 安装依赖（如果需要）
-npm install
-
-# 打包成 .vsix 文件
-vsce package
+npm install          # 只装 vsce 等打包依赖
+npm run build:native # 改了 Rust 层时需要重新构建原生模块
+npm run package      # vsce package，打包前自动跑 npm test
 ```
 
-成功后会生成 `sv-align-2.0.0.vsix` 文件。
+成功后生成 `svtools-<version>.vsix`（golden 测试未通过时打包会中止）。
 
 ---
 
@@ -94,7 +90,7 @@ vsce package
 1. 打开 VSCode
 2. 按 `Ctrl+Shift+P` 打开命令面板
 3. 输入 "Install from VSIX..."
-4. 选择生成的 `sv-align-2.0.0.vsix` 文件
+4. 选择生成的 `svtools-<version>.vsix` 文件
 5. 重新加载窗口
 6. 测试插件功能是否正常
 7. 检查图标是否正确显示
@@ -106,15 +102,13 @@ vsce package
 ### 方法一：命令行发布（推荐）
 
 ```bash
-cd vscode-extension
-
-# 首次发布会提示输入 Publisher 名称和 Token
+# 打包前会自动执行 npm test（golden 用例 + 幂等断言），失败即中止
 vsce publish
 
-# 或指定版本发布
-vsce publish patch   # 2.0.0 -> 2.0.1
-vsce publish minor   # 2.0.0 -> 2.1.0
-vsce publish major   # 2.0.0 -> 3.0.0
+# 或指定版本递增（当前版本见 package.json）
+vsce publish patch   # 3.4.6 -> 3.4.7
+vsce publish minor   # 3.4.6 -> 3.5.0
+vsce publish major   # 3.4.6 -> 4.0.0
 ```
 
 根据提示输入：
@@ -126,7 +120,7 @@ vsce publish major   # 2.0.0 -> 3.0.0
 1. 访问 [VSCode Marketplace Publisher](https://marketplace.visualstudio.com/manage)
 2. 选择你的 Publisher
 3. 点击 "Publish Extension"
-4. 上传 `sv-align-2.0.0.vsix` 文件
+4. 上传 `svtools-<version>.vsix` 文件
 5. 填写扩展信息（会从 package.json 自动读取）
 6. 点击 "Upload" 发布
 
@@ -135,7 +129,7 @@ vsce publish major   # 2.0.0 -> 3.0.0
 ## 发布后验证
 
 1. 访问 [VSCode Marketplace](https://marketplace.visualstudio.com/)
-2. 搜索 "SystemVerilog Align Formatter" 或 "sv-align"
+2. 搜索 "SystemVerilog Tools"
 3. 检查插件页面显示是否正确：
    - ✓ 图标显示正确
    - ✓ 名称和描述正确
@@ -166,7 +160,7 @@ ovsx publish
 
 ### 修改代码后更新
 
-1. 修改 `package.json` 中的版本号：
+1. 修改 `package.json` 中的版本号（并同步 `src-rust/Cargo.toml` 与 CHANGELOG.md）：
    ```json
    "version": "2.0.1"  // 根据修改类型递增
    ```
@@ -196,7 +190,7 @@ ovsx publish
 
 ### Q: 图标不显示
 **A**:
-1. 确保 `icon.png` 在 `vscode-extension` 根目录
+1. 确保 `icon.png` 在仓库根目录
 2. 确保 `package.json` 中有 `"icon": "icon.png"`
 3. 重新打包并发布
 
@@ -232,7 +226,7 @@ ovsx publish
 - [ ] 版本号正确
 - [ ] Publisher 已创建
 - [ ] Personal Access Token 已获取
-- [ ] 本地测试通过
+- [ ] 本地测试通过（`npm test`：golden 用例 + 幂等断言）
 - [ ] .vsix 文件生成成功
 
 准备就绪后，运行：

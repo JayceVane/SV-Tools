@@ -367,51 +367,6 @@ pub fn align_module_port(
     }
     let len_bw: usize = len_bw_a.iter().sum::<usize>() + 2 * len_bw_a.len();
 
-    // Python-style alignment: calculate prefix length for each declaration
-    // prefix = dir [+ var] [+ type] [+ sign] [+ range]
-    // Then pad all prefixes to the same length
-    let mut max_prefix_len: usize = 0;
-
-    for d in &decl {
-        let dir = d.name("dir").unwrap().as_str();
-        if !PORT_DIRS.contains(&dir) {
-            max_prefix_len = max_prefix_len.max(dir.len());
-            continue;
-        }
-
-        let var = d.name("var").map(|x| x.as_str());
-        let tp = d.name("type").map(|x| x.as_str().trim()).unwrap_or("");
-        let sign = d.name("sign").map(|x| x.as_str().trim()).unwrap_or("");
-        let bw = d.name("bw").map(|x| x.as_str()).unwrap_or("");
-
-        // Calculate prefix length: dir [+ ' ' + var] [+ ' ' + type] [+ ' ' + sign] [+ ' ' + bw]
-        let mut plen = dir.len();
-        if let Some(v) = var {
-            plen += 1 + v.len();
-        }
-        if !tp.is_empty() {
-            plen += 1 + tp.len();
-        }
-        if !sign.is_empty() {
-            plen += 1 + sign.len();
-        }
-        if !bw.is_empty() {
-            let bw_clean = Regex::new(r"\s*").unwrap().replace_all(bw, "");
-            plen += 1 + bw_clean.len();
-        }
-
-        max_prefix_len = max_prefix_len.max(plen);
-    }
-
-    // Round up max_prefix_len to tab boundary for clean alignment
-    let tab_size = options.nb_space();
-    let max_prefix_len = if tab_size > 0 {
-        let aligned = max_prefix_len + (tab_size - max_prefix_len % tab_size);
-        aligned
-    } else {
-        max_prefix_len + 1
-    };
-
     // Calculate port name column width
     let mut max_port_len: usize = 0;
     for d in &decl {
@@ -489,14 +444,10 @@ pub fn align_module_port(
         max_prefix_len = max_prefix_len.max(plen);
     }
 
-    // Round up max_prefix_len to tab boundary for clean alignment
-    let tab_size = options.nb_space();
-    let max_prefix_len = if tab_size > 0 {
-        let aligned = max_prefix_len + (tab_size - max_prefix_len % tab_size);
-        aligned
-    } else {
-        max_prefix_len + 1
-    };
+    // 名称列与最宽前缀之间的空格数可配置（portNameGap，默认 2；spec §9.13）。
+    // 原实现把前缀列宽向上取整到缩进宽度的倍数（18→20），名称列间隙随组宽
+    // 在 2..5 间漂移，恰好落在边界上时还会多出一整格
+    let max_prefix_len = max_prefix_len + options.port_name_gap() - 1;
 
     // Rewrite each port line with alignment
     let lines: Vec<&str> = txt_port.split('\n').collect();
@@ -701,6 +652,7 @@ fn skip_comment(text: &str, pos: usize) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::FormatOptions;
 
     #[test]
     fn test_split_on_comma() {
@@ -712,5 +664,44 @@ mod tests {
     fn test_split_on_comma_nested() {
         let result = split_on_comma("a(x, y), b");
         assert_eq!(result, vec!["a(x, y)", "b"]);
+    }
+
+    fn port_txt() -> &'static str {
+        "module m (\ninput wire [7:0] a,\noutput wire [63:0] dout\n);\nendmodule\n"
+    }
+
+    fn name_gap_of(output: &str, marker: &str) -> usize {
+        // 统计 marker（如 "[63:0]"）之后到端口名之间的空格数
+        let line = output
+            .lines()
+            .find(|l| l.contains(marker))
+            .unwrap_or_else(|| panic!("no {} in output:\n{}", marker, output));
+        let after = line.split(marker).nth(1).unwrap();
+        after.len() - after.trim_start().len()
+    }
+
+    #[test]
+    fn test_port_name_gap_config() {
+        // 默认 2：最宽前缀（output wire [63:0]）与名称列之间恰好 2 空格
+        let out2 = align_module_port(port_txt(), 0, &FormatOptions::default(), "    ", "    ").0;
+        assert_eq!(name_gap_of(&out2, "[63:0]"), 2, "default gap:\n{}", out2);
+
+        // gap=1：紧凑单空格
+        let mut opt1 = FormatOptions::default();
+        opt1.port_name_gap = Some(1);
+        let out1 = align_module_port(port_txt(), 0, &opt1, "    ", "    ").0;
+        assert_eq!(name_gap_of(&out1, "[63:0]"), 1, "gap=1:\n{}", out1);
+
+        // gap=4：加宽
+        let mut opt4 = FormatOptions::default();
+        opt4.port_name_gap = Some(4);
+        let out4 = align_module_port(port_txt(), 0, &opt4, "    ", "    ").0;
+        assert_eq!(name_gap_of(&out4, "[63:0]"), 4, "gap=4:\n{}", out4);
+
+        // 越界钳位到 [1,8]：0 → 1
+        let mut opt0 = FormatOptions::default();
+        opt0.port_name_gap = Some(0);
+        let out0 = align_module_port(port_txt(), 0, &opt0, "    ", "    ").0;
+        assert_eq!(name_gap_of(&out0, "[63:0]"), 1, "gap=0 clamped:\n{}", out0);
     }
 }

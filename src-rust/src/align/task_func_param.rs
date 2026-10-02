@@ -163,13 +163,9 @@ pub fn align_task_func_param(
         max_prefix_len = max_prefix_len.max(plen);
     }
 
-    // Round up to tab boundary
-    let tab_size = options.nb_space();
-    let max_prefix_len = if tab_size > 0 {
-        max_prefix_len + (tab_size - max_prefix_len % tab_size)
-    } else {
-        max_prefix_len + 1
-    };
+    // 名称列与最宽前缀之间的空格数可配置（portNameGap，默认 2；spec §9.13，
+    // 与 align_module_port 一致）。原实现按缩进宽度向上取整，列距随组宽漂移
+    let max_prefix_len = max_prefix_len + options.port_name_gap() - 1;
 
     // Calculate port name column width
     let mut max_port_len: usize = 0;
@@ -373,4 +369,42 @@ fn find_param_open_paren(txt: &str) -> Option<usize> {
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::FormatOptions;
+
+    fn param_txt() -> &'static str {
+        "function automatic f (\ninput wire [7:0] a,\noutput wire [63:0] dout\n);"
+    }
+
+    fn name_gap_of(output: &str, marker: &str) -> usize {
+        let line = output
+            .lines()
+            .find(|l| l.contains(marker))
+            .unwrap_or_else(|| panic!("no {} in output:\n{}", marker, output));
+        let after = line.split(marker).nth(1).unwrap();
+        after.len() - after.trim_start().len()
+    }
+
+    #[test]
+    fn test_port_name_gap_config() {
+        // 默认 2
+        let out2 = align_task_func_param(param_txt(), 1, &FormatOptions::default(), "    ").0;
+        assert_eq!(name_gap_of(&out2, "[63:0]"), 2, "default gap:\n{}", out2);
+
+        // gap=1
+        let mut opt1 = FormatOptions::default();
+        opt1.port_name_gap = Some(1);
+        let out1 = align_task_func_param(param_txt(), 1, &opt1, "    ").0;
+        assert_eq!(name_gap_of(&out1, "[63:0]"), 1, "gap=1:\n{}", out1);
+
+        // gap=4
+        let mut opt4 = FormatOptions::default();
+        opt4.port_name_gap = Some(4);
+        let out4 = align_task_func_param(param_txt(), 1, &opt4, "    ").0;
+        assert_eq!(name_gap_of(&out4, "[63:0]"), 4, "gap=4:\n{}", out4);
+    }
 }

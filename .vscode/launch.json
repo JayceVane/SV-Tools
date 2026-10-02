@@ -10,21 +10,14 @@
       ],
       "outFiles": [
         "${workspaceFolder}/extension.js"
-      ],
-      "preLaunchTask": "npm: watch"
+      ]
     },
     {
-      "name": "Extension Tests",
-      "type": "extensionHost",
+      "name": "Golden 格式化测试",
+      "type": "node",
       "request": "launch",
-      "args": [
-        "--extensionDevelopmentPath=${workspaceFolder}",
-        "--extensionTestsPath=${workspaceFolder}/test/suite/index"
-      ],
-      "outFiles": [
-        "${workspaceFolder}/test/suite/index.js"
-      ],
-      "preLaunchTask": "npm: watch"
+      "program": "${workspaceFolder}/test/golden_test.js",
+      "cwd": "${workspaceFolder}"
     }
   ]
 }

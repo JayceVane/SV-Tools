@@ -96,6 +96,17 @@ fn main() {
             "--no-blank-compact" => {
                 options.blank_compact = Some(false);
             }
+            "--port-name-gap" => {
+                i += 1;
+                if i >= args.len() {
+                    eprintln!("Error: --port-name-gap requires a number (1-8)");
+                    std::process::exit(1);
+                }
+                options.port_name_gap = Some(args[i].parse().unwrap_or_else(|_| {
+                    eprintln!("Error: invalid port-name-gap");
+                    std::process::exit(1);
+                }));
+            }
             "-" => {
                 // Read from stdin
                 let mut text = String::new();
@@ -177,19 +188,7 @@ fn main() {
 }
 
 fn format_text(text: &str, options: &FormatOptions) -> String {
-    let indent_style = options.indent_style().to_string();
-    let preprocessed =
-        svtools::preprocess::preprocess_text(text, &indent_style, options.inline_compact());
-    if std::env::var("SVDBG_PRE").is_ok() {
-        eprintln!("=== PRE ===\n{}=== ENDPRE ===", preprocessed);
-    }
-    let mut beautifier = svtools::beautifier::VerilogBeautifier::new(options.clone());
-    let formatted = beautifier.beautify_text(&preprocessed);
-    if std::env::var("SVDBG_FMT").is_ok() {
-        eprintln!("=== FMT ===\n{}=== ENDFMT ===", formatted);
-    }
-    let max_empty = options.max_consecutive_empty_lines();
-    svtools::blank_rules::normalize_blank_lines(&formatted, max_empty, options.blank_compact())
+    svtools::format_with_protect_passthrough(text, options)
 }
 
 fn print_usage(program: &str) {

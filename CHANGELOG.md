@@ -2,6 +2,31 @@
 
 All notable changes to the SystemVerilog VSCode Extension will be documented in this file.
 
+## [3.4.7] - 2026-10-02
+
+### Added
+- **端口/参数表名称列间距配置 `svtools.portNameGap`**（1–8，默认 2，CLI `--port-name-gap`）：模块/接口头端口表与 task/function 参数表中名称列与最宽前缀（方向/类型/位宽）之间的空格数；设 1 即紧凑单空格风格
+- **npm scripts**：`npm test`（golden 用例 + 幂等断言）、`npm run build:native`（napi 构建并把 `.node` 复制到根目录）、`npm run package`；`vsce` 打包前经 `vscode:prepublish` 自动跑 golden 测试
+- **CI**（`.github/workflows/ci.yml`）：windows-latest 上从源码构建原生模块后运行 golden 测试，格式化回归在 PR 上即被拦住
+- 45 项配置在设置面板按使用动线分组排列（缩进与空行 → 换行与对齐 → 代码生成 → Icarus Verilog → Vivado），由 `order` 字段固定顺序
+- golden 格式化用例扩充至 17 个：新增 ex14（连续单行例化不粘连不误展开）、ex15（端口名称列边界列宽）、ex16（`pragma protect 加密区逐字节透传）
+
+### Changed
+- **仓库瘦身**：移除 v2 Python 后端（`python/`）与其进程管理器 `processManager.js`、根目录一次性调试脚本与输出文件
+- **原生模块不再入库**：`svtools.win32-x64-msvc.node`（23MB）改为由 `npm run build:native` 产出或从 GitHub Releases 下载，`.gitignore` 收掉全部 `*.node`；新增 `.github/workflows/release.yml`，随 tag 构建并把 `.node` 与 vsix 上传为 Release 附件
+- 原生模块缺失时的报错从 "native module not loaded" 改为给出可执行补救路径（构建命令 / Releases）
+- `svtools.reset` / `svtools.sreset` 默认值改为 `["rst_n","reset_n"]` / `["sreset","srst"]`，与 README 及 Rust 内置默认一致；此前清单里的空数组覆盖了内置默认，例化/testbench 生成不会自动识别复位
+- `svtools.maxConsecutiveEmptyLines` 下限放开到 `-1`（完全不处理空行，spec §3 早已定义）
+- 文档同步：README 版本号/配置表补全（`inlineCompact`、`blankCompact`、`portNameGap`、`vivado.*`）/项目结构/源码安装步骤改为 `npm run build:native`；INSTALL、CONTRIBUTING、PUBLISH 去除 Python 时代内容
+
+### Fixed
+- **`pragma protect` 加密区逐字节透传**（Xilinx/Synopsys 加密 IP，如 `*_syn_rfs.v`）：BASE64 载荷行长（`line_length=76`）是编码规范的一部分，重排会破坏解密；且长串无 `;`/关键字的行使对齐器二次方变慢——万行加密文件（ibert/ila 等）格式化 45+ 分钟不返回，透传后 81ms 且输出与输入逐字节一致（未闭合区域同样透传，区外代码段边界镜像用户空行分隔）
+- **端口/参数表名称列距漂移**：名称列原按缩进宽度向上取整（18→20 列），与最宽前缀的间距随组宽在 2..5 间漂移、恰在边界时多出一整格；改为可配置固定间距（默认 2）——模块头与 task/function 参数表两处对齐器一致（后者此前漏网仍保留取整逻辑）
+- **连续单行模块例化粘连与误展开**：实例行（名字后紧跟 `(`）被误判为声明滞留 Decl 状态，连续单行实例被攒进同一次对齐调用而粘连；新增窄化实例头正则并在 `;` 处独立走实例对齐
+- **for 头空格归一化覆盖 `begin` 块状体**：`for(...) begin` 形态此前整行跳过——task 内块状 for 头的多余空格不删、运算符空格不归一，与同文件单行 for 风格分裂；现统一归一化（词间空白折叠、运算符/分号前后单空格含补齐），for 头跨行（用户显式换行）不动
+- **for 归一化破坏字符串字面量**（既有缺陷）：`for(i=0;i<2;i++) $display("a=b  c");` 曾被改成 `"a = b c"`——respace 无字符串保护；现字符串段逐字节保留，括号平衡扫描亦跳过字符串内的括号；for 归一化并入 `inlineCompact` 开关（关闭时保持原有空格）
+- `stripEmptyLine` 配置项在设置界面可见但从未传给原生模块（勾了没反应），现按配置生效
+
 ## [3.4.6] - 2026-09-29
 
 ### Added

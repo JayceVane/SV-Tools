@@ -144,6 +144,16 @@ pub static RE_INST_FULL: LazyLock<Regex> = LazyLock::new(|| {
         .unwrap()
 });
 
+/// 实例化头（带端口括号）：`itype [#(params)] iname (`。
+/// 比 RE_INST_FULL 窄——不含 `iname ;` 备选，普通声明（含 `mailbox #(...) mb;`
+/// 这类无端口括号的参数化声明）不匹配。用于把实例行从声明分类中排除：
+/// 实例行曾被 is_decl_line 误判为声明，走了"置 Decl 状态不 flush"分支，
+/// 连续单行实例被攒进同一次对齐调用（粘连/展开错误的根源）。
+pub static RE_INST_PORTS: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?s)^[ \t]*\b(?P<itype>\w+)\s*(#\s*\([^;]+\))?\s*\b(?P<iname>\w+)\s*\(")
+        .unwrap()
+});
+
 // ── Beautifier block keywords ───────────────────────────────────
 
 pub const KW_BLOCK: &[&str] = &[

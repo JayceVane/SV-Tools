@@ -28,9 +28,9 @@ module top #(
     parameter ID_W = 4 ,
     parameter ID_E = 4
 ) (
-    input            clk, rst_n,
-    input  [31:0]    arbase ,
-    output [63:0]    tx_data
+    input          clk, rst_n,
+    input  [31:0]  arbase ,
+    output [63:0]  tx_data
 );
 
     axi_if #(.DATA_W(64), .ADDR_W(32), .ID_W(4)) axi_bus ();
