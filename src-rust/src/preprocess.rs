@@ -986,3 +986,25 @@ mod for_norm_tests {
         assert_eq!(out, "for(i = 0; i < 64; i = i << 1) begin");
     }
 }
+
+#[cfg(test)]
+mod protect_crlf_tests {
+    use super::*;
+    use crate::config::FormatOptions;
+
+    #[test]
+    fn test_crlf_input_keeps_blank_between_segments() {
+        // CRLF 输入：段间空行不得丢失（\r 曾使空行判定失效）
+        let txt = "module a;\r\nendmodule\r\n\r\n`pragma protect begin_protected\r\nZZZZ\r\n`pragma protect end_protected\r\n\r\nmodule b;\r\nendmodule\r\n";
+        let segs = split_protected_regions(&txt.replace("\r\n", "\n"));
+        assert_eq!(segs.len(), 3);
+        match &segs[0] {
+            ProtectSegment::Code(s) => assert!(s.ends_with("endmodule\n\n")),
+            _ => panic!("expected Code"),
+        }
+        match &segs[2] {
+            ProtectSegment::Code(s) => assert!(s.starts_with("\nmodule b")),
+            _ => panic!("expected Code"),
+        }
+    }
+}
