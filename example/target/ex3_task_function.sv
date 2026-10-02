@@ -9,7 +9,7 @@ task automatic drive (
     input logic [31:0]  base_addr,
     input logic [31:0]  burst_len
 );
-    for(int i=0;i<iter;i++) begin
+    for(int i = 0; i < iter; i++) begin
         @(posedge clk);
         arbase  <= base_addr+i*burst_len*4;
         arvalid <= 1'b1;
