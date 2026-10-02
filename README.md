@@ -2,7 +2,7 @@
 
 一款适用于 Visual Studio Code 的 Verilog/SystemVerilog 代码格式化和生产力工具插件，改编自 Sublime Text SystemVerilog 插件和 Verilog-Gadget 插件。
 
-**版本**: v3.4.7-beta1（预览版）
+**版本**: v3.4.7
 
 > **v3.0 重大更新**: 核心引擎使用 Rust 重构，无需 Python 依赖，性能大幅提升！
 >
@@ -11,6 +11,8 @@
 > **v3.4.2 重大更新**: **Icarus Verilog 工具链集成**（输入/保存自动 lint、一键仿真、跨文件模块解析）+ **内置 VCD 波形查看器**（双击 .vcd 直接打开，多选分组/拖拽调序/显示格式切换/边沿导航，零外部依赖）！
 >
 > **v3.4.6 重大更新**: 格式化行为收敛为**规范驱动**——[`docs/FORMAT_SPEC.md`](docs/FORMAT_SPEC.md) 是格式化器的唯一权威定义；空行规则统一裁决（块内删除、块间分隔）、单行/多行双轨对齐、新增 `inlineCompact` / `blankCompact` 开关；golden 用例逐条带**幂等校验**（格式化两次结果不变）。
+>
+> **v3.4.7 重大更新**: **`pragma protect` 加密 IP 逐字节透传**（Xilinx 加密文件曾格式化假死数十分钟且可能破坏解密，现毫秒级完成且内容零改动）；端口/参数表名称列间距可配置（`portNameGap`）；for 头空格归一化覆盖块状体并保护字符串字面量。
 
 ## 功能特性
 
@@ -299,6 +301,7 @@ assign signal_8 = 8;
 | `stripEmptyLine` | boolean | true | 删除对齐/展开过程中产生的多余空行 |
 | `inlineCompact` | boolean | true | 行内紧凑：单行语句内主动删除多余空格；关闭则保持原有空格 |
 | `blankCompact` | boolean | true | 行间紧凑：块内删除空行、块间保证分隔；关闭则保持用户空行且格式化不新增空行 |
+| `portNameGap` | number | 2 | 模块/接口头端口表与 task/function 参数表中名称列与最宽前缀（方向/类型/位宽）的空格数（1-8） |
 
 **格式化 · 换行与对齐**
 

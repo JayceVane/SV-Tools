@@ -60,6 +60,11 @@ export interface FormatOptions {
    * 关闭时保持用户空行、不插入，仅折叠至 max（且格式化不得新增空行）
    */
   blankCompact?: boolean
+  /**
+   * 模块/接口头端口表与 task/function 参数表：名称列与最宽前缀之间的
+   * 空格数（spec §9.13，≥1）
+   */
+  portNameGap?: number
 }
 export interface GadgetOptions {
   instPrefix?: string
