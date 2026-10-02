@@ -288,7 +288,11 @@ covergroup 内 bins 名与 `{…}` 集合按列对齐（ex8）。
    维度内部空格保留用户原文。
 9. **import/export**：`importSameLine=false` 时独立成行。
 10. **宏**：`` `ifdef/`ifndef/`elsif/`else/`endif `` 第 0 列；`` `define `` 体（含续行）
-    原样保留。
+    原样保留。**`` `pragma protect `` 加密区**（`begin_protected` … `end_protected`，
+    含 Synopsys 风格 `` `protect ``）**整区逐字节透传**——BASE64 载荷行长（如
+    `line_length=76`）是编码规范的一部分，重排会破坏解密；未闭合区域余下全部
+    透传。区外代码段边界镜像用户的空行分隔（≥1 空行 → 恰好 1 行，无则不加）
+    （ex16）。
 11. **generate**：`genvar` 声明按声明组处理；`if/for` 生成块体 +1 缩进；
     其内实例按 §8.3 对齐。
 12. **bind**（`oneBindPerLine`）：每条 bind 一行。

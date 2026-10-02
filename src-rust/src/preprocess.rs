@@ -770,3 +770,111 @@ fn expand_modport(text: &str) -> String {
     }
     out.join("\n")
 }
+
+// ── `pragma protect 加密区切分 ─────────────────────────────────
+// Xilinx/Synopsys 加密 IP 的 BASE64 载荷行长（如 line_length=76）是编码
+// 规范的一部分，重排/删空格会破坏解密；且长串无 `;`/关键字的行会让
+// 对齐器以二次方变慢（万行加密文件需数十分钟）。整区原样透传。
+
+pub enum ProtectSegment {
+    Code(String),
+    Protected(String),
+}
+
+/// 把文本切成交替的普通代码段与 `` `pragma protect `` 加密区（含起止行）。
+/// 未闭合的加密区余下全部透传——宁可不格式化也不损坏载荷。
+pub fn split_protected_regions(text: &str) -> Vec<ProtectSegment> {
+    let re_begin = Regex::new(r"^[ \t]*`(?:pragma[ \t]+)?protect[ \t]+begin_protected").unwrap();
+    let re_end = Regex::new(r"^[ \t]*`(?:pragma[ \t]+)?protect[ \t]+end_protected").unwrap();
+
+    let mut segments = Vec::new();
+    let mut code_start = 0usize;
+    let mut region_start: Option<usize> = None;
+    let bytes = text.as_bytes();
+    let mut pos = 0usize;
+    while pos < bytes.len() {
+        let line_end = text[pos..].find('\n').map(|i| pos + i + 1).unwrap_or(bytes.len());
+        let line = &text[pos..line_end];
+        if region_start.is_none() && re_begin.is_match(line) {
+            if pos > code_start {
+                segments.push(ProtectSegment::Code(text[code_start..pos].to_string()));
+            }
+            region_start = Some(pos);
+        } else if region_start.is_some() && re_end.is_match(line) {
+            segments.push(ProtectSegment::Protected(
+                text[region_start.unwrap()..line_end].to_string(),
+            ));
+            region_start = None;
+            code_start = line_end;
+        }
+        pos = line_end;
+    }
+    if let Some(rs) = region_start {
+        segments.push(ProtectSegment::Protected(text[rs..].to_string()));
+    } else if code_start < bytes.len() {
+        // 纯空白尾段直接透传，避免空段走管线丢失换行
+        if text[code_start..].trim().is_empty() {
+            segments.push(ProtectSegment::Protected(text[code_start..].to_string()));
+        } else {
+            segments.push(ProtectSegment::Code(text[code_start..].to_string()));
+        }
+    }
+    segments
+}
+
+#[cfg(test)]
+mod protect_tests {
+    use super::*;
+
+    #[test]
+    fn test_fully_wrapped_passthrough() {
+        let txt = "`pragma protect begin_protected\n`pragma protect data_block\nABcd+/12\n`pragma protect end_protected\n";
+        let segs = split_protected_regions(txt);
+        assert_eq!(segs.len(), 1);
+        match &segs[0] {
+            ProtectSegment::Protected(s) => assert_eq!(s, txt),
+            _ => panic!("expected Protected"),
+        }
+    }
+
+    #[test]
+    fn test_code_around_region() {
+        let txt = "module a;\nendmodule\n`protect begin_protected\nZZZZ\n`protect end_protected\nmodule b;\nendmodule\n";
+        let segs = split_protected_regions(txt);
+        assert_eq!(segs.len(), 3);
+        match &segs[0] {
+            ProtectSegment::Code(s) => assert!(s.contains("module a")),
+            _ => panic!("expected Code"),
+        }
+        match &segs[1] {
+            ProtectSegment::Protected(s) => {
+                assert!(s.starts_with("`protect begin_protected"));
+                assert!(s.ends_with("end_protected\n"));
+            }
+            _ => panic!("expected Protected"),
+        }
+        match &segs[2] {
+            ProtectSegment::Code(s) => assert!(s.contains("module b")),
+            _ => panic!("expected Code"),
+        }
+    }
+
+    #[test]
+    fn test_unclosed_region_tail_passthrough() {
+        let txt = "module a;\nendmodule\n`pragma protect begin_protected\nQQQQ\n";
+        let segs = split_protected_regions(txt);
+        assert_eq!(segs.len(), 2);
+        match &segs[1] {
+            ProtectSegment::Protected(s) => assert!(s.contains("QQQQ")),
+            _ => panic!("expected Protected"),
+        }
+    }
+
+    #[test]
+    fn test_no_region_single_code() {
+        let txt = "module a;\nendmodule\n";
+        let segs = split_protected_regions(txt);
+        assert_eq!(segs.len(), 1);
+        matches!(segs[0], ProtectSegment::Code(_));
+    }
+}

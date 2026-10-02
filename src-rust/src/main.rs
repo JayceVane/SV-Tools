@@ -177,13 +177,7 @@ fn main() {
 }
 
 fn format_text(text: &str, options: &FormatOptions) -> String {
-    let indent_style = options.indent_style().to_string();
-    let preprocessed =
-        svtools::preprocess::preprocess_text(text, &indent_style, options.inline_compact());
-    let mut beautifier = svtools::beautifier::VerilogBeautifier::new(options.clone());
-    let formatted = beautifier.beautify_text(&preprocessed);
-    let max_empty = options.max_consecutive_empty_lines();
-    svtools::blank_rules::normalize_blank_lines(&formatted, max_empty, options.blank_compact())
+    svtools::format_with_protect_passthrough(text, options)
 }
 
 fn print_usage(program: &str) {
