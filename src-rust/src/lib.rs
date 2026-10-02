@@ -23,7 +23,10 @@ fn format_text(text: String, options: FormatOptions) -> Result<String> {
 /// 规范的一部分，重排会破坏解密；且长载荷会使对齐器二次方变慢），
 /// 其余普通代码段独立格式化后按原顺序拼接。
 pub fn format_with_protect_passthrough(text: &str, options: &FormatOptions) -> String {
-    let segments = preprocess::split_protected_regions(text);
+    // 行尾归一须先于加密区切分：CRLF 的 \r 会让段间空行判定失效
+    // （`\r\n` 行被视为非空内容，段边界空行被丢弃）
+    let text = text.replace("\r\n", "\n").replace('\r', "\n");
+    let segments = preprocess::split_protected_regions(&text);
     if segments.is_empty() {
         return String::new();
     }
