@@ -141,8 +141,18 @@ function buildSimulateScript(o) {
     // runtime 空串 → 'all'（run all 跑到 $finish）；未传时保持 1000ns 兼容
     const rt = (o.runtime === undefined || o.runtime === null) ? '1000ns'
         : (String(o.runtime) === '' ? 'all' : String(o.runtime));
-    L.push('set_property -name {xsim.simulate.runtime} -value ' + tclQuote(rt) + ' -objects [get_filesets sim_1]');
+    // 默认生成的 <top>.tcl 先做 wave 配置（add_wave）再 run——模块只有不可
+    // trace 的对象（如动态数组，xsim 不支持 trace 动态类型）时脚本在 wave
+    // 块中断，run all 永不执行、$display 无输出。用 custom_tcl 换成只含
+    // run 的最小脚本；结束后 reset 属性，不影响用户手动 launch_simulation
+    L.push('set xsimTcl [file join [file dirname [info script]] xsim_run.tcl]');
+    L.push('set fh [open $xsimTcl w]');
+    L.push('puts $fh "run ' + tclQuote(rt) + '"');
+    L.push('puts $fh "quit"');
+    L.push('close $fh');
+    L.push('set_property -name {xsim.simulate.custom_tcl} -value $xsimTcl -objects [get_filesets sim_1]');
     L.push('launch_simulation');
+    L.push('catch { reset_property xsim.simulate.custom_tcl [get_filesets sim_1] }');
     L.push('puts "SVTOOLS_SIM_DONE"');
     return L.filter(Boolean).join('\n') + '\n';
 }
