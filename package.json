@@ -133,6 +133,18 @@
         "icon": "$(search)"
       },
       {
+        "command": "svtools.lint.selectEngine",
+        "title": "%cmd.lint_selectEngine.title%",
+        "category": "SystemVerilog Tools",
+        "icon": "$(zap)"
+      },
+      {
+        "command": "svtools.xvlog.elaborate",
+        "title": "%cmd.xvlog_elaborate.title%",
+        "category": "SystemVerilog Tools",
+        "icon": "$(checklist)"
+      },
+      {
         "command": "svtools.iverilog.simulate",
         "title": "%cmd.iverilog_simulate.title%",
         "category": "SystemVerilog Tools",
@@ -539,11 +551,11 @@
           ],
           "description": "%cfg.lintEngine.desc%"
         },
-        "svtools.lint.elaborate": {
+        "svtools.lint.currentFileOnly": {
           "order": 64.5,
           "type": "boolean",
-          "default": false,
-          "description": "%cfg.lintElaborate.desc%"
+          "default": true,
+          "description": "%cfg.lintCurrentFileOnly.desc%"
         },
         "svtools.iverilog.path": {
           "order": 70,

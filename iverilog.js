@@ -25,7 +25,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { lintWithXvlog, resetXvlogCache } = require('./xvlog');
+const { lintWithXvlog, elaborateWithXvlog, resetXvlogCache } = require('./xvlog');
 
 const OUTPUT_CHANNEL_TITLE = 'SystemVerilog Tools · Icarus Verilog';
 const DIAGNOSTIC_SOURCE = 'iverilog';
@@ -586,13 +586,18 @@ function activateIverilog(context, deps) {
             }
         }
 
+        // currentFileOnly（默认开）：只检查当前打开的文件——不带 -y 扫描目录、
+        // 不做缺模块补文件；关闭后恢复跨文件解析
+        const fileOnly = vscode.workspace.getConfiguration('svtools.lint').get('currentFileOnly', true);
+        const scanDirs = fileOnly ? [] : (await scanWorkspaceSources()).dirs;
+
         const args = [
             '-tnull',
             ...buildCommonArgs({
                 fileName: filePath,
                 standard: config.get('standard'),
-                includePaths: [fileDir, ...resolveConfigPaths(config.get('includePaths'), fileDir), ...(await scanWorkspaceSources()).dirs],
-                libraryPaths: [fileDir, ...resolveConfigPaths(config.get('libraryPaths'), fileDir), ...(await scanWorkspaceSources()).dirs],
+                includePaths: [fileDir, ...resolveConfigPaths(config.get('includePaths'), fileDir), ...scanDirs],
+                libraryPaths: [fileDir, ...resolveConfigPaths(config.get('libraryPaths'), fileDir), ...scanDirs],
                 extraArgs: ['-Y', '.sv', ...config.get('lintArgs', [])]
             })
         ];
@@ -600,7 +605,9 @@ function activateIverilog(context, deps) {
         const gen = (lintGenerations.get(document.uri.toString()) || 0) + 1;
         lintGenerations.set(document.uri.toString(), gen);
 
-        const { result } = await compileWithModuleResolution(toolchain, args, [lintTarget], fileDir);
+        const { result } = fileOnly
+            ? { result: await runTool(toolchain.iverilog, [...args, lintTarget], { cwd: fileDir, env: toolchain.env }) }
+            : await compileWithModuleResolution(toolchain, args, [lintTarget], fileDir);
         if (tempFile) {
             try { fs.unlinkSync(tempFile); } catch (err) { /* 清理失败可忽略 */ }
         }
@@ -846,22 +853,50 @@ function activateIverilog(context, deps) {
     simStatusBar.command = 'svtools.iverilog.simulate';
     context.subscriptions.push(simStatusBar);
 
+    // lint 引擎切换 + xelab 详细化按钮（与仿真按钮同组，排在右侧）
+    const engineStatusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 90);
+    engineStatusBar.command = 'svtools.lint.selectEngine';
+    context.subscriptions.push(engineStatusBar);
+
+    const elabStatusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 89);
+    elabStatusBar.command = 'svtools.xvlog.elaborate';
+    elabStatusBar.tooltip = 'xelab 详细化检查（当前文件 + 工作区依赖；类型/端口/位宽/未定义模块引用）';
+    context.subscriptions.push(elabStatusBar);
+
+    function currentLintEngine() {
+        return vscode.workspace.getConfiguration('svtools.lint').get('engine', 'iverilog');
+    }
+
     function updateStatusBar() {
         const editor = vscode.window.activeTextEditor;
-        if (!editor || !isVerilogDocument(editor.document)) {
+        const verilogOpen = !!(editor && isVerilogDocument(editor.document));
+
+        if (!verilogOpen) {
             simStatusBar.hide();
-            return;
-        }
-        if (activeSim) {
+        } else if (activeSim) {
             simStatusBar.text = '$(debug-restart) iverilog 仿真中';
             simStatusBar.tooltip = 'Icarus Verilog 仿真正在运行 — 点击重新运行，或执行 "Stop Simulation" 停止';
             simStatusBar.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
+            simStatusBar.show();
         } else {
             simStatusBar.text = '$(play) iverilog 仿真';
             simStatusBar.tooltip = '运行 Icarus Verilog 仿真（编译 + vvp）';
             simStatusBar.backgroundColor = undefined;
+            simStatusBar.show();
         }
-        simStatusBar.show();
+
+        if (verilogOpen) {
+            const engine = currentLintEngine();
+            engineStatusBar.text = `$(zap) ${engine}`;
+            engineStatusBar.tooltip = `lint 引擎：${engine} — 点击切换 iverilog / xvlog`;
+            engineStatusBar.show();
+            // xelab 手动按钮只在 xvlog 引擎下有意义
+            elabStatusBar.text = '$(checklist) xelab';
+            if (engine === 'xvlog') elabStatusBar.show(); else elabStatusBar.hide();
+        } else {
+            engineStatusBar.hide();
+            elabStatusBar.hide();
+        }
     }
 
     // ---- 事件与命令接线 ----
@@ -909,6 +944,8 @@ function activateIverilog(context, deps) {
             if (event.affectsConfiguration('svtools.vivado.path')) {
                 resetXvlogCache();
             }
+            // 引擎切换等配置变化后刷新状态栏按钮
+            updateStatusBar();
             // 重新检查所有打开的 Verilog 文档
             for (const doc of vscode.workspace.textDocuments) {
                 lintDocument(doc);
@@ -921,6 +958,43 @@ function activateIverilog(context, deps) {
         vscode.workspace.onDidDeleteFiles(() => { workspaceScanCache = { dirs: [], modules: new Map(), expiresAt: 0 }; }),
         vscode.workspace.onDidRenameFiles(() => { workspaceScanCache = { dirs: [], modules: new Map(), expiresAt: 0 }; }),
 
+        vscode.commands.registerCommand('svtools.lint.selectEngine', async () => {
+            const cur = currentLintEngine();
+            const pick = await vscode.window.showQuickPick([
+                { label: 'iverilog', description: 'Icarus Verilog — 快速语法检查（-tnull）', value: 'iverilog' },
+                { label: 'xvlog', description: 'Vivado — 与 xsim 编译阶段一致的诊断，可配合 xelab 按钮', value: 'xvlog' }
+            ], { placeHolder: `当前 lint 引擎：${cur} — 选择要切换的引擎` });
+            if (!pick || pick.value === cur) return;
+            const target = vscode.workspace.workspaceFolders
+                ? vscode.ConfigurationTarget.Workspace : vscode.ConfigurationTarget.Global;
+            await vscode.workspace.getConfiguration('svtools.lint').update('engine', pick.value, target);
+            vscode.window.setStatusBarMessage(`lint 引擎已切换：${pick.value}`, 3000);
+            updateStatusBar();
+        }),
+        vscode.commands.registerCommand('svtools.xvlog.elaborate', async () => {
+            const editor = vscode.window.activeTextEditor;
+            if (!editor || !isVerilogDocument(editor.document) || editor.document.uri.scheme !== 'file') {
+                vscode.window.showWarningMessage('请先在编辑器中打开 Verilog/SystemVerilog 文件。');
+                return;
+            }
+            if (currentLintEngine() !== 'xvlog') {
+                vscode.window.showWarningMessage('xelab 详细化检查需要 lint 引擎为 xvlog — 点击状态栏引擎按钮切换。');
+                return;
+            }
+            const gen = (lintGenerations.get(editor.document.uri.toString()) || 0) + 1;
+            lintGenerations.set(editor.document.uri.toString(), gen);
+            const summary = await elaborateWithXvlog(editor.document, {
+                vscode, channel, applyDiagnostics, isVerilogDocument, scanWorkspaceSources,
+                lintGenerations, gen,
+                showToolchainError: (msg, setting) => showToolchainError(msg, setting)
+            });
+            vscode.window.setStatusBarMessage(
+                summary.errorCount
+                    ? `xelab：发现 ${summary.errorCount} 个错误，详见 Problems 面板`
+                    : 'xelab：详细化检查未发现问题',
+                5000);
+            return summary;
+        }),
         vscode.commands.registerCommand('svtools.iverilog.lint', async () => {
             const editor = vscode.window.activeTextEditor;
             if (!editor) {

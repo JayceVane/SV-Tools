@@ -27,7 +27,6 @@
   "cfg.lintEngine.desc": "Lint 引擎：Icarus Verilog（iverilog -tnull）或 Vivado xvlog（工具链位置取 svtools.vivado.path）",
   "cfg.lintEngine.iverilog": "Icarus Verilog —— 快速，iverilog -tnull 语法检查",
   "cfg.lintEngine.xvlog": "Vivado xvlog —— 与 xsim 编译阶段一致的语法诊断",
-  "cfg.lintElaborate.desc": "仅 xvlog 引擎：xvlog 通过后追加 xelab 详细化检查（类型/端口/位宽），较慢；缓存在 <工作区>/.svtools/xvlog",
   "cfg.iverilog_path.desc": "Icarus Verilog 的 bin 目录（或 iverilog 可执行文件的完整路径）。留空 = 从 IVERILOG_HOME、PATH 和常见安装位置自动探测。",
   "cfg.iverilog_cygwinPath.desc": "cygwin1.dll 所在目录，Cygwin 构建的 Icarus Verilog 安装在 Cygwin 根目录之外时需要。留空 = 自动探测。",
   "cfg.iverilog_lintOnSave.desc": "保存时运行 iverilog 语法检查，诊断结果显示在问题（Problems）面板",
@@ -74,5 +73,8 @@
   "cmd.vivado_removeFromFileset.title": "Vivado: 从工程移除文件",
   "cmd.vivado_simulate.title": "Vivado: 仿真当前文件 (xsim)",
   "cmd.simulate_pick.title": "仿真…",
-  "cfg.vivado_simRuntime.desc": "Vivado xsim 仿真运行时长（xsim.simulate.runtime），如 1000ns。留空 = 跑到 $finish（xsim -runall）"
+  "cfg.vivado_simRuntime.desc": "Vivado xsim 仿真运行时长（xsim.simulate.runtime），如 1000ns。留空 = 跑到 $finish（xsim -runall）",
+  "cmd.lint_selectEngine.title": "Lint：选择引擎（iverilog / xvlog）",
+  "cmd.xvlog_elaborate.title": "Lint：xelab 详细化检查（当前文件 + 工作区依赖）",
+  "cfg.lintCurrentFileOnly.desc": "只对打开的文件做语法检查——快速、不产生工作区其他文件的诊断。关闭后跨文件解析（iverilog -y 扫描 / xvlog 附带工作区文件集）"
 }
