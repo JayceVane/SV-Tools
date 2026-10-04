@@ -853,15 +853,11 @@ function activateIverilog(context, deps) {
     simStatusBar.command = 'svtools.iverilog.simulate';
     context.subscriptions.push(simStatusBar);
 
-    // lint 引擎切换 + xelab 详细化按钮（与仿真按钮同组，排在右侧）
+    // lint 引擎切换按钮（状态栏右侧）。xelab 详细化按钮在编辑器工具栏
+    // （标签页右上角，package.json editor/title，仅 xvlog 引擎显示）
     const engineStatusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 90);
     engineStatusBar.command = 'svtools.lint.selectEngine';
     context.subscriptions.push(engineStatusBar);
-
-    const elabStatusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 89);
-    elabStatusBar.command = 'svtools.xvlog.elaborate';
-    elabStatusBar.tooltip = 'xelab 详细化检查（当前文件 + 工作区依赖；类型/端口/位宽/未定义模块引用）';
-    context.subscriptions.push(elabStatusBar);
 
     function currentLintEngine() {
         return vscode.workspace.getConfiguration('svtools.lint').get('engine', 'iverilog');
@@ -890,12 +886,8 @@ function activateIverilog(context, deps) {
             engineStatusBar.text = `$(zap) ${engine}`;
             engineStatusBar.tooltip = `lint 引擎：${engine} — 点击切换 iverilog / xvlog`;
             engineStatusBar.show();
-            // xelab 手动按钮只在 xvlog 引擎下有意义
-            elabStatusBar.text = '$(checklist) xelab';
-            if (engine === 'xvlog') elabStatusBar.show(); else elabStatusBar.hide();
         } else {
             engineStatusBar.hide();
-            elabStatusBar.hide();
         }
     }
 
