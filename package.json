@@ -525,6 +525,26 @@
           "default": "",
           "description": "%cfg.headerTemplate.desc%"
         },
+        "svtools.lint.engine": {
+          "order": 64,
+          "type": "string",
+          "enum": [
+            "iverilog",
+            "xvlog"
+          ],
+          "default": "iverilog",
+          "enumDescriptions": [
+            "%cfg.lintEngine.iverilog%",
+            "%cfg.lintEngine.xvlog%"
+          ],
+          "description": "%cfg.lintEngine.desc%"
+        },
+        "svtools.lint.elaborate": {
+          "order": 64.5,
+          "type": "boolean",
+          "default": false,
+          "description": "%cfg.lintElaborate.desc%"
+        },
         "svtools.iverilog.path": {
           "order": 70,
           "type": "string",
