@@ -25,6 +25,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { lintWithXvlog, resetXvlogCache } = require('./xvlog');
 
 const OUTPUT_CHANNEL_TITLE = 'SystemVerilog Tools · Icarus Verilog';
 const DIAGNOSTIC_SOURCE = 'iverilog';
@@ -496,8 +497,9 @@ function activateIverilog(context, deps) {
      * 将编译输出解析结果写入诊断集合（Problems 面板可点击跳转）。
      * @param {vscode.TextDocument|null} document 触发 lint 的文档（用于整行 squiggle 范围）
      * @param {ReturnType<typeof parseCompilerOutput>} findings
+     * @param {string} [source] 诊断来源标识（iverilog / xvlog）
      */
-    function applyDiagnostics(document, findings) {
+    function applyDiagnostics(document, findings, source) {
         const grouped = new Map();
         for (const f of findings) {
             if (!grouped.has(f.file)) grouped.set(f.file, []);
@@ -526,7 +528,7 @@ function activateIverilog(context, deps) {
                 }
                 const diag = new vscode.Diagnostic(range, item.message,
                     item.severity === 'warning' ? vscode.DiagnosticSeverity.Warning : vscode.DiagnosticSeverity.Error);
-                diag.source = DIAGNOSTIC_SOURCE;
+                diag.source = source || DIAGNOSTIC_SOURCE;
                 list.push(diag);
             }
             diagnostics.set(uri, list);
@@ -545,6 +547,17 @@ function activateIverilog(context, deps) {
         const empty = { ok: true, errorCount: 0, warningCount: 0 };
         if (!isVerilogDocument(document)) return empty;
         if (document.uri.scheme !== 'file') return empty;
+
+        // lint 引擎分流：xvlog（Vivado 语法/详细化检查）走独立模块
+        if (vscode.workspace.getConfiguration('svtools.lint').get('engine', 'iverilog') === 'xvlog') {
+            const gen = (lintGenerations.get(document.uri.toString()) || 0) + 1;
+            lintGenerations.set(document.uri.toString(), gen);
+            return lintWithXvlog(document, {
+                vscode, channel, applyDiagnostics, isVerilogDocument, scanWorkspaceSources,
+                lintGenerations, gen,
+                showToolchainError: (msg, setting) => showToolchainError(msg, setting)
+            });
+        }
 
         let toolchain;
         try {
@@ -612,14 +625,14 @@ function activateIverilog(context, deps) {
     }
 
     let toolchainErrorShown = false;
-    function showToolchainError(message) {
+    function showToolchainError(message, setting) {
         if (toolchainErrorShown) return;
         toolchainErrorShown = true;
         vscode.window.showErrorMessage(message, '打开设置')
             .then(choice => {
                 toolchainErrorShown = false;
                 if (choice === '打开设置') {
-                    vscode.commands.executeCommand('workbench.action.openSettings', 'svtools.iverilog.path');
+                    vscode.commands.executeCommand('workbench.action.openSettings', setting || 'svtools.iverilog.path');
                 }
             });
     }
@@ -884,12 +897,17 @@ function activateIverilog(context, deps) {
             }
         }),
         vscode.workspace.onDidChangeConfiguration(event => {
-            if (!event.affectsConfiguration('svtools.iverilog')) return;
+            if (!event.affectsConfiguration('svtools.iverilog')
+                && !event.affectsConfiguration('svtools.lint')
+                && !event.affectsConfiguration('svtools.vivado')) return;
             // 工具路径类配置变更后强制重新探测
             if (event.affectsConfiguration('svtools.iverilog.path')
                 || event.affectsConfiguration('svtools.iverilog.cygwinPath')) {
                 cachedToolchain = null;
                 toolchainFailure = null;
+            }
+            if (event.affectsConfiguration('svtools.vivado.path')) {
+                resetXvlogCache();
             }
             // 重新检查所有打开的 Verilog 文档
             for (const doc of vscode.workspace.textDocuments) {
