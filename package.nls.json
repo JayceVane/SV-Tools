@@ -27,7 +27,6 @@
   "cfg.lintEngine.desc": "Lint engine: Icarus Verilog (iverilog -tnull) or Vivado xvlog (uses svtools.vivado.path for toolchain lookup)",
   "cfg.lintEngine.iverilog": "Icarus Verilog — fast, uses iverilog -tnull",
   "cfg.lintEngine.xvlog": "Vivado xvlog — Vivado syntax check, same diagnostics as xsim compile step",
-  "cfg.lintElaborate.desc": "xvlog engine only: after xvlog passes, run xelab for elaboration-level checks (types, ports, widths). Slower; snapshot cached in <workspace>/.svtools/xvlog",
   "cfg.iverilog_path.desc": "Icarus Verilog bin directory (or full path to iverilog executable). Empty = auto-detect from IVERILOG_HOME, PATH and common install locations.",
   "cfg.iverilog_cygwinPath.desc": "Directory containing cygwin1.dll, required by Cygwin builds of Icarus Verilog installed outside a Cygwin root. Empty = auto-detect.",
   "cfg.iverilog_lintOnSave.desc": "Run iverilog syntax check on save and report diagnostics in the Problems panel",
@@ -74,5 +73,8 @@
   "cmd.vivado_removeFromFileset.title": "Vivado: Remove File from Project",
   "cmd.vivado_simulate.title": "Vivado: Simulate Current File (xsim)",
   "cmd.simulate_pick.title": "Simulate…",
-  "cfg.vivado_simRuntime.desc": "Vivado xsim simulation runtime (xsim.simulate.runtime), e.g. 1000ns. Empty = run until $finish (xsim -runall)"
+  "cfg.vivado_simRuntime.desc": "Vivado xsim simulation runtime (xsim.simulate.runtime), e.g. 1000ns. Empty = run until $finish (xsim -runall)",
+  "cmd.lint_selectEngine.title": "Lint: Select Engine (iverilog / xvlog)",
+  "cmd.xvlog_elaborate.title": "Lint: xelab Elaboration Check (current file + workspace deps)",
+  "cfg.lintCurrentFileOnly.desc": "Lint the opened file only — fast, no diagnostics from other workspace files. Off: resolve cross-file modules (iverilog -y scan / xvlog workspace file set)"
 }
