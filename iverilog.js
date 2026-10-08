@@ -265,7 +265,9 @@ function formatCommandLine(command, args) {
 // 工作区源码扫描（目录清单 + 模块名 → 文件索引，带 TTL 缓存）
 // ---------------------------------------------------------------------------
 
-const MODULE_DECL_RE = /^[ \t]*(?:module|macromodule)[ \t]+([A-Za-z_][A-Za-z0-9_$]*)/gm;
+// module/interface/package/program 都算设计单元：TB 跨文件引用的 interface 实例、
+// import 的 package 同样要能按定义文件补编译（"Module <apb_if> not found" 类报错）
+const MODULE_DECL_RE = /^[ \t]*(?:module|macromodule|interface|package|program)[ \t]+([A-Za-z_][A-Za-z0-9_$]*)/gm;
 // iverilog 缺模块汇总块：*** These modules were missing:\n        name referenced N times.\n***
 const MISSING_MODULE_BLOCK_RE = /\*\*\* These modules were missing:\r?\n([\s\S]*?)\r?\n\s*\*\*\*/;
 const MISSING_MODULE_ENTRY_RE = /^[ \t]+([A-Za-z_][A-Za-z0-9_$]*)[ \t]+referenced/gm;
@@ -279,7 +281,8 @@ let workspaceScanCache = { dirs: [], modules: new Map(), expiresAt: 0 };
 
 /**
  * 扫描工作区 Verilog 源码：收集含源文件的目录（供 -y/-I 使用）与
- * 「模块名 → 文件路径」索引（供缺模块时按实际定义文件补编译，覆盖文件名≠模块名的情况）。
+ * 「设计单元名（module/interface/package/program）→ 文件路径」索引
+ * （供缺单元时按实际定义文件补编译，覆盖文件名≠单元名的情况）。
  * 结果带 TTL 缓存，避免每次防抖 lint 都全量扫描；缺模块重试与文件增删事件会强制刷新。
  * @param {boolean} [force=false] 跳过缓存强制重新扫描
  * @returns {Promise<{dirs: string[], modules: Map<string, string>}>}
