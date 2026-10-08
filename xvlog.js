@@ -140,6 +140,30 @@ function buildPrjBody(files) {
     return lines.join('\n') + '\n';
 }
 
+/** 当前文件是否用到了 UVM（uvm_pkg/uvm_config_db/`uvm_* 宏/uvm_macros.svh 均命中）。 */
+function detectUvmUsage(text) {
+    return /\buvm_[a-z0-9_]+/i.test(String(text));
+}
+
+/**
+ * 查找 Vivado 自带 UVM 源码目录（uvm_macros.svh 所在），供 xvlog -i 使用。
+ * 不同版本安装布局不同（2022.1 是 data/system_verilog/uvm_1.2），逐个探测。
+ * @param {string} binDir Vivado bin 目录
+ * @returns {string|null} 找不到返回 null（此时不加 -i，`include "uvm_macros.svh" 会失败）
+ */
+function findUvmIncludeDir(binDir) {
+    const root = path.resolve(binDir, '..');
+    const candidates = [
+        path.join(root, 'data', 'system_verilog', 'uvm_1.2'),
+        path.join(root, 'data', 'system_verilog', 'uvm'),
+        path.join(root, 'data', 'systemverilog', 'uvm')
+    ];
+    for (const c of candidates) {
+        if (fs.existsSync(path.join(c, 'uvm_macros.svh'))) return c;
+    }
+    return null;
+}
+
 /**
  * 公共前置：文档校验、工具链、工作目录、未保存缓冲区临时文件。
  * @returns {null|object} 失败返回 null
@@ -182,8 +206,22 @@ async function prepareXvlogRun(document, ctx) {
         }
     }
 
+    // UVM 工程：需显式挂预编译 UVM 库（-L UVM），否则 'uvm_pkg'/
+    // 'uvm_config_db' is not declared（VRFC 10-2989）；编译还需 -i 指向
+    // 自带 UVM 源码目录，`include "uvm_macros.svh" 才能解析。
+    // 检测基于当前文件——elaborate 补入的工作区依赖文件不参与检测。
+    let uvmLibArgs = [];
+    let uvmIncArgs = [];
+    if (detectUvmUsage(document.getText())) {
+        uvmLibArgs = ['-L', 'UVM'];
+        const uvmInc = findUvmIncludeDir(binDir);
+        if (uvmInc) uvmIncArgs = ['-i', uvmInc];
+        channel.appendLine('[lint] 检测到 UVM：附加 -L UVM'
+            + (uvmIncArgs.length ? ' -i <uvm 源码目录>' : ''));
+    }
+
     return {
-        binDir, workDir, filePath, lintTarget, tempFile,
+        binDir, workDir, filePath, lintTarget, tempFile, uvmLibArgs, uvmIncArgs,
         collect: (raw) => parseVivadoDiagnostics(tempFile ? raw.split(tempFile).join(filePath) : raw, workDir, filePath),
         cleanup: () => { if (tempFile) { try { fs.unlinkSync(tempFile); } catch (e) { /* 忽略 */ } } },
         stale: () => !!(ctx.lintGenerations && ctx.lintGenerations.get(document.uri.toString()) !== ctx.gen)
@@ -207,7 +245,7 @@ async function lintWithXvlog(document, ctx) {
     const { vscode, channel, applyDiagnostics, scanWorkspaceSources } = ctx;
     const prep = await prepareXvlogRun(document, ctx);
     if (!prep) return empty;
-    const { binDir, workDir, filePath, lintTarget, collect, cleanup, stale } = prep;
+    const { binDir, workDir, filePath, lintTarget, collect, cleanup, stale, uvmLibArgs, uvmIncArgs } = prep;
     const startedAt = Date.now();
 
     const fileOnly = vscode.workspace.getConfiguration('svtools.lint').get('currentFileOnly', true);
@@ -227,7 +265,7 @@ async function lintWithXvlog(document, ctx) {
         return empty;
     }
 
-    const xv = await runVivadoTool(binDir, 'xvlog', ['--nolog', '--incr', '-prj', 'svtools.prj'], workDir, 120000);
+    const xv = await runVivadoTool(binDir, 'xvlog', ['--nolog', ...uvmLibArgs, ...uvmIncArgs, '--incr', '-prj', 'svtools.prj'], workDir, 120000);
     cleanup();
     if (stale()) return empty;
 
@@ -249,7 +287,7 @@ async function elaborateWithXvlog(document, ctx) {
     const { channel, applyDiagnostics, scanWorkspaceSources } = ctx;
     const prep = await prepareXvlogRun(document, ctx);
     if (!prep) return empty;
-    const { binDir, workDir, filePath, lintTarget, collect, cleanup, stale } = prep;
+    const { binDir, workDir, filePath, lintTarget, collect, cleanup, stale, uvmLibArgs, uvmIncArgs } = prep;
     const startedAt = Date.now();
 
     const top = require('./vivado/tclgen').firstModuleName(document.getText());
@@ -268,14 +306,14 @@ async function elaborateWithXvlog(document, ctx) {
             return empty;
         }
         // 全量编译（无 --incr）：本轮文件集必须全部通过，库才完整
-        const xv = await runVivadoTool(binDir, 'xvlog', ['--nolog', '-prj', 'svtools.prj'], workDir, 120000);
+        const xv = await runVivadoTool(binDir, 'xvlog', ['--nolog', ...uvmLibArgs, ...uvmIncArgs, '-prj', 'svtools.prj'], workDir, 120000);
         if (stale()) { cleanup(); return empty; }
         findings = collect(`${xv.stderr}\n${xv.stdout}`);
         if (xv.code !== 0) break;   // 文件集有语法错（当前文件或补入的依赖）——如实报告
         if (!top) break;            // 当前文件无 module 声明，无法详细化
 
         const xe = await runVivadoTool(binDir, 'xelab',
-            ['--nolog', '--snapshot', 'svtools_lint', 'work.' + top], workDir, 120000);
+            ['--nolog', '--snapshot', 'svtools_lint', ...uvmLibArgs, 'work.' + top], workDir, 120000);
         if (stale()) { cleanup(); return empty; }
         const xeRaw = `${xe.stderr}\n${xe.stdout}`;
         findings = findings.concat(collect(xeRaw));
@@ -305,5 +343,7 @@ module.exports = {
     resetXvlogCache,
     resolveXvlogBinDir,
     parseVivadoDiagnostics,
-    buildPrjBody
+    buildPrjBody,
+    detectUvmUsage,
+    findUvmIncludeDir
 };
