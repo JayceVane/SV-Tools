@@ -2,7 +2,7 @@
   "name": "svtools",
   "displayName": "SystemVerilog Tools",
   "description": "Verilog/SystemVerilog formatter, module instantiation, testbench generation, and productivity tools (Rust native backend)",
-  "version": "3.4.8-beta4",
+  "version": "3.4.8-beta5",
   "publisher": "JayceVane",
   "author": {
     "name": "JayceVane",
@@ -292,6 +292,11 @@
           "command": "svtools.xvlog.elaborate",
           "group": "navigation@1",
           "when": "config.svtools.lint.engine == 'xvlog' && (resourceExtname == .sv || resourceExtname == .v || resourceExtname == .svh || resourceExtname == .vh) && activeCustomEditorId != svtoolsWaveViewer"
+        },
+        {
+          "command": "svtools.iverilog.stopSimulation",
+          "group": "navigation@2",
+          "when": "svtools.simRunning && activeCustomEditorId != svtoolsWaveViewer"
         },
         {
           "command": "svtools.vivado.addToFileset",
