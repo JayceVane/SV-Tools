@@ -294,6 +294,11 @@
           "when": "config.svtools.lint.engine == 'xvlog' && (resourceExtname == .sv || resourceExtname == .v || resourceExtname == .svh || resourceExtname == .vh) && activeCustomEditorId != svtoolsWaveViewer"
         },
         {
+          "command": "svtools.iverilog.stopSimulation",
+          "group": "navigation@2",
+          "when": "svtools.simRunning && activeCustomEditorId != svtoolsWaveViewer"
+        },
+        {
           "command": "svtools.vivado.addToFileset",
           "alt": "svtools.vivado.removeFromFileset",
           "group": "navigation@1",

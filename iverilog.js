@@ -381,7 +381,7 @@ async function compileWithModuleResolution(toolchain, commonArgs, inputFiles, cw
 // 工具链探测（带缓存）
 // ---------------------------------------------------------------------------
 
-/** @type {{binDir: string, iverilog: string, vvp: string, env: NodeJS.ProcessEnv, version: string}|null} */
+/** @type {{binDir: string, iverilog: string, vvp: string, env: NodeJS.ProcessEnv, version: string, cygwinDir: string|null}|null} */
 let cachedToolchain = null;
 /** @type {string|null} 最近一次探测失败的原因，避免每次保存都重复探测报错 */
 let toolchainFailure = null;
@@ -443,7 +443,9 @@ async function resolveToolchain(force = false) {
         iverilog,
         vvp,
         env: buildChildEnv(cygwinDir),
-        version: versionMatch ? versionMatch[1] : 'unknown'
+        version: versionMatch ? versionMatch[1] : 'unknown',
+        // Cygwin 构建时定位到的 DLL 目录（bin 内含 stdbuf.exe 等工具）；原生构建为 null
+        cygwinDir: cygwinDir
     };
     toolchainFailure = null;
     return cachedToolchain;
@@ -645,6 +647,35 @@ function activateIverilog(context, deps) {
     }
 
     /**
+     * 终止仿真进程。只 kill() 直接子进程在两种情况下会留孤儿：
+     * 1) stdbuf 包装：cygwin exec 会更换 Windows PID，且参数不进 Windows 命令行
+     *    （CommandLine 里只有 vvp.exe 自身路径），不能按命令行匹配；
+     * 2) Windows 对部分进程树的信号投递不可靠。
+     * 因此 Windows 上先用 taskkill /T 按进程树强杀，stdbuf 包装时再按
+     * ParentProcessId == 原 spawn PID 定位 exec 后的 vvp 精确兜底
+     * （cygwin exec 产生的新进程父指针指向原进程，关系可查）。
+     * @param {{child: import('child_process').ChildProcess, wrapped: boolean}} sim
+     */
+    function killSimProcess(sim) {
+        const { child, wrapped } = sim;
+        try { child.kill(); } catch (err) { /* 下面继续兜底 */ }
+        if (process.platform !== 'win32') return;
+        if (child.pid) {
+            try {
+                spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true });
+            } catch (err) { /* 忽略 */ }
+        }
+        if (!wrapped) return;
+        try {
+            spawn('powershell.exe', ['-NoProfile', '-Command',
+                `Get-CimInstance Win32_Process -Filter "Name='vvp.exe' AND ParentProcessId=${child.pid}" | `
+                + `ForEach-Object { taskkill /F /PID $_.ProcessId }`], { windowsHide: true });
+        } catch (err) {
+            channel.appendLine(`停止仿真兜底清理失败：${err}`);
+        }
+    }
+
+    /**
      * 停止正在运行的仿真。
      * @param {string} [reason] 停止原因，写入输出通道
      */
@@ -652,11 +683,7 @@ function activateIverilog(context, deps) {
         if (!activeSim) return;
         if (activeSim.timeoutTimer) clearTimeout(activeSim.timeoutTimer);
         activeSim.killed = true;
-        try {
-            activeSim.child.kill();
-        } catch (err) {
-            channel.appendLine(`停止仿真进程失败：${err}`);
-        }
+        killSimProcess(activeSim);
         channel.appendLine(reason ? `** 仿真已停止（${reason}）**` : '** 仿真已停止 **');
         activeSim = null;
         updateStatusBar();
@@ -782,11 +809,27 @@ function activateIverilog(context, deps) {
 
         // ---- 运行 vvp ----
         const runArgs = ['-n', ...config.get('simArgs', []), vvpFile];
-        channel.appendLine(`$ ${formatCommandLine(toolchain.vvp, runArgs)}`);
+
+        // Cygwin 构建的 vvp 在 stdout 接管道时是块缓冲：短输出要等进程退出才可见，
+        // 进程被强杀则整个丢失（表现为「仿真无输出」）。stdbuf -oL 强制行缓冲让
+        // $display/$monitor 实时流到输出通道。注意 cygwin exec 会更换 Windows PID，
+        // 停止时不能只 kill 直接子进程（见 killSimProcess）。
+        let vvpCmd = toolchain.vvp;
+        let vvpCmdArgs = runArgs;
+        let vvpWrapped = false;
+        if (process.platform === 'win32' && toolchain.cygwinDir) {
+            const stdbuf = path.join(toolchain.cygwinDir, 'stdbuf.exe');
+            if (fs.existsSync(stdbuf)) {
+                vvpCmd = stdbuf;
+                vvpCmdArgs = ['-oL', toolchain.vvp, ...runArgs];
+                vvpWrapped = true;
+            }
+        }
+        channel.appendLine(`$ ${formatCommandLine(vvpCmd, vvpCmdArgs)}`);
 
         const startedAt = Date.now();
-        const child = spawn(toolchain.vvp, runArgs, { cwd: fileDir, env: toolchain.env, windowsHide: true });
-        const sim = { child, document, startedAt, timeoutTimer: null, killed: false };
+        const child = spawn(vvpCmd, vvpCmdArgs, { cwd: fileDir, env: toolchain.env, windowsHide: true });
+        const sim = { child, document, startedAt, timeoutTimer: null, killed: false, vvpFile, wrapped: vvpWrapped };
         activeSim = sim;
         updateStatusBar();
 
@@ -867,14 +910,20 @@ function activateIverilog(context, deps) {
         const editor = vscode.window.activeTextEditor;
         const verilogOpen = !!(editor && isVerilogDocument(editor.document));
 
+        // context key 让 editor/title 停止按钮跟随仿真状态显隐
+        vscode.commands.executeCommand('setContext', 'svtools.simRunning', !!activeSim);
+
         if (!verilogOpen) {
             simStatusBar.hide();
         } else if (activeSim) {
-            simStatusBar.text = '$(debug-restart) iverilog 仿真中';
-            simStatusBar.tooltip = 'Icarus Verilog 仿真正在运行 — 点击重新运行，或执行 "Stop Simulation" 停止';
+            // 运行中点击 = 停止（旧版点击会重新运行，卡死的仿真看起来「停不掉」）
+            simStatusBar.command = 'svtools.iverilog.stopSimulation';
+            simStatusBar.text = '$(debug-stop) 停止仿真';
+            simStatusBar.tooltip = 'Icarus Verilog 仿真正在运行 — 点击停止';
             simStatusBar.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
             simStatusBar.show();
         } else {
+            simStatusBar.command = 'svtools.iverilog.simulate';
             simStatusBar.text = '$(play) iverilog 仿真';
             simStatusBar.tooltip = '运行 Icarus Verilog 仿真（编译 + vvp）';
             simStatusBar.backgroundColor = undefined;

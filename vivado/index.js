@@ -306,8 +306,12 @@ function activateVivado(context, deps) {
                 : vscode.workspace.getConfiguration('svtools.vivado').get('timeoutMs', 0);
             if (timeoutMs > 0) {
                 running.timer = setTimeout(() => {
-                    log('[vivado] 超时 (' + timeoutMs + 'ms)，终止进程');
-                    try { child.kill(); } catch (e) { /* ignore */ }
+                    log('[vivado] 超时 (' + timeoutMs + 'ms)，终止进程树');
+                    try {
+                        // 只 kill() 会只杀掉 cmd.exe 壳，vivado/xsim 孤儿化继续运行
+                        if (process.platform === 'win32') spawn('taskkill', ['/pid', String(child.pid), '/T', '/F']);
+                        else child.kill('SIGKILL');
+                    } catch (e) { /* ignore */ }
                     done(null, 'timeout');
                 }, timeoutMs);
             }

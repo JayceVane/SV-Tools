@@ -70,7 +70,17 @@ function runVivadoTool(binDir, tool, args, cwd, timeoutMs) {
             return;
         }
         let stdout = '', stderr = '', settled = false;
-        const timer = setTimeout(() => { try { child.kill(); } catch (e) { /* 忽略 */ } }, timeoutMs || 120000);
+        // 超时必须按进程树杀：Windows 上只 kill() 会只杀掉 cmd.exe 壳，
+        // xvlog/xelab 本体孤儿化继续占用 xsim.dir 库
+        const timer = setTimeout(() => {
+            if (process.platform === 'win32' && child.pid) {
+                try {
+                    spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true });
+                } catch (e) { try { child.kill(); } catch (e2) { /* 忽略 */ } }
+            } else {
+                try { child.kill(); } catch (e) { /* 忽略 */ }
+            }
+        }, timeoutMs || 120000);
         const finish = (code, errorMessage) => {
             if (settled) return;
             settled = true;
