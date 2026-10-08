@@ -98,7 +98,9 @@ function runVivadoTool(binDir, tool, args, cwd, timeoutMs) {
 /**
  * 解析 Vivado 工具输出（xvlog/xelab 的 VRFC/XSIM 格式）为诊断条目。
  * `ERROR: [VRFC 10-4982] syntax error near '=' [d:/path/file.sv:6]`
- * 位置后缀 [file:line(:col)]；无位置的 ERROR/WARNING 归到主文件第 1 行。
+ * 位置后缀 [file:line(:col)]；XSIM 系列把位置写在消息体内
+ * （`File "path" Line 41 :` / `File : path, Line : 25994,`）也一并解析；
+ * 两种都没有的 ERROR/WARNING 归到主文件第 1 行。
  * @param {string} raw 工具输出
  * @param {string} cwd 工具运行目录（相对路径解析基准）
  * @param {string} mainFile 主文件绝对路径（无位置条目的落点）
@@ -111,14 +113,24 @@ function parseVivadoDiagnostics(raw, cwd, mainFile) {
         const severity = m[1] === 'ERROR' ? 'error' : 'warning';
         const rest = m[3];
         const loc = rest.match(/\[(.+?):(\d+)(?::(\d+))?\]\s*$/);
+        // XSIM 消息体内嵌位置：File "D:/a.sv" Line 41 : / File : /d/a.sv, Line : 41,
+        const embedded = loc ? null : rest.match(/File\s+(?:"([^"]+)"|:\s*([^,]+?))\s*,?\s*Line\s+:?\s*(\d+)/);
         let file = mainFile;
         let lineNo = 1;
+        let message;
         if (loc) {
             const p = loc[1].replace(/\\/g, '/').replace(/\/$/, '');
             file = path.isAbsolute(p) ? p : path.resolve(cwd, p);
             lineNo = parseInt(loc[2], 10) || 1;
+            message = rest.slice(0, loc.index).trim();
+        } else if (embedded) {
+            const p = (embedded[1] || embedded[2] || '').trim().replace(/\\/g, '/');
+            if (path.isAbsolute(p)) file = p;
+            lineNo = parseInt(embedded[3], 10) || 1;
+            message = rest.trim();
+        } else {
+            message = rest.trim();
         }
-        const message = (loc ? rest.slice(0, loc.index) : rest).trim();
         if (!message) continue;
         findings.push({
             file: path.normalize(file),
@@ -165,6 +177,36 @@ function findUvmIncludeDir(binDir) {
 }
 
 /**
+ * 从 xvlog/xelab 输出提取未解析的设计单元名：
+ * - 实例化/例化目标缺失：`Module <apb_if> not found while processing ...`（VRFC 10-2063）
+ * - import/类型引用未声明：`'apb_uvm_pkg' is not declared`（VRFC 10-2989）
+ * 返回名字集合，由调用方按索引过滤（真实拼写错误的标识符查不到定义，自然落空）。
+ */
+function extractMissingUnits(raw) {
+    const names = new Set();
+    const text = String(raw);
+    for (const m of text.matchAll(/Module <([A-Za-z_][A-Za-z0-9_$]*)> not found/g)) names.add(m[1]);
+    for (const m of text.matchAll(/'([A-Za-z_][A-Za-z0-9_$]*)' is not declared/g)) names.add(m[1]);
+    return names;
+}
+
+/**
+ * 把缺失单元名映射为索引中的定义文件，排除已参与编译的。
+ * @param {Set<string>} names extractMissingUnits 的结果
+ * @param {Map<string, string>} unitIndex 设计单元名 → 文件路径
+ * @param {string[]} files 当前文件集（绝对路径）
+ * @returns {string[]} 需要补入的文件
+ */
+function resolveUnitFiles(names, unitIndex, files) {
+    const additions = [];
+    for (const name of names) {
+        const f = unitIndex && unitIndex.get(name);
+        if (f && !files.some(x => path.normalize(x) === path.normalize(f))) additions.push(f);
+    }
+    return additions;
+}
+
+/**
  * 公共前置：文档校验、工具链、工作目录、未保存缓冲区临时文件。
  * @returns {null|object} 失败返回 null
  */
@@ -206,22 +248,28 @@ async function prepareXvlogRun(document, ctx) {
         }
     }
 
-    // UVM 工程：需显式挂预编译 UVM 库（-L UVM），否则 'uvm_pkg'/
-    // 'uvm_config_db' is not declared（VRFC 10-2989）；编译还需 -i 指向
-    // 自带 UVM 源码目录，`include "uvm_macros.svh" 才能解析。
+    // UVM 工程：xvlog/xelab 需显式挂预编译 UVM 库（-L UVM，否则
+    // 'uvm_pkg'/'uvm_config_db' is not declared，VRFC 10-2989）；编译还需
+    // -i 指向自带 UVM 源码目录，`include "uvm_macros.svh" 才能解析；
+    // xelab 需 --timescale 兜底——UVM 库全库无 `timescale，与带 timescale
+    // 的用户代码混合细化会报 XSIM 43-4100（工程流由 Vivado 默认注入）。
     // 检测基于当前文件——elaborate 补入的工作区依赖文件不参与检测。
     let uvmLibArgs = [];
     let uvmIncArgs = [];
+    let uvmTimescale = null;
     if (detectUvmUsage(document.getText())) {
         uvmLibArgs = ['-L', 'UVM'];
         const uvmInc = findUvmIncludeDir(binDir);
         if (uvmInc) uvmIncArgs = ['-i', uvmInc];
+        const ts = String(document.getText()).match(/`timescale\s+([0-9.]+[munpf]?s\s*\/\s*[0-9.]+[munpf]?s)/i);
+        uvmTimescale = ts ? ts[1].replace(/\s+/g, '') : '1ns/1ps';
         channel.appendLine('[lint] 检测到 UVM：附加 -L UVM'
-            + (uvmIncArgs.length ? ' -i <uvm 源码目录>' : ''));
+            + (uvmIncArgs.length ? ' -i <uvm 源码目录>' : '')
+            + `（xelab --timescale ${uvmTimescale}）`);
     }
 
     return {
-        binDir, workDir, filePath, lintTarget, tempFile, uvmLibArgs, uvmIncArgs,
+        binDir, workDir, filePath, lintTarget, tempFile, uvmLibArgs, uvmIncArgs, uvmTimescale,
         collect: (raw) => parseVivadoDiagnostics(tempFile ? raw.split(tempFile).join(filePath) : raw, workDir, filePath),
         cleanup: () => { if (tempFile) { try { fs.unlinkSync(tempFile); } catch (e) { /* 忽略 */ } } },
         stale: () => !!(ctx.lintGenerations && ctx.lintGenerations.get(document.uri.toString()) !== ctx.gen)
@@ -239,6 +287,9 @@ function summarize(findings, filePath) {
  * xvlog lint 主流程（自动触发：防抖/打开/保存）。
  * svtools.lint.currentFileOnly（默认开）时只编译当前文件——快速、
  * 诊断不外溢到工作区其他文件；关闭后附带工作区模块索引跨文件解析。
+ * 两种模式下，当前文件引用了本工作区定义的 module/interface/package 而
+ * 编译报「not found / not declared」时，自动补入定义文件重试（≤3 轮），
+ * 避免把跨文件引用误报成语法错；--incr 下补入文件只在首次真正编译。
  */
 async function lintWithXvlog(document, ctx) {
     const empty = { ok: true, errorCount: 0, warningCount: 0 };
@@ -249,45 +300,60 @@ async function lintWithXvlog(document, ctx) {
     const startedAt = Date.now();
 
     const fileOnly = vscode.workspace.getConfiguration('svtools.lint').get('currentFileOnly', true);
+    // xvlog 按 prj 顺序分析：import 的 package 必须排在 importer 之前，
+    // 因此当前文件始终放最后、补入的依赖 prepend 到最前
     let files = [lintTarget];
     if (!fileOnly) {
         try {
             const scan = await scanWorkspaceSources();
             const extra = [...scan.modules.values()].filter(f => path.normalize(f) !== path.normalize(lintTarget));
-            files = [lintTarget, ...extra];
+            files = [...extra, lintTarget];
         } catch (err) { /* 扫描失败只检查当前文件 */ }
     }
 
     const prjFile = path.join(workDir, 'svtools.prj');
-    try { fs.writeFileSync(prjFile, buildPrjBody(files)); } catch (err) {
-        channel.appendLine(`[lint] 写入 prj 失败：${err.message}`);
-        cleanup();
-        return empty;
+    let unitIndex = null;   // 惰性获取：只有报缺单元时才查索引
+    let xv = null;
+    for (let round = 0; round <= 3; round++) {
+        try { fs.writeFileSync(prjFile, buildPrjBody(files)); } catch (err) {
+            channel.appendLine(`[lint] 写入 prj 失败：${err.message}`);
+            cleanup();
+            return empty;
+        }
+        xv = await runVivadoTool(binDir, 'xvlog', ['--nolog', ...uvmLibArgs, ...uvmIncArgs, '--incr', '-prj', 'svtools.prj'], workDir, 120000);
+        if (stale()) { cleanup(); return empty; }
+        if (xv.code === 0) break;
+        const raw = `${xv.stderr}\n${xv.stdout}`;
+        if (!unitIndex) {
+            try { unitIndex = (await scanWorkspaceSources()).modules; } catch (err) { unitIndex = new Map(); }
+        }
+        const additions = resolveUnitFiles(extractMissingUnits(raw), unitIndex, files);
+        if (!additions.length) break;   // 真实语法错——如实报告
+        channel.appendLine(`[lint] 补入缺失依赖：${additions.map(f => path.basename(f)).join(', ')}`);
+        files.unshift(...additions);
     }
-
-    const xv = await runVivadoTool(binDir, 'xvlog', ['--nolog', ...uvmLibArgs, ...uvmIncArgs, '--incr', '-prj', 'svtools.prj'], workDir, 120000);
     cleanup();
-    if (stale()) return empty;
 
     const findings = collect(`${xv.stderr}\n${xv.stdout}`);
     applyDiagnostics(document, findings, 'xvlog');
     const summary = summarize(findings, filePath);
-    channel.appendLine(`[lint:xvlog] ${path.basename(filePath)}${document.isDirty ? '（缓冲区）' : ''} → ${summary.errorCount} 错误, ${summary.warningCount} 警告 (${Date.now() - startedAt}ms)`);
+    channel.appendLine(`[lint:xvlog] ${path.basename(filePath)}${document.isDirty ? '（缓冲区）' : ''} → ${summary.errorCount} 错误, ${summary.warningCount} 警告，编译 ${files.length} 个文件 (${Date.now() - startedAt}ms)`);
     return summary;
 }
 
 /**
  * xelab 详细化检查（手动触发：状态栏按钮）。
- * 从当前文件出发做依赖迭代解析：xvlog 编译 → xelab → 报缺模块则按工作区
- * 模块索引补文件重试（≤4 轮）。不预先编入整个工作区——任一无关文件有语法
- * 错都会使 xvlog 中止且 xsim.dir 库不完整，导致 xelab 对当前文件误报。
+ * 从当前文件出发做依赖迭代解析：xvlog 编译 → xelab → 报缺单元（module/
+ * interface/package）则按工作区设计单元索引补文件重试（≤6 轮，xvlog 与
+ * xelab 阶段的缺失都驱动迭代）。不预先编入整个工作区——任一无关文件有
+ * 语法错都会使 xvlog 中止且 xsim.dir 库不完整，导致 xelab 对当前文件误报。
  */
 async function elaborateWithXvlog(document, ctx) {
     const empty = { ok: true, errorCount: 0, warningCount: 0 };
     const { channel, applyDiagnostics, scanWorkspaceSources } = ctx;
     const prep = await prepareXvlogRun(document, ctx);
     if (!prep) return empty;
-    const { binDir, workDir, filePath, lintTarget, collect, cleanup, stale, uvmLibArgs, uvmIncArgs } = prep;
+    const { binDir, workDir, filePath, lintTarget, collect, cleanup, stale, uvmLibArgs, uvmIncArgs, uvmTimescale } = prep;
     const startedAt = Date.now();
 
     const top = require('./vivado/tclgen').firstModuleName(document.getText());
@@ -299,7 +365,7 @@ async function elaborateWithXvlog(document, ctx) {
     let files = [lintTarget];
     let findings = [];
     let rounds = 0;
-    for (; rounds < 4; rounds++) {
+    for (; rounds < 6; rounds++) {
         try { fs.writeFileSync(prjFile, buildPrjBody(files)); } catch (err) {
             channel.appendLine(`[lint] 写入 prj 失败：${err.message}`);
             cleanup();
@@ -308,25 +374,30 @@ async function elaborateWithXvlog(document, ctx) {
         // 全量编译（无 --incr）：本轮文件集必须全部通过，库才完整
         const xv = await runVivadoTool(binDir, 'xvlog', ['--nolog', ...uvmLibArgs, ...uvmIncArgs, '-prj', 'svtools.prj'], workDir, 120000);
         if (stale()) { cleanup(); return empty; }
-        findings = collect(`${xv.stderr}\n${xv.stdout}`);
-        if (xv.code !== 0) break;   // 文件集有语法错（当前文件或补入的依赖）——如实报告
+        const xvRaw = `${xv.stderr}\n${xv.stdout}`;
+        findings = collect(xvRaw);
+        if (xv.code !== 0) {
+            // xvlog 阶段也会缺依赖：import 本工作区 package（'X' is not declared）、
+            // 实例化本工作区 interface/module（Module <X> not found）——先补齐再试
+            const additions = resolveUnitFiles(extractMissingUnits(xvRaw), modules, files);
+            if (!additions.length) break;   // 真实语法错（当前文件或依赖）——如实报告
+            channel.appendLine(`[lint] 补入缺失依赖：${additions.map(f => path.basename(f)).join(', ')}`);
+            files.unshift(...additions);    // 依赖必须在 importer 之前分析
+            findings = [];
+            continue;
+        }
         if (!top) break;            // 当前文件无 module 声明，无法详细化
 
         const xe = await runVivadoTool(binDir, 'xelab',
-            ['--nolog', '--snapshot', 'svtools_lint', ...uvmLibArgs, 'work.' + top], workDir, 120000);
+            ['--nolog', '--snapshot', 'svtools_lint', ...uvmLibArgs,
+             ...(uvmTimescale ? ['--timescale', uvmTimescale] : []), 'work.' + top], workDir, 120000);
         if (stale()) { cleanup(); return empty; }
         const xeRaw = `${xe.stderr}\n${xe.stdout}`;
         findings = findings.concat(collect(xeRaw));
 
-        const missing = [...xeRaw.matchAll(/Module <([A-Za-z_][A-Za-z0-9_$]*)> not found/g)].map(m => m[1]);
-        if (!missing.length) break;
-        const additions = [];
-        for (const name of missing) {
-            const f = modules.get(name);
-            if (f && !files.some(x => path.normalize(x) === path.normalize(f))) additions.push(f);
-        }
-        if (!additions.length) break;   // 工作区索引也找不到——保留 missing 诊断
-        files.push(...additions);
+        const additions = resolveUnitFiles(extractMissingUnits(xeRaw), modules, files);
+        if (!additions.length) break;   // 无缺失或索引也找不到——保留当前诊断
+        files.unshift(...additions);    // 依赖必须在 importer 之前分析
         findings = [];                  // 中间轮诊断丢弃，取收敛后的最终结果
     }
     cleanup();
@@ -344,6 +415,8 @@ module.exports = {
     resolveXvlogBinDir,
     parseVivadoDiagnostics,
     buildPrjBody,
+    extractMissingUnits,
+    resolveUnitFiles,
     detectUvmUsage,
     findUvmIncludeDir
 };
