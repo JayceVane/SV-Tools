@@ -374,7 +374,9 @@ async function compileWithModuleResolution(toolchain, commonArgs, inputFiles, cw
         const additions = resolveMissingModuleFiles(`${result.stderr}\n${result.stdout}`, modules, compiledSet);
         if (additions.length === 0) break;
         for (const file of additions) compiledSet.add(path.resolve(file));
-        files = files.concat(additions);
+        // 缺失定义前置而非追加：iverilog 单遍编译要求 package 在 import 它的
+        // 文件之前（模块先后无关，前置对两者都安全）
+        files = additions.concat(files);
         result = await runTool(toolchain.iverilog, [...commonArgs, ...files], { cwd, env: toolchain.env });
     }
     return { result, files };
