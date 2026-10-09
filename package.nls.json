@@ -76,5 +76,6 @@
   "cfg.vivado_simRuntime.desc": "Vivado xsim simulation runtime (xsim.simulate.runtime), e.g. 1000ns. Empty = run until $finish (xsim -runall)",
   "cmd.lint_selectEngine.title": "Lint: Select Engine (iverilog / xvlog)",
   "cmd.xvlog_elaborate.title": "Lint: xelab Elaboration Check (current file + workspace deps)",
-  "cfg.lintCurrentFileOnly.desc": "Lint the opened file only — fast, no diagnostics from other workspace files. Off: resolve cross-file modules (iverilog -y scan / xvlog workspace file set)"
+  "cfg.lintCurrentFileOnly.desc": "Lint the opened file only — fast, no diagnostics from other workspace files. Off: resolve cross-file modules (iverilog -y scan / xvlog workspace file set)",
+  "cmd.vivado_reports.title": "Vivado: OOC Report (Utilization & Logic Levels)"
 }

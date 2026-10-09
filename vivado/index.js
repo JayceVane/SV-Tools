@@ -25,7 +25,8 @@ const path = require('path');
 const { normalizeVivadoDir, findVivadoBinDir, buildBatchArgs, cmdQuote } = require('./toolchain');
 const {
     tclQuote, tclList, buildCreateProjectScript, buildAddFilesScript, buildRemoveFilesScript,
-    buildSimulateScript, extractVivadoIssues, firstModuleName
+    buildSimulateScript, extractVivadoIssues, firstModuleName,
+    buildOocReportsScript, parseUtilHierSummary, parseLogicLevelSummary
 } = require('./tclgen');
 const { buildExportPartsScript, parsePartsDump, partFilterOptions, filterParts, buildPartPickerHtml } = require('./parts');
 const { matchGlobList, classifyFiles, DEFAULT_STRUCTURE } = require('./structure');
@@ -159,9 +160,105 @@ function activateVivado(context, deps) {
             buildSimulateScript({ xprPath: xpr, top, file: cur.path, isSv: cur.isSv, runtime }));
     }
 
+    /**
+     * 传递闭包收集综合文件集：入口文件 + 其文本中出现的工作区定义单元（词边界
+     * 匹配，含模块实例化/import 引用；注释误命中只多读文件，不影响 -top 综合）。
+     * @param {string} entryFile
+     * @returns {Promise<string[]>}
+     */
+    async function collectSynthFiles(entryFile) {
+        const files = [entryFile];
+        let index;
+        try { index = (await require('../iverilog').scanWorkspaceSources()).modules; } catch (err) { return files; }
+        const seen = new Set(files.map(f => path.resolve(f)));
+        const nameRes = [...index.keys()].map(n => ({ n, re: new RegExp('\\b' + n.replace(/[$]/g, '\\$') + '\\b') }));
+        for (let i = 0; i < files.length; i++) {
+            let text = '';
+            try { text = fs.readFileSync(files[i], 'utf8'); } catch (err) { continue; }
+            for (const { n, re } of nameRes) {
+                const f = index.get(n);
+                if (f && !seen.has(path.resolve(f)) && re.test(text)) {
+                    seen.add(path.resolve(f));
+                    files.push(f);
+                }
+            }
+        }
+        return files;
+    }
+
+    /** OOC 综合结束后：解析两份报告摘要进输出通道，并把 .rpt 打开到编辑器。 */
+    async function showOocReports(outDir, top) {
+        const utilRpt = path.join(outDir, 'utilization_hier.rpt');
+        const llRpt = path.join(outDir, 'logic_levels.rpt');
+        log('———— OOC 报告（' + top + '）————');
+        try {
+            for (const s of parseUtilHierSummary(fs.readFileSync(utilRpt, 'utf8'))) log(s);
+        } catch (err) { /* 报告缺失时只开文件 */ }
+        try {
+            log(parseLogicLevelSummary(fs.readFileSync(llRpt, 'utf8')));
+        } catch (err) { /* 同上 */ }
+        log('完整报告: ' + utilRpt);
+        for (const f of [utilRpt, llRpt]) {
+            try { await vscode.window.showTextDocument(vscode.Uri.file(f), { preview: false }); } catch (err) { /* 打不开只留通道摘要 */ }
+        }
+    }
+
+    /**
+     * 标签页 Vivado 快捷入口：当前模块 OOC 综合（保持层次）→
+     * 分层资源占用 + 逻辑级数分布报告。不依赖/修改 .xpr 工程。
+     */
+    async function vivadoReports() {
+        const cur = currentVerilogFile();
+        if (!cur) return;
+        const text = cur.doc.getText();
+        if (/\buvm_[a-z0-9_]+/i.test(text)) {
+            vscode.window.showWarningMessage('当前文件使用 UVM（测试平台不可综合），请打开 RTL 模块文件再生成报告。');
+            return;
+        }
+        const top = firstModuleName(text);
+        if (!top) { vscode.window.showErrorMessage('当前文件里没有找到 module 声明'); return; }
+
+        // 器件来源：工作区 .xpr → svtools.vivado.part 配置
+        let part = '';
+        const xpr = await findProjectXpr();
+        if (xpr) {
+            try { part = (fs.readFileSync(xpr, 'utf8').match(/Option Name="Part" Val="([^"]+)"/) || [])[1] || ''; } catch (err) { /* 读不到走配置 */ }
+        }
+        const cfg = vscode.workspace.getConfiguration('svtools.vivado');
+        if (!part) part = String(cfg.get('part', '') || '').trim();
+        if (!part) {
+            vscode.window.showErrorMessage(
+                '未找到器件型号：工作区没有 .xpr，且 svtools.vivado.part 未配置', '打开设置'
+            ).then(choice => {
+                if (choice === '打开设置') vscode.commands.executeCommand('workbench.action.openSettings', 'svtools.vivado.part');
+            });
+            return;
+        }
+
+        const files = await collectSynthFiles(cur.path);
+        const ws = vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders[0];
+        const base = ws ? ws.uri.fsPath : path.dirname(cur.path);
+        const outDir = path.join(base, '.svtools', 'vivado', 'ooc');
+        const scriptPath = path.join(base, '.svtools', 'vivado', 'ooc_reports.tcl');
+        fs.mkdirSync(path.dirname(scriptPath), { recursive: true });
+        fs.writeFileSync(scriptPath, buildOocReportsScript({
+            files,
+            includeDirs: [...new Set(files.map(f => path.dirname(f)))],
+            top, part, outDir,
+            isSv: files.some(f => /\.(sv|svh)$/i.test(f))
+        }));
+        vscode.window.showInformationMessage(`OOC 综合中：${top}（${part}，${files.length} 个文件，保持层次）— 可在 Vivado 输出通道查看进度`);
+        const r = await runScript(scriptPath, { quiet: true });
+        if (!r || r.code !== 0) {
+            out.show(true);
+            vscode.window.showErrorMessage('OOC 综合失败（详见 Vivado 输出通道）');
+            return;
+        }
+        await showOocReports(outDir, top);
+    }
+
     /** 标签页 ▶ 按钮：选择仿真引擎。 */
-    async function simulatePick() {
-        const engine = await vscode.window.showQuickPick(
+    async function simulatePick() {        const engine = await vscode.window.showQuickPick(
             [
                 { label: '$(chip) Icarus Verilog', description: 'iverilog 编译 + vvp（无需 Vivado 工程）', value: 'iverilog' },
                 { label: '$(circuit-board) Vivado xsim', description: '行为仿真，当前文件置为 sim_1 顶层（需 Vivado 工程）', value: 'vivado' }
@@ -487,6 +584,7 @@ function activateVivado(context, deps) {
         vscode.commands.registerCommand('svtools.vivado.addToFileset', () => addCurrentToProject()),
         vscode.commands.registerCommand('svtools.vivado.removeFromFileset', () => removeCurrentFromProject()),
         vscode.commands.registerCommand('svtools.vivado.simulate', () => simulateWithVivado()),
+        vscode.commands.registerCommand('svtools.vivado.reports', () => vivadoReports()),
         vscode.commands.registerCommand('svtools.simulate.pick', () => simulatePick()),
         vscode.workspace.onDidChangeWorkspaceFolders(() => refreshProjectContext())
     );

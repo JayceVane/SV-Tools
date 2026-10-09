@@ -157,8 +157,77 @@ function buildSimulateScript(o) {
     return L.filter(Boolean).join('\n') + '\n';
 }
 
+/**
+ * 生成 OOC 综合报告 TCL：read_verilog → synth_design（out_of_context、保持层次）
+ * → 分层资源占用（report_utilization -hierarchical）+ 逻辑级数分布
+ * （report_design_analysis -logic_level_distribution，无约束 OOC 设计可用）。
+ * 不打开/修改任何 .xpr 工程。2022.1 实测两命令均支持；report_logic_levels
+ * 命令不存在（更早版本移除/更晚引入），-hierarchical 与 -logic_level_distribution
+ * 不能同用。
+ * @param {{files: string[], includeDirs: string[], top: string, part: string, outDir: string, isSv?: boolean}} o
+ */
+function buildOocReportsScript(o) {
+    const L = [
+        '# 由 svtools 生成的 OOC 综合报告脚本（不修改任何工程）',
+        'set outDir ' + tclQuote(o.outDir),
+        'file mkdir $outDir',
+        // include 目录必须挂在 synth_design 上（2022.1 实测 read_verilog 无
+        // -include_dirs 选项、include 由综合器解析；`include 相对本文件目录仍自动生效）
+        'read_verilog ' + (o.isSv === false ? '' : '-sv ') + tclList(o.files),
+        'synth_design -top ' + tclQuote(o.top) + ' -part ' + tclQuote(o.part)
+            + ' -mode out_of_context -flatten_hierarchy none'
+            + ' -include_dirs ' + tclList(o.includeDirs || []),
+        'report_utilization -hierarchical -file $outDir/utilization_hier.rpt',
+        'report_design_analysis -logic_level_distribution -file $outDir/logic_levels.rpt',
+        'puts "SVTOOLS_OOC_DONE"'
+    ];
+    return L.join('\n') + '\n';
+}
+
+/**
+ * 解析 report_utilization -hierarchical 的表格为摘要行。
+ * 表列：Instance | Module | Total LUTs | Logic LUTs | LUTRAMs | SRLs | FFs | RAMB36 | RAMB18 | DSP Blocks
+ * @param {string} rptText 报告全文
+ * @returns {string[]} 每个实例一行摘要
+ */
+function parseUtilHierSummary(rptText) {
+    const rows = [];
+    for (const line of String(rptText).split(/\r?\n/)) {
+        const m = line.match(/^\|(.+)\|\s*$/);
+        if (!m) continue;
+        const cells = m[1].split('|').map(c => c.trim());
+        if (cells.length < 10 || cells[0] === 'Instance' || /^-+$/.test(cells[0])) continue;
+        const [inst, mod, lut, , , , ff, b36, b18, dsp] = cells;
+        if (!/^\d+$/.test(lut)) continue;   // 跳过非数据行
+        rows.push(`${inst}${mod === '(top)' ? ' (top)' : ''}: LUT ${lut} | FF ${ff} | BRAM36/18 ${b36}/${b18} | DSP ${dsp}`);
+    }
+    return rows;
+}
+
+/**
+ * 解析 report_design_analysis -logic_level_distribution 的分布表为摘要。
+ * 表列：End Point Clock | Requirement | 0 | 1 | 2 | …（列名即级数）
+ * @param {string} rptText 报告全文
+ * @returns {string} 摘要行（无数据时返回提示）
+ */
+function parseLogicLevelSummary(rptText) {
+    const lines = String(rptText).split(/\r?\n/);
+    for (const line of lines) {
+        const m = line.match(/^\|(.+)\|\s*$/);
+        if (!m) continue;
+        const cells = m[1].split('|').map(c => c.trim());
+        if (cells.length < 3 || cells[0] === 'End Point Clock' || /^-+$/.test(cells[0])) continue;
+        if (!/^\d+$/.test(cells[2])) continue;   // 数据行：第 3 列起是各级计数
+        const dist = [];
+        for (let i = 2; i < cells.length; i++) dist.push(`${i - 2} 级=${cells[i]}`);
+        return `逻辑级数分布（时钟 ${cells[0]}，Top 路径）: ${dist.join(', ')}`;
+    }
+    return '逻辑级数分布: 无时序路径数据';
+}
+
 module.exports = {
     tclQuote, tclList,
     buildCreateProjectScript, buildAddFilesScript, buildRemoveFilesScript, buildSimulateScript,
+    buildOocReportsScript, parseUtilHierSummary, parseLogicLevelSummary,
     extractVivadoIssues, firstModuleName
 };
