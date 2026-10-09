@@ -158,13 +158,16 @@ function buildSimulateScript(o) {
 }
 
 /**
- * 生成 OOC 综合报告 TCL：read_verilog → synth_design（out_of_context、保持层次）
- * → 分层资源占用（report_utilization -hierarchical）+ 逻辑级数分布
+ * 生成 OOC 综合报告 TCL：read_verilog → synth_design（out_of_context）→
+ * 分层资源占用（report_utilization -hierarchical）+ 逻辑级数分布
  * （report_design_analysis -logic_level_distribution，无约束 OOC 设计可用）。
  * 不打开/修改任何 .xpr 工程。2022.1 实测两命令均支持；report_logic_levels
  * 命令不存在（更早版本移除/更晚引入），-hierarchical 与 -logic_level_distribution
  * 不能同用。
- * @param {{files: string[], includeDirs: string[], top: string, part: string, outDir: string, isSv?: boolean}} o
+ * flatten：'none'（默认，保留模块边界——可看子模块分摊，代价是禁跨边界优化）
+ * 或 'full'（Vivado 默认，跨模块边界优化——资源/时序最优，层次被展平）。
+ * 两档都保持 -mode out_of_context，对比时只差 flatten 一个变量。
+ * @param {{files: string[], includeDirs: string[], top: string, part: string, outDir: string, isSv?: boolean, flatten?: 'none'|'full'}} o
  */
 function buildOocReportsScript(o) {
     const L = [
@@ -175,7 +178,7 @@ function buildOocReportsScript(o) {
         // -include_dirs 选项、include 由综合器解析；`include 相对本文件目录仍自动生效）
         'read_verilog ' + (o.isSv === false ? '' : '-sv ') + tclList(o.files),
         'synth_design -top ' + tclQuote(o.top) + ' -part ' + tclQuote(o.part)
-            + ' -mode out_of_context -flatten_hierarchy none'
+            + ' -mode out_of_context -flatten_hierarchy ' + (o.flatten === 'full' ? 'full' : 'none')
             + ' -include_dirs ' + tclList(o.includeDirs || []),
         'report_utilization -hierarchical -file $outDir/utilization_hier.rpt',
         'report_design_analysis -logic_level_distribution -file $outDir/logic_levels.rpt',
@@ -199,7 +202,10 @@ function parseUtilHierSummary(rptText) {
         if (cells.length < 10 || cells[0] === 'Instance' || /^-+$/.test(cells[0])) continue;
         const [inst, mod, lut, , , , ff, b36, b18, dsp] = cells;
         if (!/^\d+$/.test(lut)) continue;   // 跳过非数据行
-        rows.push(`${inst}${mod === '(top)' ? ' (top)' : ''}: LUT ${lut} | FF ${ff} | BRAM36/18 ${b36}/${b18} | DSP ${dsp}`);
+        // 形如 "(mytop)" 的行 = 顶层模块自身逻辑（不含子实例）；首行 = 全设计合计
+        const self = inst.match(/^\((.+)\)$/);
+        const label = self ? self[1] + ' 自身' : inst + (mod === '(top)' ? ' (top)' : '');
+        rows.push(`${label}: LUT ${lut} | FF ${ff} | BRAM36/18 ${b36}/${b18} | DSP ${dsp}`);
     }
     return rows;
 }
