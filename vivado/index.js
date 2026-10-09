@@ -215,8 +215,17 @@ function activateVivado(context, deps) {
             vscode.window.showWarningMessage('当前文件使用 UVM（测试平台不可综合），请打开 RTL 模块文件再生成报告。');
             return;
         }
-        const top = firstModuleName(text);
-        if (!top) { vscode.window.showErrorMessage('当前文件里没有找到 module 声明'); return; }
+        // 综合顶层取自当前文件（不碰工程 top）；多模块文件让用户挑，单模块直取
+        const modules = [...text.matchAll(/^[ \t]*(?:module|macromodule)[ \t]+([A-Za-z_][A-Za-z0-9_$]*)/gm)].map(m => m[1]);
+        if (!modules.length) { vscode.window.showErrorMessage('当前文件里没有找到 module 声明'); return; }
+        let top = modules[0];
+        if (modules.length > 1) {
+            const pick = await vscode.window.showQuickPick(
+                modules.map(m => ({ label: m, description: m === modules[0] ? '文件中第一个模块' : '' })),
+                { placeHolder: '当前文件包含 ' + modules.length + ' 个 module，选择要综合的顶层' });
+            if (!pick) return;   // 用户取消
+            top = pick.label;
+        }
 
         // 器件来源：工作区 .xpr → svtools.vivado.part 配置
         let part = '';
