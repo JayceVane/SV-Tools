@@ -591,8 +591,9 @@ function activateIverilog(context, deps) {
             }
         }
 
-        // currentFileOnly（默认开）：只检查当前打开的文件——不带 -y 扫描目录、
-        // 不做缺模块补文件；关闭后恢复跨文件解析
+        // currentFileOnly（默认开）：不附带工作区扫描目录（-y/-I 不广播），
+        // 但实例化本工作区定义的模块时仍按设计单元索引精确补定义文件重试，
+        // 避免把跨文件引用误报成 Unknown module type；关闭后附带 -y 目录
         const fileOnly = vscode.workspace.getConfiguration('svtools.lint').get('currentFileOnly', true);
         const scanDirs = fileOnly ? [] : (await scanWorkspaceSources()).dirs;
 
@@ -610,9 +611,7 @@ function activateIverilog(context, deps) {
         const gen = (lintGenerations.get(document.uri.toString()) || 0) + 1;
         lintGenerations.set(document.uri.toString(), gen);
 
-        const { result } = fileOnly
-            ? { result: await runTool(toolchain.iverilog, [...args, lintTarget], { cwd: fileDir, env: toolchain.env }) }
-            : await compileWithModuleResolution(toolchain, args, [lintTarget], fileDir);
+        const { result } = await compileWithModuleResolution(toolchain, args, [lintTarget], fileDir);
         if (tempFile) {
             try { fs.unlinkSync(tempFile); } catch (err) { /* 清理失败可忽略 */ }
         }
