@@ -230,11 +230,14 @@ impl LineInfo {
         line.trim().is_empty()
     }
 
-    /// §6.2 块级行（作为相邻内容的后者 / 块头侧）。
+    /// §6.2 块级行（作为相邻内容的后者 / 块头侧）。容器闭合词（endgenerate 等）
+    /// 不算：generate 块内的 `end` 与收容它的 `endgenerate` 是同一构造的收尾，
+    /// 中间不应插空行（endmodule 本就不在 BLOCK_CLOSE_KW，endgenerate 需显式排除）。
     fn block_open_side(&self) -> bool {
         !self.is_comment
             && (BLOCK_OPEN_KW.contains(&self.first_sig.as_str())
-                || BLOCK_CLOSE_KW.contains(&self.first_word.as_str())
+                || (BLOCK_CLOSE_KW.contains(&self.first_word.as_str())
+                    && !matches!(close_kw_ctx(&self.first_word), Some(Ctx::Container)))
                 || self.paren_closed)
     }
 
@@ -640,5 +643,15 @@ mod tests {
         let input2 = "module m;\n    always #5 clk = ~clk;\n    logic a;\nendmodule\n";
         let out2 = norm(input2);
         assert!(out2.contains("always #5 clk = ~clk;\n\n    logic a;"), "{}", out2);
+    }
+
+    #[test]
+    fn test_end_to_endgenerate_no_blank_inserted() {
+        // generate 块内 for 的 `end` 与收容它的 `endgenerate` 紧邻时不得插空行
+        // （endgenerate 曾被 block_open_side 误当块头开侧）；其后的成员分隔保留
+        let input = "module m;\n    genvar i;\n    generate\n        for(i = 0; i < 2; i = i + 1) begin : g\n            assign x = i;\n        end\n    endgenerate\n    assign y = x;\nendmodule\n";
+        let out = norm(input);
+        assert!(out.contains("end\n    endgenerate"), "end 与 endgenerate 之间被插空行: {}", out);
+        assert!(out.contains("endgenerate\n\n    assign y"), "endgenerate 与下一成员的分隔缺失: {}", out);
     }
 }
