@@ -2,6 +2,29 @@
 
 All notable changes to the SystemVerilog VSCode Extension will be documented in this file.
 
+## [3.4.8] - 2026-10-09
+
+### Added
+- **xvlog lint 引擎可选**（`svtools.lint.engine`：`iverilog` 默认 / `xvlog`）：直调 Vivado 的 xvlog 做语法检查，VRFC 诊断进 Problems 面板；状态栏 ⚡ 一键切换引擎；prj 工程文件绕开 Windows 命令行长度限制，未保存缓冲区写临时文件（md5 命名）参与检查
+- **xelab 详细化检查**（编辑器工具栏按钮，仅 xvlog 引擎显示）：编译通过后跑 xelab 静态细化，捕捉类型/端口/位宽/未定义引用等深度错误；**依赖迭代解析（≤6 轮）**——从当前文件出发，按 xvlog 与 xelab 两阶段的缺单元报错（`Module <X> not found` / `'X' is not declared`）自动补入缺失定义文件重试，无关文件的语法错不再阻断当前文件的检查
+- **UVM 工程自动支持**：文件含 `uvm_*` 标识符即自动附加 `-L UVM`（预编译库）+ `-i <vivado>/data/system_verilog/uvm_1.2`（`uvm_macros.svh` 解析，多版本布局探测）+ xelab `--timescale`（取当前文件声明值，默认 1ns/1ps）——UVM 预编译库全库无 `timescale，与带 timescale 的用户代码混合细化必报 XSIM 43-4100（工程流由 Vivado 后台注入默认值，批处理须自带）
+- **工作区设计单元索引扩展**：`module`/`interface`/`package`/`program` 统一收录，import 本地 package、实例化本地 interface 均可按定义文件命中（文件名≠单元名亦可）
+- **单文件 lint 自动补依赖**：双引擎下当前文件引用本工作区定义单元时自动补定义文件重试（`--incr`/精确补文件，均 ≤3 轮），不再把跨文件引用误报成语法错；`svtools.lint.currentFileOnly`（默认开）语义为「不附带 -y 扫描目录、诊断不外溢」，关闭后附带工作区目录做全工作区解析
+- **仿真运行中的停止按钮**：状态栏变为「■ 停止仿真」+ 编辑器工具栏停止按钮（按 `svtools.simRunning` 显隐）
+
+### Changed
+- **vvp 仿真实时输出**：Cygwin 构建的 vvp 在 stdout 接管道时块缓冲——短输出要等进程退出才可见、进程被强杀则整个丢失（表现为「仿真无输出」）；自动用 cygwin 目录下的 `stdbuf -oL` 强制行缓冲，`$display`/`$monitor` 实时流到输出通道（无 stdbuf 回退直跑）
+- README 精简重写（688→147 行）：版本横幅与版本标记全部移除（版本历史只由 CHANGELOG 承载，README 不随发布变更），配置表收敛为核心 7 项
+- 诊断位置解析新增 XSIM 消息体内嵌格式（`File "..." Line N :` 与 `File : path, Line : N,`），此类条目不再落到主文件第 1 行
+- cargo 测试基线全绿（修正 2 个过时断言，67/67）
+
+### Fixed
+- **xvlog 按 prj 顺序分析导致的 package 解析失败**：package 必须排在 importer 之前——补入依赖 prepend 到最前、工作区模式当前文件移到最后（此前 `[top, pkg]` 顺序下加齐文件仍报 `'X' is not declared`）
+- **xsim 仿真 `run all` 被 wave 配置块阻断**：`launch_simulation` 自动生成的 `<top>.tcl` 里 `add_wave` 排在 `run all` 之前，模块含不可 trace 对象（动态数组/队列，xsim 不支持）时脚本中断、仿真永不执行（显示成功但无 $display 输出）；改为生成最小 `xsim_run.tcl`（`run <时长>` + `quit`）挂到 `xsim.simulate.custom_tcl`（绝对路径），结束后 `reset_property` 清除
+- **停止仿真留孤儿进程**：stdbuf 包装时 cygwin `exec` 更换 Windows PID 且参数不进命令行，`kill()` 杀的是已退出的壳——停止改为 `kill()` + `taskkill /T` 进程树 + 按 `ParentProcessId` 定位 exec 后的 vvp 三重击杀；仿真运行中点状态栏曾会静默重跑（真正的 Stop 藏在命令面板），现状态栏/工具栏直接是停止按钮
+- **Vivado/xvlog 超时只杀 cmd.exe 壳**：vivado/xsim/xvlog 本体孤儿化继续运行（xsim「无法停止」根因）——超时路径统一 `taskkill /T` 按进程树终止
+- **currentFileOnly 单文件模式跨文件模块误报**（3.4.8 迭代中引入、发布前修）：单文件 lint 曾连缺模块重试一起去掉，实例化工作区模块报 `Unknown module type`；现仍按设计单元索引精确补定义文件（宿主回归 14/14 覆盖）
+
 ## [3.4.7] - 2026-10-02
 
 ### Added
