@@ -187,10 +187,10 @@ function activateVivado(context, deps) {
     }
 
     /** OOC 综合结束后：解析两份报告摘要进输出通道，并把 .rpt 打开到编辑器。 */
-    async function showOocReports(outDir, top) {
+    async function showOocReports(outDir, top, modeLabel) {
         const utilRpt = path.join(outDir, 'utilization_hier.rpt');
         const llRpt = path.join(outDir, 'logic_levels.rpt');
-        log('———— OOC 报告（' + top + '）————');
+        log('———— OOC 报告（' + top + (modeLabel ? '，' + modeLabel : '') + '）————');
         try {
             for (const s of parseUtilHierSummary(fs.readFileSync(utilRpt, 'utf8'))) log(s);
         } catch (err) { /* 报告缺失时只开文件 */ }
@@ -204,8 +204,11 @@ function activateVivado(context, deps) {
     }
 
     /**
-     * 标签页 Vivado 快捷入口：当前模块 OOC 综合（保持层次）→
-     * 分层资源占用 + 逻辑级数分布报告。不依赖/修改 .xpr 工程。
+     * 标签页 Vivado 快捷入口：当前模块 OOC 综合 → 分层资源占用 + 逻辑级数
+     * 分布报告。不依赖/修改 .xpr 工程。两档可选（对比优化收益）：
+     * 保持层次 = -flatten_hierarchy none（可看子模块分摊，禁跨边界优化）；
+     * 全优化 = full（Vivado 默认，跨模块边界优化，层次被展平）。
+     * 两档都是 out_of_context，对比时只差 flatten 一个变量。
      */
     async function vivadoReports() {
         const cur = currentVerilogFile();
@@ -215,6 +218,22 @@ function activateVivado(context, deps) {
             vscode.window.showWarningMessage('当前文件使用 UVM（测试平台不可综合），请打开 RTL 模块文件再生成报告。');
             return;
         }
+        // 综合策略：保持层次（默认）/ 全优化，两档对比只差 -flatten_hierarchy
+        const modePick = await vscode.window.showQuickPick([
+            {
+                label: '保持层次（默认）',
+                description: '-flatten_hierarchy none：保留模块边界，可看子模块资源分摊；禁跨边界优化',
+                value: 'none'
+            },
+            {
+                label: '全优化',
+                description: '-flatten_hierarchy full（Vivado 默认）：跨模块边界优化，资源/时序最优；层次被展平',
+                value: 'full'
+            }
+        ], { placeHolder: 'OOC 综合策略（两档都为 out_of_context，可分别跑一次对比差别）' });
+        if (!modePick) return;   // 用户取消
+        const flatten = modePick.value;
+
         // 综合顶层取自当前文件（不碰工程 top）；多模块文件让用户挑，单模块直取
         const modules = [...text.matchAll(/^[ \t]*(?:module|macromodule)[ \t]+([A-Za-z_][A-Za-z0-9_$]*)/gm)].map(m => m[1]);
         if (!modules.length) { vscode.window.showErrorMessage('当前文件里没有找到 module 声明'); return; }
@@ -247,23 +266,25 @@ function activateVivado(context, deps) {
         const files = await collectSynthFiles(cur.path);
         const ws = vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders[0];
         const base = ws ? ws.uri.fsPath : path.dirname(cur.path);
-        const outDir = path.join(base, '.svtools', 'vivado', 'ooc');
+        // 两档报告分目录存放，分别跑一次后可直接对比/不被覆盖
+        const outDir = path.join(base, '.svtools', 'vivado', 'ooc', flatten === 'full' ? 'opt' : 'hier');
         const scriptPath = path.join(base, '.svtools', 'vivado', 'ooc_reports.tcl');
         fs.mkdirSync(path.dirname(scriptPath), { recursive: true });
         fs.writeFileSync(scriptPath, buildOocReportsScript({
             files,
             includeDirs: [...new Set(files.map(f => path.dirname(f)))],
-            top, part, outDir,
+            top, part, outDir, flatten,
             isSv: files.some(f => /\.(sv|svh)$/i.test(f))
         }));
-        vscode.window.showInformationMessage(`OOC 综合中：${top}（${part}，${files.length} 个文件，保持层次）— 可在 Vivado 输出通道查看进度`);
+        const modeLabel = flatten === 'full' ? '全优化（flatten full）' : '保持层次（flatten none）';
+        vscode.window.showInformationMessage(`OOC 综合中：${top}（${part}，${files.length} 个文件，${modeLabel}）— 可在 Vivado 输出通道查看进度`);
         const r = await runScript(scriptPath, { quiet: true });
         if (!r || r.code !== 0) {
             out.show(true);
             vscode.window.showErrorMessage('OOC 综合失败（详见 Vivado 输出通道）');
             return;
         }
-        await showOocReports(outDir, top);
+        await showOocReports(outDir, top, modeLabel);
     }
 
     /** 标签页 ▶ 按钮：选择仿真引擎。 */
