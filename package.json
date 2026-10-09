@@ -218,6 +218,12 @@
         "title": "%cmd.simulate_pick.title%",
         "category": "SystemVerilog Tools",
         "icon": "$(play)"
+      },
+      {
+        "command": "svtools.vivado.reports",
+        "title": "%cmd.vivado_reports.title%",
+        "category": "SystemVerilog Tools",
+        "icon": "$(chip)"
       }
     ],
     "customEditors": [
@@ -297,6 +303,11 @@
           "command": "svtools.iverilog.stopSimulation",
           "group": "navigation@2",
           "when": "svtools.simRunning && activeCustomEditorId != svtoolsWaveViewer"
+        },
+        {
+          "command": "svtools.vivado.reports",
+          "group": "navigation@3",
+          "when": "(resourceExtname == .sv || resourceExtname == .v || resourceExtname == .svh || resourceExtname == .vh) && activeCustomEditorId != svtoolsWaveViewer"
         },
         {
           "command": "svtools.vivado.addToFileset",

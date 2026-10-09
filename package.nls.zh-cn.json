@@ -76,5 +76,6 @@
   "cfg.vivado_simRuntime.desc": "Vivado xsim 仿真运行时长（xsim.simulate.runtime），如 1000ns。留空 = 跑到 $finish（xsim -runall）",
   "cmd.lint_selectEngine.title": "Lint：选择引擎（iverilog / xvlog）",
   "cmd.xvlog_elaborate.title": "Lint：xelab 详细化检查（当前文件 + 工作区依赖）",
-  "cfg.lintCurrentFileOnly.desc": "只对打开的文件做语法检查——快速、不产生工作区其他文件的诊断。关闭后跨文件解析（iverilog -y 扫描 / xvlog 附带工作区文件集）"
+  "cfg.lintCurrentFileOnly.desc": "只对打开的文件做语法检查——快速、不产生工作区其他文件的诊断。关闭后跨文件解析（iverilog -y 扫描 / xvlog 附带工作区文件集）",
+  "cmd.vivado_reports.title": "Vivado：OOC 报告（资源占用 + 逻辑级数）"
 }
