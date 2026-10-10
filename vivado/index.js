@@ -164,13 +164,19 @@ function activateVivado(context, deps) {
     /**
      * 传递闭包收集综合文件集：入口文件 + 其文本中出现的工作区定义单元（词边界
      * 匹配，含模块实例化/import 引用；注释误命中只多读文件，不影响 -top 综合）。
+     * package 必须先于 import 它的文件被 read_verilog（Vivado 逐文件即时编译，
+     * importer 在前会报 Synth 8-36 'xxx_pkg' is not declared——与 xvlog prj 顺序、
+     * iverilog 单遍编译同一约束），故收集后重排：package 文件在前，package 间按
+     * import 依赖拓扑排序。
      * @param {string} entryFile
      * @returns {Promise<string[]>}
      */
     async function collectSynthFiles(entryFile) {
         const files = [entryFile];
         let index;
-        try { index = (await require('../iverilog').scanWorkspaceSources()).modules; } catch (err) { return files; }
+        // OOC 综合是重操作，强制刷新索引——不吃 10s TTL 缓存（刚建/改 package
+        // 的窗口期会拿到旧索引导致漏收依赖）
+        try { index = (await require('../iverilog').scanWorkspaceSources(true)).modules; } catch (err) { return files; }
         const seen = new Set(files.map(f => path.resolve(f)));
         const nameRes = [...index.keys()].map(n => ({ n, re: new RegExp('\\b' + n.replace(/[$]/g, '\\$') + '\\b') }));
         for (let i = 0; i < files.length; i++) {
@@ -184,7 +190,38 @@ function activateVivado(context, deps) {
                 }
             }
         }
-        return files;
+        return orderForReadVerilog(files);
+    }
+
+    /** read_verilog 读序重排：package 文件在前（package 间按 import 拓扑），其余保持原序。 */
+    function orderForReadVerilog(files) {
+        const info = files.map(file => {
+            let text = '';
+            try { text = fs.readFileSync(file, 'utf8'); } catch (err) { /* 读不了按非 package 处理 */ }
+            const decl = text.match(/^[ \t]*(module|macromodule|interface|package|program)[ \t]+([A-Za-z_][A-Za-z0-9_$]*)/m) || [];
+            return {
+                file,
+                kind: decl[1] || '',
+                name: decl[2] || '',
+                imports: new Set([...text.matchAll(/\bimport\s+([A-Za-z_][A-Za-z0-9_$]*)\s*::/g)].map(m => m[1]))
+            };
+        });
+        const nameOf = new Map(info.filter(i => i.name).map(i => [i.name, i.file]));
+        const pkgFiles = new Set(info.filter(i => i.kind === 'package').map(i => i.file));
+        const ordered = [];
+        const done = new Set();
+        const visit = (it) => {
+            if (done.has(it.file)) return;
+            done.add(it.file);
+            for (const imp of it.imports) {
+                const dep = nameOf.get(imp);
+                if (dep && pkgFiles.has(dep)) visit(info.find(x => x.file === dep));
+            }
+            ordered.push(it);
+        };
+        for (const it of info) if (pkgFiles.has(it.file)) visit(it);
+        for (const it of info) if (!pkgFiles.has(it.file)) visit(it);
+        return ordered.map(i => i.file);
     }
 
     /** OOC 综合结束后：解析两份报告摘要进输出通道，并把 .rpt 打开到编辑器。 */
