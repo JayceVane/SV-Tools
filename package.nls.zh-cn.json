@@ -77,5 +77,19 @@
   "cmd.lint_selectEngine.title": "Lint：选择引擎（iverilog / xvlog）",
   "cmd.xvlog_elaborate.title": "Lint：xelab 详细化检查（当前文件 + 工作区依赖）",
   "cfg.lintCurrentFileOnly.desc": "只对打开的文件做语法检查——快速、不产生工作区其他文件的诊断。关闭后跨文件解析（iverilog -y 扫描 / xvlog 附带工作区文件集）",
-  "cmd.vivado_reports.title": "Vivado：OOC 报告（资源占用 + 逻辑级数）"
+  "cmd.vivado_reports.title": "Vivado：OOC 报告（资源占用 + 逻辑级数）",
+  "cmd.vivado_tree_refresh.title": "刷新工程树",
+  "cmd.vivado_tree_addFile.title": "添加文件到工程",
+  "cmd.vivado_tree_removeFile.title": "从工程移除文件",
+  "cmd.vivado_tree_setTopSynth.title": "设为综合顶层",
+  "cmd.vivado_tree_setTopSim.title": "设为仿真顶层",
+  "cmd.vivado_tree_moveToSim.title": "移到 sim_1（仿真源文件）",
+  "cmd.vivado_tree_moveToSources.title": "移到 sources_1（设计源文件）",
+  "cmd.vivado_tree_elaborate.title": "xelab 详细化（顶层模块）",
+  "cmd.vivado_tree_synthesize.title": "运行综合",
+  "cmd.vivado_tree_implement.title": "运行布局布线",
+  "cmd.vivado_tree_reportSynth.title": "综合报告（资源占用 + 逻辑级数）",
+  "cmd.vivado_tree_reportImpl.title": "实现报告（时序汇总 + 资源占用）",
+  "viewcontainer.vivado.title": "Vivado 工程",
+  "view.vivado.projectTree.name": "工程文件"
 }

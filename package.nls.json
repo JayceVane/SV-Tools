@@ -77,5 +77,19 @@
   "cmd.lint_selectEngine.title": "Lint: Select Engine (iverilog / xvlog)",
   "cmd.xvlog_elaborate.title": "Lint: xelab Elaboration Check (current file + workspace deps)",
   "cfg.lintCurrentFileOnly.desc": "Lint the opened file only — fast, no diagnostics from other workspace files. Off: resolve cross-file modules (iverilog -y scan / xvlog workspace file set)",
-  "cmd.vivado_reports.title": "Vivado: OOC Report (Utilization & Logic Levels)"
+  "cmd.vivado_reports.title": "Vivado: OOC Report (Utilization & Logic Levels)",
+  "cmd.vivado_tree_refresh.title": "Refresh Project Tree",
+  "cmd.vivado_tree_addFile.title": "Add File to Project",
+  "cmd.vivado_tree_removeFile.title": "Remove File from Project",
+  "cmd.vivado_tree_setTopSynth.title": "Set as Synthesis Top",
+  "cmd.vivado_tree_setTopSim.title": "Set as Simulation Top",
+  "cmd.vivado_tree_moveToSim.title": "Move to sim_1 (Simulation Sources)",
+  "cmd.vivado_tree_moveToSources.title": "Move to sources_1 (Design Sources)",
+  "cmd.vivado_tree_elaborate.title": "xelab Elaborate (Top Module)",
+  "cmd.vivado_tree_synthesize.title": "Run Synthesis",
+  "cmd.vivado_tree_implement.title": "Run Place & Route",
+  "cmd.vivado_tree_reportSynth.title": "Synthesis Report (Utilization & Logic Levels)",
+  "cmd.vivado_tree_reportImpl.title": "Implementation Report (Timing Summary & Utilization)",
+  "viewcontainer.vivado.title": "Vivado Project",
+  "view.vivado.projectTree.name": "Project Files"
 }
