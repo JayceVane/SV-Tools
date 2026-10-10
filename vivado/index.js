@@ -361,7 +361,7 @@ function activateVivado(context, deps) {
         });
     }
 
-    /** 运行 TCL 脚本。返回 Promise<{code, ms, issues}>（供命令与 AI Agent 工具复用）。 */
+    /** 运行 TCL 脚本。返回 Promise<{code, ms, issues, stdout}>（供命令与 AI Agent 工具复用）。 */
     function runScript(scriptPath, opts) {
         return new Promise((resolve) => {
             if (running) {
@@ -415,7 +415,9 @@ function activateVivado(context, deps) {
                     log('[vivado] 退出 code=' + code + (reason ? ' (' + reason + ')' : '') + '，耗时 ' + (ms / 1000).toFixed(1) + 's');
                 }
                 refreshProjectContext();   // create_project 等操作可能新建/删除了 .xpr
-                resolve({ code: code, ms: ms, issues: issues });
+                // stdout 一并返回：调用方可消费 SVTOOLS_* 标记（Vivado batch
+                // 退出码不可靠，脚本内错误也可能返回 0）
+                resolve({ code: code, ms: ms, issues: issues, stdout: outLines.join('') });
             };
 
             const outLines = [];

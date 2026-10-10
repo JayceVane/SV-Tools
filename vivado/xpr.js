@@ -66,15 +66,24 @@ function resolveXprPath(p, xprDir) {
 }
 
 /**
+ * 两个文件路径是否同一文件：normalize 后精确比较；win32 再忽略大小写
+ * （盘符大小写、目录段大小写在不同来源——findFiles / Vivado 写入——可能不同）。
+ */
+function samePath(a, b) {
+    const x = path.normalize(String(a || ''));
+    const y = path.normalize(String(b || ''));
+    return process.platform === 'win32' ? x.toLowerCase() === y.toLowerCase() : x === y;
+}
+
+/**
  * 便捷查询：某文件属于哪个文件集（sources_1/sim_1/constrs_1/…）。
  * @returns {string|null} 文件集名；不在工程中返回 null
  */
 function fileSetOf(parsed, absFile) {
-    const want = path.normalize(absFile);
     for (const s of parsed.sets) {
-        if (s.files.some(f => path.normalize(f) === want)) return s.name;
+        if (s.files.some(f => samePath(f, absFile))) return s.name;
     }
     return null;
 }
 
-module.exports = { parseXpr, fileSetOf, resolveXprPath };
+module.exports = { parseXpr, fileSetOf, samePath, resolveXprPath };
