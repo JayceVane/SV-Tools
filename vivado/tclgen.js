@@ -189,24 +189,31 @@ function buildLaunchRunScript(o) {
 /**
  * 生成"打开已完成的 run 并输出报告"TCL。synth 报告含分层资源 + 逻辑级数；
  * impl 报告含时序汇总 + 资源。run 未完成时 open_run 报错（插件提示先跑）。
- * @param {{xprPath:string, run:'synth_1'|'impl_1', outDir:string}} o
+ * @param {{xprPath:string, run:'synth_1'|'impl_1', outDir:string, reports?:Array<'utilization'|'logic_levels'|'timing_summary'>}} o
+ * reports 缺省 = 该 run 全套；传子集则只生成所选报告（快捷区拆分入口用）。
  */
 function buildRunReportsScript(o) {
     const isSynth = o.run === 'synth_1';
-    return [
+    const kinds = o.reports || (isSynth ? ['utilization', 'logic_levels'] : ['utilization', 'timing_summary']);
+    const L = [
         'open_project ' + tclQuote(o.xprPath),
         'set outDir ' + tclQuote(o.outDir),
         'file mkdir $outDir',
-        'open_run ' + o.run + (isSynth ? ' -name netlist_1' : ' -name impl_1'),
-        isSynth
-            ? 'report_utilization -hierarchical -file $outDir/synth_utilization.rpt'
-            : 'report_utilization -file $outDir/impl_utilization.rpt',
-        isSynth
-            ? 'report_design_analysis -logic_level_distribution -file $outDir/synth_logic_levels.rpt'
-            : 'report_timing_summary -file $outDir/timing_summary.rpt',
-        'puts "SVTOOLS_REPORTS_DONE"',
-        'puts "SVTOOLS_DONE"'
-    ].join('\n') + '\n';
+        'open_run ' + o.run + (isSynth ? ' -name netlist_1' : ' -name impl_1')
+    ];
+    for (const k of kinds) {
+        if (k === 'utilization') {
+            L.push(isSynth
+                ? 'report_utilization -hierarchical -file $outDir/synth_utilization.rpt'
+                : 'report_utilization -file $outDir/impl_utilization.rpt');
+        } else if (k === 'logic_levels') {
+            L.push('report_design_analysis -logic_level_distribution -file $outDir/synth_logic_levels.rpt');
+        } else if (k === 'timing_summary') {
+            L.push('report_timing_summary -file $outDir/timing_summary.rpt');
+        }
+    }
+    L.push('puts "SVTOOLS_REPORTS_DONE"', 'puts "SVTOOLS_DONE"');
+    return L.join('\n') + '\n';
 }
 
 /**

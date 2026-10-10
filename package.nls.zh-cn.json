@@ -91,5 +91,10 @@
   "cmd.vivado_tree_reportSynth.title": "综合报告（资源占用 + 逻辑级数）",
   "cmd.vivado_tree_reportImpl.title": "实现报告（时序汇总 + 资源占用）",
   "viewcontainer.vivado.title": "Vivado 工程",
-  "view.vivado.projectTree.name": "工程文件"
+  "view.vivado.projectTree.name": "工程文件",
+  "cmd.vivado_tree_reportImplUtil.title": "布局布线报告（资源占用）",
+  "cmd.vivado_tree_reportTiming.title": "时序报告（WNS/TNS）",
+  "cmd.vivado_tree_bitstream.title": "生成 Bitstream",
+  "cmd.vivado_tree_quickElaborate.title": "仿真 Top 详细化（xelab）",
+  "cmd.vivado_tree_expandAll.title": "全部展开"
 }

@@ -17,10 +17,12 @@
  * Vivado 工程管理侧边栏：依赖层级文件树（类 Vivado Sources 视图）+ 右键管理。
  * - 数据源：.xpr（文件集成员/top，正则解析免启动 Vivado）+ 工作区设计单元索引
  *   （层级 = top 模块按实例化关系向下展开，词边界闭包）
- * - 右键：加入/移出工程、设综合/仿真 top、文件集间移动（src↔sim）、
- *   top 级 xelab 详细化、综合、布局布线、时序/综合/实现报告
+ * - 树首固定「top 级操作」快捷区：xelab/综合/报告/布局布线/bitstream/时序报告
+ *   一键触发，不需要定位到 top 模块右键
+ * - 右键：加入/移出工程、设综合/仿真 top、文件集间移动（src↔sim）
+ * - 视图标题栏：全部展开（expandAll）+ VS Code 内置全部收起（showCollapseAll）
  * - 写操作全部经 Vivado batch TCL（复用 runScript：状态栏转圈 + 停止按钮），
- *   完成后自动刷新树；.xpr 文件变化（含在 Vivado GUI 里的改动）也触发刷新
+ *   完成后重解析 .xpr 事实校验；.xpr 变化（含 Vivado GUI 里的改动）也触发刷新
  */
 
 'use strict';
@@ -89,7 +91,7 @@ function activateProjectTree(context, deps) {
         // 各文件集：top 层级树 + 不在层级里的文件平铺
         const srcTree = buildSetTree('设计源文件（' + srcSet.name + '）', srcSet, unitIndex, 'sources');
         const simTree = buildSetTree('仿真源文件（' + simSet.name + '）', simSet, unitIndex, 'sim');
-        const cats = [srcTree, simTree];
+        const cats = [quickActionsNode(srcSet, simSet), srcTree, simTree];
 
         if (constrFiles.length) {
             cats.push(catItem('约束文件（constrs_1）', constrFiles.map(f => fileNode(f, 'constraint'))));
@@ -110,8 +112,39 @@ function activateProjectTree(context, deps) {
         roots = cats;
     }
 
-    function buildSetTree(label, set, unitIndex, kind) {
-        const children = [];
+    /**
+     * top 级快捷操作区（树首固定区域）：不需要定位到 top 模块右键，
+     * 一键触发 xelab / 综合 / 报告 / 布局布线 / bitstream / 时序报告。
+     */
+    function quickActionsNode(srcSet, simSet) {
+        const srcTop = srcSet.top || '';
+        const simTop = simSet.top || '';
+        const items = [
+            actionItem('xelab 详细化（' + (simTop ? '仿真 top: ' + simTop : '无仿真 top，回退综合 top') + '）', 'zap', 'svtools.vivado.tree.quickElaborate'),
+            actionItem('工程综合（synth_1' + (srcTop ? ' · ' + srcTop : '') + '）', 'tools', 'svtools.vivado.tree.synthesize'),
+            actionItem('综合报告（分层资源 + 逻辑级数）', 'graph', 'svtools.vivado.tree.reportSynth'),
+            actionItem('布局布线（impl_1，自动级联综合）', 'circuit-board', 'svtools.vivado.tree.implement'),
+            actionItem('布局布线报告（资源占用）', 'list-tree', 'svtools.vivado.tree.reportImplUtil'),
+            actionItem('时序报告（WNS/TNS）', 'watch', 'svtools.vivado.tree.reportTiming'),
+            actionItem('生成 Bitstream（impl → write_bitstream）', 'package', 'svtools.vivado.tree.bitstream')
+        ];
+        const it = catItem('top 级操作' + (srcTop || simTop ? '（top: ' + (srcTop || simTop) + '）' : ''), items);
+        it.iconPath = new vscode.ThemeIcon('zap');
+        it.contextValue = 'actions';
+        return it;
+    }
+
+    /** 快捷区条目：无子级，点击即执行绑定的命令。 */
+    function actionItem(label, icon, command) {
+        const it = new vscode.TreeItem(label, vscode.TreeItemCollapsibleState.None);
+        it.iconPath = new vscode.ThemeIcon(icon);
+        it.contextValue = 'action';
+        it.tooltip = '点击执行';
+        it.command = { command, title: label };
+        return it;
+    }
+
+    function buildSetTree(label, set, unitIndex, kind) {        const children = [];
         const claimed = [];
         if (set.top && unitIndex.get(set.top)) {
             const visited = new Set([set.top]);
@@ -336,7 +369,28 @@ function activateProjectTree(context, deps) {
         vscode.commands.executeCommand('svtools.xvlog.elaborate');
     }
 
-    /** 综合 / 布局布线（impl 自动级联 synth）。 */
+    /** 快捷区 xelab：从 .xpr 取 sim_1 top（无则综合 top）的源文件打开后详细化。 */
+    async function quickElaborate() {
+        const xpr = await currentXpr(); if (!xpr) return;
+        let parsed;
+        try { parsed = parseXpr(xpr); } catch (err) { vscode.window.showErrorMessage('读取 .xpr 失败'); return; }
+        const simSet = parsed.sets.find(s => s.type === 'SimulationSrcs') || {};
+        const srcSet = parsed.sets.find(s => s.type === 'DesignSrcs') || {};
+        const top = simSet.top || srcSet.top;
+        if (!top) { vscode.window.showErrorMessage('工程未设置 top 模块（在文件树右键模块设置）'); return; }
+        let unitIndex = new Map();
+        try { unitIndex = (await scanWorkspaceSources()).modules; } catch (err) { /* */ }
+        const file = unitIndex.get(top);
+        if (!file) {
+            // 索引找不到时兜底：top 名 + 常见扩展名在工程文件集里找
+            const cand = [...simSet.files, ...srcSet.files].find(f => samePath(path.basename(f), top + '.sv') || samePath(path.basename(f), top + '.v'));
+            if (!cand) { vscode.window.showErrorMessage('找不到 top 模块 ' + top + ' 的源文件'); return; }
+            return elaborateTop({ nodeData: { file: cand } });
+        }
+        return elaborateTop({ nodeData: { file } });
+    }
+
+    /** 综合 / 布局布线 / Bitstream（impl 自动级联 synth）。 */
     async function launchRun(run, toStep, label) {
         const xpr = await currentXpr(); if (!xpr) return;
         vscode.window.showInformationMessage(label + '启动（状态栏可查看进度/停止）…');
@@ -354,40 +408,63 @@ function activateProjectTree(context, deps) {
         log('[' + run + '] ' + label + '完成');
     }
 
-    /** 报告：跑 tcl 生成 .rpt → webview 打开 + 摘要进通道。 */
-    async function openRunReports(run) {
+    /**
+     * 报告：跑 tcl 生成 .rpt → webview 打开 + 摘要进通道。
+     * @param {'synth_1'|'impl_1'} run
+     * @param {Array<'utilization'|'logic_levels'|'timing_summary'>} [kinds] 缺省 = 该 run 全套
+     */
+    async function openRunReports(run, kinds) {
         const xpr = await currentXpr(); if (!xpr) return;
         const ws = vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders[0];
         const base = ws ? ws.uri.fsPath : path.dirname(xpr);
         const outDir = path.join(base, '.svtools', 'vivado', 'reports', run);
         const scriptPath = path.join(base, '.svtools', 'vivado', 'reports_' + run + '.tcl');
         fs.mkdirSync(outDir, { recursive: true });
-        fs.writeFileSync(scriptPath, buildRunReportsScript({ xprPath: xpr, run, outDir }));
+        fs.writeFileSync(scriptPath, buildRunReportsScript({ xprPath: xpr, run, outDir, reports: kinds }));
         const r = await runScript(scriptPath, { quiet: true });
         if (!r || r.code !== 0) {
             out.show(true);
             vscode.window.showErrorMessage(run + ' 报告生成失败——若 run 未完成请先运行综合/布局布线（详见输出通道）');
             return;
         }
-        const files = run === 'synth_1'
-            ? ['synth_utilization.rpt', 'synth_logic_levels.rpt']
-            : ['timing_summary.rpt', 'impl_utilization.rpt'];
-        for (const f of files) {
-            const p = path.join(outDir, f);
+        const list = kinds || (run === 'synth_1' ? ['utilization', 'logic_levels'] : ['utilization', 'timing_summary']);
+        const FILE_OF = {
+            'synth_1:utilization': ['synth_utilization.rpt', summarizeSynthUtil],
+            'synth_1:logic_levels': ['synth_logic_levels.rpt', summarizeLogicLevels],
+            'impl_1:utilization': ['impl_utilization.rpt', null],
+            'impl_1:timing_summary': ['timing_summary.rpt', summarizeTiming]
+        };
+        for (const k of list) {
+            const entry = FILE_OF[run + ':' + k];
+            if (!entry) continue;
+            const p = path.join(outDir, entry[0]);
             if (fs.existsSync(p)) showReport(vscode, vscode.Uri.file(p));
+            if (entry[1]) { try { entry[1](fs.readFileSync(p, 'utf8')); } catch (err) { /* 摘要失败不影响打开报告 */ } }
         }
-        // 摘要进通道
-        try {
-            if (run === 'synth_1') {
-                for (const s of parseUtilHierSummary(fs.readFileSync(path.join(outDir, 'synth_utilization.rpt'), 'utf8'))) log('[synth] ' + s);
-                log('[synth] ' + parseLogicLevelSummary(fs.readFileSync(path.join(outDir, 'synth_logic_levels.rpt'), 'utf8')));
-            } else {
-                const ts = fs.readFileSync(path.join(outDir, 'timing_summary.rpt'), 'utf8');
-                const m = ts.match(/^\|\s*(?:Design Timing Summary|WNS\(ns\)[^\n]*\|)\s*\n[^\n]*\n\|\s*(-?[\d.]+)\s*\|\s*(-?[\d.]+)\s*\|\s*(-?[\d.]+)\s*\|\s*(-?[\d.]+)/m);
-                if (m) log('[impl] WNS ' + m[1] + 'ns | TNS ' + m[2] + 'ns | WHS ' + m[3] + 'ns | THS ' + m[4] + 'ns'
-                    + (parseFloat(m[1]) >= 0 && parseFloat(m[3]) >= 0 ? '（时序满足）' : '（存在违例！）'));
+    }
+
+    function summarizeSynthUtil(text) {
+        for (const s of parseUtilHierSummary(text)) log('[synth] ' + s);
+    }
+    function summarizeLogicLevels(text) {
+        log('[synth] ' + parseLogicLevelSummary(text));
+    }
+    function summarizeTiming(text) {
+        const m = text.match(/^\|\s*(?:Design Timing Summary|WNS\(ns\)[^\n]*\|)\s*\n[^\n]*\n\|\s*(-?[\d.]+)\s*\|\s*(-?[\d.]+)\s*\|\s*(-?[\d.]+)\s*\|\s*(-?[\d.]+)/m);
+        if (m) log('[impl] WNS ' + m[1] + 'ns | TNS ' + m[2] + 'ns | WHS ' + m[3] + 'ns | THS ' + m[4] + 'ns'
+            + (parseFloat(m[1]) >= 0 && parseFloat(m[3]) >= 0 ? '（时序满足）' : '（存在违例！）'));
+    }
+
+    /** 全部展开（视图标题栏按钮；收起用 VS Code 内置 collapse-all）。 */
+    async function expandAll() {
+        const stack = [...roots];
+        while (stack.length) {
+            const n = stack.pop();
+            if (n.children && n.children.length) {
+                stack.push(...n.children);
+                try { await tree.reveal(n, { select: false, focus: false, expand: true }); } catch (err) { /* 节点不可 reveal 跳过 */ }
             }
-        } catch (err) { /* 摘要失败不影响打开报告 */ }
+        }
     }
 
     // ---------------- 注册 ----------------
@@ -401,10 +478,15 @@ function activateProjectTree(context, deps) {
         vscode.commands.registerCommand('svtools.vivado.tree.moveToSim', (n) => moveFile(n, 'sim_1')),
         vscode.commands.registerCommand('svtools.vivado.tree.moveToSources', (n) => moveFile(n, 'sources_1')),
         vscode.commands.registerCommand('svtools.vivado.tree.elaborate', elaborateTop),
+        vscode.commands.registerCommand('svtools.vivado.tree.quickElaborate', quickElaborate),
         vscode.commands.registerCommand('svtools.vivado.tree.synthesize', () => launchRun('synth_1', null, '综合')),
         vscode.commands.registerCommand('svtools.vivado.tree.implement', () => launchRun('impl_1', 'route_design', '布局布线')),
+        vscode.commands.registerCommand('svtools.vivado.tree.bitstream', () => launchRun('impl_1', 'write_bitstream', 'Bitstream 生成')),
         vscode.commands.registerCommand('svtools.vivado.tree.reportSynth', () => openRunReports('synth_1')),
-        vscode.commands.registerCommand('svtools.vivado.tree.reportImpl', () => openRunReports('impl_1'))
+        vscode.commands.registerCommand('svtools.vivado.tree.reportImpl', () => openRunReports('impl_1')),
+        vscode.commands.registerCommand('svtools.vivado.tree.reportImplUtil', () => openRunReports('impl_1', ['utilization'])),
+        vscode.commands.registerCommand('svtools.vivado.tree.reportTiming', () => openRunReports('impl_1', ['timing_summary'])),
+        vscode.commands.registerCommand('svtools.vivado.tree.expandAll', expandAll)
     );
 
     refresh();
