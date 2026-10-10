@@ -26,7 +26,7 @@
 'use strict';
 const fs = require('fs');
 const path = require('path');
-const { parseXpr, fileSetOf } = require('./xpr');
+const { parseXpr, fileSetOf, samePath } = require('./xpr');
 const { showReport } = require('./reportView');
 const {
     buildAddFilesScript, buildRemoveFilesScript, buildSetTopScript, buildMoveFileScript,
@@ -97,12 +97,12 @@ function activateProjectTree(context, deps) {
 
         // 未加入工程的工作区源文件/约束（右键即可加入）
         const inPrj = new Set();
-        for (const s of parsed.sets) for (const f of s.files) inPrj.add(path.normalize(f));
+        for (const s of parsed.sets) for (const f of s.files) inPrj.add(f);
         const unadded = [];
         try {
             const uris = await vscode.workspace.findFiles('**/*.{sv,v,svh,vh,xdc}', '**/{.svtools,node_modules,prj}/**', 2000);
             for (const u of uris) {
-                if (!inPrj.has(path.normalize(u.fsPath))) unadded.push(fileNode(u.fsPath, 'orphan'));
+                if (![...inPrj].some(f => samePath(f, u.fsPath))) unadded.push(fileNode(u.fsPath, 'orphan'));
             }
         } catch (err) { /* 扫描失败跳过 */ }
         if (unadded.length) cats.push(catItem('未加入工程（' + unadded.length + '）', unadded));
@@ -112,14 +112,14 @@ function activateProjectTree(context, deps) {
 
     function buildSetTree(label, set, unitIndex, kind) {
         const children = [];
-        const claimed = new Set();
+        const claimed = [];
         if (set.top && unitIndex.get(set.top)) {
             const visited = new Set([set.top]);
             children.push(moduleNode(set.top, unitIndex, visited, claimed, true));
         }
         // 不在 top 层级下的文件平铺（库里单元未被引用 / 纯包含文件等）
         for (const f of set.files) {
-            if (!claimed.has(path.normalize(f))) children.push(fileNode(f, kind === 'sim' ? 'simFile' : 'file'));
+            if (!claimed.some(c => samePath(c, f))) children.push(fileNode(f, kind === 'sim' ? 'simFile' : 'file'));
         }
         const it = catItem(label + (set.top ? ' · top: ' + set.top : ''), children);
         it.contextValue = 'setRoot';
@@ -129,12 +129,12 @@ function activateProjectTree(context, deps) {
     /** 模块层级节点：文件内引用到的工作区单元递归为子节点（环安全）。 */
     function moduleNode(name, unitIndex, visited, claimed, isTop) {
         const file = unitIndex.get(name);
-        claimed.add(path.normalize(file));
+        claimed.push(file);
         const children = [];
         let text = '';
         try { text = fs.readFileSync(file, 'utf8'); } catch (err) { /* 读不了就没有子级 */ }
         for (const [unit, f] of unitIndex) {
-            if (visited.has(unit) || path.normalize(f) === path.normalize(file)) continue;
+            if (visited.has(unit) || samePath(f, file)) continue;
             const re = new RegExp('\\b' + unit.replace(/[$]/g, '\\$') + '\\b');
             if (re.test(text)) {
                 visited.add(unit);
@@ -218,6 +218,28 @@ function activateProjectTree(context, deps) {
         return r;
     }
 
+    /**
+     * 写操作结果按 .xpr 事实校验：Vivado batch 退出码与脚本标记都可能说谎
+     * （脚本内错误仍退出 0、工程被 GUI 占用时修改可能不落盘），唯一可信的是
+     * 重解析后的 .xpr 状态。check(parsed) 返回 true=符合预期。
+     */
+    function xprFact(xprPath, check) {
+        try { return check(parseXpr(xprPath)); } catch (err) { return false; }
+    }
+
+    /** 写操作失败统一提示（含 Vivado 侧标记差异，通道里有完整输出）。 */
+    function reportWriteFail(what, r) {
+        out.show(true);
+        let hint = '';
+        if (r && r.stdout && /SVTOOLS_TCL_ERROR/.test(r.stdout)) {
+            const m = r.stdout.match(/SVTOOLS_TCL_ERROR ([^\r\n]*)/);
+            if (m) hint = '：' + m[1].slice(0, 160);
+        } else if (r && r.code === 0) {
+            hint = '（Vivado 报成功但 .xpr 未变化，常见原因：工程正被 Vivado GUI 打开）';
+        }
+        vscode.window.showErrorMessage(what + '失败' + hint + '——详见 Vivado 输出通道');
+    }
+
     async function addFileToProject(nodeArg) {
         const xpr = await currentXpr(); if (!xpr) return;
         // 目标文件：右键未加入文件时直接用之；工具栏按钮则弹出工作区文件选择
@@ -239,7 +261,11 @@ function activateProjectTree(context, deps) {
                 { label: 'constrs_1（约束）', value: 'constrs_1' }
             ], { placeHolder: path.basename(file) + ' 加入哪个文件集' });
         if (!setPick) return;
-        await runTcl('add_file.tcl', buildAddFilesScript(xpr, file, setPick.value, /\.sv(h)?$/i.test(file)));
+        const r = await runTcl('add_file.tcl', buildAddFilesScript(xpr, file, setPick.value, /\.sv(h)?$/i.test(file)));
+        if (!r || r.code !== 0 || !xprFact(xpr, p => fileSetOf(p, file) === setPick.value)) {
+            reportWriteFail(path.basename(file) + ' 加入 ' + setPick.value + ' ', r);
+            return;
+        }
         vscode.window.showInformationMessage(path.basename(file) + ' 已加入 ' + setPick.value);
     }
 
@@ -249,9 +275,19 @@ function activateProjectTree(context, deps) {
         if (!node || !node.file) return;
         let parsed;
         try { parsed = parseXpr(xpr); } catch (err) { vscode.window.showErrorMessage('读取 .xpr 失败'); return; }
-        const from = fileSetOf(parsed, node.file) || 'sources_1';
+        const from = fileSetOf(parsed, node.file);
+        if (!from) {
+            // 不在工程里还点移出：多数是树没刷新或模块节点路径与 .xpr 不一致
+            vscode.window.showWarningMessage(path.basename(node.file) + ' 不在当前 .xpr 中，已刷新工程树');
+            refresh();
+            return;
+        }
         const r = await runTcl('remove_file.tcl', buildRemoveFilesScript(xpr, node.file, from));
-        if (r && r.code === 0) vscode.window.showInformationMessage(path.basename(node.file) + ' 已从 ' + from + ' 移出工程');
+        if (!r || r.code !== 0 || !xprFact(xpr, p => fileSetOf(p, node.file) === null)) {
+            reportWriteFail(path.basename(node.file) + ' 从 ' + from + ' 移出 ', r);
+            return;
+        }
+        vscode.window.showInformationMessage(path.basename(node.file) + ' 已从 ' + from + ' 移出工程');
     }
 
     async function setTop(nodeArg, fileset) {
@@ -259,7 +295,12 @@ function activateProjectTree(context, deps) {
         const node = nodeArg && nodeArg.nodeData;
         const mod = node && node.module;
         if (!mod) { vscode.window.showErrorMessage('请右键模块节点设置 top'); return; }
-        await runTcl('set_top.tcl', buildSetTopScript({ xprPath: xpr, fileset, top: mod }));
+        const r = await runTcl('set_top.tcl', buildSetTopScript({ xprPath: xpr, fileset, top: mod }));
+        const ok = r && r.code === 0 && xprFact(xpr, p => {
+            const s = p.sets.find(x => x.name === fileset);
+            return !!s && s.top === mod;
+        });
+        if (!ok) { reportWriteFail(mod + ' 设为 ' + fileset + ' 顶层 ', r); return; }
         vscode.window.showInformationMessage(mod + ' 已设为 ' + fileset + ' 顶层');
     }
 
@@ -270,11 +311,19 @@ function activateProjectTree(context, deps) {
         let parsed;
         try { parsed = parseXpr(xpr); } catch (err) { vscode.window.showErrorMessage('读取 .xpr 失败'); return; }
         const from = fileSetOf(parsed, node.file);
-        if (!from) { vscode.window.showErrorMessage(path.basename(node.file) + ' 不在工程中'); return; }
+        if (!from) {
+            vscode.window.showWarningMessage(path.basename(node.file) + ' 不在当前 .xpr 中，已刷新工程树');
+            refresh();
+            return;
+        }
         if (from === to) { vscode.window.showInformationMessage('已在 ' + to + ' 中'); return; }
-        await runTcl('move_file.tcl', buildMoveFileScript({
+        const r = await runTcl('move_file.tcl', buildMoveFileScript({
             xprPath: xpr, file: node.file, from, to, isSv: /\.sv(h)?$/i.test(node.file)
         }));
+        if (!r || r.code !== 0 || !xprFact(xpr, p => fileSetOf(p, node.file) === to)) {
+            reportWriteFail(path.basename(node.file) + '：' + from + ' → ' + to + ' ', r);
+            return;
+        }
         vscode.window.showInformationMessage(path.basename(node.file) + '：' + from + ' → ' + to);
     }
 
