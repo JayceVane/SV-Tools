@@ -294,6 +294,36 @@
         "title": "%cmd.vivado_tree_reportImpl.title%",
         "category": "SystemVerilog Tools",
         "icon": "$(watch)"
+      },
+      {
+        "command": "svtools.vivado.tree.reportImplUtil",
+        "title": "%cmd.vivado_tree_reportImplUtil.title%",
+        "category": "SystemVerilog Tools",
+        "icon": "$(list-tree)"
+      },
+      {
+        "command": "svtools.vivado.tree.reportTiming",
+        "title": "%cmd.vivado_tree_reportTiming.title%",
+        "category": "SystemVerilog Tools",
+        "icon": "$(watch)"
+      },
+      {
+        "command": "svtools.vivado.tree.bitstream",
+        "title": "%cmd.vivado_tree_bitstream.title%",
+        "category": "SystemVerilog Tools",
+        "icon": "$(package)"
+      },
+      {
+        "command": "svtools.vivado.tree.quickElaborate",
+        "title": "%cmd.vivado_tree_quickElaborate.title%",
+        "category": "SystemVerilog Tools",
+        "icon": "$(zap)"
+      },
+      {
+        "command": "svtools.vivado.tree.expandAll",
+        "title": "%cmd.vivado_tree_expandAll.title%",
+        "category": "SystemVerilog Tools",
+        "icon": "$(expand-all)"
       }
     ],
     "viewsContainers": {
@@ -419,6 +449,11 @@
           "command": "svtools.vivado.tree.addFile",
           "group": "navigation@0",
           "when": "view == svtools.vivado.projectTree"
+        },
+        {
+          "command": "svtools.vivado.tree.expandAll",
+          "group": "navigation@2",
+          "when": "view == svtools.vivado.projectTree"
         }
       ],
       "view/item/context": [
@@ -468,6 +503,11 @@
           "when": "view == svtools.vivado.projectTree && viewItem == topModule"
         },
         {
+          "command": "svtools.vivado.tree.bitstream",
+          "group": "2_run@4",
+          "when": "view == svtools.vivado.projectTree && viewItem == topModule"
+        },
+        {
           "command": "svtools.vivado.tree.reportSynth",
           "group": "3_report@1",
           "when": "view == svtools.vivado.projectTree && viewItem == topModule"
@@ -475,6 +515,16 @@
         {
           "command": "svtools.vivado.tree.reportImpl",
           "group": "3_report@2",
+          "when": "view == svtools.vivado.projectTree && viewItem == topModule"
+        },
+        {
+          "command": "svtools.vivado.tree.reportImplUtil",
+          "group": "3_report@3",
+          "when": "view == svtools.vivado.projectTree && viewItem == topModule"
+        },
+        {
+          "command": "svtools.vivado.tree.reportTiming",
+          "group": "3_report@4",
           "when": "view == svtools.vivado.projectTree && viewItem == topModule"
         }
       ],

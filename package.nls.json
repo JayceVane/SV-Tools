@@ -91,5 +91,10 @@
   "cmd.vivado_tree_reportSynth.title": "Synthesis Report (Utilization & Logic Levels)",
   "cmd.vivado_tree_reportImpl.title": "Implementation Report (Timing Summary & Utilization)",
   "viewcontainer.vivado.title": "Vivado Project",
-  "view.vivado.projectTree.name": "Project Files"
+  "view.vivado.projectTree.name": "Project Files",
+  "cmd.vivado_tree_reportImplUtil.title": "Place & Route Report (Utilization)",
+  "cmd.vivado_tree_reportTiming.title": "Timing Report (WNS/TNS)",
+  "cmd.vivado_tree_bitstream.title": "Generate Bitstream",
+  "cmd.vivado_tree_quickElaborate.title": "Elaborate Sim Top (xelab)",
+  "cmd.vivado_tree_expandAll.title": "Expand All"
 }
