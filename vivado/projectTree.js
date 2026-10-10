@@ -429,25 +429,23 @@ function activateProjectTree(context, deps) {
         }
         const list = kinds || (run === 'synth_1' ? ['utilization', 'logic_levels'] : ['utilization', 'timing_summary']);
         const FILE_OF = {
-            'synth_1:utilization': ['synth_utilization.rpt', summarizeSynthUtil],
-            'synth_1:logic_levels': ['synth_logic_levels.rpt', summarizeLogicLevels],
-            'impl_1:utilization': ['impl_utilization.rpt', null],
-            'impl_1:timing_summary': ['timing_summary.rpt', summarizeTiming]
+            'synth_1:utilization': ['synth_utilization.rpt', '综合报告 · 分层资源占用', (t) => summarizeHier('synth', t)],
+            'synth_1:logic_levels': ['synth_logic_levels.rpt', '综合报告 · 逻辑级数分布', (t) => log('[synth] ' + parseLogicLevelSummary(t))],
+            'impl_1:utilization': ['impl_utilization.rpt', '布局布线报告 · 分层资源占用', (t) => summarizeHier('impl', t)],
+            'impl_1:timing_summary': ['timing_summary.rpt', '时序报告 · Timing Summary', summarizeTiming]
         };
         for (const k of list) {
             const entry = FILE_OF[run + ':' + k];
             if (!entry) continue;
             const p = path.join(outDir, entry[0]);
-            if (fs.existsSync(p)) showReport(vscode, vscode.Uri.file(p));
-            if (entry[1]) { try { entry[1](fs.readFileSync(p, 'utf8')); } catch (err) { /* 摘要失败不影响打开报告 */ } }
+            if (fs.existsSync(p)) showReport(vscode, vscode.Uri.file(p), entry[1]);
+            if (entry[2]) { try { entry[2](fs.readFileSync(p, 'utf8')); } catch (err) { /* 摘要失败不影响打开报告 */ } }
         }
     }
 
-    function summarizeSynthUtil(text) {
-        for (const s of parseUtilHierSummary(text)) log('[synth] ' + s);
-    }
-    function summarizeLogicLevels(text) {
-        log('[synth] ' + parseLogicLevelSummary(text));
+    /** 分层资源摘要进通道（synth/impl 共用 parseUtilHierSummary）。 */
+    function summarizeHier(tag, text) {
+        for (const s of parseUtilHierSummary(text)) log('[' + tag + '] ' + s);
     }
     function summarizeTiming(text) {
         const m = text.match(/^\|\s*(?:Design Timing Summary|WNS\(ns\)[^\n]*\|)\s*\n[^\n]*\n\|\s*(-?[\d.]+)\s*\|\s*(-?[\d.]+)\s*\|\s*(-?[\d.]+)\s*\|\s*(-?[\d.]+)/m);

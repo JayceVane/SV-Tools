@@ -203,9 +203,9 @@ function buildRunReportsScript(o) {
     ];
     for (const k of kinds) {
         if (k === 'utilization') {
-            L.push(isSynth
-                ? 'report_utilization -hierarchical -file $outDir/synth_utilization.rpt'
-                : 'report_utilization -file $outDir/impl_utilization.rpt');
+            // 与 Vivado GUI 对齐：synth/impl 打开设计后的 Utilization 视图都是
+            // 分层表（synthesized/implemented design 默认 hierarchical 展示）
+            L.push('report_utilization -hierarchical -file $outDir/' + (isSynth ? 'synth_utilization.rpt' : 'impl_utilization.rpt'));
         } else if (k === 'logic_levels') {
             L.push('report_design_analysis -logic_level_distribution -file $outDir/synth_logic_levels.rpt');
         } else if (k === 'timing_summary') {
