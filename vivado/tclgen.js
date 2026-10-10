@@ -119,6 +119,81 @@ function buildRemoveFilesScript(xprPath, file, fileset) {
 }
 
 /**
+ * 生成"设置文件集顶层"TCL（sources_1 → 综合顶层；sim_1 → 仿真顶层）。
+ * @param {{xprPath:string, fileset:string, top:string}} o
+ */
+function buildSetTopScript(o) {
+    return [
+        'open_project ' + tclQuote(o.xprPath),
+        'set_property top ' + tclQuote(o.top) + ' [get_filesets ' + tclQuote(o.fileset) + ']',
+        'update_compile_order -fileset ' + tclQuote(o.fileset),
+        'puts "SVTOOLS_TOP_SET ' + o.top + '"',
+        'puts "SVTOOLS_DONE"'
+    ].join('\n') + '\n';
+}
+
+/**
+ * 生成"文件在文件集间移动"TCL（remove + add + 保持 .sv 的 file_type）。
+ * @param {{xprPath:string, file:string, from:string, to:string, isSv:boolean}} o
+ */
+function buildMoveFileScript(o) {
+    const base = path.basename(String(o.file));
+    return [
+        'open_project ' + tclQuote(o.xprPath),
+        'set f ' + tclQuote(o.file),
+        'foreach x [get_files -quiet -of [get_filesets ' + tclQuote(o.from) + ']] {',
+        '    if {[string match -nocase *' + base.replace(/[\\{}$"]/g, '') + ' $x]} { remove_files $x }',
+        '}',
+        'set d [get_filesets ' + tclQuote(o.to) + ']',
+        'if {[llength [get_files -quiet -of $d $f]] == 0} { add_files -fileset $d $f }',
+        o.isSv ? 'catch { set_property file_type SystemVerilog [get_files -of $d $f] }' : '',
+        'update_compile_order -fileset ' + tclQuote(o.to),
+        'puts "SVTOOLS_DONE"'
+    ].filter(Boolean).join('\n') + '\n';
+}
+
+/**
+ * 生成"综合 / 布局布线"TCL：launch_runs（impl 自动级联 synth）+ wait_on_run，
+ * 结束打印 run 的 STATUS/PROGRESS 供插件判定成败。
+ * @param {{xprPath:string, run:'synth_1'|'impl_1', toStep?:string, jobs?:number}} o
+ */
+function buildLaunchRunScript(o) {
+    const step = o.toStep ? ' -to_step ' + o.toStep : '';
+    return [
+        'open_project ' + tclQuote(o.xprPath),
+        'update_compile_order -fileset sources_1',
+        'launch_runs ' + o.run + step + ' -jobs ' + (o.jobs || 4),
+        'wait_on_run ' + o.run,
+        'set r [get_runs ' + o.run + ']',
+        'puts "SVTOOLS_RUN_STATUS [get_property STATUS $r] [get_property PROGRESS $r]"',
+        'puts "SVTOOLS_DONE"'
+    ].join('\n') + '\n';
+}
+
+/**
+ * 生成"打开已完成的 run 并输出报告"TCL。synth 报告含分层资源 + 逻辑级数；
+ * impl 报告含时序汇总 + 资源。run 未完成时 open_run 报错（插件提示先跑）。
+ * @param {{xprPath:string, run:'synth_1'|'impl_1', outDir:string}} o
+ */
+function buildRunReportsScript(o) {
+    const isSynth = o.run === 'synth_1';
+    return [
+        'open_project ' + tclQuote(o.xprPath),
+        'set outDir ' + tclQuote(o.outDir),
+        'file mkdir $outDir',
+        'open_run ' + o.run + (isSynth ? ' -name netlist_1' : ' -name impl_1'),
+        isSynth
+            ? 'report_utilization -hierarchical -file $outDir/synth_utilization.rpt'
+            : 'report_utilization -file $outDir/impl_utilization.rpt',
+        isSynth
+            ? 'report_design_analysis -logic_level_distribution -file $outDir/synth_logic_levels.rpt'
+            : 'report_timing_summary -file $outDir/timing_summary.rpt',
+        'puts "SVTOOLS_REPORTS_DONE"',
+        'puts "SVTOOLS_DONE"'
+    ].join('\n') + '\n';
+}
+
+/**
  * 生成 xsim 行为仿真 TCL：打开工程（缺文件先补入）→ 当前文件模块置为 sim_1 顶层 → launch_simulation。
  * @param {{xprPath:string, top:string, file:string, isSv:boolean, runtime:string}} o
  */
@@ -234,6 +309,7 @@ function parseLogicLevelSummary(rptText) {
 module.exports = {
     tclQuote, tclList,
     buildCreateProjectScript, buildAddFilesScript, buildRemoveFilesScript, buildSimulateScript,
+    buildSetTopScript, buildMoveFileScript, buildLaunchRunScript, buildRunReportsScript,
     buildOocReportsScript, parseUtilHierSummary, parseLogicLevelSummary,
     extractVivadoIssues, firstModuleName
 };

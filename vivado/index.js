@@ -31,6 +31,7 @@ const {
 const { buildExportPartsScript, parsePartsDump, partFilterOptions, filterParts, buildPartPickerHtml } = require('./parts');
 const { matchGlobList, classifyFiles, DEFAULT_STRUCTURE } = require('./structure');
 const { scanVerilogFiles, scanConstraintFiles, scanTclFiles, detectTopModules, guessSimTop } = require('./scan');
+const { activateProjectTree } = require('./projectTree');
 
 const OUTPUT_CHANNEL_TITLE = 'SystemVerilog Tools · Vivado';
 
@@ -619,6 +620,17 @@ function activateVivado(context, deps) {
         vscode.workspace.onDidChangeWorkspaceFolders(() => refreshProjectContext())
     );
     refreshProjectContext();
+
+    // 工程管理侧边栏：依赖层级文件树 + 右键管理 + 综合/实现/报告
+    // （层级用 iverilog 的工作区设计单元索引；写操作复用 runScript）
+    try {
+        activateProjectTree(context, {
+            vscode, out, log, findProjectXpr, runScript,
+            scanWorkspaceSources: () => require('../iverilog').scanWorkspaceSources()
+        });
+    } catch (err) {
+        log('[vivado] 工程树初始化失败: ' + (err && err.message));
+    }
 
     return {
         runScript, stopRun, createProject, simulateWithVivado,

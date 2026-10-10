@@ -87,32 +87,33 @@ function buildPartPickerHtml(parts, defaultPart) {
 <meta charset="UTF-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline';">
 <style>
-  :root { color-scheme: dark; }
+  :root { color-scheme: light dark; }
   * { box-sizing: border-box; }
   body { margin:0; font-family:var(--vscode-font-family,'Segoe UI',sans-serif); font-size:13px;
          background:var(--vscode-editor-background,#1e1e1e); color:var(--vscode-editor-foreground,#ccc);
          display:flex; flex-direction:column; height:100vh; }
-  .bar { display:flex; gap:10px; padding:10px 12px; border-bottom:1px solid #33373d; flex-wrap:wrap; align-items:center; }
-  .bar label { color:#8a8f98; font-size:12px; }
-  select, input[type=text] { background:#25282d; color:#d4d4d4; border:1px solid #3c4046; border-radius:3px;
+  .bar { display:flex; gap:10px; padding:10px 12px; border-bottom:1px solid var(--vscode-panel-border,#33373d); flex-wrap:wrap; align-items:center; }
+  .bar label { color:var(--vscode-descriptionForeground,#8a8f98); font-size:12px; }
+  select, input[type=text] { background:var(--vscode-input-background,#25282d); color:var(--vscode-input-foreground,#d4d4d4); border:1px solid var(--vscode-input-border,#3c4046); border-radius:3px;
          padding:4px 8px; font-size:13px; min-width:110px; outline:none; }
   input[type=text] { flex:1; min-width:220px; }
-  select:focus, input:focus { border-color:#4fc3f7; }
+  select:focus, input:focus { border-color:var(--vscode-focusBorder,#4fc3f7); }
   .tblwrap { flex:1; overflow:auto; }
   table { border-collapse:collapse; width:100%; }
-  thead th { position:sticky; top:0; background:#232629; color:#9cdcfe; text-align:left; font-weight:600;
-             padding:7px 12px; border-bottom:1px solid #3c4046; cursor:pointer; user-select:none; white-space:nowrap; }
-  tbody td { padding:5px 12px; border-bottom:1px solid rgba(255,255,255,.04); white-space:nowrap; }
+  thead th { position:sticky; top:0; background:var(--vscode-editorGroupHeader-tabsBackground,#232629); color:var(--vscode-textLink-foreground,#9cdcfe); text-align:left; font-weight:600;
+             padding:7px 12px; border-bottom:1px solid var(--vscode-panel-border,#3c4046); cursor:pointer; user-select:none; white-space:nowrap; }
+  tbody td { padding:5px 12px; border-bottom:1px solid var(--vscode-panel-border,rgba(128,128,128,.15)); white-space:nowrap; }
   tbody tr { cursor:pointer; }
-  tbody tr:hover { background:rgba(79,195,247,.07); }
-  tbody tr.sel { background:rgba(255,213,79,.12); outline:1px solid rgba(255,213,79,.4); }
-  td.part { font-family:Consolas,monospace; color:#ffcc80; }
-  .foot { border-top:1px solid #33373d; padding:8px 12px; display:flex; align-items:center; gap:12px; }
-  .detail { flex:1; font-family:Consolas,monospace; font-size:12px; color:#9cdcfe; overflow:hidden;
+  tbody tr:hover { background:var(--vscode-list-hoverBackground,rgba(79,195,247,.07)); }
+  tbody tr.sel { background:var(--vscode-list-activeSelectionBackground,rgba(255,213,79,.12));
+                 outline:1px solid var(--vscode-list-activeSelectionForeground,rgba(255,213,79,.4)); }
+  td.part { font-family:Consolas,monospace; color:var(--vscode-symbolIcon-interfaceForeground,#ffcc80); }
+  .foot { border-top:1px solid var(--vscode-panel-border,#33373d); padding:8px 12px; display:flex; align-items:center; gap:12px; }
+  .detail { flex:1; font-family:Consolas,monospace; font-size:12px; color:var(--vscode-textLink-foreground,#9cdcfe); overflow:hidden;
             text-overflow:ellipsis; white-space:nowrap; }
-  .count { color:#8a8f98; font-size:12px; margin-right:auto; }
-  button { background:#0e639c; color:#fff; border:none; border-radius:3px; padding:6px 18px; font-size:13px; cursor:pointer; }
-  button.sec { background:#3a3d41; }
+  .count { color:var(--vscode-descriptionForeground,#8a8f98); font-size:12px; margin-right:auto; }
+  button { background:var(--vscode-button-background,#0e639c); color:var(--vscode-button-foreground,#fff); border:none; border-radius:3px; padding:6px 18px; font-size:13px; cursor:pointer; }
+  button.sec { background:var(--vscode-button-secondaryBackground,#3a3d41); color:var(--vscode-button-secondaryForeground,#ddd); }
   button:disabled { opacity:.45; cursor:default; }
 </style>
 </head>

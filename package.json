@@ -224,8 +224,95 @@
         "title": "%cmd.vivado_reports.title%",
         "category": "SystemVerilog Tools",
         "icon": "$(chip)"
+      },
+      {
+        "command": "svtools.vivado.tree.refresh",
+        "title": "%cmd.vivado_tree_refresh.title%",
+        "category": "SystemVerilog Tools",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "svtools.vivado.tree.addFile",
+        "title": "%cmd.vivado_tree_addFile.title%",
+        "category": "SystemVerilog Tools",
+        "icon": "$(add)"
+      },
+      {
+        "command": "svtools.vivado.tree.removeFile",
+        "title": "%cmd.vivado_tree_removeFile.title%",
+        "category": "SystemVerilog Tools",
+        "icon": "$(remove)"
+      },
+      {
+        "command": "svtools.vivado.tree.setTopSynth",
+        "title": "%cmd.vivado_tree_setTopSynth.title%",
+        "category": "SystemVerilog Tools",
+        "icon": "$(arrow-up)"
+      },
+      {
+        "command": "svtools.vivado.tree.setTopSim",
+        "title": "%cmd.vivado_tree_setTopSim.title%",
+        "category": "SystemVerilog Tools",
+        "icon": "$(arrow-up)"
+      },
+      {
+        "command": "svtools.vivado.tree.moveToSim",
+        "title": "%cmd.vivado_tree_moveToSim.title%",
+        "category": "SystemVerilog Tools"
+      },
+      {
+        "command": "svtools.vivado.tree.moveToSources",
+        "title": "%cmd.vivado_tree_moveToSources.title%",
+        "category": "SystemVerilog Tools"
+      },
+      {
+        "command": "svtools.vivado.tree.elaborate",
+        "title": "%cmd.vivado_tree_elaborate.title%",
+        "category": "SystemVerilog Tools",
+        "icon": "$(checklist)"
+      },
+      {
+        "command": "svtools.vivado.tree.synthesize",
+        "title": "%cmd.vivado_tree_synthesize.title%",
+        "category": "SystemVerilog Tools",
+        "icon": "$(run-all)"
+      },
+      {
+        "command": "svtools.vivado.tree.implement",
+        "title": "%cmd.vivado_tree_implement.title%",
+        "category": "SystemVerilog Tools",
+        "icon": "$(debug-start)"
+      },
+      {
+        "command": "svtools.vivado.tree.reportSynth",
+        "title": "%cmd.vivado_tree_reportSynth.title%",
+        "category": "SystemVerilog Tools",
+        "icon": "$(graph)"
+      },
+      {
+        "command": "svtools.vivado.tree.reportImpl",
+        "title": "%cmd.vivado_tree_reportImpl.title%",
+        "category": "SystemVerilog Tools",
+        "icon": "$(watch)"
       }
     ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "svtools-vivado",
+          "title": "%viewcontainer.vivado.title%",
+          "icon": "$(chip)"
+        }
+      ]
+    },
+    "views": {
+      "svtools-vivado": [
+        {
+          "id": "svtools.vivado.projectTree",
+          "name": "%view.vivado.projectTree.name%"
+        }
+      ]
+    },
     "customEditors": [
       {
         "viewType": "svtoolsWaveViewer",
@@ -320,6 +407,75 @@
           "alt": "svtools.vivado.runScript",
           "group": "navigation@0",
           "when": "resourceExtname == .tcl"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "svtools.vivado.tree.refresh",
+          "group": "navigation@1",
+          "when": "view == svtools.vivado.projectTree"
+        },
+        {
+          "command": "svtools.vivado.tree.addFile",
+          "group": "navigation@0",
+          "when": "view == svtools.vivado.projectTree"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "svtools.vivado.tree.addFile",
+          "group": "0_manage@1",
+          "when": "view == svtools.vivado.projectTree && viewItem == orphan"
+        },
+        {
+          "command": "svtools.vivado.tree.removeFile",
+          "group": "0_manage@9",
+          "when": "view == svtools.vivado.projectTree && viewItem =~ /^(file|simFile|module|topModule|constraint)$/"
+        },
+        {
+          "command": "svtools.vivado.tree.setTopSynth",
+          "group": "1_top@1",
+          "when": "view == svtools.vivado.projectTree && viewItem =~ /^(module|topModule)$/"
+        },
+        {
+          "command": "svtools.vivado.tree.setTopSim",
+          "group": "1_top@2",
+          "when": "view == svtools.vivado.projectTree && viewItem =~ /^(module|topModule)$/"
+        },
+        {
+          "command": "svtools.vivado.tree.moveToSim",
+          "group": "1_top@3",
+          "when": "view == svtools.vivado.projectTree && viewItem =~ /^(file|module|topModule)$/"
+        },
+        {
+          "command": "svtools.vivado.tree.moveToSources",
+          "group": "1_top@4",
+          "when": "view == svtools.vivado.projectTree && viewItem == simFile"
+        },
+        {
+          "command": "svtools.vivado.tree.elaborate",
+          "group": "2_run@1",
+          "when": "view == svtools.vivado.projectTree && viewItem == topModule"
+        },
+        {
+          "command": "svtools.vivado.tree.synthesize",
+          "group": "2_run@2",
+          "when": "view == svtools.vivado.projectTree && viewItem == topModule"
+        },
+        {
+          "command": "svtools.vivado.tree.implement",
+          "group": "2_run@3",
+          "when": "view == svtools.vivado.projectTree && viewItem == topModule"
+        },
+        {
+          "command": "svtools.vivado.tree.reportSynth",
+          "group": "3_report@1",
+          "when": "view == svtools.vivado.projectTree && viewItem == topModule"
+        },
+        {
+          "command": "svtools.vivado.tree.reportImpl",
+          "group": "3_report@2",
+          "when": "view == svtools.vivado.projectTree && viewItem == topModule"
         }
       ],
       "editor/context": [

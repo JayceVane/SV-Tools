@@ -374,14 +374,25 @@ function buildWaveformHtml(vcd, meta) {
     --fg:#d4d4d4; --dim:#8a8f98; --faint:#5a5f66;
     --accent:#4fc3f7; --bus:#ffcc80; --x:#ef5350; --cursor:#ffd54f;
     --sel:#2b3a4a; --hover:#2a2d33;
+    --link:#9cdcfe; --cursorSoft:#ffe9a8; --busSoft:#ffe0b2; --inputBg:#1e2126;
+    --scroll:#3a3f46; --scrollHover:#464c55;
+  }
+  /* 亮色主题：VS Code webview 的 body 带 data-vscode-theme-kind，切换时热替换变量 */
+  body[data-vscode-theme-kind='vscode-light'] {
+    --bg:#ffffff; --panel:#f6f8fa; --panel2:#eceef2; --border:#d3d7dd;
+    --fg:#24292f; --dim:#5a6068; --faint:#9aa1a9;
+    --accent:#0b7ac0; --bus:#b26a00; --x:#d32f2f; --cursor:#c9a100;
+    --sel:#d8eafa; --hover:#eef1f5;
+    --link:#0a6ebd; --cursorSoft:#8a6d00; --busSoft:#8d6e63; --inputBg:#ffffff;
+    --scroll:#c8ccd2; --scrollHover:#aeb3ba;
   }
   * { box-sizing: border-box; }
   body { margin:0; display:flex; flex-direction:column; height:100vh;
          background:var(--bg); color:var(--fg);
          font-family:'Segoe UI',Consolas,monospace; font-size:14px; }
   ::-webkit-scrollbar { width:11px; height:11px; }
-  ::-webkit-scrollbar-thumb { background:#3a3f46; border-radius:5px; }
-  ::-webkit-scrollbar-thumb:hover { background:#464c55; }
+  ::-webkit-scrollbar-thumb { background:var(--scroll); border-radius:5px; }
+  ::-webkit-scrollbar-thumb:hover { background:var(--scrollHover); }
   ::-webkit-scrollbar-corner { background:transparent; }
 
   header { padding:8px 14px; background:var(--panel); border-bottom:1px solid var(--border);
@@ -394,18 +405,18 @@ function buildWaveformHtml(vcd, meta) {
               background:var(--panel); padding:0 0 14px; }
   .treeBar { display:flex; gap:6px; padding:5px 8px; border-bottom:1px solid var(--border); }
   .treeBar button { flex:none; font-size:11px; padding:2px 9px; }
-  .treeBar button.on { border-color:#3a5a74; color:#9cdcfe; background:#253340; }
-  .scope { color:#9cdcfe; padding:4px 10px; cursor:pointer; white-space:nowrap;
+  .treeBar button.on { border-color:var(--btnOnBd); color:var(--link); background:var(--btnOnBg); }
+  .scope { color:var(--link); padding:4px 10px; cursor:pointer; white-space:nowrap;
            font-family:Consolas,monospace; font-size:13px; display:flex; align-items:center; }
-  .scope:hover { color:#c8e1ff; }
-  .scope.solo { color:#ffd54f; }
+  .scope:hover { color:var(--accent); }
+  .scope.solo { color:var(--cursor); }
   .scope .tw { color:var(--faint); margin-right:6px; width:11px; display:inline-block; }
   .sig { padding:4px 10px 4px 14px; cursor:pointer; white-space:nowrap; display:flex; gap:8px;
          align-items:center; font-family:Consolas,monospace; font-size:13px;
          border-left:2px solid transparent; }
   .sig:hover { background:var(--hover); }
   .sig.selected { background:var(--sel); border-left-color:var(--accent); }
-  .sig.multisel { background:rgba(156,220,254,.2); border-left-color:#9cdcfe; }
+  .sig.multisel { background:var(--multiSel); border-left-color:var(--link); }
   .sig .dot { width:9px; height:9px; flex:none; border-radius:2px; }
   .sig .dot.scalar { background:var(--accent); border-radius:50%; }
   .sig .dot.bus { background:var(--bus); }
@@ -425,24 +436,24 @@ function buildWaveformHtml(vcd, meta) {
            display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
   button { background:var(--panel2); color:var(--fg); border:1px solid var(--border);
            border-radius:4px; padding:4px 13px; cursor:pointer; font-size:13px; }
-  button:hover { background:#2c313a; border-color:#4a505a; }
-  button.accent { border-color:#3a5a74; color:#9cdcfe; }
-  button.accent:hover { background:#253340; }
+  button:hover { background:var(--btnHovBg); border-color:var(--btnHovBd); }
+  button.accent { border-color:var(--btnOnBd); color:var(--link); }
+  button.accent:hover { background:var(--btnOnBg); }
   #navLabel { color:var(--dim); font-size:12px; max-width:280px; white-space:nowrap;
               overflow:hidden; text-overflow:ellipsis; }
   #zoomLabel { color:var(--dim); min-width:130px; text-align:center; font-size:12px; }
   .hint { color:var(--faint); font-size:12px; margin-left:auto; }
 
-  .ctxMenu { position:fixed; z-index:10; background:#252526; border:1px solid #454545;
+  .ctxMenu { position:fixed; z-index:10; background:var(--menuBg); border:1px solid var(--menuBd);
              border-radius:4px; padding:4px 0; min-width:170px;
-             box-shadow:0 4px 14px rgba(0,0,0,.45); font-size:12px; }
+             box-shadow:0 4px 14px rgba(0,0,0,.22); font-size:12px; }
   .ctxMenu.sub { position:absolute; left:100%; top:-5px; display:none; min-width:150px; }
-  .ctxTitle { padding:4px 12px 5px; color:#8a8f98; font-size:11px;
-              border-bottom:1px solid #33373d; margin-bottom:3px; }
+  .ctxTitle { padding:4px 12px 5px; color:var(--dim); font-size:11px;
+              border-bottom:1px solid var(--border); margin-bottom:3px; }
   .ctxItem { padding:5px 14px; cursor:pointer; white-space:nowrap; position:relative; }
-  .ctxItem:hover { background:#2a2d2e; }
-  .ctxItem.cur { color:#9cdcfe; }
-  .ctxItem.off { color:#5a5f66; cursor:default; }
+  .ctxItem:hover { background:var(--menuHov); }
+  .ctxItem.cur { color:var(--link); }
+  .ctxItem.off { color:var(--faint); cursor:default; }
   .ctxItem.off:hover { background:transparent; }
 </style>
 </head>
@@ -478,8 +489,30 @@ const DATA = ${json};
 /* 波形渲染（视口窗口模型）：只画 [viewStart, viewStart+viewSpan] 窗口内的变更段 */
 (function () {
   var RULER_H = 28, ROW_H = 30, NAME_W = 185, EDGE = 7;
-  var X_COLOR = '#ef5350';      // x 状态：红
-  var Z_COLOR = '#7986cb';      // z 状态：深蓝（indigo）
+  /* 主题调色板：canvas 拿不到 CSS 变量，统一从 body 读取自定义属性；
+     主题切换（明↔暗）时 MutationObserver 重读并整体重绘 */
+  function readPalette() {
+    var cs = getComputedStyle(document.body);
+    function v(n, fb) { var x = cs.getPropertyValue(n).trim(); return x || fb; }
+    return {
+      bg: v('--bg', '#1a1c1f'), panel: v('--panel', '#202327'), panel2: v('--panel2', '#24272c'),
+      border: v('--border', '#33373d'), fg: v('--fg', '#d4d4d4'), dim: v('--dim', '#8a8f98'),
+      faint: v('--faint', '#5a5f66'), accent: v('--accent', '#4fc3f7'), bus: v('--bus', '#ffcc80'),
+      x: v('--x', '#ef5350'), cursor: v('--cursor', '#ffd54f'),
+      cursorSoft: v('--cursorSoft', '#ffe9a8'), busSoft: v('--busSoft', '#ffe0b2'),
+      sel: v('--sel', '#2b3a4a'), hover: v('--hover', '#2a2d33'),
+      link: v('--link', '#9cdcfe'), inputBg: v('--inputBg', '#1e2126')
+    };
+  }
+  var PAL = readPalette();
+  var X_COLOR = PAL.x;      // x 状态：红
+  var Z_COLOR = '#7986cb';  // z 状态：深蓝（indigo）
+  new MutationObserver(function () {
+    PAL = readPalette();
+    X_COLOR = PAL.x;
+    renderTree();
+    draw();
+  }).observe(document.body, { attributes: true, attributeFilter: ['data-vscode-theme-kind', 'data-vscode-theme-name', 'class'] });
   /** 总线值含 x → 红；否则含 z → 深蓝；正常二进制 → null。 */
   function xzColor(v) {
     if (/x/i.test(v)) return X_COLOR;
@@ -882,7 +915,7 @@ const DATA = ${json};
       } else {
         pretty = esc(v);
       }
-      html += '   <span style="color:' + (sig.width > 1 ? '#ffcc80' : '#4fc3f7') + '">' +
+      html += '   <span style="color:' + (sig.width > 1 ? PAL.bus : PAL.accent) + '">' +
         esc(sig.path) + '</span> = ' + pretty;
     }
     return html;
@@ -988,7 +1021,7 @@ const DATA = ${json};
     }
 
     if (selected.length === 0) {
-      ctx.fillStyle = '#5a5f66';
+      ctx.fillStyle = PAL.faint;
       ctx.fillText(soloScope
         ? ('(层级 ' + soloScope + ' 下没有正在显示的信号)')
         : '(在左侧信号树中点击信号以添加波形)', NAME_W + 16, 34);
@@ -1013,7 +1046,7 @@ const DATA = ${json};
         ctx.fillRect(0, yTop, w, hh);
       }
       var f = sigFmt(sig);
-      var stroke = f === 'analog' ? '#4fc3f7' : (sig.width > 1 ? '#ffcc80' : '#4fc3f7');
+      var stroke = f === 'analog' ? PAL.accent : (sig.width > 1 ? PAL.bus : PAL.accent);
       var fill = sig.width > 1 ? 'rgba(255,204,128,.14)' : 'rgba(79,195,247,.12)';
       ctx.strokeStyle = stroke; ctx.fillStyle = stroke; ctx.lineWidth = 1.5;
       if (f === 'analog') drawAnalog(ctx, sig, yTop, hh);
@@ -1049,10 +1082,10 @@ const DATA = ${json};
         ? layout.total + 0.5
         : layout.tops[reorderDrag.toIdx] + 0.5;
       ctx.save();
-      ctx.strokeStyle = '#ffd54f'; ctx.lineWidth = 2; ctx.setLineDash([7, 4]);
+      ctx.strokeStyle = PAL.cursor; ctx.lineWidth = 2; ctx.setLineDash([7, 4]);
       ctx.beginPath(); ctx.moveTo(0, iy); ctx.lineTo(w, iy); ctx.stroke();
       ctx.restore();
-      ctx.fillStyle = '#ffd54f';
+      ctx.fillStyle = PAL.cursor;
       ctx.beginPath();
       ctx.moveTo(2, iy - 5); ctx.lineTo(10, iy); ctx.lineTo(2, iy + 5);
       ctx.closePath(); ctx.fill();
@@ -1061,7 +1094,7 @@ const DATA = ${json};
       var x = t2x(cursorT);
       if (x >= NAME_W && x <= w) {
         ctx.save();
-        ctx.strokeStyle = '#ffd54f'; ctx.setLineDash([4, 3]); ctx.lineWidth = 1.2;
+        ctx.strokeStyle = PAL.cursor; ctx.setLineDash([4, 3]); ctx.lineWidth = 1.2;
         ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke();
         ctx.restore();
       }
@@ -1107,9 +1140,9 @@ const DATA = ${json};
   }
 
   function drawNames(ctx, h, edgeRow, groupStarts) {
-    ctx.fillStyle = '#202327';
+    ctx.fillStyle = PAL.panel;
     ctx.fillRect(0, 0, NAME_W, h);
-    ctx.strokeStyle = '#33373d';
+    ctx.strokeStyle = PAL.border;
     ctx.beginPath(); ctx.moveTo(NAME_W + 0.5, 0); ctx.lineTo(NAME_W + 0.5, h); ctx.stroke();
     ctx.font = '12px Consolas,monospace';
     selected.forEach(function (sig, i) {
@@ -1119,7 +1152,7 @@ const DATA = ${json};
       if (isGroupStart) {
         ctx.fillStyle = 'rgba(79,195,247,.06)';
         ctx.fillRect(0, yTop, NAME_W, hh);
-        ctx.fillStyle = '#9cdcfe';
+        ctx.fillStyle = PAL.link;
         ctx.font = '10px Consolas,monospace';
         ctx.fillText(truncText(ctx, groupStarts[i], NAME_W - 20), 8, yTop + 11);
         ctx.font = '12px Consolas,monospace';
@@ -1132,26 +1165,26 @@ const DATA = ${json};
       if (multiSel[keyOf(sig)]) {
         ctx.fillStyle = 'rgba(156,220,254,.16)';
         ctx.fillRect(0, yTop, NAME_W, hh);
-        ctx.fillStyle = '#9cdcfe';
+        ctx.fillStyle = PAL.link;
         ctx.fillRect(0, yTop, 3, hh);
       }
       if (reorderDrag && i === reorderDrag.fromIdx) {
         ctx.fillStyle = 'rgba(255,213,79,.18)';
         ctx.fillRect(0, yTop, NAME_W, hh);
-        ctx.fillStyle = '#ffd54f';
+        ctx.fillStyle = PAL.cursor;
         ctx.fillRect(0, yTop, 3, hh);
       }
-      ctx.fillStyle = sig.width > 1 ? '#ffcc80' : '#4fc3f7';
+      ctx.fillStyle = sig.width > 1 ? PAL.bus : PAL.accent;
       ctx.beginPath();
       if (sig.width > 1) ctx.fillRect(10, y - 9, 8, 8);
       else { ctx.arc(14, y - 5, 4, 0, 7); ctx.fill(); }
-      ctx.fillStyle = multiSel[keyOf(sig)] ? '#9cdcfe' : (i === edgeRow ? '#ffe9a8' : '#d4d4d4');
+      ctx.fillStyle = multiSel[keyOf(sig)] ? PAL.link : (i === edgeRow ? PAL.cursorSoft : PAL.fg);
       ctx.fillText(truncText(ctx, showFullName ? sig.path : sig.name, NAME_W - 46), 24, y);
       var f2 = sigFmt(sig);
       if (f2 !== 'hex') {
         var badge = { bin: 'B', dec: 'D', sdec: 'S', analog: 'A' }[f2] || '';
         if (badge) {
-          ctx.fillStyle = '#9cdcfe';
+          ctx.fillStyle = PAL.link;
           ctx.font = '10px Consolas,monospace';
           ctx.fillText(badge, NAME_W - 16, y);
           ctx.font = '12px Consolas,monospace';
@@ -1165,13 +1198,13 @@ const DATA = ${json};
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, w, RULER_H);
     ctx.font = '11px Consolas,monospace';
-    ctx.fillStyle = '#202327'; ctx.fillRect(0, 0, NAME_W, RULER_H);
-    ctx.strokeStyle = '#33373d';
+    ctx.fillStyle = PAL.panel; ctx.fillRect(0, 0, NAME_W, RULER_H);
+    ctx.strokeStyle = PAL.border;
     ctx.beginPath(); ctx.moveTo(NAME_W + 0.5, 0); ctx.lineTo(NAME_W + 0.5, RULER_H); ctx.stroke();
-    ctx.fillStyle = '#8a8f98';
+    ctx.fillStyle = PAL.dim;
     ctx.fillText('时间', 10, 18);
     ctx.strokeStyle = 'rgba(255,255,255,.22)';
-    ctx.fillStyle = '#8a8f98';
+    ctx.fillStyle = PAL.dim;
     ctx.beginPath();
     var lastLabelEnd = -1;
     ticks.forEach(function (t) {
@@ -1188,7 +1221,7 @@ const DATA = ${json};
     var ovY = RULER_H - 4;
     ctx.fillStyle = 'rgba(79,195,247,.25)';
     ctx.fillRect(NAME_W, ovY, plotW(), 3);
-    ctx.fillStyle = '#4fc3f7';
+    ctx.fillStyle = PAL.accent;
     var wx = NAME_W + viewStart / END * plotW();
     var ww = Math.max(viewSpan / END * plotW(), 6);
     ctx.fillRect(wx, ovY - 1, ww, 5);
@@ -1198,9 +1231,9 @@ const DATA = ${json};
         var label = fmtTime(cursorT);
         var tw = ctx.measureText(label).width + 12;
         var bx = Math.min(Math.max(x - tw / 2, NAME_W), w - tw);
-        ctx.fillStyle = '#ffd54f';
+        ctx.fillStyle = PAL.cursor;
         ctx.fillRect(bx, 0, tw, 16);
-        ctx.fillStyle = '#1a1c1f';
+        ctx.fillStyle = PAL.bg;
         ctx.fillText(label, bx + 6, 12);
       }
     }
@@ -1314,7 +1347,7 @@ const DATA = ${json};
       var cx = (sg.x1 + sg.x2) / 2;
       ctx.fillStyle = 'rgba(26,28,31,.85)';
       ctx.fillRect(cx - tw / 2 - 4, yM - 8, tw + 8, 16);
-      ctx.fillStyle = '#ffe0b2';
+      ctx.fillStyle = PAL.busSoft;
       ctx.fillText(label, cx - tw / 2, yM + 4);
     });
   }
@@ -1534,7 +1567,7 @@ const DATA = ${json};
     var inp = document.createElement('input');
     inp.type = 'text';
     inp.value = groupNames[gid] || ('组' + gid);
-    inp.style.cssText = 'width:132px;background:#1e2126;color:#d4d4d4;border:1px solid #4fc3f7;' +
+    inp.style.cssText = 'width:132px;background:' + PAL.inputBg + ';color:' + PAL.fg + ';border:1px solid ' + PAL.accent + ';' +
       'border-radius:3px;padding:2px 6px;font-size:12px;outline:none;';
     itemEl.appendChild(inp);
     if (inp.focus) inp.focus();
