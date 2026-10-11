@@ -13,6 +13,26 @@ All notable changes to the SystemVerilog VSCode Extension will be documented in 
 
   **影响面：** 模块例化/Testbench 生成的 Signal declarations 区；带类型参数（`parameter integer W`）输出 `localparam integer W = 8` 不变；golden 34/34、cargo 70/70、宿主 14/14。
 
+- **声明对齐按空行分组**（fix/decl-align-blank-group）
+
+  **变更内容：** `align_decl` 的列宽分组 key 从 (缩进, 属性前缀) 扩展为 (缩进, 空行段号, 属性前缀)——空行切断声明对齐组，各组独立计算类型列/位宽补位/名字列/分号悬挂的宽度。
+
+  **为什么：** 原实现同一缩进下所有声明（无论是否被空行分隔）共用一组列宽，用户的分组排版语义被无视：`localparam` 组的 `=` 列、`reg` 组的位宽补位（`[  ADDR_WIDTH:0]` 被别组 `DATA_WIDTH-1:0` 撑宽）、分号悬挂列全部跨组拉齐（用户 sfifo 实例：`wr_ptr` 行的分号被 `mem` 行的数组维度推到 40+ 列外）。
+
+  **影响面：** 仅声明区含空行分组的文件输出变化（各组更紧凑）；无空行的连续声明组行为不变；幂等性保持（golden 34/34、cargo 69/69、adder/sfifo 真文件三轮稳定）。
+
+- **块内 assign 组间空行保留**（fix/format-assign-blank-idempotent）
+
+  **变更内容：** 空行规则 §6.1 给「两侧都是 assign」的块内空行开保留例外（折叠至 max）；非 assign 语句间照删。
+
+  **为什么：** begin/end 块内空行全删发生在对齐（按空行分组）之后，两轮格式化的分组视图漂移导致非幂等（用户 05_corelib adder.sv 等号列来回变化）；且组边界是排版语义不应删除。
+
+  **影响面：** begin/end 块内 assign 组之间的空行保留；always 过程赋值间、混合语句间行为不变。
+
+### Added
+- **Vivado 工程管理侧边栏**（活动栏 $(chip)）：.xpr 解析 + 按模块实例依赖组织的文件树 + 右键文件管理（加入/移出/top 设置/src↔sim 移动）+ top 级快捷操作区（xelab/综合/综合报告/布局布线/布局布线报告/时序报告/Bitstream）+ 报告独立页面展示（对齐 Vivado 观感，明暗主题跟随）；写操作按 .xpr 重解析事实校验，杜绝 Vivado 假成功；波形图/器件选型页明暗主题适配
+- **OOC 综合读序修复**：package 文件前置（import 拓扑排序），依赖文件索引强制刷新
+
 ## [3.4.8] - 2026-10-09
 
 ### Added
