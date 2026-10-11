@@ -198,8 +198,12 @@ fn extract_parens_content(text: &str) -> Option<String> {
 fn parse_param(text: &str, prefix: &str, param_list: &mut Vec<Param>) {
     let mut ptype = String::new();
     let mut is_prm = false;
+    // ^\s* 锚：normalize_for_parsing 把参数表压成单行后 split(',') 各片段带
+    // 前导空格——无锚时最左匹配从空格起，prefix 可选组匹配不上，关键字
+    // parameter/localparam 整个落进 type 捕获（例化声明输出
+    // "localparam parameter W = 8" 的根因）
     let re = Regex::new(&format!(
-        r"(?P<prefix>{}\s+)?(?P<type>.*?)(?P<name>\w+)\s*=(?P<value>.*)",
+        r"^\s*(?P<prefix>{}\s+)?(?P<type>.*?)(?P<name>\w+)\s*=(?P<value>.*)",
         regex::escape(prefix)
     ))
     .unwrap();
@@ -210,6 +214,12 @@ fn parse_param(text: &str, prefix: &str, param_list: &mut Vec<Param>) {
             ptype = Regex::new(r"\s{2,}")
                 .unwrap()
                 .replace_all(raw_type, " ")
+                .trim()
+                .to_string();
+            // 防御：ptype 不得残留 parameter/localparam 关键字
+            ptype = Regex::new(r"^(?:parameter|localparam)\s+")
+                .unwrap()
+                .replace_all(&ptype, String::new())
                 .trim()
                 .to_string();
             let pname = caps.name("name").unwrap().as_str().to_string();
@@ -302,4 +312,22 @@ fn get_clock_reset(text: &str) -> (Vec<String>, Vec<String>) {
     rsts.dedup();
 
     (clks, rsts)
+}
+
+#[cfg(test)]
+mod param_dbg {
+    use super::*;
+    use crate::config::GadgetOptions;
+    #[test]
+    fn test_param_no_keyword_in_ptype() {
+        // normalize 后参数表单行、片段带前导空格——ptype 不得残留 parameter 关键字
+        let text = "module sfifo #(\n    parameter DATA_WIDTH = 8,\n    parameter DEPTH = 4\n) (\n    input i_clk\n);\nendmodule\n";
+        let info = parse_module(text, &GadgetOptions::default()).unwrap();
+        assert_eq!(info.params.len(), 2, "params: {:?}", info.params);
+        for p in &info.params {
+            assert!(p.ptype.is_empty(), "ptype 残留关键字: {:?}", p);
+        }
+        assert_eq!(info.params[0].name, "DATA_WIDTH");
+        assert_eq!(info.params[1].name, "DEPTH");
+    }
 }
