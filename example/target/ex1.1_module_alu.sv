@@ -27,7 +27,7 @@ module alu #(
                 4'd1:result <= operand_a-operand_b;
                 4'd2:result <= operand_a&operand_b;
                 4'd3:result <= operand_a|operand_b;
-                default:result <= 0               ;
+                default:result <= 0;
             endcase
             zero_flag <= (result==0);
         end

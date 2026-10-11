@@ -14,7 +14,7 @@ module tb (
         if (valid && !ready)
             else $error("valid without ready, %0t", $time);
         else $display("ok %0d", data);
-        cnt <= cnt + 1               ;
+        cnt <= cnt + 1;
     end
 
     task automatic check();

@@ -5,6 +5,14 @@ All notable changes to the SystemVerilog VSCode Extension will be documented in 
 ## [Unreleased] (3.5.0 线)
 
 ### Fixed
+- **always 块内赋值分号贴合表达式**（fix/proc-assign-semicolon）
+
+  **变更内容：** 移除 always 块过程赋值的同缩进组分号悬挂对齐（`i_data    ;` → `i_data;`）；赋值运算符（`<=`/`=`）列对齐保留；statement 捕获 trim 尾空格，输入残留的手工空格（`addr ;`）一并清理。
+
+  **为什么：** 分号悬挂把短语句的分号拉到组内最长行对齐（用户 sfifo：`mem[wr_ptr] <= i_data    ;` 多 4 空格）——语句不是表格，分号应贴合表达式；声明区的表格化悬挂（用户此前认可的 wire/localparam 形态）不受影响。
+
+  **影响面：** always/initial 块内赋值行；ex1/ex1.1/ex13 golden 基线随形态更新；test_if_block_without_attribute 改走真实管线并断言分号贴合 + 运算符对齐；golden 36/36、cargo 70/70、宿主 14/14。
+
 - **声明维度前不再莫名多空格**（fix/decl-array-gap）
 
   **变更内容：** `align_decl` 新增 `name_arr` 列宽——带数组维度的行（`mirror_q [$]`、`mem [0:255]`）名字只对齐到「组内带维度行」的名宽（+1 保底空格），不再被无维度行（`model_full`）的名字列宽推远。
