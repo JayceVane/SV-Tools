@@ -15,20 +15,26 @@ pub fn align_decl(txt: &str, options: &FormatOptions, indent: &str, indent_space
         .map(crate::parser::patterns::normalize_compact_decl)
         .collect();
     let lines: Vec<&str> = lines.iter().map(|s| s.as_str()).collect();
-    // Group by (indent_level, attribute_prefix) for proper alignment
-    let mut lines_match: Vec<(&str, Option<regex::Captures>, usize, String)> = Vec::new();
-    let mut len_max: HashMap<(usize, String), DeclWidths> = HashMap::new();
+    // Group by (indent_level, blank_seg, attribute_prefix) for proper alignment.
+    // blank_seg：空行分隔的段号——空行是用户的分组排版语义，两组声明不应
+    // 共用列宽跨组对齐（位宽补位/分号悬挂会拉到别组的列上）
+    let mut lines_match: Vec<(&str, Option<regex::Captures>, usize, usize, String)> = Vec::new();
+    let mut len_max: HashMap<(usize, usize, String), DeclWidths> = HashMap::new();
     let one_decl_per_line = options.one_decl_per_line();
+    let mut blank_seg: usize = 0;
 
     // First pass: collect matches and calculate column widths
     for l in &lines {
+        if l.trim().is_empty() {
+            blank_seg += 1;
+        }
         if let Some(m) = re_decl.captures(l) {
             let ilvl = get_indent_level(l, options, indent, indent_space);
             let attr = m
                 .name("attr")
                 .map(|a| a.as_str().trim().to_string())
                 .unwrap_or_default();
-            let key = (ilvl, attr.clone());
+            let key = (ilvl, blank_seg, attr.clone());
             let widths = len_max.entry(key.clone()).or_insert_with(DeclWidths::new);
 
             for (k, val) in m.iter().enumerate() {
@@ -108,9 +114,9 @@ pub fn align_decl(txt: &str, options: &FormatOptions, indent: &str, indent_space
                 }
             }
 
-            lines_match.push((l, Some(m), ilvl, attr));
+            lines_match.push((l, Some(m), ilvl, blank_seg, attr));
         } else {
-            lines_match.push((l, None, 0, String::new()));
+            lines_match.push((l, None, 0, 0, String::new()));
         }
     }
 
@@ -125,9 +131,9 @@ pub fn align_decl(txt: &str, options: &FormatOptions, indent: &str, indent_space
 
     // Second pass: generate formatted lines and calculate max line length
     let mut formatted_lines: Vec<(String, Option<String>, usize, bool)> = Vec::new(); // (line, comment, ilvl, is_decl)
-    for (line, caps, ilvl, attr) in &lines_match {
+    for (line, caps, ilvl, seg, attr) in &lines_match {
         if let Some(m) = caps {
-            let key = (*ilvl, attr.clone());
+            let key = (*ilvl, *seg, attr.clone());
             let widths = &len_max[&key];
             let mut l = indent.repeat(*ilvl);
             // Prepend attribute prefix if present
@@ -304,8 +310,8 @@ pub fn align_decl(txt: &str, options: &FormatOptions, indent: &str, indent_space
         let mut idx = 0;
         for (l, _comment, ilvl, is_decl) in &formatted_lines {
             if *is_decl {
-                if let Some((_line, _caps, _ilvl, attr)) = lines_match.get(idx) {
-                    let key = (*ilvl, attr.clone());
+                if let Some((_line, _caps, _ilvl, seg, attr)) = lines_match.get(idx) {
+                    let key = (*ilvl, *seg, attr.clone());
                     if let Some(widths) = len_max.get_mut(&key) {
                         let line_len = l.trim_end().len();
                         if line_len > widths.semi_col {
@@ -324,11 +330,11 @@ pub fn align_decl(txt: &str, options: &FormatOptions, indent: &str, indent_space
     for (l, comment, ilvl, is_decl) in &formatted_lines {
         let l = if *is_decl {
             // Find attr from original lines_match
-            let attr = lines_match
+            let (attr, seg) = lines_match
                 .get(idx)
-                .map(|(_, _, _, a)| a.clone())
+                .map(|(_, _, _, s, a)| (a.clone(), *s))
                 .unwrap_or_default();
-            let key = (*ilvl, attr);
+            let key = (*ilvl, seg, attr);
             let widths = &len_max[&key];
             let mut l = l.clone();
 
@@ -473,6 +479,21 @@ mod tests {
             result
         );
         assert!(result.contains("7:0"), "7:0 missing in output");
+
+        // 空行切断对齐组：两组声明不共用列宽（位宽补位/分号悬挂不跨组）
+        let txt2 = "reg  [ADDR_WIDTH:0] wr_ptr;\nreg  [ADDR_WIDTH:0] rd_ptr;\n\nreg  [DATA_WIDTH-1:0] mem [0:DEPTH-1];\n";
+        let out2 = align_decl(txt2, &options, indent, indent_space);
+        let l1 = out2.lines().next().unwrap_or("");
+        assert!(
+            !l1.contains("  ADDR_WIDTH:0]"),
+            "空行分组后 wr_ptr 行不应再按别组位宽补位: {}",
+            out2
+        );
+        assert!(
+            !l1.trim_end().ends_with(" ;"),
+            "空行分组后分号悬挂不应拉到别组列: {}",
+            out2
+        );
     }
 
     #[test]
