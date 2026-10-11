@@ -79,7 +79,13 @@ pub fn align_decl(txt: &str, options: &FormatOptions, indent: &str, indent_space
                                 }
                             }
                         }
-                        7 => widths.name = widths.name.max(w.len()),
+                        7 => {
+                            widths.name = widths.name.max(w.len());
+                            // 带数组维度的行单独记名宽（array 列对齐基准）
+                            if m.name("array").map(|a| !a.as_str().trim().is_empty()).unwrap_or(false) {
+                                widths.name_arr = widths.name_arr.max(w.len());
+                            }
+                        }
                         8 => {
                             let arr_clean = Regex::new(r"\s*").unwrap().replace_all(w, "");
                             for (i, inner) in Regex::new(r"\[(.+?)\]")
@@ -253,10 +259,18 @@ pub fn align_decl(txt: &str, options: &FormatOptions, indent: &str, indent_space
                     l.push_str(sl.as_str().trim());
                 }
             } else {
+                // 有数组维度的行：name 只对齐到「带维度行」的名宽（+1 保底空格），
+                // 不被无维度行的 name 列宽推远；无维度行照旧用全组名宽
+                let has_arr = m.name("array").map(|a| !a.as_str().trim().is_empty()).unwrap_or(false);
+                let name_w = if has_arr {
+                    std::cmp::max(widths.name_arr, m.name("name").unwrap().as_str().len() + 1)
+                } else {
+                    widths.name
+                };
                 l.push_str(&format!(
                     "{:<width$}",
                     m.name("name").unwrap().as_str(),
-                    width = widths.name
+                    width = name_w
                 ));
                 if widths.array_sum > 0 {
                     let s = if let Some(arr) = m.name("array") {
@@ -404,6 +418,10 @@ struct DeclWidths {
     bw: Vec<usize>,
     bw_sum: usize,
     name: usize,
+    /// 组内「带数组维度行」的名字最大宽——array 前的列只在这类行之间对齐
+    /// （无维度的行把 name 填充到全组宽是为 init/分号列服务，混用会把
+    /// 维度推离名字，mirror_q [$] 莫名多出空格的根因）
+    name_arr: usize,
     array: Vec<usize>,
     array_sum: usize,
     init: usize,
@@ -424,6 +442,7 @@ impl DeclWidths {
             bw: Vec::new(),
             bw_sum: 0,
             name: 0,
+            name_arr: 0,
             array: Vec::new(),
             array_sum: 0,
             init: 0,

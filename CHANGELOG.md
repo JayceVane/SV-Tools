@@ -5,6 +5,14 @@ All notable changes to the SystemVerilog VSCode Extension will be documented in 
 ## [Unreleased] (3.5.0 线)
 
 ### Fixed
+- **声明维度前不再莫名多空格**（fix/decl-array-gap）
+
+  **变更内容：** `align_decl` 新增 `name_arr` 列宽——带数组维度的行（`mirror_q [$]`、`mem [0:255]`）名字只对齐到「组内带维度行」的名宽（+1 保底空格），不再被无维度行（`model_full`）的名字列宽推远。
+
+  **为什么：** 原实现全组共用 name 列宽，无维度行的填充是为 init/分号列服务，混组时把带维度行的 `[$]`/`[0:255]` 推离名字（用户 scoreboard：`mirror_q  [$]` 多 2 空格）；顺带消除了最宽名行与维度粘连的旧形态（`assoc[string]` → `assoc [string]`）。
+
+  **影响面：** 声明区带/无数组维度混组的文件；全组多行带维度时维度列对齐保持；ex10/ex11 golden 基线随形态更新、新增 ex12 混组用例（golden 36/36、cargo 70/70、宿主 14/14）。
+
 - **例化声明区参数不再输出 "localparam parameter"**（fix/inst-param-decl-dup）
 
   **变更内容：** `parse_param` 正则加 `^\s*` 锚，并在 ptype 计算后剥离 parameter/localparam 关键字残留。
