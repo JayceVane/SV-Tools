@@ -5,6 +5,14 @@ All notable changes to the SystemVerilog VSCode Extension will be documented in 
 ## [Unreleased] (3.5.0 线)
 
 ### Fixed
+- **例化声明区参数不再输出 "localparam parameter"**（fix/inst-param-decl-dup）
+
+  **变更内容：** `parse_param` 正则加 `^\s*` 锚，并在 ptype 计算后剥离 parameter/localparam 关键字残留。
+
+  **为什么：** `normalize_for_parsing` 把参数表压成单行后 `split(',')` 各片段带前导空格；原正则无锚点，最左匹配从空格处起、prefix 可选组匹配不上，`parameter` 关键字整个落进 type 捕获组——例化生成输出 `localparam parameter DATA_WIDTH = 8;`（用户 05_corelib sfifo.sv 实例）。
+
+  **影响面：** 模块例化/Testbench 生成的 Signal declarations 区；带类型参数（`parameter integer W`）输出 `localparam integer W = 8` 不变；golden 34/34、cargo 70/70、宿主 14/14。
+
 - **声明对齐按空行分组**（fix/decl-align-blank-group）
 
   **变更内容：** `align_decl` 的列宽分组 key 从 (缩进, 属性前缀) 扩展为 (缩进, 空行段号, 属性前缀)——空行切断声明对齐组，各组独立计算类型列/位宽补位/名字列/分号悬挂的宽度。
