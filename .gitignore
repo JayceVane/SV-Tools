@@ -29,9 +29,10 @@ test_format.rs
 temp/
 *.tmp
 test-inst.js
-# test/ 下仅本地产物不入库；golden 格式化测试入库（例外须用 test/* 形式才生效）
+# test/ 下仅本地产物不入库；golden 格式化测试与 vcd 渲染断言入库（例外须用 test/* 形式才生效）
 test/*
 !test/golden_test.js
+!test/render-vcd-badge.js
 
 # OS
 .DS_Store
