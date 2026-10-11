@@ -1345,9 +1345,11 @@ const DATA = ${json};
       var tw = ctx.measureText(label).width;
       if (tw >= sg.x2 - sg.x1 - 14) return;
       var cx = (sg.x1 + sg.x2) / 2;
-      ctx.fillStyle = 'rgba(26,28,31,.85)';
+      // 深底徽章 + 固定浅橘文字：busSoft 是柔和填充色（亮色主题下为深棕），
+      // 直接当文字色对比度只有约 2:1，故文字不随主题变，明暗主题下均 ≥7:1
+      ctx.fillStyle = 'rgba(22,24,27,.92)';
       ctx.fillRect(cx - tw / 2 - 4, yM - 8, tw + 8, 16);
-      ctx.fillStyle = PAL.busSoft;
+      ctx.fillStyle = '#ffe0b2';
       ctx.fillText(label, cx - tw / 2, yM + 4);
     });
   }

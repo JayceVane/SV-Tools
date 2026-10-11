@@ -5,6 +5,14 @@ All notable changes to the SystemVerilog VSCode Extension will be documented in 
 ## [Unreleased] (3.5.0 线)
 
 ### Fixed
+- **波形查看器总线值徽章配色看不清**（fix/wave-text-contrast）
+
+  **变更内容：** 总线值徽章（`0x78A1` 等）文字不再取 `--busSoft` 主题变量，改为固定浅橘 `#ffe0b2`；徽章底加深为 `rgba(22,24,27,.92)`。
+
+  **为什么：** `busSoft` 是为总线带柔和填充设计的低饱和色——暗色主题 `#ffe0b2` 勉强可读，亮色主题是深棕 `#8d6e63`，深棕字叠在硬编码深灰底上对比度仅约 2:1（用户截图实测看不清）。文字与填充对对比度要求相反，徽章文字不随主题变即可在明暗两主题下均 ≥7:1。
+
+  **影响面：** 仅波形查看器 canvas 上总线段值徽章的绘制色；解析/交互逻辑不变；新增 test/render-vcd-badge.js 渲染断言（新底色存在、不再用 busSoft 当文字色）+ 浏览器明暗主题实渲染人工确认；golden 36/36。
+
 - **always 块内赋值分号贴合表达式**（fix/proc-assign-semicolon）
 
   **变更内容：** 移除 always 块过程赋值的同缩进组分号悬挂对齐（`i_data    ;` → `i_data;`）；赋值运算符（`<=`/`=`）列对齐保留；statement 捕获 trim 尾空格，输入残留的手工空格（`addr ;`）一并清理。
