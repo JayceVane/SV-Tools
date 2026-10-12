@@ -75,11 +75,13 @@ vsce --version
 
 ```bash
 npm install          # 只装 vsce 等打包依赖
-npm run build:native # 改了 Rust 层时需要重新构建原生模块
+npm run build:native # 构建当前平台 .node 与 CLI 到 bin/
 npm run package      # vsce package，打包前自动跑 npm test
 ```
 
-成功后生成 `svtools-<version>.vsix`（golden 测试未通过时打包会中止）。
+VSIX 运行时包含 `src/` JavaScript 与 `bin/*.node`，`.vscodeignore` 排除 Rust 源码和中间产物；Release 单独附加 `bin/svtools.exe`。
+
+成功后生成 `svtools-<version>.vsix`（完整测试未通过时打包会中止）。
 
 ---
 
@@ -102,7 +104,7 @@ npm run package      # vsce package，打包前自动跑 npm test
 ### 方法一：命令行发布（推荐）
 
 ```bash
-# 打包前会自动执行 npm test（golden 用例 + 幂等断言），失败即中止
+# 打包前会自动执行 npm test（golden、格式化和工具链合同），失败即中止
 vsce publish
 
 # 或指定版本递增（当前版本见 package.json）
@@ -160,7 +162,7 @@ ovsx publish
 
 ### 修改代码后更新
 
-1. 修改 `package.json` 中的版本号（并同步 `src-rust/Cargo.toml` 与 CHANGELOG.md）：
+1. 修改 `package.json` 中的版本号（并同步 `src/native/Cargo.toml`、`src/native/package.json` 与 CHANGELOG.md）：
    ```json
    "version": "2.0.1"  // 根据修改类型递增
    ```

@@ -24,14 +24,14 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
 
       - name: 安装 napi CLI
-        run: npm ci --prefix src-rust
+        run: npm ci --prefix src/native
 
       - name: 构建原生模块
         run: node scripts/build-native.js
 
-      - name: 打包 vsix（打包前自动跑 golden 测试）
+      - name: 打包 vsix（打包前自动跑完整测试）
         run: |
-          npm install
+          npm ci
           npm run package
         shell: bash
 
@@ -41,5 +41,5 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: |
           gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --generate-notes
-          gh release upload "$TAG" svtools.win32-x64-msvc.node svtools-*.vsix --clobber
+          gh release upload "$TAG" bin/svtools.win32-x64-msvc.node bin/svtools.exe svtools-*.vsix --clobber
         shell: bash

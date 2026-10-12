@@ -2,7 +2,7 @@
   "name": "svtools",
   "displayName": "SystemVerilog Tools",
   "description": "Verilog/SystemVerilog formatter, module instantiation, testbench generation, and productivity tools (Rust native backend)",
-  "version": "3.5.0-beta10",
+  "version": "4.0.0-alpha1",
   "publisher": "JayceVane",
   "author": {
     "name": "JayceVane",
@@ -49,10 +49,11 @@
   ],
   "main": "./extension.js",
   "scripts": {
-    "test": "node test/golden_test.js",
+    "test": "npm run check && node test/golden_test.js && node --test test/formatter_contract_test.js test/toolchain_test.js test/waveform_test.js test/editor_test.js test/workspace_test.js",
     "build:native": "node scripts/build-native.js",
     "package": "vsce package",
-    "vscode:prepublish": "npm test"
+    "vscode:prepublish": "npm test",
+    "check": "node scripts/check-js.js"
   },
   "contributes": {
     "languages": [

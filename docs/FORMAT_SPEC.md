@@ -4,7 +4,7 @@
 若规范本身不合理，先改规范（附 golden 用例）再改实现。每条规则都应有 `example/` golden
 用例背书（见 §11）。
 
-- 版本：v3.4.6（对应空行规则重构）
+- 版本：v4.0.0-alpha1（共享词法保护与模块职责重构）
 - 配置基线：扩展默认配置（见 §3），golden 测试全部按此基线校验
 
 ---
@@ -86,7 +86,8 @@
 - constraint `{ … }` 体、typedef struct `{ … }` 体、coverpoint `{ bins … }` 体
 - 多行语句的括号/花括号续行内（实例端口列表、多行 assign 拼接等）
 
-例外：`maxConsecutiveEmptyLines = -1` 时不做任何空行处理（保留原样）。
+例外：`maxConsecutiveEmptyLines = -1` 时不做任何空行处理（保留原样）。连续 `assign`
+组之间已有空行折叠至 max，保留对齐组边界；字符串、块注释、宏正文内部空行原样保留（§10）。
 
 > 动机：task 体首尾及声明后曾被插入空行（align_decl 尾部换行伪影 + flush 后种子空行），
 > 用户明确要求块内一律无空行（ex10/ex11 golden）。
@@ -126,7 +127,7 @@ sequence/generate/fork` 开头）或块闭合行（`end`、`endtask`、`endfunct
 
 - 输出以单个换行符结束；文件末尾**不保留空行**（beautifier 输出尾部的多余换行删除）。
 - 文件开头的空行折叠至 max，不插入。
-- 唯一例外：未闭合的 `/* */` 块注释内部空行原样保留（§10.2）。
+- 例外：未闭合的保护区内部空行原样保留（§10）。
 
 ### 6.6 语义示例
 
@@ -214,8 +215,9 @@ endmodule                          // 容器闭合：不插入空行（6.2 注�
 
 ## 8. 对齐规则（`reindentOnly = false` 时）
 
-**总则（幂等性推论）**：对齐分组只由代码行的**缩进与内容**决定，**空行透明**——空行
-不参与分组判定、不切断对齐组（§6 的空行增删不得改变对齐宽度）。
+**分组规则（4.0）**：声明按缩进、用户空行分段和属性前缀分组，各组独立测量列宽。
+最终空行裁决必须保持这些分组在再次格式化时稳定。赋值对齐器只处理列宽，不能提前删除
+用户空行；空行去留由 §6 决定。单行实例与后续 `assign` 之间的用户空行按 §6.3 保留折叠。
 
 ### 8.1 声明组对齐
 
@@ -309,24 +311,30 @@ covergroup 内 bins 名与 `{…}` 集合按列对齐（ex8）。
     向上取整，取整会使列距随组宽在 2..5 间漂移（ex15）；端口名按 `alignComma`
     对齐逗号列。
 
-## 10. 注释与字符串
+## 10. 注释、字符串与保护区
 
 1. 行注释 `//` 位置保持（跟在代码后的注释与代码同行的间隔规范化为一个空格）。
 2. 块注释 `/* */` 整块保留原样（内部空行不动，§6 的扫描跳过注释与字符串字面量）。
-3. 字符串字面量内容一律原样（含 `{}`/`()`/关键字）。
+3. 字符串字面量内容一律原样（含 `{}`/`()`/关键字、分号、逗号与连续空格）。
 4. 注释行视为语句参与 §6 空行判定（归属后随语句，§6.4）。
+5. 转义标识符内部不参与结构识别，终止它的空白必须保留；`` `define `` 正文含续行
+   整体保持原文。所有格式化阶段都遵守此合同：预处理、主调度、对齐、空行裁决不得
+   将保护区内的符号重新解释成代码；保护区附近的真实代码仍正常布局。
 
 ## 11. 测试约定（golden）
 
 - `example/*.sv` = 格式化前输入；`example/target/<同名>` = 期望输出（LF 或 CRLF 均可，
   比较时归一）。
 - 每用例两个断言：① 格式化输出 == golden；② 对 golden 再格式化 == golden（幂等）。
-- `node test/golden_test.js` 运行；扩展侧真实回归 `node test/run-auto-lint-repro.js`。
+- `npm test` 运行 JavaScript 语法检查、golden 与模块合同回归；
+  `cargo test --manifest-path src/native/Cargo.toml --lib` 运行 Rust 单元测试。
+- `test/formatter_contract_test.js` 验证配置组合、保护区全文不变、相邻真实代码对齐和幂等性。
 - 新格式化问题 → 最小复现入 `example/`，按本规范校对输出后固化 golden；规范变更必须
   同步更新本文档。
 
 ---
 
-*实现索引：预处理 `src-rust/src/preprocess.rs`；主循环 `beautifier.rs`；对齐
-`align/{decl,assign,instance,module_port,task_func_param}.rs`；空行 pass
-`blank_rules.rs`；收尾 `postprocess.rs`。*
+*4.0 实现索引：统一词法事实 `src/native/src/source_scan.rs`；预处理 `preprocess.rs`；
+格式化调度 `formatter/mod.rs`，结构、行布局、块布局、过程赋值、保护区各有模块；对齐
+`align/{decl,assign,instance,module_port,task_func_param}.rs`；空行裁决 `blank_rules.rs`。
+`beautifier.rs` 为兼容导出，`postprocess.rs` 是已弃用的旧空行接口，不参与生产管线。*

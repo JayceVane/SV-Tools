@@ -2,7 +2,8 @@
 // 生成一个含总线跳变的 VCD，走 buildWaveformHtml，输出明暗两个 HTML 供截图
 const fs = require('fs');
 const path = require('path');
-const { parseVcd, buildWaveformHtml } = require('../vcd.js');
+const { parseVcd } = require('../src/waveform/parser');
+const { buildWaveformHtml } = require('../src/waveform/view');
 
 const vcdText = `$timescale 1ns $end
 $scope module tb $end

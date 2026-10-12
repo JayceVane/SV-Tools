@@ -5,6 +5,8 @@
 
 改编自 Sublime Text [SystemVerilog](https://github.com/TheClams/SystemVerilog)（格式化）与 [Verilog-Gadget](https://github.com/poucotm/Verilog-Gadget)（生产力工具）插件。
 
+本 worktree 为 **4.0.0-alpha1 开发分支**。源码按 `src/` 分层，原生模块与 CLI 构建到 `bin/`；3.x 继续在原工程目录维护。
+
 ## 功能总览
 
 **格式化**（保存时自动 / 手动 / 选中区域，`docs/FORMAT_SPEC.md` 为唯一行为规范）
@@ -52,12 +54,12 @@
 ```bash
 git clone <本仓库> && cd 02_svtools
 npm install
-npm run build:native   # 需要 Rust 工具链；产物 .node 自动复制到根目录
-npm test               # golden 用例 + 幂等断言
+npm run build:native   # 需要 Rust 工具链；产物 .node 与 CLI 自动复制到 bin/
+npm test               # golden、幂等、词法保真、工具运行与 VCD 合同
 npm run package        # 生成 svtools-<版本>.vsix
 ```
 
-没有 Rust 工具链时，从 GitHub Releases 下载对应 tag 的 `svtools.win32-x64-msvc.node` 放到仓库根目录。
+没有 Rust 工具链时，从 GitHub Releases 下载对应 tag 的 `svtools.win32-x64-msvc.node` 放到仓库 bin/ 目录。
 
 ## 快速上手
 
@@ -72,7 +74,7 @@ npm run package        # 生成 svtools-<版本>.vsix
 | 插入文件头 | `Ctrl+Shift+Insert` / `Cmd+Shift+Insert` |
 | Icarus lint / 仿真 / Vivado 命令 | 命令面板搜索 "SystemVerilog Tools" |
 
-全部 20 个命令与 45 项配置见命令面板与设置面板（已按 缩进与空行 → 换行与对齐 → 代码生成 → Icarus Verilog → Vivado 分组）。
+全部 40 个命令与 48 项配置见命令面板与设置面板（已按 缩进与空行 → 换行与对齐 → 代码生成 → Icarus Verilog → Vivado 分组）。
 
 ### 核心格式化配置
 
@@ -95,7 +97,7 @@ svtools.exe file.sv                # 格式化到 stdout
 svtools.exe -i file1.sv file2.sv   # 原地格式化
 svtools.exe -c *.sv                # 检查是否需要格式化（CI 可用）
 svtools.exe --port-name-gap 1 f.sv # 任意配置项均有对应旗标
-cat file.sv | svtools.exe          # stdin
+cat file.sv | svtools.exe -        # stdin
 ```
 
 可执行文件从 [GitHub Releases](https://github.com/JayceVane/SV-Tools/releases) 下载（随版本附 `.node` 与 `svtools.exe`）。
@@ -119,7 +121,7 @@ module alu #(
 
 - **格式化没有生效**：确认文件语言模式为 Verilog/SystemVerilog；查看输出面板错误。
 - **中文注释乱码**：插件强制 UTF-8；请确认文件本身以 UTF-8 保存。
-- **找不到原生模块**：市场/vsix 安装不会遇到；源码运行需根目录 `svtools.win32-x64-msvc.node`（`npm run build:native` 或从 Releases 下载），放入后重载窗口。
+- **找不到原生模块**：市场/vsix 安装不会遇到；源码运行需 `bin/svtools.<平台>.node`（`npm run build:native` 或从 Releases 下载），放入后重载窗口。
 
 ## 文档
 

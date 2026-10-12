@@ -5,7 +5,7 @@
  *  - 对 example/*.sv 逐个用扩展同款配置格式化，与 example/target/<同名> 全文比对；
  *  - 同时验证幂等：对 target 再格式化一次应与 target 完全一致；
  *  - 发现新的格式化问题时：把最小复现加入 example/，人工校对输出后固化到
- *    example/target/（src-rust/target/release/svtools.exe example/xx.sv > example/target/xx.sv）。
+ *    example/target/（bin/svtools.exe example/xx.sv > example/target/xx.sv）。
  */
 const fs = require('fs');
 const path = require('path');
@@ -14,7 +14,7 @@ const ROOT = path.join(__dirname, '..');
 const EXAMPLE_DIR = path.join(ROOT, 'example');
 const TARGET_DIR = path.join(EXAMPLE_DIR, 'target');
 
-const native = require(path.join(ROOT, 'svtools.win32-x64-msvc.node'));
+const native = require('../src/native-loader').createNativeLoader({ rootDir: ROOT }).load();
 
 // 与 extension.js formatDocument 完全一致的默认配置
 function format(text) {

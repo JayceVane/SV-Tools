@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [master]
+    branches: [master, "codex/refactor-v4"]
   pull_request:
   workflow_dispatch:
 
@@ -13,7 +13,7 @@ concurrency:
 jobs:
   golden:
     name: Golden 格式化测试
-    # 原生模块与测试用例按 Windows x64 产物组织（extension.js 加载 svtools.win32-x64-msvc.node）
+    # 构建当前平台产物到 bin/，验证格式化与 JS 边界合同。
     runs-on: windows-latest
     timeout-minutes: 30
     steps:
@@ -26,10 +26,13 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
 
       - name: 安装 napi CLI
-        run: npm ci --prefix src-rust
+        run: npm ci --prefix src/native
 
-      - name: 构建原生模块并复制到根目录
+      - name: 构建原生模块与 CLI 到 bin/
         run: node scripts/build-native.js
 
-      - name: 运行 golden 测试（输出比对 + 幂等断言）
-        run: node test/golden_test.js
+      - name: 运行完整回归测试
+        run: npm test
+
+      - name: 运行 Rust 测试
+        run: cargo test --manifest-path src/native/Cargo.toml
