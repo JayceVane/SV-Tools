@@ -36,6 +36,10 @@ test/*
 !test/golden_test.js
 !test/render-vcd-badge.js
 !test/*_test.js
+!test/fixtures/
+test/fixtures/*
+!test/fixtures/memory_dump.sv
+!test/fixtures/memory_dump.vcd
 
 # OS
 .DS_Store

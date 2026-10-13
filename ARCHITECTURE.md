@@ -62,6 +62,9 @@ flowchart LR
 4.0.0-alpha2 将波形解析放入单文件 worker；增量 parser 与紧凑 store 独立于页面。
 host 只转发信号元数据、有界时间窗、精确游标及边沿查询；client 管交互与持久化，
 renderer 管可见行绘制，model 管纯视图规则。目录和 Canvas 均按视口工作。
+alpha3 新增 memory 视图；`memory.js` 只建立索引分组和有界页，`memory-view.js` 管矩阵交互、
+当前页精确读值与过期响应。它复用 values 服务，不改变事件存储，也不展开所有地址组合。
+索引分组只引用已 dump 的信号，packed bit 的原引用由 parser 保留；显示名称继续兼容。
 详细操作、数据合同与 100/500 MiB 实测见 `docs/WAVEFORM.md`。
 
 声明、端口和过程赋值仍采用词法与正则驱动的布局规则，没有完整 SystemVerilog AST。

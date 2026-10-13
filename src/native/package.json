@@ -1,6 +1,6 @@
 {
   "name": "svtools-native",
-  "version": "4.0.0-alpha2",
+  "version": "4.0.0-alpha3",
   "description": "SystemVerilog formatter and tools native addon",
   "main": "index.js",
   "scripts": {

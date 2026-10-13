@@ -57,5 +57,28 @@ footer { display: flex; gap: 14px; align-items: center; padding: 6px 12px; borde
 #loadDetail { color: var(--dim); }#loadTitle { font-size: 18px; }#loadError { color: var(--x); white-space: pre-wrap; max-width: 650px; text-align: center; }
 .menu { position: fixed; z-index: 10; min-width: 180px; padding: 5px; background: var(--panel); border: 1px solid var(--border); border-radius: 6px; box-shadow: 0 8px 24px #0004; display: grid; gap: 3px; }
 .menu button { text-align: left; border-color: transparent; background: transparent; }.menu input { margin: 3px; }
+/* 存储器以有界页显示；缩小波形区时仍保留时间轴和共享游标。 */
+#memoryPanel { flex: 0 1 375px; min-height: 180px; display: flex; flex-direction: column; border-top: 1px solid var(--border); background: var(--panel); }
+#memoryPanel[hidden] { display: none; }
+.memoryHeader { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-bottom: 1px solid var(--border); }
+.memoryHeader .sectionTitle { padding: 0; white-space: nowrap; }
+#memorySelect { flex: 1; font-family: Consolas, monospace; }#memoryClose { border-color: transparent; }
+.memoryTools { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; padding: 7px 10px; }
+#memoryAddress { width: 130px; }#memoryInfo { margin-left: auto; }
+.memoryLegend { display: flex; flex-wrap: wrap; gap: 14px; padding: 0 12px 8px; font: 11px Consolas, monospace; }
+.memoryLegend .a, .memoryWord .a { color: var(--a); }.memoryLegend .b, .memoryWord .b { color: var(--b); }
+.memoryChangedKey { color: var(--accent); }#memoryReadStatus { color: var(--dim); margin-left: auto; }
+#memoryGrid { flex: 1; min-height: 0; overflow: auto; background: var(--bg); }
+#memoryTable { border-collapse: separate; border-spacing: 0; width: 100%; font-family: Consolas, monospace; }
+#memoryTable th { background: var(--raised); color: var(--dim); font-size: 11px; font-weight: 400; padding: 7px 10px; }
+#memoryTable thead th { position: sticky; top: 0; z-index: 1; }#memoryTable tbody th { position: sticky; left: 0; }
+#memoryTable td, #memoryTable th { border-right: 1px solid var(--border); border-bottom: 1px solid var(--border); text-align: left; }
+#memoryTable td { min-width: 102px; padding: 3px; }
+.memoryWord { position: relative; width: 100%; display: grid; gap: 3px; border-color: transparent; border-radius: 3px; background: transparent; padding: 5px 14px 5px 7px; text-align: left; font: 12px Consolas, monospace; }
+.memoryWord span { max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.memoryWord span:empty { display: none; }
+.memoryWord.changed { background: var(--selection); box-shadow: inset 3px 0 var(--accent); }.memoryWord.changed::after { content: 'Δ'; color: var(--accent); font-size: 10px; position: absolute; top: 4px; right: 4px; }
+.memoryWord .unknown { text-decoration: underline dotted var(--x); }
+.memoryMissing { color: var(--dim); font-size: 11px; }.oneDimension .memoryWord { grid-template-columns: 1fr 1fr 20px; align-items: center; }
+.oneDimension .memoryWord span { max-width: none; }.oneDimension td { width: 100%; }
 ::-webkit-scrollbar { width: 9px; height: 9px; }::-webkit-scrollbar-thumb { background: var(--border); border: 2px solid var(--bg); border-radius: 6px; }
 @media (max-width: 800px) { aside { width: 185px; }.hint { display: none; }header { padding: 8px 10px; }.toolbar { padding: 5px; gap: 3px; } }

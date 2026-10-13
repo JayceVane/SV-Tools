@@ -195,6 +195,14 @@ test('worker 元数据保留 range 和不同 bit 路径，alias 查询仍共享 
     assert.deepEqual(await session.values({ ids: ['!', '"'], time: 0 }), { values: { '!': '0', '"': '1' } });
 });
 
+test('一位 packed 切片保留原引用事实，数组地址与显示名称分离', () => {
+    const metadata = parseVcd('$var wire 1 ! bus [3:3] $end $var reg 1 # mem[2] [0:0] $end $enddefinitions $end');
+    assert.equal(metadata.vars[0].name, 'bus[3]'); assert.equal(metadata.vars[0].referenceName, 'bus');
+    assert.equal(metadata.vars[1].name, 'mem[2][0]'); assert.equal(metadata.vars[1].referenceName, 'mem[2]');
+    for (const suffix of ['[3:3][2:2]', '[3:3][2]']) assert.throws(() =>
+        parseVcd('$var wire 1 ! bus ' + suffix + ' $end $enddefinitions $end'), error => error.code === 'VCD_PARSE');
+});
+
 for (const suffix of ['[15:0]', '[7:0]garbage', '[9007199254740993]']) {
     test('非法 range/index 不被忽略：' + suffix, () => {
         assert.throws(() => parseVcd('$var wire 8 ! bus ' + suffix + ' $end $enddefinitions $end'),

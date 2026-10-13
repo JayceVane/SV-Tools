@@ -70,23 +70,24 @@ function createVcdParser({ onChange = () => {}, onVariable = () => {}, limits = 
         const suffix = parts.slice(4).join('');
         const selections = suffix.match(/\[[+-]?\d+(?::[+-]?\d+)?\]/g) || [];
         if (selections.join('') !== suffix) fail('$var 索引或范围无效：' + suffix.slice(0, 80));
-        let range;
+        let range, referenceName, hasRange = false;
         for (const selection of selections) {
             const bounds = selection.slice(1, -1).split(':').map(Number);
             if (bounds.some(bound => !Number.isSafeInteger(bound))) fail('$var 索引超出安全整数范围');
             if (bounds.length === 1) {
-                if (range) fail('$var 的数组索引必须位于向量范围之前');
+                if (hasRange) fail('$var 的数组索引必须位于向量范围之前');
                 name += '[' + bounds[0] + ']';
             } else {
-                if (range) fail('$var 只能包含一个向量范围');
+                if (hasRange) fail('$var 只能包含一个向量范围');
+                hasRange = true;
                 const size = Math.abs(bounds[0] - bounds[1]) + 1;
                 if (!Number.isSafeInteger(size) || size !== width) fail('$var 范围与声明位宽不一致');
-                if (width === 1) name += '[' + bounds[0] + ']';
+                if (width === 1) { referenceName = name; name += '[' + bounds[0] + ']'; }
                 else range = '[' + bounds.join(':') + ']';
             }
         }
         if (name.length > cap.maxReferenceLength) failResource('VCD 信号引用超过安全长度');
-        return { name, ...(range ? { range } : {}) };
+        return { name, ...(range ? { range } : {}), ...(referenceName ? { referenceName } : {}) };
     }
 
     function endCommand() {

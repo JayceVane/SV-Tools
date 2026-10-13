@@ -10,6 +10,12 @@
         multi: new Set(), fullName: false, snap: true, secondsPerTick: null,
         series: new Map(), seriesKey: '', windowKey: '', valuesA: Object.create(null), valuesB: Object.create(null) };
     const renderer = window.createWaveRenderer({ canvas, ruler: $('ruler'), tracks, state, model: M });
+    const memory = window.createMemoryInspector({ request, addSignals: keys => {
+        addSignals(keys); state.activeKey = keys[0]; state.multi = new Set(keys);
+        const row = state.rows.find(item => M.signalKey(item.signal) === keys[0]);
+        if (row) tracks.scrollTop = row.y;
+        viewportChanged();
+    }, onChange() { viewportChanged(); persist(); } });
     const pending = new Map();
     let requestId = 0, paintPending = false, filtered = [], windowBusy = false, windowWanted = null;
     let valuesBusy = false, valuesWanted = null, valuesKey = '', edgeVersion = 0, menu = null, drag = null;
@@ -23,7 +29,7 @@
     function persist() {
         api.setState({ fileKey: BOOT.fileKey, selected: state.selected, start: state.view.start, span: state.view.span,
             cursorA: state.cursorA, cursorB: state.cursorB, formats: state.formats, groups: state.groups,
-            heights: state.heights, fullName: state.fullName, snap: state.snap });
+            heights: state.heights, fullName: state.fullName, snap: state.snap, memory: memory.snapshot() });
     }
     function paint() {
         if (paintPending) return;
@@ -78,6 +84,7 @@
         finally { windowBusy = false; pumpWindow(); }
     }
     function queueValues() {
+        memory.refresh(state.cursorA, state.cursorB, state.secondsPerTick);
         const params = { ids: visibleIds(), a: state.cursorA, b: state.cursorB }, key = JSON.stringify(params);
         if (key === valuesKey) return;
         valuesKey = key; state.valuesA = Object.create(null); state.valuesB = Object.create(null); valuesWanted = { params, key }; pumpValues();
@@ -203,9 +210,13 @@
         }).slice(0, 16).map(M.signalKey);
         state.activeKey = state.selected[0] || null;
         const scope = $('scope');
-        for (const item of metadata.scopes) { const option = document.createElement('option'); option.value = item.path; option.textContent = item.path; scope.appendChild(option); }
+        for (const path of new Set(metadata.scopes.map(item => item.path))) {
+            const option = document.createElement('option'); option.value = path; option.textContent = path; scope.appendChild(option);
+        }
         $('metadata').textContent = `${metadata.vars.length.toLocaleString()} signals · ${(metadata.fileBytes / 1048576 || 0).toFixed(1)} MiB · ${metadata.timescale || 'timescale 未声明'} · ${M.formatTime(metadata.endTime, state.secondsPerTick)}`;
         $('loading').classList.add('hidden'); $('snap').classList.toggle('active', state.snap); $('fullName').classList.toggle('active', state.fullName);
+        memory.refresh(state.cursorA, state.cursorB, state.secondsPerTick);
+        memory.initialize(metadata.vars, saved?.fileKey === BOOT.fileKey ? saved.memory : null);
         filterCatalog(); rebuildRows();
     }
     window.addEventListener('message', event => {
@@ -235,6 +246,7 @@
     $('cursorMode').onclick = () => { state.activeCursor = state.activeCursor === 'A' ? 'B' : 'A'; $('cursorMode').textContent = '游标 ' + state.activeCursor; };
     $('snap').onclick = () => { state.snap = !state.snap; $('snap').classList.toggle('active', state.snap); persist(); };
     $('fullName').onclick = () => { state.fullName = !state.fullName; $('fullName').classList.toggle('active', state.fullName); viewportChanged(); persist(); };
+    $('memoryToggle').onclick = () => memory.toggle();
     const jump = () => { if (!state.metadata) return; const time = M.parseTime($('jumpTime').value, state.secondsPerTick);
         if (time === null || time > state.metadata.endTime) { status('时间无效或超出文件范围；可输入 ticks 或带单位的时间'); return; }
         ++edgeVersion; setCursor(time, state.activeCursor); setView({ start: time - state.view.span / 2, span: state.view.span }); };

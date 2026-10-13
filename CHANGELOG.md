@@ -2,6 +2,14 @@
 
 All notable changes to the SystemVerilog VSCode Extension will be documented in this file.
 
+## [4.0.0-alpha3] — VCD 存储器查看
+
+**变更内容：** 新增存储器视图，把 `mem[addr]` 字数组与 `mem[row][col]` 展开记录按地址显示，共享波形的 A/B 游标。支持 Hex/Bin/Dec/SDec、地址定位、分页、变化标记、单元添加波形与状态恢复。
+
+**为什么：** 大量 memory 单元逐行添加波形不便于对照地址和内容。数组索引识别、页面交互与精确读值分别负责，页面只查询当前页，避免展开整个矩阵。
+
+**影响面：** 原 VCD 数据服务与波形导航保持兼容；未 dump 单元和无初值分别显示。packed 切片不会误作数组地址，定义冲突的数组仍可在普通波形中查看。用户取消 FSDB 开发，本版本不新增 FSDB 查看支持。验证与文件清单见 `docs/V4_ALPHA3.md`。
+
 ## [4.0.0-alpha2] — always 事件头与大文件波形查看器
 
 **变更内容：** `inlineCompact` 开启时删除 always 事件控制头的冗余水平空白，保留注释、字符串、宏、转义标识符及用户换行。波形查看器改用 worker 流式解析与紧凑分块存储，页面按需请求可见时间窗，增加双游标 Δt、信号检索、精确边沿导航、布局恢复与明暗主题。
