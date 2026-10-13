@@ -135,7 +135,8 @@ function activate(context) {
     activateIverilog(context, { waveViewer });
 
     // Vivado TCL 批处理运行与工程创建
-    activateVivado(context);
+    const vivado = activateVivado(context);
+    return { vivado };
 }
 
 /**

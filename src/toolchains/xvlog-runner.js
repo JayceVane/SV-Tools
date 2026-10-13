@@ -25,7 +25,7 @@ async function prepare(document, ctx, task) {
     if (document.isDirty) { lintTarget = path.join(workDir, path.basename(filePath)); await fs.writeFile(lintTarget, text); }
     task.throwIfCancelled();
     const options = vscode.workspace.getConfiguration('svtools.iverilog', document.uri);
-    const includeDirs = [...new Set([path.dirname(filePath), ...(options.get('includePaths', []) || []).map(dir => path.resolve(folder?.uri.fsPath || path.dirname(filePath), dir))])];
+    const includeDirs = [...new Set([path.dirname(filePath), ...(ctx.projectScope?.includePaths || []), ...(options.get('includePaths', []) || []).map(dir => path.resolve(folder?.uri.fsPath || path.dirname(filePath), dir))])];
     const libraryArgs = [], timescale = text.match(/`timescale\s+([0-9.]+[munpf]?s\s*\/\s*[0-9.]+[munpf]?s)/i);
     let uvmTimescale;
     if (rules.detectUvmUsage(text)) {
@@ -58,6 +58,7 @@ async function compile(prep, files, incremental) {
 }
 
 async function dependencyIndex(prep) {
+    if (prep.ctx.projectScope) return prep.ctx.projectScope.modules;
     const scan = await prep.ctx.scanWorkspaceSources(); prep.task.throwIfCancelled(); return scan.modules;
 }
 
@@ -77,7 +78,8 @@ async function lint(prep) {
 }
 
 async function elaborate(prep) {
-    const modules = await dependencyIndex(prep); let files = [prep.lintTarget], result;
+    const modules = await dependencyIndex(prep);
+    let files = [...(prep.ctx.projectScope?.files || []).filter(file => path.normalize(file) !== path.normalize(prep.filePath)), prep.lintTarget], result;
     for (let round = 0; round < MAX_ELABORATE_ROUNDS; round++) {
         result = await compile(prep, files, false);
         if (result.stopped || result.aborted || result.diagnosticsIncomplete) break;

@@ -197,6 +197,7 @@ function editorHarness(f, getToolchain, options = {}) {
         vscode.workspace[name] = handler => { handlers.set(name, handler); return disposable(); };
     }
     const api = activateIverilog({ subscriptions: [] }, { vscode, resolveToolchain: getToolchain, startProcess: options.startProcess,
+        xvlogTools: options.xvlogTools, resolveXvlogBinDir: options.resolveXvlogBinDir,
         scanWorkspaceSources: async () => ({ dirs: [], modules: new Map() }), waveViewer: { openWaveform: async file => waves.push(file) } });
     return { api, doc, config, handlers, commands, messages, waves, bars, problems };
 }
@@ -230,6 +231,23 @@ test('不同资源配置并发探测时，迟到结果不污染另一个配置�
         assert.equal(calls.filter(call => call.probe && call.command.includes('tool-b')).length, 1);
         assert.equal(calls.at(-1).command, path.join(directories[1], compiler));
     } finally { await h.api.dispose(); }
+});
+
+test('显式工程xelab不依赖lint引擎，使用指定top与成员且可单独停止', async t => {
+    const f = await fixture(t);
+    const makeOptions = mode => ({ resolveXvlogBinDir: () => f.root,
+        xvlogTools: Object.fromEntries(['xvlog', 'xelab'].map(tool => [tool, { command: process.execPath, args: [f.driver, tool, mode] }])) });
+    const h = editorHarness(f, async () => { throw new Error('不应调用Icarus探测'); }, makeOptions('ok'));
+    try {
+        const result = await h.commands.get('svtools.xvlog.elaborate')(h.doc, { top: 'chosen', projectScope: { files: [f.file], modules: new Map(), includePaths: [f.root] } });
+        assert.equal(result.status, 'success'); assert.ok(result.logPaths.at(-1).endsWith('xelab.log'));
+    } finally { await h.api.dispose(); }
+    const slow = editorHarness(f, async () => { throw new Error('不应调用Icarus探测'); }, makeOptions('slow'));
+    try {
+        const task = slow.commands.get('svtools.xvlog.elaborate')(slow.doc, { top: 'chosen', projectScope: { files: [f.file], modules: new Map(), includePaths: [] } });
+        await waitFor(() => slow.messages.some(line => line.includes('ready'))); await slow.commands.get('svtools.lint.stop')(slow.doc);
+        assert.equal((await task).status, 'cancelled');
+    } finally { await slow.api.dispose(); }
 });
 
 test('编辑器停止命令覆盖编译阶段，不启动vvp、不自动打开残留波形', async t => {

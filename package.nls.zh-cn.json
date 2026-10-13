@@ -96,5 +96,7 @@
   "cmd.vivado_tree_reportTiming.title": "时序报告（WNS/TNS）",
   "cmd.vivado_tree_bitstream.title": "生成 Bitstream",
   "cmd.vivado_tree_quickElaborate.title": "仿真 Top 详细化（xelab）",
-  "cmd.vivado_tree_expandAll.title": "全部展开"
+  "cmd.vivado_tree_expandAll.title": "全部展开",
+  "cmd.vivado_tree_selectProject.title": "Vivado：选择工程",
+  "cmd.vivado_tree_stop.title": "Vivado：停止面板任务"
 }

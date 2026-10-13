@@ -96,5 +96,7 @@
   "cmd.vivado_tree_reportTiming.title": "Timing Report (WNS/TNS)",
   "cmd.vivado_tree_bitstream.title": "Generate Bitstream",
   "cmd.vivado_tree_quickElaborate.title": "Elaborate Sim Top (xelab)",
-  "cmd.vivado_tree_expandAll.title": "Expand All"
+  "cmd.vivado_tree_expandAll.title": "Expand All",
+  "cmd.vivado_tree_selectProject.title": "Vivado: Select project",
+  "cmd.vivado_tree_stop.title": "Vivado: Stop panel task"
 }

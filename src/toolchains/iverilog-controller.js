@@ -105,7 +105,7 @@ function activateIverilog(context, deps) {
         simBar.text = activeSim ? '$(debug-stop) ' + (labels[activeSim.state] || activeSim.state) + ' · 停止' : '$(play) iverilog 仿真';
         simBar.tooltip = activeSim ? '停止当前任务，包括编译阶段' : '编译并运行当前 testbench'; simBar.show();
     }
-    async function execute(document, kind = 'lint') {
+    async function execute(document, kind = 'lint', options = {}) {
         const mainFile = document?.uri?.fsPath || '';
         if (disposed || !isVerilogDocument(document) || document.uri.scheme !== 'file') {
             const message = '请先打开已保存的 Verilog/SystemVerilog 文档';
@@ -118,10 +118,10 @@ function activateIverilog(context, deps) {
         try {
             await task.waitForPrevious(); task.throwIfCancelled();
             if (kind === 'simulation') return await runner.simulate(task, document);
-            if (currentEngine(document) === 'xvlog') {
+            if (kind === 'elaborate' || currentEngine(document) === 'xvlog') {
                 return await (kind === 'elaborate' ? elaborateWithXvlog : lintWithXvlog)(document, {
                     vscode, channel, output, applyDiagnostics, isVerilogDocument, scanWorkspaceSources: scanSources, task, showToolchainError,
-                    toolCommands: deps.xvlogTools, resolveBinDir: deps.resolveXvlogBinDir });
+                    toolCommands: deps.xvlogTools, resolveBinDir: deps.resolveXvlogBinDir, top: options.top, projectScope: options.projectScope });
             }
             return await runner.lint(task, document);
         } catch (error) {
@@ -170,10 +170,13 @@ function activateIverilog(context, deps) {
         vscode.commands.registerCommand('svtools.iverilog.lint', async () => { deps.resetToolchainFailure(); return reportSummary(await execute(vscode.window.activeTextEditor?.document), currentEngine(vscode.window.activeTextEditor?.document)); }),
         vscode.commands.registerCommand('svtools.iverilog.simulate', () => execute(vscode.window.activeTextEditor?.document, 'simulation')),
         vscode.commands.registerCommand('svtools.iverilog.stopSimulation', () => stopSimulation()),
-        vscode.commands.registerCommand('svtools.xvlog.elaborate', async () => {
-            const document = vscode.window.activeTextEditor?.document;
-            if (currentEngine(document) !== 'xvlog') return reportSummary({ status: 'skipped', message: '请切换到 xvlog 引擎' }, 'xelab');
-            return reportSummary(await execute(document, 'elaborate'), 'xelab');
+        vscode.commands.registerCommand('svtools.lint.stop', requested => {
+            const document = requested?.uri ? requested : vscode.window.activeTextEditor?.document;
+            if (document) tasks.cancel(lintKey(document), '用户停止检查');
+        }),
+        vscode.commands.registerCommand('svtools.xvlog.elaborate', async (requestedDocument, options = {}) => {
+            const document = requestedDocument?.uri ? requestedDocument : vscode.window.activeTextEditor?.document;
+            return reportSummary(await execute(document, 'elaborate', options), 'xelab');
         }),
         vscode.commands.registerCommand('svtools.lint.selectEngine', async () => {
             const engine = currentEngine(vscode.window.activeTextEditor?.document);

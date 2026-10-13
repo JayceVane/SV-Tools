@@ -15,10 +15,8 @@
  */
 /**
  * Vivado 工程管理侧边栏：依赖层级文件树（类 Vivado Sources 视图）+ 右键管理。
- * - 数据源：.xpr（文件集成员/top，正则解析免启动 Vivado）+ 工作区设计单元索引
- *   （层级 = top 模块按实例化关系向下展开，词边界闭包）
- * - 树首固定「top 级操作」快捷区：xelab/综合/报告/布局布线/bitstream/时序报告
- *   一键触发，不需要定位到 top 模块右键
+ * - 数据源：完整 .xpr 文件集与本工程源码的有界引用预览，无需启动 Vivado。
+ * - 工程根下按实际文件集显示成员，快捷操作单独分组；仿真引用不冒充成员。
  * - 右键：加入/移出工程、设综合/仿真 top、文件集间移动（src↔sim）
  * - 视图标题栏：全部展开（expandAll）+ VS Code 内置全部收起（showCollapseAll）
  * - 写操作全部经 Vivado batch TCL（复用 runScript：状态栏转圈 + 停止按钮），
@@ -29,6 +27,8 @@
 const fs = require('fs');
 const path = require('path');
 const { parseXpr, fileSetOf, samePath } = require('./xpr');
+const { buildProjectTree } = require('./tree-model');
+const { cancelledError } = require('../toolchains/job');
 const { showReport } = require('./reportView');
 const {
     buildAddFilesScript, buildRemoveFilesScript, buildSetTopScript, buildMoveFileScript,
@@ -36,219 +36,153 @@ const {
     parseUtilHierSummary, parseLogicLevelSummary
 } = require('./tclgen');
 
-const VERILOG_EXT = /\.(sv|v|svh|vh)$/i;
-const CONSTRAINT_EXT = /\.(xdc|sdc|ucf)$/i;
-
 /**
  * 激活工程树视图。
  * @param {import('vscode').ExtensionContext} context
- * @param {object} deps { findProjectXpr, runScript, log, out, scanWorkspaceSources }
+ * @param {object} deps 工程选择、批处理、停止、日志与 VS Code 边界。
  */
 function activateProjectTree(context, deps) {
-    const vscode = require('vscode');
-    const { findProjectXpr, runScript, log, out, scanWorkspaceSources } = deps;
-
-    /** @type {any} 树数据缓存（refresh 重建） */
-    let roots = [];
-
-    class VivadoTreeProvider {
-        getTreeItem(element) { return element; }
-        getChildren(element) {
-            if (!element) return Promise.resolve(roots);
-            return Promise.resolve(element.children || []);
-        }
+    const vscode = deps.vscode || require('vscode');
+    const { findProjectXpr, runScript, log, out } = deps;
+    const changes = new vscode.EventEmitter();
+    let roots = [], parents = new WeakMap(), disposed = false, revision = 0, queued = false, refreshing = null;
+    let watcherTimer = null, operation = null, externalStage = null, stopRequested = false, stopAction = null, modelUnits = new Map(), pickerToken = null;
+    function setRunning(stage) {
+        if (disposed) return;
+        externalStage = stage;
+        tree.message = operation ? '正在执行：' + operation : stage ? 'Vivado 正在运行，可使用标题栏停止任务' : undefined;
+        Promise.resolve(vscode.commands.executeCommand('setContext', 'svtools.vivado.busy', !!operation || !!stage || !!deps.isRunning?.())).catch(error => log('[工程树] 更新任务状态失败：' + error.message));
     }
-    const tree = vscode.window.createTreeView('svtools.vivado.projectTree', {
-        treeDataProvider: new VivadoTreeProvider(),
-        showCollapseAll: true
-    });
-    context.subscriptions.push(tree);
 
-    // ---------------- 数据构建 ----------------
-
-    async function rebuild() {
-        let xprPath = null;
-        try { xprPath = await findProjectXpr(); } catch (err) { /* 无工程 */ }
-        if (!xprPath) {
-            roots = [infoItem('未找到 Vivado 工程（.xpr）—— 先运行 "Vivado: 创建工程" 或打开含 .xpr 的工作区')];
-            return;
-        }
-        let parsed;
-        try {
-            parsed = parseXpr(xprPath);
-        } catch (err) {
-            roots = [infoItem('读取 .xpr 失败：' + err.message)];
-            return;
-        }
-
-        let unitIndex = new Map();
-        try { unitIndex = (await scanWorkspaceSources()).modules; } catch (err) { /* 索引不可用则无层级 */ }
-
-        const srcSet = parsed.sets.find(s => s.type === 'DesignSrcs') || { name: 'sources_1', top: '', files: [] };
-        const simSet = parsed.sets.find(s => s.type === 'SimulationSrcs') || { name: 'sim_1', top: '', files: [] };
-        const constrFiles = (parsed.sets.find(s => s.type === 'Constrs') || { files: [] }).files;
-
-        // 各文件集：top 层级树 + 不在层级里的文件平铺
-        const srcTree = buildSetTree('设计源文件（' + srcSet.name + '）', srcSet, unitIndex, 'sources');
-        const simTree = buildSetTree('仿真源文件（' + simSet.name + '）', simSet, unitIndex, 'sim');
-        const cats = [quickActionsNode(srcSet, simSet), srcTree, simTree];
-
-        if (constrFiles.length) {
-            cats.push(catItem('约束文件（constrs_1）', constrFiles.map(f => fileNode(f, 'constraint'))));
-        }
-
-        // 未加入工程的工作区源文件/约束（右键即可加入）
-        const inPrj = new Set();
-        for (const s of parsed.sets) for (const f of s.files) inPrj.add(f);
-        const unadded = [];
-        try {
-            const uris = await vscode.workspace.findFiles('**/*.{sv,v,svh,vh,xdc}', '**/{.svtools,node_modules,prj}/**', 2000);
-            for (const u of uris) {
-                if (![...inPrj].some(f => samePath(f, u.fsPath))) unadded.push(fileNode(u.fsPath, 'orphan'));
+    function items(nodes, parent) {
+        return nodes.map(node => {
+            const state = !node.children?.length ? vscode.TreeItemCollapsibleState.None
+                : node.expanded ? vscode.TreeItemCollapsibleState.Expanded : vscode.TreeItemCollapsibleState.Collapsed;
+            const item = new vscode.TreeItem(node.label, state);
+            for (const key of ['id', 'description', 'tooltip', 'contextValue', 'nodeData']) item[key] = node[key];
+            item.iconPath = new vscode.ThemeIcon(node.icon || 'file-code');
+            if (node.command) item.command = { command: node.command, title: node.label, arguments: [item] };
+            else if (node.nodeData?.file) {
+                item.resourceUri = vscode.Uri.file(node.nodeData.file);
+                item.command = { command: 'vscode.open', title: '打开', arguments: [item.resourceUri] };
             }
-        } catch (err) { /* 扫描失败跳过 */ }
-        if (unadded.length) cats.push(catItem('未加入工程（' + unadded.length + '）', unadded));
-
-        roots = cats;
-    }
-
-    /**
-     * top 级快捷操作区（树首固定区域）：不需要定位到 top 模块右键，
-     * 一键触发 xelab / 综合 / 报告 / 布局布线 / bitstream / 时序报告。
-     */
-    function quickActionsNode(srcSet, simSet) {
-        const srcTop = srcSet.top || '';
-        const simTop = simSet.top || '';
-        const items = [
-            actionItem('xelab 详细化（' + (simTop ? '仿真 top: ' + simTop : '无仿真 top，回退综合 top') + '）', 'zap', 'svtools.vivado.tree.quickElaborate'),
-            actionItem('工程综合（synth_1' + (srcTop ? ' · ' + srcTop : '') + '）', 'tools', 'svtools.vivado.tree.synthesize'),
-            actionItem('综合报告（分层资源 + 逻辑级数）', 'graph', 'svtools.vivado.tree.reportSynth'),
-            actionItem('布局布线（impl_1，自动级联综合）', 'circuit-board', 'svtools.vivado.tree.implement'),
-            actionItem('布局布线报告（资源占用）', 'list-tree', 'svtools.vivado.tree.reportImplUtil'),
-            actionItem('时序报告（WNS/TNS）', 'watch', 'svtools.vivado.tree.reportTiming'),
-            actionItem('生成 Bitstream（impl → write_bitstream）', 'package', 'svtools.vivado.tree.bitstream')
-        ];
-        const it = catItem('top 级操作' + (srcTop || simTop ? '（top: ' + (srcTop || simTop) + '）' : ''), items);
-        it.iconPath = new vscode.ThemeIcon('zap');
-        it.contextValue = 'actions';
-        return it;
-    }
-
-    /** 快捷区条目：无子级，点击即执行绑定的命令。 */
-    function actionItem(label, icon, command) {
-        const it = new vscode.TreeItem(label, vscode.TreeItemCollapsibleState.None);
-        it.iconPath = new vscode.ThemeIcon(icon);
-        it.contextValue = 'action';
-        it.tooltip = '点击执行';
-        it.command = { command, title: label };
-        return it;
-    }
-
-    function buildSetTree(label, set, unitIndex, kind) {        const children = [];
-        const claimed = [];
-        if (set.top && unitIndex.get(set.top)) {
-            const visited = new Set([set.top]);
-            children.push(moduleNode(set.top, unitIndex, visited, claimed, true));
-        }
-        // 不在 top 层级下的文件平铺（库里单元未被引用 / 纯包含文件等）
-        for (const f of set.files) {
-            if (!claimed.some(c => samePath(c, f))) children.push(fileNode(f, kind === 'sim' ? 'simFile' : 'file'));
-        }
-        const it = catItem(label + (set.top ? ' · top: ' + set.top : ''), children);
-        it.contextValue = 'setRoot';
-        return it;
-    }
-
-    /** 模块层级节点：文件内引用到的工作区单元递归为子节点（环安全）。 */
-    function moduleNode(name, unitIndex, visited, claimed, isTop) {
-        const file = unitIndex.get(name);
-        claimed.push(file);
-        const children = [];
-        let text = '';
-        try { text = fs.readFileSync(file, 'utf8'); } catch (err) { /* 读不了就没有子级 */ }
-        for (const [unit, f] of unitIndex) {
-            if (visited.has(unit) || samePath(f, file)) continue;
-            const re = new RegExp('\\b' + unit.replace(/[$]/g, '\\$') + '\\b');
-            if (re.test(text)) {
-                visited.add(unit);
-                children.push(moduleNode(unit, unitIndex, visited, claimed, false));
-            }
-        }
-        const it = new vscode.TreeItem(name, vscode.TreeItemCollapsibleState.Collapsed);
-        it.description = path.basename(file);
-        it.tooltip = file + (isTop ? '（顶层）' : '');
-        it.iconPath = new vscode.ThemeIcon(isTop ? 'rocket' : 'symbol-module');
-        it.contextValue = isTop ? 'topModule' : 'module';
-        it.command = { command: 'vscode.open', title: '打开', arguments: [vscode.Uri.file(file)] };
-        it.nodeData = { kind: 'module', module: name, file, isTop };
-        it.children = children;
-        return it;
-    }
-
-    function fileNode(file, kind) {
-        const it = new vscode.TreeItem(path.basename(file));
-        it.description = vscode.workspace.asRelativePath(path.dirname(file));
-        it.tooltip = file;
-        it.iconPath = new vscode.ThemeIcon(
-            kind === 'orphan' ? 'diff-add'
-                : kind === 'constraint' ? 'gauge'
-                    : kind === 'simFile' ? 'beaker' : 'file-code');
-        it.contextValue = kind;
-        it.command = { command: 'vscode.open', title: '打开', arguments: [vscode.Uri.file(file)] };
-        it.nodeData = { kind, file };
-        it.children = [];
-        return it;
-    }
-
-    function catItem(label, children) {
-        const it = new vscode.TreeItem(label, vscode.TreeItemCollapsibleState.Expanded);
-        it.iconPath = new vscode.ThemeIcon('folder-library');
-        it.contextValue = 'category';
-        it.children = children;
-        return it;
-    }
-
-    function infoItem(text) {
-        const it = new vscode.TreeItem(text, vscode.TreeItemCollapsibleState.None);
-        it.iconPath = new vscode.ThemeIcon('info');
-        it.children = [];
-        return it;
-    }
-
-    async function refresh() {
-        await rebuild();
-        tree.message = undefined;
-    }
-
-    // .xpr 变化（含 Vivado GUI 侧改动）→ 防抖刷新
-    let xprWatchDebounce = null;
-    try {
-        const watcher = vscode.workspace.createFileSystemWatcher('**/*.xpr');
-        watcher.onDidChange(() => {
-            clearTimeout(xprWatchDebounce);
-            xprWatchDebounce = setTimeout(refresh, 800);
+            parents.set(item, parent); item.children = items(node.children || [], item); return item;
         });
-        context.subscriptions.push(watcher);
-    } catch (err) { /* watcher 不可用跳过 */ }
+    }
+    const info = message => ({ id: 'state:' + message, label: message, icon: 'info', contextValue: 'info', children: [] });
+    roots = items([info('正在发现 Vivado 工程…')]);
+    const provider = { onDidChangeTreeData: changes.event, getTreeItem: item => item,
+        getChildren: item => item ? item.children || [] : roots, getParent: item => parents.get(item) };
+    const tree = vscode.window.createTreeView('svtools.vivado.projectTree', { treeDataProvider: provider, showCollapseAll: true });
+    context.subscriptions.push(tree, changes);
+
+    /** 每次构建局部快照，提交时核对代次；错误与空工作区也有可见内容。 */
+    async function rebuild() {
+        const xpr = await findProjectXpr();
+        if (!xpr) return { roots: [info('没有 Vivado 工程。点击“选择工程”打开 .xpr，或创建工程。')], issues: [] };
+        const parsed = parseXpr(xpr), folder = vscode.workspace.getWorkspaceFolder(vscode.Uri.file(xpr));
+        let workspaceFiles = [], scanError = null;
+        if (folder) {
+            try {
+                const pattern = new vscode.RelativePattern(folder.uri, '**/*.{sv,v,svh,vh,xdc,sdc,ucf}');
+                workspaceFiles = (await vscode.workspace.findFiles(pattern, '**/{.svtools,node_modules,*.srcs,*.runs,*.cache}/**', 2000)).map(uri => uri.fsPath);
+            } catch (error) { scanError = '扫描未加入文件失败：' + error.message; log('[工程树] ' + scanError); }
+        }
+        const snapshot = await buildProjectTree(parsed, { workspaceFiles });
+        if (scanError) snapshot.issues.push(scanError);
+        return { ...snapshot, count: new Set(parsed.sets.flatMap(set => set.files)).size };
+    }
+    function refresh() {
+        if (disposed) return Promise.resolve();
+        queued = true; revision++; tree.message = '正在刷新工程…';
+        if (!refreshing) refreshing = (async () => {
+            while (queued && !disposed) {
+                queued = false; const version = revision; let snapshot;
+                try { snapshot = await rebuild(); }
+                catch (error) { log('[工程树] 刷新失败：' + error.message); snapshot = { roots: [info('读取工程失败：' + error.message)], issues: [error.message] }; }
+                if (disposed || version !== revision) continue;
+                parents = new WeakMap(); roots = items(snapshot.roots); modelUnits = snapshot.units || new Map();
+                tree.description = snapshot.project ? path.basename(snapshot.project) : undefined;
+                tree.message = operation ? '正在执行：' + operation : externalStage ? 'Vivado 正在运行，可使用标题栏停止任务' : snapshot.issues.length ? '有 ' + snapshot.issues.length + ' 项工程提示，详见树和输出通道' : undefined;
+                tree.badge = snapshot.count ? { value: snapshot.count, tooltip: '当前工程文件数' } : undefined;
+                for (const issue of snapshot.issues) log('[工程树] ' + issue);
+                changes.fire(undefined);
+            }
+        })().finally(() => { refreshing = null; if (queued && !disposed) return refresh(); });
+        return refreshing;
+    }
+    function scheduleRefresh() {
+        if (disposed) return;
+        clearTimeout(watcherTimer); watcherTimer = setTimeout(() => { watcherTimer = null; refresh(); }, 300);
+    }
+    for (const glob of ['**/*.xpr', '**/*.{sv,v,svh,vh,xdc,sdc,ucf}']) {
+        try {
+            const watcher = vscode.workspace.createFileSystemWatcher(glob);
+            context.subscriptions.push(watcher, watcher.onDidChange(scheduleRefresh), watcher.onDidCreate(scheduleRefresh), watcher.onDidDelete(scheduleRefresh));
+        } catch (error) { log('[工程树] 文件监听不可用：' + error.message); }
+    }
+    context.subscriptions.push(vscode.workspace.onDidChangeWorkspaceFolders(scheduleRefresh), vscode.workspace.onDidSaveTextDocument(scheduleRefresh));
+    function dispose() {
+        if (disposed) return;
+        Promise.resolve(stopOperation()).catch(error => console.error('工程树任务取消失败：', error));
+        pickerToken?.dispose(); disposed = true; revision++; clearTimeout(watcherTimer); changes.dispose();
+    }
+    context.subscriptions.push({ dispose });
+
+    /** 写操作入口串行，运行中不会先覆写脚本；刷新仍然可用。 */
+    function guarded(label, action) {
+        return async node => {
+            if (disposed) return;
+            if (operation || deps.isRunning?.()) { vscode.window.showWarningMessage('Vivado 正在处理任务，请等待完成或先停止。'); return; }
+            operation = label; stopRequested = false; stopAction = null;
+            pickerToken = vscode.CancellationTokenSource ? new vscode.CancellationTokenSource() : null; setRunning(externalStage);
+            try { return await action(node); }
+            catch (error) {
+                log('[工程树] ' + label + '：' + error.message);
+                if (error.code !== 'TOOL_CANCELLED') vscode.window.showErrorMessage(label + '失败：' + error.message);
+            }
+            finally { operation = null; stopAction = null; pickerToken?.dispose(); pickerToken = null; setRunning(externalStage); await refresh(); }
+        };
+    }
+    function stopOperation() {
+        if (operation) stopRequested = true;
+        pickerToken?.cancel();
+        if (stopAction) return stopAction();
+        if (deps.isRunning?.()) return deps.stopRun?.();
+        return !!operation;
+    }
 
     // ---------------- 命令实现 ----------------
 
-    async function currentXpr() {
+    async function currentXpr(node) {
         const xpr = await findProjectXpr();
         if (!xpr) vscode.window.showErrorMessage('未找到 Vivado 工程（.xpr）');
+        if (node?.nodeData?.xpr && !samePath(node.nodeData.xpr, xpr)) {
+            vscode.window.showWarningMessage('工程已切换，请在刷新后的树中重新选择操作。'); return null;
+        }
+        if (xpr) parseXpr(xpr);
         return xpr;
     }
 
     /** 写操作通用流程：跑 tcl → 成功后刷新树。 */
-    async function runTcl(name, body) {
-        const ws = vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders[0];
-        if (!ws) { vscode.window.showErrorMessage('请先打开一个工作区'); return null; }
-        const scriptPath = path.join(ws.uri.fsPath, '.svtools', 'vivado', name);
-        fs.mkdirSync(path.dirname(scriptPath), { recursive: true });
-        fs.writeFileSync(scriptPath, body);
-        const r = await runScript(scriptPath, { quiet: true });
-        refresh();
-        return r;
+    async function runTcl(name, body, xpr, validate = () => true) {
+        if (stopRequested) throw cancelledError();
+        async function checkCurrent() {
+            if (stopRequested) throw cancelledError();
+            const current = await findProjectXpr();
+            if (!samePath(current, xpr) || !validate(parseXpr(xpr))) {
+                vscode.window.showWarningMessage('工程或文件集成员已变化，请刷新后重新执行。'); throw cancelledError('工程状态已变化');
+            }
+        }
+        await checkCurrent();
+        const base = vscode.workspace.getWorkspaceFolder(vscode.Uri.file(xpr))?.uri.fsPath || path.dirname(xpr);
+        const parent = path.join(base, '.svtools', 'vivado', 'actions');
+        await fs.promises.mkdir(parent, { recursive: true });
+        const directory = await fs.promises.mkdtemp(path.join(parent, 'action-'));
+        const scriptPath = path.join(directory, name);
+        await fs.promises.writeFile(scriptPath, body);
+        await checkCurrent();
+        return runScript(scriptPath, { quiet: true, panel: true });
     }
 
     /**
@@ -257,11 +191,12 @@ function activateProjectTree(context, deps) {
      * 重解析后的 .xpr 状态。check(parsed) 返回 true=符合预期。
      */
     function xprFact(xprPath, check) {
-        try { return check(parseXpr(xprPath)); } catch (err) { return false; }
+        try { return check(parseXpr(xprPath)); } catch (err) { log('[工程树] 写入后读取工程失败：' + err.message); return false; }
     }
 
     /** 写操作失败统一提示（含 Vivado 侧标记差异，通道里有完整输出）。 */
     function reportWriteFail(what, r) {
+        if (r?.status === 'cancelled') { log('[工程树] ' + what + '已取消'); return; }
         out.show(true);
         let hint = '';
         if (r && r.stdout && /SVTOOLS_TCL_ERROR/.test(r.stdout)) {
@@ -273,63 +208,77 @@ function activateProjectTree(context, deps) {
         vscode.window.showErrorMessage(what + '失败' + hint + '——详见 Vivado 输出通道');
     }
 
+    async function chooseFileset(parsed, type, node) {
+        const sets = parsed.sets.filter(set => !type || set.type === type);
+        if (!sets.length) { vscode.window.showWarningMessage('工程中没有目标文件集。请先在 Vivado 中建立文件集。'); return null; }
+        if (type && sets.length === 1) return sets[0].name;
+        const preferred = node?.nodeData?.fileset;
+        const choices = [...sets].sort((a, b) => Number(b.name === preferred) - Number(a.name === preferred)).map(set => ({ label: set.name, description: set.type, value: set.name }));
+        return (await vscode.window.showQuickPick(choices, { placeHolder: '选择目标文件集' }, pickerToken?.token))?.value || null;
+    }
+    const hasMember = (parsed, set, file) => parsed.sets.find(entry => entry.name === set)?.files.some(member => samePath(member, file));
+    const succeeded = result => result?.code === 0 && (!result.status || result.status === 'success');
+
     async function addFileToProject(nodeArg) {
-        const xpr = await currentXpr(); if (!xpr) return;
+        const xpr = await currentXpr(nodeArg); if (!xpr) return;
         // 目标文件：右键未加入文件时直接用之；工具栏按钮则弹出工作区文件选择
-        let file = nodeArg && nodeArg.file;
+        let file = nodeArg?.nodeData?.file || nodeArg?.file;
         if (!file) {
             let uris = [];
-            try { uris = await vscode.workspace.findFiles('**/*.{sv,v,svh,vh,xdc}', '**/{.svtools,node_modules}/**', 2000); } catch (err) { }
+            uris = await vscode.workspace.findFiles('**/*.{sv,v,svh,vh,xdc,sdc,ucf}', '**/{.svtools,node_modules}/**', 2000);
             if (!uris.length) { vscode.window.showInformationMessage('工作区没有可加入的源文件/约束'); return; }
             const pick = await vscode.window.showQuickPick(
                 uris.map(u => ({ label: path.basename(u.fsPath), description: vscode.workspace.asRelativePath(u.fsPath), fsPath: u.fsPath })),
-                { placeHolder: '选择要加入工程的文件' });
+                { placeHolder: '选择要加入工程的文件' }, pickerToken?.token);
             if (!pick) return;
             file = pick.fsPath;
         }
-        const setPick = await vscode.window.showQuickPick(
-            [
-                { label: 'sources_1（RTL 源文件）', value: 'sources_1' },
-                { label: 'sim_1（仿真/测试台）', value: 'sim_1' },
-                { label: 'constrs_1（约束）', value: 'constrs_1' }
-            ], { placeHolder: path.basename(file) + ' 加入哪个文件集' });
-        if (!setPick) return;
-        const r = await runTcl('add_file.tcl', buildAddFilesScript(xpr, file, setPick.value, /\.sv(h)?$/i.test(file)));
-        if (!r || r.code !== 0 || !xprFact(xpr, p => fileSetOf(p, file) === setPick.value)) {
-            reportWriteFail(path.basename(file) + ' 加入 ' + setPick.value + ' ', r);
+        const parsed = parseXpr(xpr), target = await chooseFileset(parsed, null, nodeArg); if (!target) return;
+        if (hasMember(parsed, target, file)) { vscode.window.showInformationMessage('文件已在 ' + target + ' 中'); return; }
+        const r = await runTcl('add_file.tcl', buildAddFilesScript(xpr, file, target, /\.sv(h)?$/i.test(file)), xpr,
+            latest => latest.sets.some(set => set.name === target));
+        if (!succeeded(r) || !xprFact(xpr, p => hasMember(p, target, file))) {
+            reportWriteFail(path.basename(file) + ' 加入 ' + target + ' ', r);
             return;
         }
-        vscode.window.showInformationMessage(path.basename(file) + ' 已加入 ' + setPick.value);
+        vscode.window.showInformationMessage(path.basename(file) + ' 已加入 ' + target);
     }
 
     async function removeFileFromProject(nodeArg) {
-        const xpr = await currentXpr(); if (!xpr) return;
+        if (nodeArg?.nodeData?.isReference) { vscode.window.showWarningMessage('此节点仅为引用，请在实际文件集中管理。'); return; }
+        const xpr = await currentXpr(nodeArg); if (!xpr) return;
         const node = nodeArg && nodeArg.nodeData;
         if (!node || !node.file) return;
         let parsed;
         try { parsed = parseXpr(xpr); } catch (err) { vscode.window.showErrorMessage('读取 .xpr 失败'); return; }
-        const from = fileSetOf(parsed, node.file);
-        if (!from) {
+        const from = node.fileset || fileSetOf(parsed, node.file);
+        if (!from || !hasMember(parsed, from, node.file)) {
             // 不在工程里还点移出：多数是树没刷新或模块节点路径与 .xpr 不一致
             vscode.window.showWarningMessage(path.basename(node.file) + ' 不在当前 .xpr 中，已刷新工程树');
             refresh();
             return;
         }
-        const r = await runTcl('remove_file.tcl', buildRemoveFilesScript(xpr, node.file, from));
-        if (!r || r.code !== 0 || !xprFact(xpr, p => fileSetOf(p, node.file) === null)) {
+        const r = await runTcl('remove_file.tcl', buildRemoveFilesScript(xpr, node.file, from), xpr, latest => hasMember(latest, from, node.file));
+        if (!succeeded(r) || !xprFact(xpr, p => !hasMember(p, from, node.file))) {
             reportWriteFail(path.basename(node.file) + ' 从 ' + from + ' 移出 ', r);
             return;
         }
         vscode.window.showInformationMessage(path.basename(node.file) + ' 已从 ' + from + ' 移出工程');
     }
 
-    async function setTop(nodeArg, fileset) {
-        const xpr = await currentXpr(); if (!xpr) return;
+    async function setTop(nodeArg, type) {
+        if (nodeArg?.nodeData?.isReference) { vscode.window.showWarningMessage('请在实际文件集的模块节点设置顶层。'); return; }
+        const xpr = await currentXpr(nodeArg); if (!xpr) return;
         const node = nodeArg && nodeArg.nodeData;
         const mod = node && node.module;
         if (!mod) { vscode.window.showErrorMessage('请右键模块节点设置 top'); return; }
-        const r = await runTcl('set_top.tcl', buildSetTopScript({ xprPath: xpr, fileset, top: mod }));
-        const ok = r && r.code === 0 && xprFact(xpr, p => {
+        const parsed = parseXpr(xpr), fileset = await chooseFileset(parsed, type, nodeArg); if (!fileset) return;
+        const allowed = parsed.sets.filter(set => set.name === fileset || type === 'SimulationSrcs' && set.type === 'DesignSrcs').flatMap(set => set.files);
+        if (!allowed.some(file => samePath(file, node.file))) { vscode.window.showWarningMessage('请先将该文件加入目标文件集。'); return; }
+        const r = await runTcl('set_top.tcl', buildSetTopScript({ xprPath: xpr, fileset, top: mod }), xpr,
+            latest => latest.sets.some(set => set.name === fileset && set.type === type)
+                && latest.sets.some(set => (set.name === fileset || type === 'SimulationSrcs' && set.type === 'DesignSrcs') && set.files.some(file => samePath(file, node.file))));
+        const ok = succeeded(r) && xprFact(xpr, p => {
             const s = p.sets.find(x => x.name === fileset);
             return !!s && s.top === mod;
         });
@@ -337,23 +286,25 @@ function activateProjectTree(context, deps) {
         vscode.window.showInformationMessage(mod + ' 已设为 ' + fileset + ' 顶层');
     }
 
-    async function moveFile(nodeArg, to) {
-        const xpr = await currentXpr(); if (!xpr) return;
+    async function moveFile(nodeArg, type) {
+        if (nodeArg?.nodeData?.isReference) { vscode.window.showWarningMessage('此节点仅为引用，请在实际文件集中管理。'); return; }
+        const xpr = await currentXpr(nodeArg); if (!xpr) return;
         const node = nodeArg && nodeArg.nodeData;
         if (!node || !node.file) return;
         let parsed;
         try { parsed = parseXpr(xpr); } catch (err) { vscode.window.showErrorMessage('读取 .xpr 失败'); return; }
-        const from = fileSetOf(parsed, node.file);
-        if (!from) {
+        const from = node.fileset || fileSetOf(parsed, node.file);
+        if (!from || !hasMember(parsed, from, node.file)) {
             vscode.window.showWarningMessage(path.basename(node.file) + ' 不在当前 .xpr 中，已刷新工程树');
             refresh();
             return;
         }
+        const to = await chooseFileset(parsed, type, nodeArg); if (!to) return;
         if (from === to) { vscode.window.showInformationMessage('已在 ' + to + ' 中'); return; }
         const r = await runTcl('move_file.tcl', buildMoveFileScript({
             xprPath: xpr, file: node.file, from, to, isSv: /\.sv(h)?$/i.test(node.file)
-        }));
-        if (!r || r.code !== 0 || !xprFact(xpr, p => fileSetOf(p, node.file) === to)) {
+        }), xpr, latest => hasMember(latest, from, node.file) && latest.sets.some(set => set.name === to && set.type === type));
+        if (!succeeded(r) || !xprFact(xpr, p => hasMember(p, to, node.file) && !hasMember(p, from, node.file))) {
             reportWriteFail(path.basename(node.file) + '：' + from + ' → ' + to + ' ', r);
             return;
         }
@@ -362,44 +313,56 @@ function activateProjectTree(context, deps) {
 
     /** top 级 xelab 详细化：打开文件后复用现有 lint 详细化命令。 */
     async function elaborateTop(nodeArg) {
+        const xpr = await currentXpr(nodeArg); if (!xpr) return;
         const node = nodeArg && nodeArg.nodeData;
         if (!node || !node.file) return;
+        await refresh();
+        const parsed = parseXpr(xpr), targetSet = parsed.sets.find(set => set.name === node.fileset);
+        const sets = targetSet?.type === 'DesignSrcs' ? [targetSet]
+            : parsed.sets.filter(set => set.type === 'DesignSrcs' || set.type === 'SimulationSrcs' && set.name === node.fileset);
+        const files = [...new Set(sets.flatMap(set => set.files).filter(file => /\.(sv|v)$/i.test(file)))];
+        const members = new Set(sets.flatMap(set => set.files));
+        const modules = new Map([...modelUnits].filter(([, file]) => [...members].some(member => samePath(member, file))));
+        const projectScope = { files, modules, includePaths: [...new Set([...members].map(file => path.dirname(file)))] };
         const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(node.file));
         await vscode.window.showTextDocument(doc);
-        vscode.commands.executeCommand('svtools.xvlog.elaborate');
+        if (stopRequested) throw cancelledError();
+        stopAction = () => vscode.commands.executeCommand('svtools.lint.stop', doc);
+        await vscode.commands.executeCommand('svtools.xvlog.elaborate', doc, { top: node.module, projectScope });
     }
 
     /** 快捷区 xelab：从 .xpr 取 sim_1 top（无则综合 top）的源文件打开后详细化。 */
-    async function quickElaborate() {
-        const xpr = await currentXpr(); if (!xpr) return;
+    async function quickElaborate(nodeArg) {
+        const xpr = await currentXpr(nodeArg); if (!xpr) return;
         let parsed;
         try { parsed = parseXpr(xpr); } catch (err) { vscode.window.showErrorMessage('读取 .xpr 失败'); return; }
-        const simSet = parsed.sets.find(s => s.type === 'SimulationSrcs') || {};
-        const srcSet = parsed.sets.find(s => s.type === 'DesignSrcs') || {};
-        const top = simSet.top || srcSet.top;
-        if (!top) { vscode.window.showErrorMessage('工程未设置 top 模块（在文件树右键模块设置）'); return; }
-        let unitIndex = new Map();
-        try { unitIndex = (await scanWorkspaceSources()).modules; } catch (err) { /* */ }
-        const file = unitIndex.get(top);
+        let candidates = parsed.sets.filter(set => set.type === 'SimulationSrcs' && set.top);
+        if (!candidates.length) candidates = parsed.sets.filter(set => set.type === 'DesignSrcs' && set.top);
+        if (!candidates.length) { vscode.window.showErrorMessage('工程未设置 top 模块（在文件树右键模块设置）'); return; }
+        const chosen = candidates.length === 1 ? candidates[0] : (await vscode.window.showQuickPick(
+            candidates.map(set => ({ label: set.name, description: 'top: ' + set.top, set })), { placeHolder: '选择要详细化的工程文件集' }, pickerToken?.token))?.set;
+        if (!chosen) return;
+        const top = chosen.top, allowed = [...chosen.files, ...parsed.sets.filter(set => set.type === 'DesignSrcs').flatMap(set => set.files)];
+        await refresh();
+        const stack = [...roots], matches = [];
+        while (stack.length) { const item = stack.pop(); if (item.nodeData?.module === top && allowed.some(member => samePath(member, item.nodeData.file))) matches.push(item.nodeData.file); stack.push(...item.children); }
+        const file = matches.find(candidate => chosen.files.some(member => samePath(member, candidate))) || matches[0];
         if (!file) {
             // 索引找不到时兜底：top 名 + 常见扩展名在工程文件集里找
-            const cand = [...simSet.files, ...srcSet.files].find(f => samePath(path.basename(f), top + '.sv') || samePath(path.basename(f), top + '.v'));
+            const cand = allowed.find(f => samePath(path.basename(f), top + '.sv') || samePath(path.basename(f), top + '.v'));
             if (!cand) { vscode.window.showErrorMessage('找不到 top 模块 ' + top + ' 的源文件'); return; }
-            return elaborateTop({ nodeData: { file: cand } });
+            return elaborateTop({ nodeData: { file: cand, module: top, fileset: chosen.name, xpr } });
         }
-        return elaborateTop({ nodeData: { file } });
+        return elaborateTop({ nodeData: { file, module: top, fileset: chosen.name, xpr } });
     }
 
     /** 综合 / 布局布线 / Bitstream（impl 自动级联 synth）。 */
-    async function launchRun(run, toStep, label) {
-        const xpr = await currentXpr(); if (!xpr) return;
+    async function launchRun(run, toStep, label, nodeArg) {
+        const xpr = await currentXpr(nodeArg); if (!xpr) return;
         vscode.window.showInformationMessage(label + '启动（状态栏可查看进度/停止）…');
-        const ws = vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders[0];
-        const scriptPath = path.join(ws ? ws.uri.fsPath : path.dirname(xpr), '.svtools', 'vivado', 'launch_run.tcl');
-        fs.mkdirSync(path.dirname(scriptPath), { recursive: true });
-        fs.writeFileSync(scriptPath, buildLaunchRunScript({ xprPath: xpr, run, toStep }));
-        const r = await runScript(scriptPath, { quiet: true });
-        if (!r || r.code !== 0) {
+        const r = await runTcl('launch_run.tcl', buildLaunchRunScript({ xprPath: xpr, run, toStep }), xpr);
+        if (r?.status === 'cancelled') { log('[工程树] ' + label + '已取消'); return; }
+        if (!succeeded(r)) {
             out.show(true);
             vscode.window.showErrorMessage(label + '失败（详见 Vivado 输出通道）');
             return;
@@ -413,16 +376,15 @@ function activateProjectTree(context, deps) {
      * @param {'synth_1'|'impl_1'} run
      * @param {Array<'utilization'|'logic_levels'|'timing_summary'>} [kinds] 缺省 = 该 run 全套
      */
-    async function openRunReports(run, kinds) {
-        const xpr = await currentXpr(); if (!xpr) return;
-        const ws = vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders[0];
-        const base = ws ? ws.uri.fsPath : path.dirname(xpr);
-        const outDir = path.join(base, '.svtools', 'vivado', 'reports', run);
-        const scriptPath = path.join(base, '.svtools', 'vivado', 'reports_' + run + '.tcl');
-        fs.mkdirSync(outDir, { recursive: true });
-        fs.writeFileSync(scriptPath, buildRunReportsScript({ xprPath: xpr, run, outDir, reports: kinds }));
-        const r = await runScript(scriptPath, { quiet: true });
-        if (!r || r.code !== 0) {
+    async function openRunReports(run, kinds, nodeArg) {
+        const xpr = await currentXpr(nodeArg); if (!xpr) return;
+        const base = vscode.workspace.getWorkspaceFolder(vscode.Uri.file(xpr))?.uri.fsPath || path.dirname(xpr);
+        const parent = path.join(base, '.svtools', 'vivado', 'reports', run);
+        await fs.promises.mkdir(parent, { recursive: true });
+        const outDir = await fs.promises.mkdtemp(path.join(parent, 'report-'));
+        const r = await runTcl('reports_' + run + '.tcl', buildRunReportsScript({ xprPath: xpr, run, outDir, reports: kinds }), xpr);
+        if (r?.status === 'cancelled') { log('[工程树] 报告任务已取消'); return; }
+        if (!succeeded(r)) {
             out.show(true);
             vscode.window.showErrorMessage(run + ' 报告生成失败——若 run 未完成请先运行综合/布局布线（详见输出通道）');
             return;
@@ -439,7 +401,7 @@ function activateProjectTree(context, deps) {
             if (!entry) continue;
             const p = path.join(outDir, entry[0]);
             if (fs.existsSync(p)) showReport(vscode, vscode.Uri.file(p), entry[1]);
-            if (entry[2]) { try { entry[2](fs.readFileSync(p, 'utf8')); } catch (err) { /* 摘要失败不影响打开报告 */ } }
+            if (entry[2]) { try { entry[2](fs.readFileSync(p, 'utf8')); } catch (err) { log('[工程树] 读取报告摘要失败：' + err.message); } }
         }
     }
 
@@ -455,12 +417,14 @@ function activateProjectTree(context, deps) {
 
     /** 全部展开（视图标题栏按钮；收起用 VS Code 内置 collapse-all）。 */
     async function expandAll() {
-        const stack = [...roots];
+        await refresh(); const stack = [...roots]; let expanded = 0;
         while (stack.length) {
             const n = stack.pop();
             if (n.children && n.children.length) {
                 stack.push(...n.children);
-                try { await tree.reveal(n, { select: false, focus: false, expand: true }); } catch (err) { /* 节点不可 reveal 跳过 */ }
+                if (++expanded > 500) { vscode.window.showInformationMessage('已展开前 500 个分组，其余可手动展开。'); break; }
+                try { await tree.reveal(n, { select: false, focus: false, expand: true }); }
+                catch (err) { log('[工程树] 展开节点失败：' + err.message); break; }
             }
         }
     }
@@ -469,25 +433,29 @@ function activateProjectTree(context, deps) {
 
     context.subscriptions.push(
         vscode.commands.registerCommand('svtools.vivado.tree.refresh', refresh),
-        vscode.commands.registerCommand('svtools.vivado.tree.addFile', addFileToProject),
-        vscode.commands.registerCommand('svtools.vivado.tree.removeFile', removeFileFromProject),
-        vscode.commands.registerCommand('svtools.vivado.tree.setTopSynth', (n) => setTop(n, 'sources_1')),
-        vscode.commands.registerCommand('svtools.vivado.tree.setTopSim', (n) => setTop(n, 'sim_1')),
-        vscode.commands.registerCommand('svtools.vivado.tree.moveToSim', (n) => moveFile(n, 'sim_1')),
-        vscode.commands.registerCommand('svtools.vivado.tree.moveToSources', (n) => moveFile(n, 'sources_1')),
-        vscode.commands.registerCommand('svtools.vivado.tree.elaborate', elaborateTop),
-        vscode.commands.registerCommand('svtools.vivado.tree.quickElaborate', quickElaborate),
-        vscode.commands.registerCommand('svtools.vivado.tree.synthesize', () => launchRun('synth_1', null, '综合')),
-        vscode.commands.registerCommand('svtools.vivado.tree.implement', () => launchRun('impl_1', 'route_design', '布局布线')),
-        vscode.commands.registerCommand('svtools.vivado.tree.bitstream', () => launchRun('impl_1', 'write_bitstream', 'Bitstream 生成')),
-        vscode.commands.registerCommand('svtools.vivado.tree.reportSynth', () => openRunReports('synth_1')),
-        vscode.commands.registerCommand('svtools.vivado.tree.reportImpl', () => openRunReports('impl_1')),
-        vscode.commands.registerCommand('svtools.vivado.tree.reportImplUtil', () => openRunReports('impl_1', ['utilization'])),
-        vscode.commands.registerCommand('svtools.vivado.tree.reportTiming', () => openRunReports('impl_1', ['timing_summary'])),
+        vscode.commands.registerCommand('svtools.vivado.tree.stop', stopOperation),
+        vscode.commands.registerCommand('svtools.vivado.tree.selectProject', guarded('选择工程', () => deps.selectProject(pickerToken?.token))),
+        vscode.commands.registerCommand('svtools.vivado.tree.addFile', guarded('加入文件', addFileToProject)),
+        vscode.commands.registerCommand('svtools.vivado.tree.removeFile', guarded('移出文件', removeFileFromProject)),
+        vscode.commands.registerCommand('svtools.vivado.tree.setTopSynth', guarded('设置综合顶层', n => setTop(n, 'DesignSrcs'))),
+        vscode.commands.registerCommand('svtools.vivado.tree.setTopSim', guarded('设置仿真顶层', n => setTop(n, 'SimulationSrcs'))),
+        vscode.commands.registerCommand('svtools.vivado.tree.moveToSim', guarded('移入仿真集', n => moveFile(n, 'SimulationSrcs'))),
+        vscode.commands.registerCommand('svtools.vivado.tree.moveToSources', guarded('移入设计集', n => moveFile(n, 'DesignSrcs'))),
+        vscode.commands.registerCommand('svtools.vivado.tree.elaborate', guarded('详细化', elaborateTop)),
+        vscode.commands.registerCommand('svtools.vivado.tree.quickElaborate', guarded('顶层详细化', quickElaborate)),
+        vscode.commands.registerCommand('svtools.vivado.tree.synthesize', guarded('综合', n => launchRun('synth_1', null, '综合', n))),
+        vscode.commands.registerCommand('svtools.vivado.tree.implement', guarded('布局布线', n => launchRun('impl_1', 'route_design', '布局布线', n))),
+        vscode.commands.registerCommand('svtools.vivado.tree.bitstream', guarded('生成 Bitstream', n => launchRun('impl_1', 'write_bitstream', 'Bitstream 生成', n))),
+        vscode.commands.registerCommand('svtools.vivado.tree.reportSynth', guarded('综合报告', n => openRunReports('synth_1', undefined, n))),
+        vscode.commands.registerCommand('svtools.vivado.tree.reportImpl', guarded('实现报告', n => openRunReports('impl_1', undefined, n))),
+        vscode.commands.registerCommand('svtools.vivado.tree.reportImplUtil', guarded('资源报告', n => openRunReports('impl_1', ['utilization'], n))),
+        vscode.commands.registerCommand('svtools.vivado.tree.reportTiming', guarded('时序报告', n => openRunReports('impl_1', ['timing_summary'], n))),
         vscode.commands.registerCommand('svtools.vivado.tree.expandAll', expandAll)
     );
 
-    refresh();
+    const ready = refresh();
+    setRunning(null);
+    return { refresh, ready, dispose, setRunning, isBusy: () => !!operation, getChildren: provider.getChildren, onDidChangeTreeData: changes.event };
 }
 
 module.exports = { activateProjectTree };

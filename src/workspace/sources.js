@@ -9,12 +9,21 @@ const WORKSPACE_SCAN_TTL_MS = 10000;
 const WORKSPACE_SCAN_MAX_DIRS = 200;
 const WORKSPACE_SCAN_MAX_FILES = 3000;
 
-/** @param {string} text @returns {string[]} 按源码顺序提取设计单元名，忽略注释和字符串。 */
-function extractDesignUnitNames(text) {
-    const code = String(text).replace(/\/\*[\s\S]*?(?:\*\/|$)|\/\/[^\r\n]*|"(?:\\[\s\S]|[^"\\])*(?:"|$)/g,
+/** @param {string} text @returns {string} 屏蔽注释和字符串，保留原文位置与换行。 */
+function maskSourceText(text) {
+    return String(text).replace(/\/\*[\s\S]*?(?:\*\/|$)|\/\/[^\r\n]*|"(?:\\[\s\S]|[^"\\])*(?:"|$)/g,
         protectedText => protectedText.replace(/[^\r\n]/g, ' '));
-    return Array.from(code.matchAll(MODULE_DECL_RE), match => match[1]);
 }
+
+/** @param {string} text @returns {{name:string,start:number,end:number}[]} 按原文区间识别设计单元声明。 */
+function extractDesignUnits(text) {
+    const code = maskSourceText(text);
+    const matches = [...code.matchAll(MODULE_DECL_RE)];
+    return matches.map((match, index) => ({ name: match[1], start: match.index, end: matches[index + 1]?.index ?? code.length }));
+}
+
+/** @param {string} text @returns {string[]} 按源码顺序提取设计单元名，忽略注释和字符串。 */
+function extractDesignUnitNames(text) { return extractDesignUnits(text).map(unit => unit.name); }
 
 /**
  * 工作区设计单元索引，不依赖 lint 引擎或 Vivado。
@@ -94,4 +103,4 @@ function invalidateWorkspaceSources() {
     if (defaultIndex) defaultIndex.invalidate();
 }
 
-module.exports = { extractDesignUnitNames, createWorkspaceSourceIndex, scanWorkspaceSources, invalidateWorkspaceSources };
+module.exports = { maskSourceText, extractDesignUnits, extractDesignUnitNames, createWorkspaceSourceIndex, scanWorkspaceSources, invalidateWorkspaceSources };

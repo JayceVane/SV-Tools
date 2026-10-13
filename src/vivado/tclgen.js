@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 // TCL 语法转义与各类 Vivado 脚本生成（纯函数，不依赖 vscode）。
+const { maskSourceText } = require('../workspace/sources');
 
 /** TCL 列表元素转义：路径统一转 / 后按需加花括号（braced word 内 \ 为字面量，不安全故先消除）。 */
 function tclQuote(value) {
@@ -77,7 +78,7 @@ function extractVivadoIssues(lines) {
 
 /** 取文件中第一个 module 声明的模块名（无则空串）。 */
 function firstModuleName(text) {
-    const m = String(text || '').match(/\bmodule\s+([A-Za-z_][A-Za-z0-9_]*)/);
+    const m = maskSourceText(text || '').match(/\bmodule\s+(?:(?:automatic|static)\s+)?([A-Za-z_][A-Za-z0-9_$]*)/);
     return m ? m[1] : '';
 }
 
@@ -218,12 +219,12 @@ function buildRunReportsScript(o) {
 
 /**
  * 生成 xsim 行为仿真 TCL：打开工程（缺文件先补入）→ 当前文件模块置为 sim_1 顶层 → launch_simulation。
- * @param {{xprPath:string, top:string, file:string, isSv:boolean, runtime:string}} o
+ * @param {{xprPath:string, top:string, file:string, isSv:boolean, runtime:string,fileset?:string}} o
  */
 function buildSimulateScript(o) {
     const L = [
         'open_project ' + tclQuote(o.xprPath),
-        'set fs [get_filesets sim_1]',
+        'set fs [get_filesets ' + tclQuote(o.fileset || 'sim_1') + ']',
         'set f ' + tclQuote(o.file)
     ];
     if (o.file) {
@@ -233,8 +234,8 @@ function buildSimulateScript(o) {
         L.push('}');
     }
     if (o.top) {
-        L.push('set_property top ' + tclQuote(o.top) + ' [get_filesets sim_1]');
-        L.push('update_compile_order -fileset sim_1');
+        L.push('set_property top ' + tclQuote(o.top) + ' $fs');
+        L.push('update_compile_order -fileset $fs');
     }
     // runtime 空串 → 'all'（run all 跑到 $finish）；未传时保持 1000ns 兼容
     const rt = (o.runtime === undefined || o.runtime === null) ? '1000ns'
@@ -248,9 +249,9 @@ function buildSimulateScript(o) {
     L.push('puts $fh "run ' + tclQuote(rt) + '"');
     L.push('puts $fh "quit"');
     L.push('close $fh');
-    L.push('set_property -name {xsim.simulate.custom_tcl} -value $xsimTcl -objects [get_filesets sim_1]');
-    L.push('launch_simulation');
-    L.push('catch { reset_property xsim.simulate.custom_tcl [get_filesets sim_1] }');
+    L.push('set_property -name {xsim.simulate.custom_tcl} -value $xsimTcl -objects $fs');
+    L.push('launch_simulation -simset $fs');
+    L.push('catch { reset_property xsim.simulate.custom_tcl $fs }');
     L.push('puts "SVTOOLS_SIM_DONE"');
     return L.filter(Boolean).join('\n') + '\n';
 }
