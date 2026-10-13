@@ -1,216 +1,270 @@
-/**
- * Copyright (c) 2025 JayceVane (JayceVane@163.com)
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- *
- * 内置 VCD 波形查看器：解析 + webview 渲染。
- *
- * 模块分层：
- *  - parseVcd / buildSignalTree / parseTimescaleSeconds 为纯函数，不依赖 vscode，可独立单元测试；
- *  - activateWaveViewer() 负责 VSCode 集成（webview 面板、命令、与仿真联动）。
- *
- * 渲染采用视口窗口模型：canvas 固定为可视区大小，只绘制 [viewStart, viewStart+viewSpan]
- * 时间窗口内的变更（二分查找定位），任意时间跨度（如 1ns 下 245e9 ticks）均可缩放浏览。
- */
+'use strict';
 
-/**
- * 解析 VCD 文本。
- * @param {string} text VCD 文件全文
- * @returns {{
- *   headers: {key: string, value: string}[],
- *   scopes: {name: string, type: string, path: string}[],
- *   vars: {id: string, name: string, width: number, type: string, scopePath: string, path: string}[],
- *   changes: Map<string, {t: number, value: string}[]>,
- *   endTime: number,
- *   timescale: string
- * }}
- *  - changes 以信号 id 为键，时间升序；value 为字符串形式（标量 '0'/'1'/'x'/'z'，
- *    向量为去掉前缀的二进制串如 'x0x00xxx'，实数为十进制文本）
- */
-function parseVcd(text) {
-    const headers = [];
-    const scopes = [];
-    const vars = [];
-    const changes = new Map();
-    let timescale = '';
-    let endTime = 0;
+const DEFAULT_LIMITS = Object.freeze({ maxTokenLength: 16 * 1024 * 1024, maxHeaderLength: 1024 * 1024,
+    maxVariables: 1000000, maxSignalWidth: 16 * 1024 * 1024 - 1, maxReferenceLength: 65536, maxScopeDepth: 256 });
+const HEADER_COMMANDS = new Set(['$date', '$version', '$timescale', '$comment']);
+const DUMP_COMMANDS = new Set(['$dumpvars', '$dumpall', '$dumpon', '$dumpoff']);
 
-    const scopeStack = [];
-    let currentHeader = null;
-    /** 最近一次 # 时间戳 */
-    let lastTime = 0;
-
-    const lines = String(text).split(/\r?\n/);
-    for (let raw of lines) {
-        const line = raw.trim();
-        if (!line) continue;
-
-        // 头字段既允许单行 $timescale 1ns $end，也允许跨行内容。
-        if (currentHeader) {
-            const endIndex = line.indexOf('$end');
-            currentHeader.parts.push(endIndex >= 0 ? line.slice(0, endIndex).trim() : line);
-            if (endIndex >= 0) {
-                const value = currentHeader.parts.filter(Boolean).join(' ');
-                headers.push({ key: currentHeader.key, value });
-                if (currentHeader.key === '$timescale') timescale = value;
-                currentHeader = null;
-            }
-            continue;
-        }
-        const headerStart = line.match(/^\$(date|version|timescale|comment)\b(.*)$/i);
-        if (headerStart) {
-            const key = '$' + headerStart[1].toLowerCase();
-            const body = headerStart[2].trim();
-            const endIndex = body.indexOf('$end');
-            if (endIndex >= 0) {
-                const value = body.slice(0, endIndex).trim();
-                headers.push({ key, value });
-                if (key === '$timescale') timescale = value;
-            } else {
-                currentHeader = { key, parts: [body] };
-            }
-            continue;
-        }
-
-        // --- scope 层级 ---
-        const scopeStart = line.match(/^\$scope\s+(\w+)\s+(\S+)\s*\$end$/i);
-        if (scopeStart) {
-            scopeStack.push({ type: scopeStart[1], name: scopeStart[2] });
-            scopes.push({
-                name: scopeStart[2],
-                type: scopeStart[1],
-                path: scopeStack.map(s => s.name).join('.')
-            });
-            continue;
-        }
-        if (/^\$upscope/i.test(line)) {
-            scopeStack.pop();
-            continue;
-        }
-
-        const varStart = line.match(/^\$var\s+(\w+)\s+(\d+)\s+(\S+)\s+(\S+)(?:\s+(\[[^\]]+\]))?\s*\$end$/i);
-        if (varStart) {
-            const scopePath = scopeStack.map(s => s.name).join('.');
-            const variable = {
-                id: varStart[3],
-                name: varStart[4],
-                width: parseInt(varStart[2], 10),
-                type: varStart[1],
-                scopePath,
-                path: scopePath ? `${scopePath}.${varStart[4]}` : varStart[4]
-            };
-            vars.push(variable);
-            continue;
-        }
-        if (/^\$enddefinitions/i.test(line)) {
-            continue;
-        }
-
-        // --- 值变更区 ---
-        const timeMatch = line.match(/^#(\S+)$/);
-        if (timeMatch) {
-            const t = parseNumber(timeMatch[1]);
-            if (t !== null) {
-                if (t > endTime) endTime = t;
-                lastTime = t;
-            }
-            continue;
-        }
-        // $dumpall 使用当前时间；初始 $dumpvars 位于首个时间戳之前时自然使用 0。
-        if (/^\$(dumpvars|dumpall)\b/i.test(line)) continue;
-        if (/^\$dumpoff\b/i.test(line) || /^\$dumpon\b/i.test(line)) continue;
-        if (/^\$end\b/i.test(line)) continue;
-        if (/^\$comment\b/i.test(line)) continue;
-
-        const change = parseValueChange(line);
-        if (!change) continue;
-        pushChange(changes, change.id, { t: lastTime, value: change.value });
+/** 带源码位置的解析错误，避免静默丢弃损坏或截断的数据。 */
+class VcdParseError extends Error {
+    constructor(message, line, column) {
+        super(`VCD 第 ${line} 行、第 ${column} 列：${message}`);
+        this.name = 'VcdParseError';
+        this.code = 'VCD_PARSE';
+        this.line = line;
+        this.column = column;
     }
-    return { headers, scopes, vars, changes, endTime, timescale };
-}
-
-function pushChange(map, id, entry) {
-    if (!map.has(id)) map.set(id, []);
-    map.get(id).push(entry);
 }
 
 /**
- * 解析单行值变更。
- * 标量：`0!` `1"` `x$` `z%`；向量：`b1010 #` 或 `B1010 #`；实数：`r25.5 %`。
- * @returns {{id: string, value: string}|null}
+ * 增量 VCD token 解析器；字节流先由调用者解码为文本。所有入口共享这一语法实现。
+ * @param {{onChange?: (id: string, time: number, value: string) => void, onVariable?: (variable: object) => void, limits?: object}} [options]
+ * @returns {{write: (chunk: string) => void, finish: () => object}}
  */
-function parseValueChange(line) {
-    let m = line.match(/^([01xzXZ])(\S+)$/);
-    if (m) return { id: m[2], value: m[1].toLowerCase() };
-    m = line.match(/^([brBR])\s*(\S+)\s+(\S+)$/);
-    if (m) return { id: m[3], value: m[2].toLowerCase() };
-    return null;
+function createVcdParser({ onChange = () => {}, onVariable = () => {}, limits = {} } = {}) {
+    const cap = { ...DEFAULT_LIMITS, ...limits };
+    for (const [name, maximum] of Object.entries(DEFAULT_LIMITS)) {
+        if (!Number.isSafeInteger(cap[name]) || cap[name] < 1 || cap[name] > maximum) {
+            throw Object.assign(new Error('VCD 解析限制 ' + name + ' 必须为 1–' + maximum + ' 的整数'), { code: 'VCD_RESOURCE_LIMIT' });
+        }
+    }
+    const metadata = { headers: [], scopes: [], vars: [], endTime: 0, timescale: '' };
+    const scopes = [];
+    const ids = new Set();
+    let command = null;
+    let commandParts = [];
+    let commandLength = 0;
+    let pendingValue = null;
+    let dumpOpen = false;
+    let definitionsEnded = false;
+    let time = 0;
+    let carry = '';
+    let line = 1;
+    let column = 1;
+    let tokenLine = 1;
+    let tokenColumn = 1;
+    let finished = false;
+    const fail = message => { throw new VcdParseError(message, tokenLine, tokenColumn); };
+    const failResource = message => {
+        const error = new VcdParseError(message, tokenLine, tokenColumn);
+        error.code = 'VCD_RESOURCE_LIMIT';
+        throw error;
+    };
+
+    function deliver(callback, ...args) {
+        try { callback(...args); }
+        catch (error) {
+            if (['VCD_PARSE', 'VCD_RESOURCE_LIMIT'].includes(error.code) && error.line === undefined) {
+                const contextual = new VcdParseError(error.message, tokenLine, tokenColumn);
+                contextual.code = error.code;
+                contextual.cause = error;
+                throw contextual;
+            }
+            throw error;
+        }
+    }
+
+    function reference(parts, width) {
+        let name = parts[3];
+        if (name.length > cap.maxReferenceLength || parts[2].length > cap.maxReferenceLength) failResource('VCD 信号引用或 id 超过安全长度');
+        const suffix = parts.slice(4).join('');
+        const selections = suffix.match(/\[[+-]?\d+(?::[+-]?\d+)?\]/g) || [];
+        if (selections.join('') !== suffix) fail('$var 索引或范围无效：' + suffix.slice(0, 80));
+        let range;
+        for (const selection of selections) {
+            const bounds = selection.slice(1, -1).split(':').map(Number);
+            if (bounds.some(bound => !Number.isSafeInteger(bound))) fail('$var 索引超出安全整数范围');
+            if (bounds.length === 1) {
+                if (range) fail('$var 的数组索引必须位于向量范围之前');
+                name += '[' + bounds[0] + ']';
+            } else {
+                if (range) fail('$var 只能包含一个向量范围');
+                const size = Math.abs(bounds[0] - bounds[1]) + 1;
+                if (!Number.isSafeInteger(size) || size !== width) fail('$var 范围与声明位宽不一致');
+                if (width === 1) name += '[' + bounds[0] + ']';
+                else range = '[' + bounds.join(':') + ']';
+            }
+        }
+        if (name.length > cap.maxReferenceLength) failResource('VCD 信号引用超过安全长度');
+        return { name, ...(range ? { range } : {}) };
+    }
+
+    function endCommand() {
+        const parts = commandParts;
+        if (HEADER_COMMANDS.has(command)) {
+            const value = parts.join(' ');
+            if (!definitionsEnded) metadata.headers.push({ key: command, value });
+            if (command === '$timescale') {
+                if (parseTimescaleSeconds(value) === null) fail('非法的 $timescale：' + value);
+                metadata.timescale = value;
+            }
+        } else if (command === '$scope') {
+            if (definitionsEnded || parts.length !== 2) fail('$scope 声明不完整');
+            if (scopes.length >= cap.maxScopeDepth || scopes.join('.').length + parts[1].length + 1 > cap.maxReferenceLength) failResource('VCD 作用域超过安全深度或长度');
+            scopes.push(parts[1]);
+            metadata.scopes.push({ type: parts[0], name: parts[1], path: scopes.join('.') });
+        } else if (command === '$upscope') {
+            if (parts.length || !scopes.length) fail('$upscope 没有对应作用域');
+            scopes.pop();
+        } else if (command === '$var') {
+            if (definitionsEnded || parts.length < 4) fail('$var 声明不完整');
+            const width = Number(parts[1]);
+            if (!/^\d+$/.test(parts[1]) || !Number.isSafeInteger(width) || width < 1) fail('非法信号位宽：' + parts[1]);
+            if (width > cap.maxSignalWidth) failResource('VCD 声明位宽超过 ' + cap.maxSignalWidth + ' 位安全上限');
+            if (metadata.vars.length >= cap.maxVariables) failResource('信号声明超过资源上限');
+            const scopePath = scopes.join('.');
+            const selected = reference(parts, width);
+            const path = scopePath ? scopePath + '.' + selected.name : selected.name;
+            if (path.length > cap.maxReferenceLength) failResource('VCD 信号路径超过安全长度');
+            const variable = { type: parts[0], width, id: parts[2], ...selected, scopePath, path };
+            metadata.vars.push(variable);
+            ids.add(variable.id);
+            deliver(onVariable, variable);
+        } else if (command === '$enddefinitions') {
+            if (parts.length || definitionsEnded || scopes.length) fail('$enddefinitions 前的作用域未关闭或声明无效');
+            definitionsEnded = true;
+        }
+        command = null;
+        commandParts = [];
+        commandLength = 0;
+    }
+
+    function emitValue(id, value) {
+        if (!definitionsEnded) fail('值变更出现在 $enddefinitions 之前');
+        if (!ids.has(id)) fail('值变更引用未声明的信号：' + id);
+        deliver(onChange, id, time, value);
+    }
+
+    function accept(token) {
+        if (token.length > cap.maxTokenLength) failResource('单个 token 超过资源上限');
+        if (command) {
+            if (token.toLowerCase() === '$end') endCommand();
+            else {
+                commandLength += token.length + (commandParts.length ? 1 : 0);
+                if (commandLength > cap.maxHeaderLength) failResource('VCD 头字段超过资源上限');
+                commandParts.push(token);
+            }
+            return;
+        }
+        if (pendingValue !== null) {
+            emitValue(token, pendingValue);
+            pendingValue = null;
+            return;
+        }
+        if (token[0] === '$') {
+            const key = token.toLowerCase();
+            if (key === '$end') {
+                if (!dumpOpen) fail('无对应命令的 $end');
+                dumpOpen = false;
+            } else if (DUMP_COMMANDS.has(key)) {
+                if (!definitionsEnded || dumpOpen) fail('嵌套或提前出现的 dump 命令');
+                dumpOpen = true;
+            } else {
+                command = key;
+            }
+            return;
+        }
+        if (token[0] === '#') {
+            const source = token.slice(1);
+            const next = Number(source);
+            if (!/^\d+$/.test(source) || !Number.isSafeInteger(next) || next < time) fail('时间戳必须是递增的非负安全整数：' + source);
+            if (!definitionsEnded) fail('时间戳出现在 $enddefinitions 之前');
+            time = next;
+            metadata.endTime = next;
+            return;
+        }
+        const prefix = token[0].toLowerCase();
+        if ('01xz'.includes(prefix) && token.length > 1) {
+            emitValue(token.slice(1), prefix);
+        } else if (prefix === 'b') {
+            const value = token.slice(1).toLowerCase();
+            if (!value || !/^[01xz]+$/.test(value)) fail('非法二进制值：' + token.slice(0, 80));
+            pendingValue = value;
+        } else if (prefix === 'r') {
+            const value = token.slice(1);
+            if (!/^[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$/.test(value) || !Number.isFinite(Number(value))) fail('非法实数值：' + value);
+            pendingValue = value;
+        } else {
+            fail('无法识别的值 token：' + token.slice(0, 80));
+        }
+    }
+
+    function write(chunk) {
+        if (finished) throw new Error('VCD 解析器已结束');
+        const text = String(chunk);
+        let tokenStart = -1;
+        for (let index = 0; index < text.length; index++) {
+            const code = text.charCodeAt(index);
+            const isWhitespace = code <= 32 || (code === 0xfeff && line === 1 && column === 1);
+            if (isWhitespace) {
+                if (tokenStart >= 0 || carry) {
+                    accept(carry + (tokenStart >= 0 ? text.slice(tokenStart, index) : ''));
+                    carry = '';
+                    tokenStart = -1;
+                }
+                if (code === 10) { line++; column = 1; } else column++;
+            } else {
+                if (tokenStart < 0) {
+                    tokenStart = index;
+                    if (!carry) { tokenLine = line; tokenColumn = column; }
+                }
+                column++;
+            }
+        }
+        if (tokenStart >= 0) carry += text.slice(tokenStart);
+        if (carry.length > cap.maxTokenLength) failResource('单个 token 超过资源上限');
+    }
+
+    function finish() {
+        if (finished) throw new Error('VCD 解析器已结束');
+        if (carry) { accept(carry); carry = ''; }
+        if (command) fail('文件截断：' + command + ' 缺少 $end');
+        if (pendingValue !== null) fail('文件截断：向量或实数缺少信号标识');
+        if (dumpOpen) fail('文件截断：dump 命令缺少 $end');
+        if (metadata.vars.length && !definitionsEnded) fail('文件截断：缺少 $enddefinitions');
+        finished = true;
+        return metadata;
+    }
+    return { write, finish };
 }
 
-/** VCD 时间/实数解析（支持普通整数与小数）。 */
-function parseNumber(text) {
-    const n = Number(text);
-    return Number.isFinite(n) ? n : null;
+/** 小文本兼容入口；大文件应使用 VcdSession，避免在宿主创建全文和事件对象。 */
+function parseVcd(text) {
+    const changes = new Map();
+    const parser = createVcdParser({ onChange(id, t, value) {
+        if (!changes.has(id)) changes.set(id, []);
+        changes.get(id).push({ t, value });
+    } });
+    parser.write(String(text));
+    return { ...parser.finish(), changes };
 }
 
-/**
- * 解析 $timescale 为「每个时间单位对应的秒数」。如 '1ns' → 1e-9，'10ps' → 1e-10。
- * @param {string} timescale 如 '1s'、'1ns'、'100ps'、'10 us'
- * @returns {number|null} 秒数；无法解析返回 null
- */
+/** @param {string} timescale @returns {number|null} 每个 VCD tick 对应的秒数。 */
 function parseTimescaleSeconds(timescale) {
-    // 兼容 VCD 标准变体：s/sec、ms/msec、us/usec、ns/nsec、ps/psec、fs/fsec（大小写不敏感、允许空格）
-    const m = String(timescale || '').trim().match(/^(\d+(?:\.\d+)?)\s*(sec|s|ms|msec|us|usec|ns|nsec|ps|psec|fs|fsec)$/i);
-    if (!m) return null;
-    const value = parseFloat(m[1]);
-    const unitFactors = { s: 1, sec: 1, ms: 1e-3, msec: 1e-3, us: 1e-6, usec: 1e-6, ns: 1e-9, nsec: 1e-9, ps: 1e-12, psec: 1e-12, fs: 1e-15, fsec: 1e-15 };
-    return value * unitFactors[m[2].toLowerCase()];
+    const match = String(timescale || '').trim().match(/^(\d+(?:\.\d+)?)\s*(sec|s|ms|msec|us|usec|ns|nsec|ps|psec|fs|fsec)$/i);
+    if (!match) return null;
+    const factors = { s: 1, sec: 1, ms: 1e-3, msec: 1e-3, us: 1e-6, usec: 1e-6, ns: 1e-9, nsec: 1e-9, ps: 1e-12, psec: 1e-12, fs: 1e-15, fsec: 1e-15 };
+    return Number(match[1]) * factors[match[2].toLowerCase()];
 }
 
-/**
- * 把扁平 var 列表组织成 scope 树（供信号树面板展示）。
- * 同一 id 可能在多个 scope 出现（父模块信号在子 scope 的引用），按 path 全部保留。
- * @param {ReturnType<typeof parseVcd>} vcd
- * @returns {{name: string, path: string, type: string, children: (object|var)[]}}
- *          树节点：scope 节点有 children；信号节点含 id/width/type。
- */
+/** 信号树既接受兼容解析结果，也接受仅含 changeCount 的 worker 元数据。 */
 function buildSignalTree(vcd) {
     const root = { name: '', path: '', type: 'root', children: [] };
-    const scopeNodes = new Map([['', root]]);
-
+    const nodes = new Map([['', root]]);
     for (const scope of vcd.scopes) {
-        const parentPath = scope.path.includes('.')
-            ? scope.path.slice(0, scope.path.lastIndexOf('.'))
-            : '';
-        const parent = scopeNodes.get(parentPath) || root;
-        const node = { name: scope.name, path: scope.path, type: scope.type, children: [] };
-        scopeNodes.set(scope.path, node);
-        parent.children.push(node);
+        const parentPath = scope.path.includes('.') ? scope.path.slice(0, scope.path.lastIndexOf('.')) : '';
+        const node = { ...scope, children: [] };
+        (nodes.get(parentPath) || root).children.push(node);
+        nodes.set(scope.path, node);
     }
-    for (const v of vcd.vars) {
-        // 参数/规格参数是常量，对波形查看无意义（iverilog 会把它们 dump 成 t=0 变更），不进树
-        if (/^(spec)?parameter$/i.test(v.type)) continue;
-        const parent = scopeNodes.get(v.scopePath) || root;
-        parent.children.push({
-            name: v.name,
-            path: v.path,
-            id: v.id,
-            width: v.width,
-            type: v.type,
-            hasChanges: vcd.changes.has(v.id) && vcd.changes.get(v.id).length > 0
-        });
+    for (const variable of vcd.vars) {
+        if (/^(spec)?parameter$/i.test(variable.type)) continue;
+        const hasChanges = typeof variable.changeCount === 'number' ? variable.changeCount > 0
+            : Boolean(vcd.changes && vcd.changes.has(variable.id) && vcd.changes.get(variable.id).length);
+        (nodes.get(variable.scopePath) || root).children.push({ name: variable.name, path: variable.path,
+            id: variable.id, width: variable.width, type: variable.type, ...(variable.range ? { range: variable.range } : {}), hasChanges });
     }
     return root;
 }
 
-module.exports = { parseVcd, buildSignalTree, parseTimescaleSeconds };
+module.exports = { DEFAULT_LIMITS, createVcdParser, VcdParseError, parseVcd, buildSignalTree, parseTimescaleSeconds };

@@ -1,5 +1,7 @@
 # 4.0.0-alpha1 变更清单
 
+后续 `4.0.0-alpha2` 的 always 修复、波形重构与逐文件清单见 `V4_ALPHA2.md`。
+
 开发 worktree：`C:\Users\JayceVane\.codex\worktrees\svtools-v4\02_svtools`；分支：`codex/refactor-v4`。
 基线：`49f54f97119a996991d40a059b01a0ae589e85db`。3.x 原目录继续维护，未复制其未提交内容。
 

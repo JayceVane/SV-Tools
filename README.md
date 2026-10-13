@@ -5,7 +5,10 @@
 
 改编自 Sublime Text [SystemVerilog](https://github.com/TheClams/SystemVerilog)（格式化）与 [Verilog-Gadget](https://github.com/poucotm/Verilog-Gadget)（生产力工具）插件。
 
-本 worktree 为 **4.0.0-alpha1 开发分支**。源码按 `src/` 分层，原生模块与 CLI 构建到 `bin/`；3.x 继续在原工程目录维护。
+本 worktree 为 **4.0.0-alpha2 开发分支**。源码按 `src/` 分层，原生模块与 CLI 构建到 `bin/`；3.x 继续在原工程目录维护。
+
+4.0 波形查看器采用后台流式加载与按需时间窗，增加双游标 Δt 和信号检索，已实测
+100/500 MiB VCD。操作说明、性能数据与验收范围见 [波形查看器](docs/WAVEFORM.md)。
 
 ## 功能总览
 
@@ -53,7 +56,8 @@
 
 ```bash
 git clone <本仓库> && cd 02_svtools
-npm install
+npm ci
+npm ci --prefix src/native
 npm run build:native   # 需要 Rust 工具链；产物 .node 与 CLI 自动复制到 bin/
 npm test               # golden、幂等、词法保真、工具运行与 VCD 合同
 npm run package        # 生成 svtools-<版本>.vsix

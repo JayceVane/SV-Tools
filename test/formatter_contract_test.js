@@ -250,3 +250,49 @@ test('宏续行的 begin 不影响真实声明间空行，宏保真且声明仍�
     assert.equal(wider.indexOf('wider'), high.indexOf('high'), formatted);
     assert.equal(wider.indexOf(';'), high.indexOf(';'), formatted);
 });
+
+const alwaysEventHeaders = [
+    ['用户 always 时钟块', 'always @(posedge   i_clk)', 'always @(posedge i_clk)'],
+    ['always_ff 双边沿 or 列表', 'always_ff @(posedge   i_clk or  negedge   rst_n)', 'always_ff @(posedge i_clk or negedge rst_n)'],
+    ['always 逗号事件列表', 'always @(posedge   i_clk ,   negedge   rst_n)', 'always @(posedge i_clk, negedge rst_n)'],
+    ['always_ff 多层函数括号与 iff', 'always_ff @(posedge   get_clk(  select(i_clk , mux(a, b)) ) iff   enabled )', 'always_ff @(posedge get_clk(select(i_clk, mux(a, b))) iff enabled)'],
+];
+for (const [label, original, expected] of alwaysEventHeaders) {
+    for (const inlineCompact of [true, false]) {
+        test(label + '：inlineCompact=' + inlineCompact, () => {
+            const source = 'module demo;\n' + original + ' begin\nq <= d;\nend\nendmodule\n';
+            const formatted = formatStable(source, { inlineCompact });
+            assert.ok(formatted.includes(inlineCompact ? expected : original), formatted);
+        });
+    }
+}
+
+test('always 事件头只紧凑代码，保护字符串、注释和转义标识符', () => {
+    const literal = '"中文  (a,b); \\"保留\\""';
+    const comment = '/* posedge  保留  (,) */';
+    const escaped = '\\clk.name[0] ';
+    const original = 'always_ff @(posedge   get_clk( ' + literal + ' ,  ' + escaped + ') ' + comment + ' or   negedge  rst_n)';
+    const source = 'module demo;\n' + original + ' begin\nq <= d;\nend\nendmodule\n';
+    const formatted = formatStable(source);
+    assert.ok(formatted.includes('always_ff @(posedge get_clk('), formatted);
+    assert.ok(formatted.includes(literal), formatted);
+    assert.ok(formatted.includes(comment), formatted);
+    assert.ok(formatted.includes(escaped), formatted);
+    assert.ok(formatted.includes('or negedge rst_n)'), formatted);
+    assert.ok(formatStable(source, { inlineCompact: false }).includes(original));
+});
+
+test('always 多行事件列表保留行形态并在各代码行紧凑', () => {
+    const source = 'module demo;\nalways_ff @(\nposedge   get_clk(i_clk , nested(a, b)) or\nnegedge   rst_n\n) begin\nq <= d;\nend\nendmodule\n';
+    const formatted = formatStable(source);
+    assert.match(formatted, /always_ff @\(\n\s*posedge get_clk\(i_clk, nested\(a, b\)\) or\n\s*negedge rst_n\n\s*\)/);
+});
+
+test('注释与宏中的伪 always 头原样保留', () => {
+    const comment = '// always @(posedge   i_clk) begin';
+    const macro = '`define CLOCKED \\\n  always @(posedge   i_clk) begin \\\n    q <= d; end\n';
+    const source = macro + 'module demo;\n' + comment + '\nlogic flag;\nendmodule\n';
+    const formatted = formatStable(source);
+    assert.ok(formatted.startsWith(macro), formatted);
+    assert.ok(formatted.includes(comment), formatted);
+});

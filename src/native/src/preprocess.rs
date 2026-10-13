@@ -18,6 +18,12 @@ pub fn preprocess_text(text: &str, indent_style: &str, inline_compact: bool) -> 
     } else {
         text
     };
+    // always 事件控制头与完整语句采用相同行内紧凑语义，范围止于事件列表闭括号。
+    let text = if inline_compact {
+        normalize_always_event_controls(&text)
+    } else {
+        text
+    };
     // modport 列表按方向拆行（`output a,b,input c` → 两行）
     let text = expand_modport(&text);
     // property/sequence 体多余空格归一化（spec §9.5）
@@ -299,6 +305,91 @@ fn trailing_close_kw(cur: &str) -> Option<usize> {
     None
 }
 
+/// 仅规范 always 系列的显式事件控制头；块体、其它语句和用户换行不参与此规则。
+fn normalize_always_event_controls(text: &str) -> String {
+    static HEAD: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| {
+        Regex::new(r"^[ \t]*(?P<keyword>always(?:_ff|_comb|_latch)?)\b")
+            .expect("valid always header pattern")
+    });
+    let masked = source_scan::mask_non_code(text);
+    let mut offset = 0;
+    let mut edits: Vec<(std::ops::Range<usize>, String)> = Vec::new();
+    for line in masked.split('\n') {
+        if let Some(header) = HEAD.captures(line) {
+            let keyword = header.name("keyword").unwrap();
+            let event = source_scan::next_code_offset(text, offset + keyword.end());
+            if text.as_bytes().get(event) == Some(&b'@') {
+                let open = source_scan::next_code_offset(text, event + 1);
+                if text.as_bytes().get(open) == Some(&b'(') {
+                    if let Some(close) = source_scan::find_matching(text, open) {
+                        let start = offset + keyword.start();
+                        let range = start..close + 1;
+                        if !edits
+                            .last()
+                            .is_some_and(|(previous, _)| previous.end > start)
+                        {
+                            edits.push((range.clone(), compact_inline_whitespace(&text[range])));
+                        }
+                    }
+                }
+            }
+        }
+        offset += line.len() + 1;
+    }
+    let mut output = text.to_string();
+    for (range, header) in edits.into_iter().rev() {
+        output.replace_range(range, &header);
+    }
+    output
+}
+
+/// 行内紧凑共享规则：只折叠代码区水平空白，保护原文、换行和转义标识符终止符。
+fn compact_inline_whitespace(header: &str) -> String {
+    let mut output = String::with_capacity(header.len());
+    let mut pos = 0;
+    let mut line_start = true;
+    let mut after_escaped_identifier = false;
+    while pos < header.len() {
+        if let Some(end) = source_scan::protected_end(header, pos) {
+            after_escaped_identifier = header.as_bytes()[pos] == b'\\';
+            output.push_str(&header[pos..end]);
+            line_start = header[..end].ends_with('\n');
+            pos = end;
+            continue;
+        }
+        let ch = header[pos..].chars().next().unwrap();
+        if ch == '\n' {
+            output.push(ch);
+            line_start = true;
+            after_escaped_identifier = false;
+            pos += 1;
+        } else if ch == ' ' || ch == '\t' {
+            let mut end = pos;
+            while matches!(header.as_bytes().get(end), Some(b' ' | b'\t')) {
+                end += 1;
+            }
+            let next = header[end..].chars().next();
+            if line_start {
+                output.push_str(&header[pos..end]);
+            } else if after_escaped_identifier
+                || (next.is_some()
+                    && !matches!(next, Some(')' | ']' | ',' | ';' | '\n'))
+                    && !matches!(output.chars().next_back(), Some('(' | '[' | '!')))
+            {
+                output.push(' ');
+            }
+            after_escaped_identifier = false;
+            pos = end;
+        } else {
+            output.push(ch);
+            line_start = false;
+            after_escaped_identifier = false;
+            pos += ch.len_utf8();
+        }
+    }
+    output
+}
+
 /// 单行 for（for 头 + 内联单条语句，无 begin）运算符空格规范化：
 /// `for(int i=0;i<len;i++) sum+=data[i];` → `for(int i = 0; i < len; i++) sum += data[i];`
 /// 带 begin 的多行 for 头保持原样。
@@ -410,40 +501,8 @@ fn normalize_expr_line(line: &str) -> String {
         .find(|segment| segment.kind == SegmentKind::LineComment)
         .map_or(line.len(), |segment| segment.range.start);
     let (code, comment) = line.split_at(comment_start);
-    let mut out = String::with_capacity(line.len());
-    let mut pos = code.len() - code.trim_start().len();
-    let mut after_escaped_identifier = false;
-    while pos < code.len() {
-        if let Some(end) = source_scan::protected_end(code, pos) {
-            after_escaped_identifier = code.as_bytes()[pos] == b'\\';
-            out.push_str(&code[pos..end]);
-            pos = end;
-            continue;
-        }
-        let ch = code[pos..].chars().next().unwrap();
-        if ch == ' ' || ch == '\t' {
-            let mut end = pos;
-            while matches!(code.as_bytes().get(end), Some(b' ' | b'\t')) {
-                end += 1;
-            }
-            let next = code[end..].chars().next();
-            let previous = out.chars().next_back();
-            if after_escaped_identifier
-                || (next.is_some()
-                    && !matches!(next, Some(')' | ']' | ',' | ';'))
-                    && !matches!(previous, Some('(' | '[' | '!')))
-            {
-                out.push(' ');
-            }
-            after_escaped_identifier = false;
-            pos = end;
-        } else {
-            after_escaped_identifier = false;
-            out.push(ch);
-            pos += ch.len_utf8();
-        }
-    }
-    let mut result = out.trim_end().to_string();
+    let compacted = compact_inline_whitespace(code.trim_start());
+    let mut result = source_scan::trim_code_end(&compacted).to_string();
     if !comment.is_empty() && !result.is_empty() {
         result.push(' ');
     }
@@ -833,5 +892,113 @@ mod directive_contract_tests {
     fn modport_with_comments_is_conservatively_preserved() {
         let text = "modport m(output a /* input ) 中文 */,input b);";
         assert_eq!(preprocess_text(text, "1tbs", true), text);
+    }
+}
+
+#[cfg(test)]
+mod always_event_tests {
+    use super::*;
+    use crate::config::FormatOptions;
+
+    #[test]
+    fn complete_pipeline_compacts_event_headers_and_respects_the_switch() {
+        let cases = [
+            ("always @(posedge   i_clk)", "always @(posedge i_clk)"),
+            (
+                "always_ff @(posedge   i_clk or  negedge   rst_n)",
+                "always_ff @(posedge i_clk or negedge rst_n)",
+            ),
+            (
+                "always @(posedge   i_clk ,   negedge   rst_n)",
+                "always @(posedge i_clk, negedge rst_n)",
+            ),
+            (
+                "always_ff @(posedge   get_clk(  select(i_clk , mux(a, b)) ) iff   enabled )",
+                "always_ff @(posedge get_clk(select(i_clk, mux(a, b))) iff enabled)",
+            ),
+        ];
+        for (original, compacted) in cases {
+            for inline_compact in [true, false] {
+                for style in ["1tbs", "gnu"] {
+                    let options = FormatOptions {
+                        inline_compact: Some(inline_compact),
+                        indent_style: Some(style.to_string()),
+                        ..FormatOptions::default()
+                    };
+                    let input = format!(
+                        "module demo;\n{} begin\nq <= d;\nend\nendmodule\n",
+                        original
+                    );
+                    let output = crate::format_code_segment(&input, &options);
+                    assert!(
+                        output.contains(if inline_compact { compacted } else { original }),
+                        "{}",
+                        output
+                    );
+                    assert_eq!(crate::format_code_segment(&output, &options), output);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn event_compaction_preserves_literals_comments_and_escaped_identifiers() {
+        let literal = r#""中文  (a,b); \"保留\"""#;
+        let comment = "/* posedge  保留  (,) */";
+        let header = format!(
+            "always_ff @(posedge   get_clk( {} ,  \\clk.name[0] ) {} or   negedge  rst_n)",
+            literal, comment
+        );
+        let input = format!("module demo;\n{} begin\nq <= d;\nend\nendmodule\n", header);
+        let output = crate::format_code_segment(&input, &FormatOptions::default());
+        assert!(
+            output.contains("always_ff @(posedge get_clk("),
+            "{}",
+            output
+        );
+        assert!(output.contains(literal), "{}", output);
+        assert!(output.contains(comment), "{}", output);
+        assert!(output.contains(r"\clk.name[0] "), "{}", output);
+        assert!(output.contains("or negedge rst_n)"), "{}", output);
+        assert_eq!(
+            crate::format_code_segment(&output, &FormatOptions::default()),
+            output
+        );
+    }
+
+    #[test]
+    fn event_compaction_does_not_touch_the_body_or_unrelated_statements() {
+        let input = "logic   flag;\nalways @(posedge   clk) begin\nq  <=   d;\nend\nalways_comb begin\nx  =   y;\nend\nalways #10 clk  =   ~clk;\n";
+        let expected = input.replace("@(posedge   clk)", "@(posedge clk)");
+        assert_eq!(normalize_always_event_controls(input), expected);
+    }
+
+    #[test]
+    fn multiline_event_layout_and_comments_are_preserved() {
+        let comment = "/*保留\n  posedge  fake (,);\n*/";
+        let input = format!("always_ff @(\n    posedge   get_clk(i_clk , nested(a, b)) or\n    {}\n    negedge   rst_n\n) begin\nq <= d;\nend", comment);
+        let output = normalize_always_event_controls(&input);
+        assert_eq!(output.matches('\n').count(), input.matches('\n').count());
+        assert!(output.contains(comment), "{}", output);
+        assert!(
+            output.contains("posedge get_clk(i_clk, nested(a, b)) or"),
+            "{}",
+            output
+        );
+        assert!(output.contains("negedge rst_n"), "{}", output);
+        assert!(output.ends_with("begin\nq <= d;\nend"), "{}", output);
+    }
+
+    #[test]
+    fn fake_headers_in_comments_and_macros_are_not_selected() {
+        let input = "// always @(posedge   clk)\n`define CLOCKED \\\n  always @(posedge   clk) begin \\\n    q <= d; end\n";
+        assert_eq!(normalize_always_event_controls(input), input);
+    }
+
+    #[test]
+    fn incomplete_event_controls_are_passthrough() {
+        let input = "always_ff @(posedge   get_clk(\"unclosed\"";
+        assert_eq!(normalize_always_event_controls(input), input);
+        normalize_always_event_controls("always @(\nalways @(posedge   clk))");
     }
 }

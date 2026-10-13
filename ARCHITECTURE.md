@@ -59,6 +59,11 @@ flowchart LR
 
 ## 后续约束
 
+4.0.0-alpha2 将波形解析放入单文件 worker；增量 parser 与紧凑 store 独立于页面。
+host 只转发信号元数据、有界时间窗、精确游标及边沿查询；client 管交互与持久化，
+renderer 管可见行绘制，model 管纯视图规则。目录和 Canvas 均按视口工作。
+详细操作、数据合同与 100/500 MiB 实测见 `docs/WAVEFORM.md`。
+
 声明、端口和过程赋值仍采用词法与正则驱动的布局规则，没有完整 SystemVerilog AST。
 共享扫描保证保护区不被重新解释，并不能证明所有语法构造都已覆盖。端口表与 task/function
 参数表已共用分隔符识别；各自的列宽策略暂留在所属模块，避免把历史规则硬塞入通用框架。
