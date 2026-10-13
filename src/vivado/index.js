@@ -17,7 +17,9 @@
 // 增量文件管理、双引擎仿真、器件选型）+ 各子模块纯函数汇总导出。
 // extension.js 的 require('./vivado') 解析到本目录。
 
-const { startProcess } = require('../toolchains/process');
+const { createToolTaskManager } = require('../toolchains/job');
+const { createBufferedOutput } = require('../toolchains/channel');
+const { runVivadoBatchTask } = require('./batch');
 const { scanWorkspaceSources } = require('../workspace/sources');
 const fs = require('fs');
 const os = require('os');
@@ -26,7 +28,7 @@ const path = require('path');
 const { normalizeVivadoDir, findVivadoBinDir, buildBatchArgs } = require('./toolchain');
 const {
     tclQuote, tclList, buildCreateProjectScript, buildAddFilesScript, buildRemoveFilesScript,
-    buildSimulateScript, extractVivadoIssues, firstModuleName,
+    buildSimulateScript, firstModuleName,
     buildOocReportsScript, parseUtilHierSummary, parseLogicLevelSummary
 } = require('./tclgen');
 const { buildExportPartsScript, parsePartsDump, partFilterOptions, filterParts, buildPartPickerHtml } = require('./parts');
@@ -42,8 +44,9 @@ const OUTPUT_CHANNEL_TITLE = 'SystemVerilog Tools · Vivado';
 function activateVivado(context, deps) {
     const vscode = (deps && deps.vscode) || require('vscode');
     const out = vscode.window.createOutputChannel(OUTPUT_CHANNEL_TITLE);
+    const output = createBufferedOutput(out), tasks = createToolTaskManager();
 
-    let running = null;      // { child, scriptPath, startedAt, timer }
+    let running = null;      // { job, scriptPath }，准备阶段也可停止。
     let statusItem = null;
     let binDirCache = null;
 
@@ -424,33 +427,23 @@ function activateVivado(context, deps) {
         log('[vivado] ' + executable + ' ' + args.join(' '));
         log('[vivado] cwd: ' + cwd);
         status('$(loading~spin) Vivado 运行中…', 'svtools.vivado.stop');
-        const run = startProcess(executable, args, {
-            cwd, timeoutMs,
-            onStdout: text => out.append(text),
-            onStderr: text => out.append(text),
-            onTimeout: () => log('[vivado] 超时 (' + timeoutMs + 'ms)，终止进程树'),
-            onTerminationError: error => log('[vivado] 终止进程失败：' + error.message)
-        });
-        const task = { run, scriptPath };
+        const job = tasks.start('vivado');
+        const task = { job, scriptPath };
         running = task;
-        const result = await run.completion;
-        if (running === task) {
-            running = null;
-            status(null);
+        try {
+            await job.directory(path.join(path.dirname(scriptPath), 'tasks'), 'vivado');
+            const result = await runVivadoBatchTask({ task: job, executable, args, cwd, scriptPath, timeoutMs, onOutput: output.append });
+            output.flush();
+            log(`[vivado] ${result.ok ? '完成' : result.message}，耗时 ${(result.ms / 1000).toFixed(1)}s`);
+            if (result.logPath) log('完整日志：' + result.logPath);
+            refreshProjectContext(); return result;
+        } catch (error) {
+            log('[vivado] 任务失败：' + error.message);
+            return { code: null, status: job.signal.aborted ? 'cancelled' : 'failed', error: error.message };
+        } finally {
+            try { await job.finish(); } catch (error) { log('任务产物清理失败：' + error.message); }
+            if (running === task) { running = null; status(null); }
         }
-        const code = result.timedOut || result.errorMessage ? null : result.code;
-        const issues = extractVivadoIssues(result.output);
-        if (code === 0) {
-            log('[vivado] 完成，耗时 ' + (result.elapsedMs / 1000).toFixed(1) + 's' +
-                (issues.length ? '，' + issues.length + ' 条错误/严重警告' : ''));
-        } else {
-            const reason = result.timedOut ? 'timeout' : result.errorMessage;
-            log('[vivado] 退出 code=' + code + (reason ? ' (' + reason + ')' : '') +
-                '，耗时 ' + (result.elapsedMs / 1000).toFixed(1) + 's');
-        }
-        refreshProjectContext();
-        // Vivado 的脚本错误也可能返回 0；保留原始交错输出中的 SVTOOLS_* 标记。
-        return { code, ms: result.elapsedMs, issues, stdout: result.output };
     }
 
     function stopRun() {
@@ -459,7 +452,7 @@ function activateVivado(context, deps) {
             return;
         }
         log('[vivado] 用户请求停止，终止进程树');
-        running.run.stop();
+        running.job.cancel('用户停止 Vivado');
         return true;
     }
 
@@ -588,8 +581,7 @@ function activateVivado(context, deps) {
 
     // ---------------- 命令接线 ----------------
 
-    context.subscriptions.push(
-        out,
+    context.subscriptions.push(out, { dispose() { tasks.cancelAll(); output.dispose(); tasks.dispose().catch(error => console.error('Vivado 任务释放失败：', error)); } },
         vscode.commands.registerCommand('svtools.vivado.runScript', async () => {
             const editor = vscode.window.activeTextEditor;
             if (editor && /\.tcl$/i.test(editor.document.fileName)) {

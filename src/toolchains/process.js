@@ -1,7 +1,8 @@
 'use strict';
 
 const childProcess = require('child_process');
-const { StringDecoder } = require('string_decoder');
+const path = require('path');
+const { ProcessOutput } = require('./output');
 const TERMINATION_GRACE_MS = 2000;
 
 /** Windows 批处理参数引用；普通可执行文件直接使用 spawn 参数数组。 */
@@ -63,104 +64,134 @@ function terminateProcessTree(child, options = {}) {
     launchCleanup('taskkill', ['/pid', String(pid), '/T', '/F']);
 }
 
+/** 单次进程的取消、超时和完成状态；输出处理由 ProcessOutput 负责。 */
+class ProcessRun {
+    constructor(options) {
+        this.options = options;
+        this.spawn = options.spawn || childProcess.spawn;
+        this.platform = options.platform || process.platform;
+        this.startedAt = Date.now();
+        this.child = null;
+        this.output = null;
+        this.timer = null;
+        this.terminationTimer = null;
+        this.finishing = false;
+        this.settled = false;
+        this.timedOut = false;
+        this.stopped = false;
+        this.aborted = false;
+        this.errorMessage = null;
+        this.abortListener = null;
+        this.completion = new Promise(resolve => { this.resolveCompletion = resolve; });
+    }
+    async finish(code, errorMessage = null, signal = null) {
+        if (this.finishing) return;
+        this.finishing = true;
+        if (!this.errorMessage && errorMessage) this.errorMessage = errorMessage;
+        if (this.timer) clearTimeout(this.timer);
+        if (this.terminationTimer) clearTimeout(this.terminationTimer);
+        if (this.abortListener) this.options.signal.removeEventListener('abort', this.abortListener);
+        let captured = { stdout: '', stderr: '', output: '', outputTruncated: false, lineTruncated: false, logPath: null, logError: null };
+        try { if (this.output) captured = await this.output.finish(); }
+        catch (error) { if (!this.errorMessage) this.errorMessage = error.message || String(error); }
+        const failure = this.errorMessage || captured.errorMessage || null;
+        this.settled = true;
+        this.resolveCompletion({ ...captured, code: failure ? -1 : code, errorMessage: failure,
+            timedOut: this.timedOut, elapsedMs: Date.now() - this.startedAt, signal, stopped: this.stopped, aborted: this.aborted });
+    }
+    fail(error) {
+        if (this.finishing) return;
+        if (!this.errorMessage) this.errorMessage = error.message || String(error);
+        if (this.child) this.stop();
+        else this.finish(-1);
+    }
+    reportTermination(error) {
+        if (this.finishing) return;
+        try {
+            if (this.options.onTerminationError) this.options.onTerminationError(error);
+            else console.error('终止工具进程失败：', error);
+        } catch (callbackError) {
+            if (!this.errorMessage) this.errorMessage = '终止回调失败：' + callbackError.message;
+        }
+        this.finish(-1, '终止工具进程失败：' + error.message);
+    }
+    stop() {
+        if (this.finishing || this.stopped) return;
+        this.stopped = true;
+        if (this.timer) clearTimeout(this.timer);
+        if (this.output) this.output.stopInput();
+        if (!this.child) { this.finish(null); return; }
+        terminateProcessTree(this.child, { platform: this.platform, spawn: this.spawn,
+            wrappedProcessName: this.options.wrappedProcessName, onError: error => this.reportTermination(error) });
+        if (!this.finishing) this.terminationTimer = setTimeout(() => {
+            this.reportTermination(new Error('终止工具进程后未收到退出事件：PID ' + this.child.pid));
+        }, TERMINATION_GRACE_MS);
+    }
+    abort() {
+        if (this.finishing) return;
+        if (!this.timedOut) this.aborted = true;
+        this.stop();
+    }
+    start(command, args) {
+        try {
+            const signal = this.options.signal;
+            if (signal && (typeof signal.addEventListener !== 'function' || typeof signal.removeEventListener !== 'function')) throw new TypeError('signal 必须是 AbortSignal');
+            if (signal && signal.aborted) { this.abort(); return; }
+            const outputOptions = { ...this.options };
+            if (outputOptions.logPath !== undefined && outputOptions.logPath !== null) {
+                if (typeof outputOptions.logPath !== 'string' || !outputOptions.logPath.trim()) throw new TypeError('logPath 必须是非空路径');
+                outputOptions.logPath = path.resolve(this.options.cwd || process.cwd(), outputOptions.logPath);
+            }
+            this.output = new ProcessOutput(outputOptions, { onFailure: error => queueMicrotask(() => this.fail(error)) });
+            if (this.output.errorMessage) { this.finish(-1); return; }
+            if (signal && signal.aborted) { this.abort(); return; }
+            const spawnOptions = { cwd: this.options.cwd, env: this.options.env, windowsHide: true };
+            if (this.platform === 'win32' && /\.(bat|cmd)$/i.test(command)) {
+                // /s 剥掉外层引号，保留含空格的工具路径与逐参数引用。
+                const line = '"' + [command, ...args].map(cmdQuote).join(' ') + '"';
+                this.child = this.spawn('cmd.exe', ['/d', '/s', '/c', line], { ...spawnOptions, windowsVerbatimArguments: true });
+            } else this.child = this.spawn(command, args, spawnOptions);
+            this.output.bindStreams([this.child.stdout, this.child.stderr]);
+            for (const [stream, isStderr] of [[this.child.stdout, false], [this.child.stderr, true]]) {
+                if (!stream) continue;
+                stream.on('data', chunk => this.output.write(isStderr, chunk));
+                stream.on('error', error => this.fail(new Error((isStderr ? 'stderr' : 'stdout') + ' 读取失败：' + error.message)));
+            }
+            this.child.once('error', error => {
+                // 启动失败没有 PID；运行中的错误需先终止进程，避免返回后工具仍存活。
+                if (this.child.pid && this.child.exitCode == null && this.child.signalCode == null) this.fail(error);
+                else this.finish(-1, error.message);
+            });
+            this.child.once('close', (code, receivedSignal) => this.finish(code, null, receivedSignal));
+            if (signal) {
+                this.abortListener = () => this.abort();
+                signal.addEventListener('abort', this.abortListener, { once: true });
+                if (signal.aborted) this.abort();
+            }
+            const timeoutMs = Number(this.options.timeoutMs || 0);
+            if (timeoutMs > 0 && !this.stopped && !this.finishing) this.timer = setTimeout(() => {
+                this.timedOut = true;
+                try { if (this.options.onTimeout) this.options.onTimeout(); }
+                catch (error) { this.fail(new Error('onTimeout 回调失败：' + error.message)); }
+                this.stop();
+            }, timeoutMs);
+        } catch (error) { this.fail(error); }
+    }
+}
+
 /**
- * 启动工具并统一管理 UTF-8 输出、超时和完成状态。读取模块不启动进程。
- * @param {string} command 工具路径（支持 Windows .bat/.cmd）
- * @param {string[]} args 各引擎自行构造的参数
- * @param {{cwd?: string, env?: NodeJS.ProcessEnv, timeoutMs?: number, onStdout?: (text: string) => void, onStderr?: (text: string) => void, onTimeout?: () => void, onTerminationError?: (error: Error) => void, wrappedProcessName?: string, platform?: string, spawn?: typeof childProcess.spawn}} [options]
- * @returns {{child: import('child_process').ChildProcess|null, completion: Promise<{code: number|null, stdout: string, stderr: string, output: string, errorMessage: string|null, timedOut: boolean, elapsedMs: number, signal: string|null, stopped: boolean}>, stop: () => void}}
+ * 启动外部工具；摘要有界，完整日志以 wx 新建；取消后停止接收输出。
+ * @param {string} command @param {string[]} args
+ * @param {{cwd?: string, env?: NodeJS.ProcessEnv, timeoutMs?: number, signal?: AbortSignal, maxOutputChars?: number, maxLineChars?: number, logPath?: string, onStdout?: Function, onStderr?: Function, onLine?: (text: string, isStderr: boolean, meta: {truncated: boolean, droppedChars: number, final: boolean}) => void, onTimeout?: Function, onTerminationError?: Function, wrappedProcessName?: string, platform?: string, spawn?: typeof childProcess.spawn}} [options]
+ * @returns {{child: import('child_process').ChildProcess|null, completion: Promise<object>, stop: () => void}}
  */
 function startProcess(command, args, options = {}) {
-    const spawn = options.spawn || childProcess.spawn;
-    const platform = options.platform || process.platform;
-    const startedAt = Date.now();
-    let child = null;
-    let timer = null;
-    let terminationTimer = null;
-    let settled = false;
-    let timedOut = false;
-    let stopped = false;
-    let stdout = '';
-    let stderr = '';
-    let output = '';
-    let resolveCompletion;
-    const completion = new Promise(resolve => { resolveCompletion = resolve; });
-    const stdoutDecoder = new StringDecoder('utf8');
-    const stderrDecoder = new StringDecoder('utf8');
-    const feed = (isStderr, text) => {
-        if (!text) return;
-        output += text;
-        if (isStderr) stderr += text;
-        else stdout += text;
-        const callback = isStderr ? options.onStderr : options.onStdout;
-        if (callback) callback(text);
-    };
-    const finish = (code, errorMessage = null, signal = null) => {
-        if (settled) return;
-        settled = true;
-        if (timer) clearTimeout(timer);
-        if (terminationTimer) clearTimeout(terminationTimer);
-        feed(false, stdoutDecoder.end());
-        feed(true, stderrDecoder.end());
-        resolveCompletion({ code, stdout, stderr, output, errorMessage, timedOut,
-            elapsedMs: Date.now() - startedAt, signal, stopped });
-    };
-    const stop = () => {
-        if (settled || stopped) return;
-        stopped = true;
-        if (timer) clearTimeout(timer);
-        terminateProcessTree(child, { platform, spawn,
-            wrappedProcessName: options.wrappedProcessName,
-            onError: error => {
-                if (options.onTerminationError) options.onTerminationError(error);
-                else console.error('终止工具进程失败：', error);
-                finish(-1, '终止工具进程失败：' + error.message);
-            }
-        });
-        if (!settled) {
-            terminationTimer = setTimeout(() => {
-                const error = new Error('终止工具进程后未收到退出事件：PID ' + (child && child.pid));
-                if (options.onTerminationError) options.onTerminationError(error);
-                finish(-1, error.message);
-            }, TERMINATION_GRACE_MS);
-        }
-    };
-    try {
-        const spawnOptions = { cwd: options.cwd, env: options.env, windowsHide: true };
-        if (platform === 'win32' && /\.(bat|cmd)$/i.test(command)) {
-            // /s 会剥掉首尾一对引号；外层引号保护含空格的可执行路径。
-            const line = '"' + [command, ...args].map(cmdQuote).join(' ') + '"';
-            child = spawn('cmd.exe', ['/d', '/s', '/c', line], { ...spawnOptions, windowsVerbatimArguments: true });
-        } else {
-            child = spawn(command, args, spawnOptions);
-        }
-        if (child.stdout) {
-            child.stdout.on('data', data => feed(false, stdoutDecoder.write(data)));
-            child.stdout.on('error', error => { stop(); finish(-1, error.message); });
-        }
-        if (child.stderr) {
-            child.stderr.on('data', data => feed(true, stderrDecoder.write(data)));
-            child.stderr.on('error', error => { stop(); finish(-1, error.message); });
-        }
-        child.once('error', error => finish(-1, error.message));
-        child.once('close', (code, signal) => finish(code, null, signal));
-        const timeoutMs = Number(options.timeoutMs || 0);
-        if (timeoutMs > 0) {
-            timer = setTimeout(() => {
-                timedOut = true;
-                if (options.onTimeout) options.onTimeout();
-                stop();
-            }, timeoutMs);
-        }
-    } catch (error) {
-        finish(-1, error.message);
-    }
-    return { child, completion, stop };
+    const run = new ProcessRun(options);
+    run.start(command, args);
+    return { child: run.child, completion: run.completion, stop: () => run.stop() };
 }
 
 /** @param {string} command @param {string[]} args @param {Parameters<typeof startProcess>[2]} [options] @returns {ReturnType<typeof startProcess>['completion']} */
-function runProcess(command, args, options) {
-    return startProcess(command, args, options).completion;
-}
+function runProcess(command, args, options) { return startProcess(command, args, options).completion; }
 
 module.exports = { cmdQuote, terminateProcessTree, startProcess, runProcess };

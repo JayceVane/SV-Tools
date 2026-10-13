@@ -20,19 +20,14 @@
  *  - activateIverilog() 负责 VSCode 集成（诊断、命令、状态栏、事件接线）。
  */
 
-const { spawn } = require('child_process');
-const { runProcess, startProcess } = require('./process');
-const { scanWorkspaceSources, invalidateWorkspaceSources } = require('../workspace/sources');
-const crypto = require('crypto');
+const { runProcess } = require('./process');
+const { createDiagnosticCapture } = require('./diagnostics');
+const { processSucceeded } = require('./result');
+const { COMPILE_TIMEOUT_MS } = require('./compile-policy');
+const { scanWorkspaceSources } = require('../workspace/sources');
 const fs = require('fs');
-const os = require('os');
 const path = require('path');
-const { lintWithXvlog, elaborateWithXvlog, resetXvlogCache } = require('./xvlog');
 
-const OUTPUT_CHANNEL_TITLE = 'SystemVerilog Tools · Icarus Verilog';
-const DIAGNOSTIC_SOURCE = 'iverilog';
-const VERILOG_LANGUAGE_IDS = ['verilog', 'systemverilog', 'system-verilog'];
-const WAVEFORM_EXTENSIONS = ['.vcd', '.fst'];
 const TOOL_PROBE_TIMEOUT_MS = 10000;
 // 0xC0000135 STATUS_DLL_NOT_FOUND：Windows 加载器找不到 DLL 时进程以此码退出且无任何输出
 const DLL_NOT_FOUND_EXIT_CODE = 3221225781;
@@ -262,21 +257,34 @@ function resolveMissingModuleFiles(rawText, moduleIndex, compiledSet) {
  * @param {string} cwd
  * @returns {Promise<{result: object, inputFiles: string[]}>}
  */
-async function compileWithModuleResolution(toolchain, commonArgs, inputFiles, cwd) {
+async function compileWithModuleResolution(toolchain, commonArgs, inputFiles, cwd, options = {}) {
     let files = [...inputFiles];
     const compiledSet = new Set(files.map(f => path.resolve(f)));
-    let result = await runTool(toolchain.iverilog, [...commonArgs, ...files], { cwd, env: toolchain.env });
+    const scan = options.scanSources || scanWorkspaceSources;
+    async function compileRound() {
+        options.task?.throwIfCancelled();
+        const capture = createDiagnosticCapture({ parseLine: line => parseCompilerOutput(options.mapLine ? options.mapLine(line) : line, cwd),
+            extractMissing: line => Array.from(line.matchAll(/Unknown module type:\s*([A-Za-z_][A-Za-z0-9_$]*)|^\s*([A-Za-z_][A-Za-z0-9_$]*)\s+referenced/g), match => match[1] || match[2]) });
+        const args = [...(toolchain.compilePrefix || []), ...commonArgs, ...files];
+        const settings = { cwd, env: toolchain.env, stage: 'compiling', timeoutMs: options.timeoutMs ?? COMPILE_TIMEOUT_MS,
+            onLine: capture.onLine, onStdout: options.onStdout, onStderr: options.onStderr };
+        const result = options.task ? await options.task.run(toolchain.iverilog, args, settings)
+            : await runProcess(toolchain.iverilog, args, settings);
+        return capture.snapshot(result);
+    }
+    let result = await compileRound();
 
     for (let round = 0; round < 3 && result.code !== 0; round++) {
         // 既然缺模块，缓存里的目录/索引可能已过期（如刚新建的源文件），强制重新扫描
-        const { modules } = await scanWorkspaceSources(true);
-        const additions = resolveMissingModuleFiles(`${result.stderr}\n${result.stdout}`, modules, compiledSet);
+        if (result.stopped || result.aborted || result.diagnosticsIncomplete || !result.missingUnits.size) break;
+        const { modules } = await scan(true); options.task?.throwIfCancelled();
+        const additions = [...new Set([...result.missingUnits].map(name => modules.get(name)).filter(file => file && !compiledSet.has(path.resolve(file))))];
         if (additions.length === 0) break;
         for (const file of additions) compiledSet.add(path.resolve(file));
         // 缺失定义前置而非追加：iverilog 单遍编译要求 package 在 import 它的
         // 文件之前（模块先后无关，前置对两者都安全）
         files = additions.concat(files);
-        result = await runTool(toolchain.iverilog, [...commonArgs, ...files], { cwd, env: toolchain.env });
+        result = await compileRound();
     }
     return { result, files };
 }
@@ -287,6 +295,7 @@ async function compileWithModuleResolution(toolchain, commonArgs, inputFiles, cw
 
 /** @type {{binDir: string, iverilog: string, vvp: string, env: NodeJS.ProcessEnv, version: string, cygwinDir: string|null}|null} */
 let cachedToolchain = null;
+let cachedToolchainKey = null;
 /** @type {string|null} 最近一次探测失败的原因，避免每次保存都重复探测报错 */
 let toolchainFailure = null;
 
@@ -299,18 +308,33 @@ function looksLikeMissingDll(result) {
     return result.code === DLL_NOT_FOUND_EXIT_CODE || /cygwin1\.dll/i.test(`${result.stderr} ${result.errorMessage || ''}`);
 }
 
+/** 原始探测失败且确认缺 DLL 时，定位 Cygwin 并重试；每次 await 后检查取消。 */
+async function probeIcarus(iverilog, binDir, cygwinPath, task) {
+    const probeTool = env => task ? task.run(iverilog, ['-V'], { env, stage: 'probe', timeoutMs: TOOL_PROBE_TIMEOUT_MS })
+        : runTool(iverilog, ['-V'], { env }, TOOL_PROBE_TIMEOUT_MS);
+    let probe = await probeTool(process.env); task?.throwIfCancelled();
+    let cygwinDir = null;
+    if (!processSucceeded(probe) && looksLikeMissingDll(probe)) {
+        cygwinDir = findCygwinBinDir(cygwinPath, binDir);
+        if (cygwinDir) { probe = await probeTool(buildChildEnv(cygwinDir)); task?.throwIfCancelled(); }
+    }
+    return { probe, cygwinDir };
+}
+
 /**
  * 探测并缓存 iverilog/vvp 工具链。Cygwin 构建缺 cygwin1.dll 时自动定位 DLL 目录并重试。
  * @param {boolean} [force=false] 忽略缓存强制重新探测
  * @returns {Promise<{binDir: string, iverilog: string, vvp: string, env: NodeJS.ProcessEnv, version: string}>}
  * @throws {Error} 找不到工具链或无法启动时抛出带修复指引的错误
  */
-async function resolveToolchain(force = false) {
-    if (cachedToolchain && !force) return cachedToolchain;
-    if (toolchainFailure && !force) throw new Error(toolchainFailure);
-
-    const vscode = require('vscode');
-    const config = vscode.workspace.getConfiguration('svtools.iverilog');
+async function resolveToolchain(force = false, task = null, editor = null) {
+    task?.throwIfCancelled();
+    const vscode = editor || require('vscode');
+    const config = vscode.workspace.getConfiguration('svtools.iverilog', task?.documentUri);
+    const key = JSON.stringify([config.get('path'), config.get('cygwinPath'), process.env.IVERILOG_HOME]);
+    if (key !== cachedToolchainKey || force) { cachedToolchain = null; toolchainFailure = null; cachedToolchainKey = key; }
+    if (cachedToolchain) return cachedToolchain;
+    if (toolchainFailure) throw new Error(toolchainFailure);
 
     const binDir = findIverilogBinDir(config.get('path'));
     if (!binDir) {
@@ -321,28 +345,18 @@ async function resolveToolchain(force = false) {
     const iverilog = path.join(binDir, IV_EXE);
     const vvp = path.join(binDir, VVP_EXE);
 
-    // 先按原样探测；Cygwin 构建缺 cygwin1.dll 时，带上 DLL 目录重试
-    let probe = await runTool(iverilog, ['-V'], { env: process.env }, TOOL_PROBE_TIMEOUT_MS);
-    let cygwinDir = null;
-    if (probe.errorMessage || probe.code !== 0) {
-        if (looksLikeMissingDll(probe)) {
-            cygwinDir = findCygwinBinDir(config.get('cygwinPath'), binDir);
-            if (cygwinDir) {
-                probe = await runTool(iverilog, ['-V'], { env: buildChildEnv(cygwinDir) }, TOOL_PROBE_TIMEOUT_MS);
-            }
-        }
-    }
+    const { probe, cygwinDir } = await probeIcarus(iverilog, binDir, config.get('cygwinPath'), task);
 
-    if (probe.errorMessage || probe.code !== 0) {
+    if (!processSucceeded(probe)) {
         const hint = looksLikeMissingDll(probe)
             ? 'iverilog 是 Cygwin 构建但未找到 cygwin1.dll，请将含该 DLL 的目录（如 <Cygwin根>\\bin）配置到 svtools.iverilog.cygwinPath。'
             : `iverilog 无法启动：${probe.errorMessage || probe.stderr.trim() || `exit ${probe.code}`}`;
-        toolchainFailure = hint;
+        if (cachedToolchainKey === key) toolchainFailure = hint;
         throw new Error(hint);
     }
 
     const versionMatch = `${probe.stdout}\n${probe.stderr}`.match(/Icarus Verilog version\s+([^\s(]+)/i);
-    cachedToolchain = {
+    const resolved = {
         binDir,
         iverilog,
         vvp,
@@ -351,8 +365,9 @@ async function resolveToolchain(force = false) {
         // Cygwin 构建时定位到的 DLL 目录（bin 内含 stdbuf.exe 等工具）；原生构建为 null
         cygwinDir: cygwinDir
     };
-    toolchainFailure = null;
-    return cachedToolchain;
+    // 不同工作区配置可同时探测，迟到的结果不能污染另一个配置的缓存。
+    if (cachedToolchainKey === key) { cachedToolchain = resolved; toolchainFailure = null; }
+    return resolved;
 }
 
 // ---------------------------------------------------------------------------
@@ -364,590 +379,13 @@ async function resolveToolchain(force = false) {
  * @param {vscode.ExtensionContext} context
  * @param {{waveViewer?: {openWaveform: (path: string) => Promise<void>}}} [deps] 依赖注入（内置 VCD 查看器）
  */
-function activateIverilog(context, deps) {
-    const vscode = require('vscode');
-    /** @type {{openWaveform: (path: string) => Promise<void>}} */
-    const waveViewer = (deps && deps.waveViewer) || { openWaveform: async () => { } };
-
-    const diagnostics = vscode.languages.createDiagnosticCollection('svtools-iverilog');
-    const channel = vscode.window.createOutputChannel(OUTPUT_CHANNEL_TITLE);
-    context.subscriptions.push(diagnostics, channel);
-
-    /** 进行中的仿真：{ run, document, startedAt, killed, vvpFile } */
-    let activeSim = null;
-    /** 每个文档的 lint 世代计数，旧的异步结果不覆盖新结果 */
-    const lintGenerations = new Map();
-    /** 每个文档的 on-change 防抖定时器 */
-    const lintDebounceTimers = new Map();
-
-    function getConfig() {
-        return vscode.workspace.getConfiguration('svtools.iverilog');
-    }
-
-    function isVerilogDocument(document) {
-        return VERILOG_LANGUAGE_IDS.includes(document.languageId);
-    }
-
-    /**
-     * 把相对路径配置项（includePaths/libraryPaths/simFiles）解析为基于工作区根的绝对路径。
-     * @param {string[]} paths
-     * @param {string} fallbackBase 无工作区时的基准目录
-     */
-    function resolveConfigPaths(paths, fallbackBase) {
-        const root = vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders[0];
-        const base = root ? root.uri.fsPath : fallbackBase;
-        return (paths || []).map(p => path.resolve(base, p));
-    }
-
-    /**
-     * 将编译输出解析结果写入诊断集合（Problems 面板可点击跳转）。
-     * @param {vscode.TextDocument|null} document 触发 lint 的文档（用于整行 squiggle 范围）
-     * @param {ReturnType<typeof parseCompilerOutput>} findings
-     * @param {string} [source] 诊断来源标识（iverilog / xvlog）
-     */
-    function applyDiagnostics(document, findings, source) {
-        const grouped = new Map();
-        for (const f of findings) {
-            if (!grouped.has(f.file)) grouped.set(f.file, []);
-            grouped.get(f.file).push(f);
-        }
-
-        // 主文档即使无诊断也要清掉旧条目
-        if (document && !grouped.has(document.uri.fsPath)) {
-            grouped.set(document.uri.fsPath, []);
-        }
-
-        for (const [file, items] of grouped) {
-            const uri = vscode.Uri.file(file);
-            const list = [];
-            for (const item of items) {
-                const lineIdx = item.line - 1;
-                let range;
-                if (document && document.uri.fsPath === file) {
-                    try {
-                        range = document.lineAt(Math.min(Math.max(lineIdx, 0), document.lineCount - 1)).range;
-                    } catch (e) {
-                        range = new vscode.Range(lineIdx, 0, lineIdx, 0);
-                    }
-                } else {
-                    range = new vscode.Range(Math.max(lineIdx, 0), 0, Math.max(lineIdx, 0), 0);
-                }
-                const diag = new vscode.Diagnostic(range, item.message,
-                    item.severity === 'warning' ? vscode.DiagnosticSeverity.Warning : vscode.DiagnosticSeverity.Error);
-                diag.source = source || DIAGNOSTIC_SOURCE;
-                list.push(diag);
-            }
-            diagnostics.set(uri, list);
-        }
-    }
-
-    /**
-     * 对单个文档执行 iverilog 语法检查并更新诊断。
-     * 文档有未保存修改时，把缓冲区内容写入临时文件进行 lint（保持 include/库目录
-     * 指向原文件目录），并把输出的临时路径回映射为原文件，保证 squiggle 落在正确位置。
-     * @param {vscode.TextDocument} document
-     * @returns {Promise<{ok: boolean, errorCount: number, warningCount: number}>}
-     *          ok = 编译退出码为 0 且无 error 级诊断（仅警告视为通过）
-     */
-    async function lintDocument(document) {
-        const empty = { ok: true, errorCount: 0, warningCount: 0 };
-        if (!isVerilogDocument(document)) return empty;
-        if (document.uri.scheme !== 'file') return empty;
-
-        // lint 引擎分流：xvlog（Vivado 语法/详细化检查）走独立模块
-        if (vscode.workspace.getConfiguration('svtools.lint').get('engine', 'iverilog') === 'xvlog') {
-            const gen = (lintGenerations.get(document.uri.toString()) || 0) + 1;
-            lintGenerations.set(document.uri.toString(), gen);
-            return lintWithXvlog(document, {
-                vscode, channel, applyDiagnostics, isVerilogDocument, scanWorkspaceSources,
-                lintGenerations, gen,
-                showToolchainError: (msg, setting) => showToolchainError(msg, setting)
-            });
-        }
-
-        let toolchain;
-        try {
-            toolchain = await resolveToolchain();
-        } catch (err) {
-            channel.appendLine(`[lint] 工具链不可用：${err.message}`);
-            showToolchainError(err.message);
-            return empty;
-        }
-
-        const filePath = document.uri.fsPath;
-        const fileDir = path.dirname(filePath);
-        const config = getConfig();
-
-        let lintTarget = filePath;
-        let tempFile = null;
-        if (document.isDirty) {
-            const hash = crypto.createHash('md5').update(document.uri.toString()).digest('hex').slice(0, 10);
-            tempFile = path.join(os.tmpdir(), `svtools-lint-${hash}${path.extname(filePath)}`);
-            try {
-                fs.writeFileSync(tempFile, document.getText());
-                lintTarget = tempFile;
-            } catch (err) {
-                channel.appendLine(`[lint] 写入临时文件失败，回退用磁盘内容：${err.message}`);
-                tempFile = null;
-            }
-        }
-
-        // currentFileOnly（默认开）：不附带工作区扫描目录（-y/-I 不广播），
-        // 但实例化本工作区定义的模块时仍按设计单元索引精确补定义文件重试，
-        // 避免把跨文件引用误报成 Unknown module type；关闭后附带 -y 目录
-        const fileOnly = vscode.workspace.getConfiguration('svtools.lint').get('currentFileOnly', true);
-        const scanDirs = fileOnly ? [] : (await scanWorkspaceSources()).dirs;
-
-        const args = [
-            '-tnull',
-            ...buildCommonArgs({
-                fileName: filePath,
-                standard: config.get('standard'),
-                includePaths: [fileDir, ...resolveConfigPaths(config.get('includePaths'), fileDir), ...scanDirs],
-                libraryPaths: [fileDir, ...resolveConfigPaths(config.get('libraryPaths'), fileDir), ...scanDirs],
-                extraArgs: ['-Y', '.sv', ...config.get('lintArgs', [])]
-            })
-        ];
-
-        const gen = (lintGenerations.get(document.uri.toString()) || 0) + 1;
-        lintGenerations.set(document.uri.toString(), gen);
-
-        const { result } = await compileWithModuleResolution(toolchain, args, [lintTarget], fileDir);
-        if (tempFile) {
-            try { fs.unlinkSync(tempFile); } catch (err) { /* 清理失败可忽略 */ }
-        }
-        if (lintGenerations.get(document.uri.toString()) !== gen) return empty; // 已被更新的 lint 取代
-
-        let raw = `${result.stderr}\n${result.stdout}`;
-        if (tempFile) {
-            // 把 iverilog 输出中的临时文件路径映射回原文件，诊断才能落在正确的编辑器上
-            raw = raw.split(tempFile).join(filePath);
-        }
-        const findings = parseCompilerOutput(raw, fileDir);
-        applyDiagnostics(document, findings);
-        const errorCount = findings.filter(f => f.severity === 'error').length;
-        const summary = {
-            ok: result.code === 0 && errorCount === 0,
-            errorCount,
-            warningCount: findings.length - errorCount
-        };
-        // 触发轨迹写入输出通道，便于确认自动 lint 是否生效
-        channel.appendLine(`[lint] ${path.basename(filePath)}${document.isDirty ? '（缓冲区）' : ''} → ${errorCount} 错误, ${summary.warningCount} 警告 (${result.elapsedMs}ms)`);
-        return summary;
-    }
-
-    let toolchainErrorShown = false;
-    function showToolchainError(message, setting) {
-        if (toolchainErrorShown) return;
-        toolchainErrorShown = true;
-        vscode.window.showErrorMessage(message, '打开设置')
-            .then(choice => {
-                toolchainErrorShown = false;
-                if (choice === '打开设置') {
-                    vscode.commands.executeCommand('workbench.action.openSettings', setting || 'svtools.iverilog.path');
-                }
-            });
-    }
-
-    /**
-     * 停止正在运行的仿真。
-     * @param {string} [reason] 停止原因，写入输出通道
-     */
-    function stopSimulation(reason) {
-        if (!activeSim) return;
-        activeSim.killed = true;
-        activeSim.run.stop();
-        channel.appendLine(reason ? `** 仿真已停止（${reason}）**` : '** 仿真已停止 **');
-        activeSim = null;
-        updateStatusBar();
-    }
-
-    /**
-     * 展开仿真附加源文件 glob（相对工作区根），返回绝对路径列表。
-     * @param {string[]} patterns
-     */
-    async function expandSimFiles(patterns) {
-        const files = [];
-        for (const pattern of patterns || []) {
-            try {
-                const uris = await vscode.workspace.findFiles(pattern, undefined, 500);
-                files.push(...uris.map(u => u.fsPath));
-            } catch (err) {
-                channel.appendLine(`忽略无效的 simFiles 模式 "${pattern}"：${err.message || err}`);
-            }
-        }
-        return [...new Set(files)];
-    }
-
-    /**
-     * 仿真结束后扫描运行目录，找出本次运行新生成的波形文件。
-     * @param {string} dir
-     * @param {number} startedAtMs
-     */
-    function findFreshWaveforms(dir, startedAtMs) {
-        const found = [];
-        let entries;
-        try {
-            entries = fs.readdirSync(dir, { withFileTypes: true });
-        } catch (err) {
-            return found;
-        }
-        for (const entry of entries) {
-            if (!entry.isFile()) continue;
-            if (!WAVEFORM_EXTENSIONS.includes(path.extname(entry.name).toLowerCase())) continue;
-            try {
-                const stat = fs.statSync(path.join(dir, entry.name));
-                if (stat.mtimeMs >= startedAtMs - 2000) found.push(path.join(dir, entry.name));
-            } catch (err) {
-                // 单个文件 stat 失败不影响其余扫描
-            }
-        }
-        return found;
-    }
-
-    /**
-     * 运行 Icarus Verilog 仿真：编译当前文档（+simFiles 附加源文件），成功后执行 vvp 并流式输出。
-     * 已有仿真在运行时先停止再启动新仿真。
-     * @param {vscode.TextDocument} document 仿真入口（通常是 testbench）
-     */
-    async function runSimulation(document) {
-        if (!document || !isVerilogDocument(document) || document.uri.scheme !== 'file') {
-            vscode.window.showWarningMessage('请先保存并在编辑器中打开 Verilog/SystemVerilog 文件再运行仿真。');
-            return;
-        }
-
-        let toolchain;
-        try {
-            toolchain = await resolveToolchain();
-        } catch (err) {
-            showToolchainError(err.message);
-            return;
-        }
-
-        if (activeSim) stopSimulation('被新的仿真运行取代');
-
-        const config = getConfig();
-        const filePath = document.uri.fsPath;
-        const fileDir = path.dirname(filePath);
-        const fileName = path.basename(filePath);
-
-        const workspaceRoot = vscode.workspace.getWorkspaceFolder(document.uri);
-        const outDir = path.join(
-            workspaceRoot ? workspaceRoot.uri.fsPath : path.join(os.tmpdir(), 'svtools-sim'),
-            '.svtools', 'sim'
-        );
-        fs.mkdirSync(outDir, { recursive: true });
-        const vvpFile = path.join(outDir, path.basename(fileName, path.extname(fileName)) + '.vvp');
-
-        channel.show(true);
-        channel.appendLine('');
-        channel.appendLine(`==== Icarus Verilog 仿真：${fileName}（${new Date().toLocaleString()}）====`);
-
-        // ---- 编译 ----
-        const extraFiles = (await expandSimFiles(config.get('simFiles', [])))
-            .filter(f => path.resolve(f) !== path.resolve(filePath));
-        if (document.isDirty) {
-            channel.appendLine('提示：文件存在未保存修改，本次仿真使用磁盘上的内容。');
-        }
-        const compileArgs = [
-            ...buildCommonArgs({
-                fileName: filePath,
-                standard: config.get('standard'),
-                includePaths: [fileDir, ...resolveConfigPaths(config.get('includePaths'), fileDir), ...(await scanWorkspaceSources()).dirs],
-                libraryPaths: [fileDir, ...resolveConfigPaths(config.get('libraryPaths'), fileDir), ...(await scanWorkspaceSources()).dirs],
-                extraArgs: ['-Y', '.sv', ...config.get('lintArgs', [])]
-            })
-        ];
-        const topModule = String(config.get('simTop') || '').trim();
-        if (topModule) compileArgs.push('-s', topModule);
-        compileArgs.push('-o', vvpFile);
-
-        channel.appendLine(`$ ${formatCommandLine(toolchain.iverilog, [...compileArgs, filePath, ...extraFiles])}`);
-        const { result: compile } = await compileWithModuleResolution(toolchain, compileArgs, [filePath, ...extraFiles], fileDir);
-        if (compile.stderr.trim()) channel.append(compile.stderr.endsWith('\n') ? compile.stderr : compile.stderr + '\n');
-
-        if (compile.code !== 0) {
-            const findings = parseCompilerOutput(`${compile.stderr}\n${compile.stdout}`, fileDir);
-            applyDiagnostics(document, findings);
-            channel.appendLine(`** 编译失败（exit ${compile.code}），仿真未运行 **`);
-            if (/Unknown module type|These modules were missing/.test(compile.stderr)
-                && !(config.get('simFiles') || []).length) {
-                channel.appendLine('提示：存在未解析模块。工作区目录已按「文件名=模块名」约定自动搜索；'
-                    + '若模块所在文件名与模块名不同，请确认模块已在工作区内定义，或在 svtools.iverilog.simFiles 配置额外源文件（如 "src/**/*.sv"）。');
-            }
-            return;
-        }
-        applyDiagnostics(document, []);
-        channel.appendLine(`编译完成，输出：${vvpFile}`);
-
-        // ---- 运行 vvp ----
-        const runArgs = ['-n', ...config.get('simArgs', []), vvpFile];
-
-        // Cygwin 构建的 vvp 在 stdout 接管道时是块缓冲：短输出要等进程退出才可见，
-        // 进程被强杀则整个丢失（表现为「仿真无输出」）。stdbuf -oL 强制行缓冲让
-        // $display/$monitor 实时流到输出通道。注意 cygwin exec 会更换 Windows PID，
-        // 停止时不能只 kill 直接子进程（由共享进程执行器清理）。
-        let vvpCmd = toolchain.vvp;
-        let vvpCmdArgs = runArgs;
-        let vvpWrapped = false;
-        if (process.platform === 'win32' && toolchain.cygwinDir) {
-            const stdbuf = path.join(toolchain.cygwinDir, 'stdbuf.exe');
-            if (fs.existsSync(stdbuf)) {
-                vvpCmd = stdbuf;
-                vvpCmdArgs = ['-oL', toolchain.vvp, ...runArgs];
-                vvpWrapped = true;
-            }
-        }
-        channel.appendLine(`$ ${formatCommandLine(vvpCmd, vvpCmdArgs)}`);
-
-        const startedAt = Date.now();
-        const run = startProcess(vvpCmd, vvpCmdArgs, {
-            cwd: fileDir,
-            env: toolchain.env,
-            timeoutMs: Number(config.get('simTimeoutMs') || 0),
-            wrappedProcessName: vvpWrapped ? 'vvp.exe' : undefined,
-            onStdout: text => channel.append(text),
-            onStderr: text => channel.append(text),
-            onTerminationError: error => channel.appendLine('停止仿真清理失败：' + error.message),
-            onTimeout: () => {
-                if (activeSim === sim) stopSimulation('超过仿真超时限制');
-            }
-        });
-        const sim = { run, document, startedAt, killed: false, vvpFile };
-        activeSim = sim;
-        updateStatusBar();
-        const result = await run.completion;
-        if (result.errorMessage) channel.appendLine('vvp 启动失败：' + result.errorMessage);
-
-        const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1);
-        const wasStopped = sim.killed;
-        if (activeSim === sim) {
-            activeSim = null;
-            updateStatusBar();
-        }
-        channel.appendLine(`** 仿真结束：耗时 ${elapsed}s ${wasStopped ? '（手动停止/超时）' : ''}**`);
-
-        // ---- 波形提示 ----
-        const waves = findFreshWaveforms(fileDir, startedAt);
-        if (waves.length > 0) {
-            const vcdFile = waves.find(w => path.extname(w).toLowerCase() === '.vcd');
-            const viewer = String(config.get('waveViewer') || '').trim();
-            const autoOpen = config.get('autoOpenWaveform', true);
-
-            // 内置查看器优先：未配置外部程序且是新 .vcd 时直接打开波形面板
-            if (vcdFile && !viewer && autoOpen) {
-                await waveViewer.openWaveform(vcdFile);
-            }
-
-            const rel = path.basename(waves[0]);
-            const buttons = [];
-            if (vcdFile && !viewer && vcdFile !== waves[0]) buttons.push('打开波形');
-            if (viewer) buttons.push('外部查看器打开');
-            buttons.push('在资源管理器中显示');
-            vscode.window.showInformationMessage(`仿真波形已生成：${rel}`, ...buttons).then(choice => {
-                if (choice === '打开波形' && vcdFile) {
-                    waveViewer.openWaveform(vcdFile);
-                } else if (choice === '外部查看器打开' && viewer) {
-                    const target = vcdFile || waves[0];
-                    const view = spawn(viewer, [target], { detached: true, stdio: 'ignore', windowsHide: true });
-                    view.on('error', err => vscode.window.showErrorMessage(`启动波形查看器失败：${err.message}`));
-                    view.unref();
-                } else if (choice === '在资源管理器中显示') {
-                    vscode.commands.executeCommand('revealFileInOs', vscode.Uri.file(waves[0]));
-                }
-            });
-        }
-    }
-
-    // ---- 状态栏 ----
-    const simStatusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 0);
-    simStatusBar.command = 'svtools.iverilog.simulate';
-    context.subscriptions.push(simStatusBar);
-
-    // lint 引擎切换按钮（状态栏右侧）。xelab 详细化按钮在编辑器工具栏
-    // （标签页右上角，package.json editor/title，仅 xvlog 引擎显示）
-    const engineStatusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 90);
-    engineStatusBar.command = 'svtools.lint.selectEngine';
-    context.subscriptions.push(engineStatusBar);
-
-    function currentLintEngine() {
-        return vscode.workspace.getConfiguration('svtools.lint').get('engine', 'iverilog');
-    }
-
-    function updateStatusBar() {
-        const editor = vscode.window.activeTextEditor;
-        const verilogOpen = !!(editor && isVerilogDocument(editor.document));
-
-        // context key 让 editor/title 停止按钮跟随仿真状态显隐
-        vscode.commands.executeCommand('setContext', 'svtools.simRunning', !!activeSim);
-
-        if (!verilogOpen) {
-            simStatusBar.hide();
-        } else if (activeSim) {
-            // 运行中点击 = 停止（旧版点击会重新运行，卡死的仿真看起来「停不掉」）
-            simStatusBar.command = 'svtools.iverilog.stopSimulation';
-            simStatusBar.text = '$(debug-stop) 停止仿真';
-            simStatusBar.tooltip = 'Icarus Verilog 仿真正在运行 — 点击停止';
-            simStatusBar.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
-            simStatusBar.show();
-        } else {
-            simStatusBar.command = 'svtools.iverilog.simulate';
-            simStatusBar.text = '$(play) iverilog 仿真';
-            simStatusBar.tooltip = '运行 Icarus Verilog 仿真（编译 + vvp）';
-            simStatusBar.backgroundColor = undefined;
-            simStatusBar.show();
-        }
-
-        if (verilogOpen) {
-            const engine = currentLintEngine();
-            engineStatusBar.text = `$(zap) ${engine}`;
-            engineStatusBar.tooltip = `lint 引擎：${engine} — 点击切换 iverilog / xvlog`;
-            engineStatusBar.show();
-        } else {
-            engineStatusBar.hide();
-        }
-    }
-
-    // ---- 事件与命令接线 ----
-    context.subscriptions.push(
-        vscode.workspace.onDidOpenTextDocument(document => {
-            if (getConfig().get('lintOnOpen')) lintDocument(document);
-        }),
-        vscode.workspace.onDidChangeTextDocument(event => {
-            if (!getConfig().get('lintOnChange')) return;
-            if (event.contentChanges.length === 0) return;
-            const document = event.document;
-            if (!isVerilogDocument(document) || document.uri.scheme !== 'file') return;
-            // 防抖：停止输入一段时间后才触发，避免每个按键起一个 iverilog 进程
-            const key = document.uri.toString();
-            const pending = lintDebounceTimers.get(key);
-            if (pending) clearTimeout(pending);
-            const delay = Math.max(100, Number(getConfig().get('lintDebounceMs')) || 800);
-            lintDebounceTimers.set(key, setTimeout(() => {
-                lintDebounceTimers.delete(key);
-                lintDocument(document);
-            }, delay));
-        }),
-        vscode.workspace.onDidSaveTextDocument(document => {
-            if (getConfig().get('lintOnSave')) lintDocument(document);
-        }),
-        vscode.workspace.onDidCloseTextDocument(document => {
-            diagnostics.delete(document.uri);
-            lintGenerations.delete(document.uri.toString());
-            const pending = lintDebounceTimers.get(document.uri.toString());
-            if (pending) {
-                clearTimeout(pending);
-                lintDebounceTimers.delete(document.uri.toString());
-            }
-        }),
-        vscode.workspace.onDidChangeConfiguration(event => {
-            if (!event.affectsConfiguration('svtools.iverilog')
-                && !event.affectsConfiguration('svtools.lint')
-                && !event.affectsConfiguration('svtools.vivado')) return;
-            // 工具路径类配置变更后强制重新探测
-            if (event.affectsConfiguration('svtools.iverilog.path')
-                || event.affectsConfiguration('svtools.iverilog.cygwinPath')) {
-                cachedToolchain = null;
-                toolchainFailure = null;
-            }
-            if (event.affectsConfiguration('svtools.vivado.path')) {
-                resetXvlogCache();
-            }
-            // 引擎切换等配置变化后刷新状态栏按钮
-            updateStatusBar();
-            // 重新检查所有打开的 Verilog 文档
-            for (const doc of vscode.workspace.textDocuments) {
-                lintDocument(doc);
-            }
-        }),
-        vscode.window.onDidChangeActiveTextEditor(() => updateStatusBar()),
-
-        // 文件增删/重命名后使工作区扫描缓存失效，新建的模块文件能立即被 lint/仿真解析
-        vscode.workspace.onDidCreateFiles(invalidateWorkspaceSources),
-        vscode.workspace.onDidDeleteFiles(invalidateWorkspaceSources),
-        vscode.workspace.onDidRenameFiles(invalidateWorkspaceSources),
-
-        vscode.commands.registerCommand('svtools.lint.selectEngine', async () => {
-            const cur = currentLintEngine();
-            const pick = await vscode.window.showQuickPick([
-                { label: 'iverilog', description: 'Icarus Verilog — 快速语法检查（-tnull）', value: 'iverilog' },
-                { label: 'xvlog', description: 'Vivado — 与 xsim 编译阶段一致的诊断，可配合 xelab 按钮', value: 'xvlog' }
-            ], { placeHolder: `当前 lint 引擎：${cur} — 选择要切换的引擎` });
-            if (!pick || pick.value === cur) return;
-            const target = vscode.workspace.workspaceFolders
-                ? vscode.ConfigurationTarget.Workspace : vscode.ConfigurationTarget.Global;
-            await vscode.workspace.getConfiguration('svtools.lint').update('engine', pick.value, target);
-            vscode.window.setStatusBarMessage(`lint 引擎已切换：${pick.value}`, 3000);
-            updateStatusBar();
-        }),
-        vscode.commands.registerCommand('svtools.xvlog.elaborate', async () => {
-            const editor = vscode.window.activeTextEditor;
-            if (!editor || !isVerilogDocument(editor.document) || editor.document.uri.scheme !== 'file') {
-                vscode.window.showWarningMessage('请先在编辑器中打开 Verilog/SystemVerilog 文件。');
-                return;
-            }
-            if (currentLintEngine() !== 'xvlog') {
-                vscode.window.showWarningMessage('xelab 详细化检查需要 lint 引擎为 xvlog — 点击状态栏引擎按钮切换。');
-                return;
-            }
-            const gen = (lintGenerations.get(editor.document.uri.toString()) || 0) + 1;
-            lintGenerations.set(editor.document.uri.toString(), gen);
-            const summary = await elaborateWithXvlog(editor.document, {
-                vscode, channel, applyDiagnostics, isVerilogDocument, scanWorkspaceSources,
-                lintGenerations, gen,
-                showToolchainError: (msg, setting) => showToolchainError(msg, setting)
-            });
-            vscode.window.setStatusBarMessage(
-                summary.errorCount
-                    ? `xelab：发现 ${summary.errorCount} 个错误，详见 Problems 面板`
-                    : 'xelab：详细化检查未发现问题',
-                5000);
-            return summary;
-        }),
-        vscode.commands.registerCommand('svtools.iverilog.lint', async () => {
-            const editor = vscode.window.activeTextEditor;
-            if (!editor) {
-                vscode.window.showWarningMessage('没有打开的编辑器。');
-                return { ok: false, errorCount: 0, warningCount: 0 };
-            }
-            // 手动触发时清除缓存的探测失败，允许用户修复环境后立即恢复
-            if (toolchainFailure) {
-                toolchainFailure = null;
-                channel.appendLine('[lint] 手动触发：重新探测工具链');
-            }
-            const summary = await lintDocument(editor.document);
-            let message;
-            if (!summary.ok) {
-                message = `iverilog: 发现 ${summary.errorCount} 个错误，详见 Problems 面板`;
-            } else if (summary.warningCount > 0) {
-                message = `iverilog: 通过，${summary.warningCount} 个警告`;
-            } else {
-                message = 'iverilog: 未发现问题';
-            }
-            vscode.window.setStatusBarMessage(message, 4000);
-            return summary;
-        }),
-        vscode.commands.registerCommand('svtools.iverilog.simulate', () => {
-            const editor = vscode.window.activeTextEditor;
-            return runSimulation(editor ? editor.document : null);
-        }),
-        vscode.commands.registerCommand('svtools.iverilog.stopSimulation', () => {
-            if (!activeSim) {
-                vscode.window.setStatusBarMessage('当前没有正在运行的仿真', 3000);
-                return;
-            }
-            stopSimulation();
-        })
-    );
-
-    // 激活由打开 .v/.sv 文件触发，该文件不会再来 onDidOpenTextDocument 事件，这里补跑 lint
-    if (getConfig().get('lintOnOpen')) {
-        for (const doc of vscode.workspace.textDocuments) {
-            lintDocument(doc);
-        }
-    }
-
-    updateStatusBar();
+function activateIverilog(context, deps = {}) {
+    return require('./iverilog-controller').activateIverilog(context, { ...deps,
+        buildCommonArgs, compileWithModuleResolution,
+        resolveToolchain: deps.resolveToolchain || (task => resolveToolchain(false, task, deps.vscode)),
+        resetToolchain() { cachedToolchain = null; toolchainFailure = null; },
+        resetToolchainFailure() { toolchainFailure = null; }
+    });
 }
 
 module.exports = {

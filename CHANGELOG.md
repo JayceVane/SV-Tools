@@ -2,6 +2,14 @@
 
 All notable changes to the SystemVerilog VSCode Extension will be documented in this file.
 
+## [4.0.0-alpha4] — 工具链任务可靠性与有界日志
+
+**变更内容：** Icarus、xvlog/xelab 与 Vivado batch 统一任务成败：依赖错误、非零退出、启动失败、超时和不完整诊断均使检查失败。每次任务使用独立产物目录，停止覆盖准备、探测、编译和运行；文档变化及替换请求取消过期任务，按触发文档合并依赖诊断。
+
+**为什么：** 原 xvlog 仅用当前文件错误数判断通过，准备失败也返回空的成功结果；共享 .prj/xsim.dir 和临时文件会让并发任务相互覆盖。完整 stdout/stderr 累积以及逐 chunk 刷新通道也使长时间仿真占用增长。现在进程、日志、任务、诊断与编辑器接线各自负责，流式捕获错误和依赖，完整日志写盘并带背压，显示和内存摘要有界。
+
+**影响面：** 编译或运行失败不会自动打开残留/部分波形；成功时按文件元数据实际变化识别产物。保留仿真 cwd，使相对 `$readmemh`/`$dumpfile` 继续工作；未保存文档的仿真仍明确使用磁盘内容。xvlog 增量缓存限同次任务，跨任务复用暂取消以确保隔离。没有新增依赖；真实 Icarus、xvlog/xelab、Vivado 验收通过。操作、验证与完整文件清单见 `docs/TOOLCHAINS.md`、`docs/V4_ALPHA4.md`。
+
 ## [4.0.0-alpha3] — VCD 存储器查看
 
 **变更内容：** 新增存储器视图，把 `mem[addr]` 字数组与 `mem[row][col]` 展开记录按地址显示，共享波形的 A/B 游标。支持 Hex/Bin/Dec/SDec、地址定位、分页、变化标记、单元添加波形与状态恢复。
