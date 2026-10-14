@@ -2,60 +2,22 @@
 
 All notable changes to the SystemVerilog VSCode Extension will be documented in this file.
 
-## [Unreleased] (3.5.0 线)
-
-### Fixed
-- **波形查看器总线值徽章配色看不清**（fix/wave-text-contrast）
-
-  **变更内容：** 总线值徽章（`0x78A1` 等）文字不再取 `--busSoft` 主题变量，改为固定浅橘 `#ffe0b2`；徽章底加深为 `rgba(22,24,27,.92)`。
-
-  **为什么：** `busSoft` 是为总线带柔和填充设计的低饱和色——暗色主题 `#ffe0b2` 勉强可读，亮色主题是深棕 `#8d6e63`，深棕字叠在硬编码深灰底上对比度仅约 2:1（用户截图实测看不清）。文字与填充对对比度要求相反，徽章文字不随主题变即可在明暗两主题下均 ≥7:1。
-
-  **影响面：** 仅波形查看器 canvas 上总线段值徽章的绘制色；解析/交互逻辑不变；新增 test/render-vcd-badge.js 渲染断言（新底色存在、不再用 busSoft 当文字色）+ 浏览器明暗主题实渲染人工确认；golden 36/36。
-
-- **always 块内赋值分号贴合表达式**（fix/proc-assign-semicolon）
-
-  **变更内容：** 移除 always 块过程赋值的同缩进组分号悬挂对齐（`i_data    ;` → `i_data;`）；赋值运算符（`<=`/`=`）列对齐保留；statement 捕获 trim 尾空格，输入残留的手工空格（`addr ;`）一并清理。
-
-  **为什么：** 分号悬挂把短语句的分号拉到组内最长行对齐（用户 sfifo：`mem[wr_ptr] <= i_data    ;` 多 4 空格）——语句不是表格，分号应贴合表达式；声明区的表格化悬挂（用户此前认可的 wire/localparam 形态）不受影响。
-
-  **影响面：** always/initial 块内赋值行；ex1/ex1.1/ex13 golden 基线随形态更新；test_if_block_without_attribute 改走真实管线并断言分号贴合 + 运算符对齐；golden 36/36、cargo 70/70、宿主 14/14。
-
-- **声明维度前不再莫名多空格**（fix/decl-array-gap）
-
-  **变更内容：** `align_decl` 新增 `name_arr` 列宽——带数组维度的行（`mirror_q [$]`、`mem [0:255]`）名字只对齐到「组内带维度行」的名宽（+1 保底空格），不再被无维度行（`model_full`）的名字列宽推远。
-
-  **为什么：** 原实现全组共用 name 列宽，无维度行的填充是为 init/分号列服务，混组时把带维度行的 `[$]`/`[0:255]` 推离名字（用户 scoreboard：`mirror_q  [$]` 多 2 空格）；顺带消除了最宽名行与维度粘连的旧形态（`assoc[string]` → `assoc [string]`）。
-
-  **影响面：** 声明区带/无数组维度混组的文件；全组多行带维度时维度列对齐保持；ex10/ex11 golden 基线随形态更新、新增 ex12 混组用例（golden 36/36、cargo 70/70、宿主 14/14）。
-
-- **例化声明区参数不再输出 "localparam parameter"**（fix/inst-param-decl-dup）
-
-  **变更内容：** `parse_param` 正则加 `^\s*` 锚，并在 ptype 计算后剥离 parameter/localparam 关键字残留。
-
-  **为什么：** `normalize_for_parsing` 把参数表压成单行后 `split(',')` 各片段带前导空格；原正则无锚点，最左匹配从空格处起、prefix 可选组匹配不上，`parameter` 关键字整个落进 type 捕获组——例化生成输出 `localparam parameter DATA_WIDTH = 8;`（用户 05_corelib sfifo.sv 实例）。
-
-  **影响面：** 模块例化/Testbench 生成的 Signal declarations 区；带类型参数（`parameter integer W`）输出 `localparam integer W = 8` 不变；golden 34/34、cargo 70/70、宿主 14/14。
-
-- **声明对齐按空行分组**（fix/decl-align-blank-group）
-
-  **变更内容：** `align_decl` 的列宽分组 key 从 (缩进, 属性前缀) 扩展为 (缩进, 空行段号, 属性前缀)——空行切断声明对齐组，各组独立计算类型列/位宽补位/名字列/分号悬挂的宽度。
-
-  **为什么：** 原实现同一缩进下所有声明（无论是否被空行分隔）共用一组列宽，用户的分组排版语义被无视：`localparam` 组的 `=` 列、`reg` 组的位宽补位（`[  ADDR_WIDTH:0]` 被别组 `DATA_WIDTH-1:0` 撑宽）、分号悬挂列全部跨组拉齐（用户 sfifo 实例：`wr_ptr` 行的分号被 `mem` 行的数组维度推到 40+ 列外）。
-
-  **影响面：** 仅声明区含空行分组的文件输出变化（各组更紧凑）；无空行的连续声明组行为不变；幂等性保持（golden 34/34、cargo 69/69、adder/sfifo 真文件三轮稳定）。
-
-- **块内 assign 组间空行保留**（fix/format-assign-blank-idempotent）
-
-  **变更内容：** 空行规则 §6.1 给「两侧都是 assign」的块内空行开保留例外（折叠至 max）；非 assign 语句间照删。
-
-  **为什么：** begin/end 块内空行全删发生在对齐（按空行分组）之后，两轮格式化的分组视图漂移导致非幂等（用户 05_corelib adder.sv 等号列来回变化）；且组边界是排版语义不应删除。
-
-  **影响面：** begin/end 块内 assign 组之间的空行保留；always 过程赋值间、混合语句间行为不变。
+## [3.5.0] - 2026-10-14
 
 ### Added
-- **Vivado 工程管理侧边栏**（活动栏 $(chip)）：.xpr 解析 + 按模块实例依赖组织的文件树 + 右键文件管理（加入/移出/top 设置/src↔sim 移动）+ top 级快捷操作区（xelab/综合/综合报告/布局布线/布局布线报告/时序报告/Bitstream）+ 报告独立页面展示（对齐 Vivado 观感，明暗主题跟随）；写操作按 .xpr 重解析事实校验，杜绝 Vivado 假成功；波形图/器件选型页明暗主题适配
-- **OOC 综合读序修复**：package 文件前置（import 拓扑排序），依赖文件索引强制刷新
+- **Vivado 工程管理侧边栏**（活动栏 $(chip)）：解析 .xpr 按**模块实例依赖**组织文件树（设计源/仿真源/未加入工程三类根节点，.xpr 变更 800ms 防抖刷新）；右键文件管理——加入工程（选目标 fileset）/移出工程/设置综合或仿真 top/sources↔sim 移动；**写操作跑完重解析 .xpr 按事实验证**（Vivado batch Tcl 出错也返回 0，只看退出码会假成功，用户曾遇「移出显示成功但仍在树中」）；top 级快捷操作区——xelab 详细化/工程综合/综合报告/布局布线/布局布线报告/时序报告/生成 Bitstream；报告类操作在**独立报告页**展示（行级分类着色，表头/违例识别覆盖 Vivado 两种表格形态，观感对齐 Vivado，明暗主题跟随）
+- **OOC 综合读序修复**：`synth_design -mode out_of_context` 前的 `read_verilog` 按「package 文件前置 + import 语句拓扑排序」重排（Vivado 逐文件即时编译，importer 先读必报 Synth 8-36 'pkg' is not declared——与 xvlog prj 顺序、iverilog 单遍同一约束的第三个漏网点）；综合前强制刷新工作区设计单元索引（重操作不吃 10s 缓存）
+- 波形查看器、器件选型页**明暗主题适配**（PAL 调色板读 CSS 变量 + 主题热切换重绘）
+
+### Fixed
+- **格式化五连修**（对齐/幂等形态，全部真机语料验证）：
+  - **声明对齐按空行分组**：空行切断声明对齐组，各组独立计算列宽（原实现同缩进跨空行共用列宽，`localparam` 组的 `=` 列、`reg` 组的位宽补位、分号悬挂全被别组撑宽——用户 sfifo 的 `wr_ptr` 分号被拉到 40+ 列外）
+  - **声明维度前不再莫名多空格**：带数组维度的行（`mirror_q [$]`、`mem [0:255]`）名字只对齐到组内带维度行的名宽，不被无维度行的名字列宽推远
+  - **例化声明区不再输出 `localparam parameter` 重复关键字**（`parse_param` 正则加锚点 + ptype 剥离关键字残留；带类型参数 `localparam integer W` 不受影响）
+  - **always 块内赋值分号贴合表达式**：移除过程赋值的分号悬挂对齐（`i_data    ;` → `i_data;`），`<=`/`=` 运算符列对齐保留；声明区的表格化悬挂不受影响
+  - **begin/end 块内 assign 组间空行保留**：空行删除发生在对齐（按空行分组）之后，两轮格式化分组视图漂移导致非幂等（adder.sv 等号列来回变化）；两侧都是 assign 的空行保留（折叠至上限），其余照删
+- **波形查看器总线值徽章配色看不清**：徽章文字原取 `--busSoft`（总线带柔和填充色），亮色主题下是深棕 `#8d6e63` 叠深灰底对比度仅约 2:1；文字固定浅橘 `#ffe0b2`、底加深，明暗主题下均 ≥7:1（新增 test/render-vcd-badge.js 渲染断言）
+- golden 用例扩充至 18 个（新增 ex12 声明维度混组），门禁 golden 36/36、cargo 70/70、宿主 14/14
 
 ## [3.4.8] - 2026-10-09
 
