@@ -63,13 +63,15 @@ Windows Node 24.17.0，生成后热缓存，64 unique signals + alias（clock/25
 ## 环境与开发边界
 
 本机工具路径及命令见已忽略 ENVIRONMENT.md；原 `D:\Workspace\FPGA\02_svtools`
-仍在 feat/3.5，保留原有 M src-rust/index.d.ts。全部开发写入本 worktree。
-alpha1 本地提交869e4d1；alpha2 提交33ff207；alpha3 提交1cc5733；alpha4 提交7593816；alpha5 以 git log -1 为准。
+继续由用户维护 3.x，分支和未提交状态以实时 Git 状态为准，不得复制或覆盖。全部开发写入本 worktree。
+alpha1 本地提交869e4d1；alpha2 提交33ff207；alpha3 提交1cc5733；alpha4 提交7593816；alpha5 提交90e5168；alpha6 提交35770d3。
 测试产生的临时浏览器服务器在交付前关闭，不作为运行依赖。
 
 ## 下一步
 
-1. 安装 alpha5 VSIX 并重载窗口，确认用户实际工程/IP/多文件集流程和波形交互。
+用户于 2026-10-14 确认：先完善当前版本，再增加新功能。Vivado IP 管理已写入 `docs/ROADMAP.md`，目前延期、未启动；待用户决定开始新功能后再实现。
+
+1. 以 alpha6 VSIX 验证用户实际工程、多文件集、补全和波形交互，优先修复实际使用反馈。
 2. 用实际100–500MB RTL波形对照仿真/GTKWave，评估更多信号数和事件密度。
 3. 下一轮统一 CompilePlan：源文件、include、宏、top、工作目录和引擎能力，避免 lint/仿真参数漂移。
 4. 随后实现内容驱动的增量源码索引与有配置键的只读缓存；不要恢复共享可写 xsim.dir。
