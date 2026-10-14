@@ -15,8 +15,6 @@
  */
 // TCL 语法转义与各类 Vivado 脚本生成（纯函数，不依赖 vscode）。
 
-const path = require('path');
-
 /** TCL 列表元素转义：路径统一转 / 后按需加花括号（braced word 内 \ 为字面量，不安全故先消除）。 */
 function tclQuote(value) {
     const s = String(value).replace(/\\/g, '/');
@@ -83,9 +81,29 @@ function firstModuleName(text) {
     return m ? m[1] : '';
 }
 
-function buildAddFilesScript(xprPath, file, fileset, isSv) {
+/**
+ * 工程写操作脚本公共骨架：open_project → body（catch 包裹）→ close_project。
+ * - 任何 Tcl 错误 → 打 SVTOOLS_TCL_ERROR 并 exit 1（Vivado batch 对脚本内错误
+ *   不可靠，不能只靠退出码判断成败）
+ * - 显式 close_project：确保工程态修改写回 .xpr（不等退出时机）
+ */
+function wrapProjectScript(xprPath, bodyLines) {
     return [
-        'open_project ' + tclQuote(xprPath),
+        'if {[catch {',
+        '    open_project ' + tclQuote(xprPath),
+        ...bodyLines.map(l => '    ' + l),
+        '} errMsg]} {',
+        '    puts "SVTOOLS_TCL_ERROR $errMsg"',
+        '    catch { close_project }',
+        '    exit 1',
+        '}',
+        'close_project',
+        'puts "SVTOOLS_DONE"'
+    ].join('\n') + '\n';
+}
+
+function buildAddFilesScript(xprPath, file, fileset, isSv) {
+    return wrapProjectScript(xprPath, [
         'set fs [get_filesets ' + tclQuote(fileset) + ']',
         'set f ' + tclQuote(file),
         'if {[llength [get_files -quiet -of $fs $f]] == 0} {',
@@ -95,27 +113,107 @@ function buildAddFilesScript(xprPath, file, fileset, isSv) {
         '    puts "SVTOOLS_ALREADY_IN $f"',
         '}',
         isSv ? 'catch { set_property file_type SystemVerilog [get_files -of $fs $f] }' : '',
-        'update_compile_order -fileset $fs',
-        'puts "SVTOOLS_DONE"'
-    ].filter(Boolean).join('\n') + '\n';
+        'update_compile_order -fileset $fs'
+    ].filter(Boolean));
 }
 
-/** 生成"把文件移出工程（按文件名在指定文件集内匹配）"的增量 TCL。 */
+/**
+ * 生成"把文件移出工程"的增量 TCL。按规范化全路径精确匹配（-nocase），
+ * 不用 basename 后缀——后缀会误删同名文件，也会在路径形态不一致时静默空转
+ * （removed=0 退出码 0，插件侧曾据此误报成功）。
+ */
 function buildRemoveFilesScript(xprPath, file, fileset) {
-    const base = path.basename(String(file));
-    return [
-        'open_project ' + tclQuote(xprPath),
+    return wrapProjectScript(xprPath, [
         'set fs [get_filesets ' + tclQuote(fileset) + ']',
+        'set target [file normalize ' + tclQuote(file) + ']',
         'set removed 0',
         'foreach f [get_files -quiet -of $fs] {',
-        '    if {[string match -nocase *' + base.replace(/[\\{}$"]/g, '') + ' $f]} {',
+        '    if {[string equal -nocase [file normalize $f] $target]} {',
         '        remove_files $f',
         '        set removed 1',
         '    }',
         '}',
-        'puts [expr {$removed ? "SVTOOLS_REMOVED" : "SVTOOLS_NOT_IN_PRJ"}]',
+        'puts [expr {$removed ? "SVTOOLS_REMOVED" : "SVTOOLS_NOT_IN_PRJ"}]'
+    ]);
+}
+
+/**
+ * 生成"设置文件集顶层"TCL（sources_1 → 综合顶层；sim_1 → 仿真顶层）。
+ * @param {{xprPath:string, fileset:string, top:string}} o
+ */
+function buildSetTopScript(o) {
+    return wrapProjectScript(o.xprPath, [
+        'set_property top ' + tclQuote(o.top) + ' [get_filesets ' + tclQuote(o.fileset) + ']',
+        'update_compile_order -fileset ' + tclQuote(o.fileset),
+        'puts "SVTOOLS_TOP_SET ' + o.top + '"'
+    ]);
+}
+
+/**
+ * 生成"文件在文件集间移动"TCL（精确路径移除 + add + 保持 .sv 的 file_type）。
+ * @param {{xprPath:string, file:string, from:string, to:string, isSv:boolean}} o
+ */
+function buildMoveFileScript(o) {
+    return wrapProjectScript(o.xprPath, [
+        'set target [file normalize ' + tclQuote(o.file) + ']',
+        'foreach x [get_files -quiet -of [get_filesets ' + tclQuote(o.from) + ']] {',
+        '    if {[string equal -nocase [file normalize $x] $target]} { remove_files $x }',
+        '}',
+        'set d [get_filesets ' + tclQuote(o.to) + ']',
+        'set f ' + tclQuote(o.file),
+        'if {[llength [get_files -quiet -of $d $f]] == 0} { add_files -fileset $d $f }',
+        o.isSv ? 'catch { set_property file_type SystemVerilog [get_files -of $d $f] }' : '',
+        'update_compile_order -fileset ' + tclQuote(o.to),
+        'puts "SVTOOLS_MOVED $f"'
+    ].filter(Boolean));
+}
+
+/**
+ * 生成"综合 / 布局布线"TCL：launch_runs（impl 自动级联 synth）+ wait_on_run，
+ * 结束打印 run 的 STATUS/PROGRESS 供插件判定成败。
+ * @param {{xprPath:string, run:'synth_1'|'impl_1', toStep?:string, jobs?:number}} o
+ */
+function buildLaunchRunScript(o) {
+    const step = o.toStep ? ' -to_step ' + o.toStep : '';
+    return [
+        'open_project ' + tclQuote(o.xprPath),
+        'update_compile_order -fileset sources_1',
+        'launch_runs ' + o.run + step + ' -jobs ' + (o.jobs || 4),
+        'wait_on_run ' + o.run,
+        'set r [get_runs ' + o.run + ']',
+        'puts "SVTOOLS_RUN_STATUS [get_property STATUS $r] [get_property PROGRESS $r]"',
         'puts "SVTOOLS_DONE"'
     ].join('\n') + '\n';
+}
+
+/**
+ * 生成"打开已完成的 run 并输出报告"TCL。synth 报告含分层资源 + 逻辑级数；
+ * impl 报告含时序汇总 + 资源。run 未完成时 open_run 报错（插件提示先跑）。
+ * @param {{xprPath:string, run:'synth_1'|'impl_1', outDir:string, reports?:Array<'utilization'|'logic_levels'|'timing_summary'>}} o
+ * reports 缺省 = 该 run 全套；传子集则只生成所选报告（快捷区拆分入口用）。
+ */
+function buildRunReportsScript(o) {
+    const isSynth = o.run === 'synth_1';
+    const kinds = o.reports || (isSynth ? ['utilization', 'logic_levels'] : ['utilization', 'timing_summary']);
+    const L = [
+        'open_project ' + tclQuote(o.xprPath),
+        'set outDir ' + tclQuote(o.outDir),
+        'file mkdir $outDir',
+        'open_run ' + o.run + (isSynth ? ' -name netlist_1' : ' -name impl_1')
+    ];
+    for (const k of kinds) {
+        if (k === 'utilization') {
+            // 与 Vivado GUI 对齐：synth/impl 打开设计后的 Utilization 视图都是
+            // 分层表（synthesized/implemented design 默认 hierarchical 展示）
+            L.push('report_utilization -hierarchical -file $outDir/' + (isSynth ? 'synth_utilization.rpt' : 'impl_utilization.rpt'));
+        } else if (k === 'logic_levels') {
+            L.push('report_design_analysis -logic_level_distribution -file $outDir/synth_logic_levels.rpt');
+        } else if (k === 'timing_summary') {
+            L.push('report_timing_summary -file $outDir/timing_summary.rpt');
+        }
+    }
+    L.push('puts "SVTOOLS_REPORTS_DONE"', 'puts "SVTOOLS_DONE"');
+    return L.join('\n') + '\n';
 }
 
 /**
@@ -232,8 +330,9 @@ function parseLogicLevelSummary(rptText) {
 }
 
 module.exports = {
-    tclQuote, tclList,
+    tclQuote, tclList, wrapProjectScript,
     buildCreateProjectScript, buildAddFilesScript, buildRemoveFilesScript, buildSimulateScript,
+    buildSetTopScript, buildMoveFileScript, buildLaunchRunScript, buildRunReportsScript,
     buildOocReportsScript, parseUtilHierSummary, parseLogicLevelSummary,
     extractVivadoIssues, firstModuleName
 };

@@ -465,8 +465,15 @@ fn flush_gap(
     }
 
     // 块内（NoBlank 上下文 / 括号花括号续行）：删除所有空行（spec §6.1）。
-    // 保持模式下保留（仅折叠）
+    // 例外：连续 assign 组之间的空行保留（折叠至 max）——组边界是用户的
+    // 分组排版语义，且删除会让对齐分组在两轮格式化间漂移（轮 1 按有空行
+    // 的视图分组、轮 2 无空行重新分组 → 非幂等）。保持模式下保留（仅折叠）
     if compact && a.in_noblank() {
+        if a.first_word == "assign" && infos[b_idx].first_word == "assign" {
+            for l in blanks.iter().take(run.min(max)) {
+                out.push((*l).to_string());
+            }
+        }
         return;
     }
 
@@ -653,5 +660,15 @@ mod tests {
         let out = norm(input);
         assert!(out.contains("end\n    endgenerate"), "end 与 endgenerate 之间被插空行: {}", out);
         assert!(out.contains("endgenerate\n\n    assign y"), "endgenerate 与下一成员的分隔缺失: {}", out);
+    }
+
+    #[test]
+    fn test_block_assign_group_blank_kept() {
+        // begin/end 块内连续 assign 组之间的空行保留（对齐组边界是排版语义；
+        // 删除会让对齐分组在两轮格式化间漂移——非幂等）。非 assign 语句间仍删。
+        let input = "module m;\n    always @(*) begin\n        assign a = x;\n        assign bbbb = y;\n\n        assign cc = z;\n\n        b <= y;\n    end\nendmodule\n";
+        let out = norm(input);
+        assert!(out.contains("assign bbbb = y;\n\n        assign cc"), "assign 组间空行被删: {}", out);
+        assert!(out.contains("assign cc = z;\n        b <= y;"), "非 assign 语句间空行应删除: {}", out);
     }
 }

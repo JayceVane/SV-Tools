@@ -2,6 +2,23 @@
 
 All notable changes to the SystemVerilog VSCode Extension will be documented in this file.
 
+## [3.5.0] - 2026-10-14
+
+### Added
+- **Vivado 工程管理侧边栏**（活动栏 $(chip)）：解析 .xpr 按**模块实例依赖**组织文件树（设计源/仿真源/未加入工程三类根节点，.xpr 变更 800ms 防抖刷新）；右键文件管理——加入工程（选目标 fileset）/移出工程/设置综合或仿真 top/sources↔sim 移动；**写操作跑完重解析 .xpr 按事实验证**（Vivado batch Tcl 出错也返回 0，只看退出码会假成功，用户曾遇「移出显示成功但仍在树中」）；top 级快捷操作区——xelab 详细化/工程综合/综合报告/布局布线/布局布线报告/时序报告/生成 Bitstream；报告类操作在**独立报告页**展示（行级分类着色，表头/违例识别覆盖 Vivado 两种表格形态，观感对齐 Vivado，明暗主题跟随）
+- **OOC 综合读序修复**：`synth_design -mode out_of_context` 前的 `read_verilog` 按「package 文件前置 + import 语句拓扑排序」重排（Vivado 逐文件即时编译，importer 先读必报 Synth 8-36 'pkg' is not declared——与 xvlog prj 顺序、iverilog 单遍同一约束的第三个漏网点）；综合前强制刷新工作区设计单元索引（重操作不吃 10s 缓存）
+- 波形查看器、器件选型页**明暗主题适配**（PAL 调色板读 CSS 变量 + 主题热切换重绘）
+
+### Fixed
+- **格式化五连修**（对齐/幂等形态，全部真机语料验证）：
+  - **声明对齐按空行分组**：空行切断声明对齐组，各组独立计算列宽（原实现同缩进跨空行共用列宽，`localparam` 组的 `=` 列、`reg` 组的位宽补位、分号悬挂全被别组撑宽——用户 sfifo 的 `wr_ptr` 分号被拉到 40+ 列外）
+  - **声明维度前不再莫名多空格**：带数组维度的行（`mirror_q [$]`、`mem [0:255]`）名字只对齐到组内带维度行的名宽，不被无维度行的名字列宽推远
+  - **例化声明区不再输出 `localparam parameter` 重复关键字**（`parse_param` 正则加锚点 + ptype 剥离关键字残留；带类型参数 `localparam integer W` 不受影响）
+  - **always 块内赋值分号贴合表达式**：移除过程赋值的分号悬挂对齐（`i_data    ;` → `i_data;`），`<=`/`=` 运算符列对齐保留；声明区的表格化悬挂不受影响
+  - **begin/end 块内 assign 组间空行保留**：空行删除发生在对齐（按空行分组）之后，两轮格式化分组视图漂移导致非幂等（adder.sv 等号列来回变化）；两侧都是 assign 的空行保留（折叠至上限），其余照删
+- **波形查看器总线值徽章配色看不清**：徽章文字原取 `--busSoft`（总线带柔和填充色），亮色主题下是深棕 `#8d6e63` 叠深灰底对比度仅约 2:1；文字固定浅橘 `#ffe0b2`、底加深，明暗主题下均 ≥7:1（新增 test/render-vcd-badge.js 渲染断言）
+- golden 用例扩充至 18 个（新增 ex12 声明维度混组），门禁 golden 36/36、cargo 70/70、宿主 14/14
+
 ## [3.4.8] - 2026-10-09
 
 ### Added

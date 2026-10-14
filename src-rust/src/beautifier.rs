@@ -1509,9 +1509,8 @@ end"#;
     #[test]
     fn test_if_block_without_attribute() {
         // Test case from test5.sv line 360-385
-        let options = FormatOptions::default();
-        let mut beautifier = VerilogBeautifier::new(options);
-
+        // 走真实管线（preprocess→beautify→blank 规则），与 formatText 一致；
+        // 直接调 beautify_text 会绕过 preprocess，输入残留的手工空格不被清理
         let input = r#"if(DEBUG_ENABLE) begin
     reg [31:0] dbg_User_Reg_awwaddr ;
     reg [31:0] dbg_User_Reg_awwdata ;
@@ -1534,11 +1533,11 @@ end"#;
         dbg_User_Reg_arready  <= User_Reg_arready   ;
         dbg_User_Reg_rdata    <= User_Reg_rdata ;   
         dbg_User_Reg_rready   <= User_Reg_rready ;  
-        dbg_User_Reg_rvalid   <= User_Reg_rvalid ;  
+        dbg_User_Reg_rvalid   <= User_Reg_rvalid ;
     end
 end"#;
 
-        let result = beautifier.beautify_text(input);
+        let result = crate::format_code_segment(input, &FormatOptions::default());
         println!("Input:\n{}", input);
         println!("\nOutput:\n{}", result);
 
@@ -1561,20 +1560,32 @@ end"#;
 
         println!("Always assignment lines: {:?}", always_lines.len());
 
-        // Find semicolon positions in always block assignments
-        let semi_pos: Vec<usize> = always_lines
-            .iter()
-            .map(|l| l.rfind(';').unwrap_or(0))
-            .collect();
-        println!("Always block semicolon positions: {:?}", semi_pos);
+        // 分号贴合表达式（无悬挂空格）；<= 运算符列对齐仍应成立。
+        // 曾经对 always 块做同缩进组分号悬挂对齐，已按用户语义移除
+        // （语句不是表格；声明区的表格化悬挂不受影响）
+        for (i, l) in always_lines.iter().enumerate() {
+            let t = l.trim_end();
+            assert!(t.ends_with(';'), "always 行 {} 不以分号结尾: {:?}", i, l);
+            let before_semi = &t[..t.len() - 1];
+            assert_eq!(
+                before_semi,
+                before_semi.trim_end(),
+                "always 行 {} 分号前有悬挂空格: {:?}",
+                i,
+                l
+            );
+        }
 
-        // All semicolons in always block should be aligned
-        if !semi_pos.is_empty() {
-            let first = semi_pos[0];
-            for (i, &pos) in semi_pos.iter().enumerate() {
+        let op_pos: Vec<usize> = always_lines
+            .iter()
+            .map(|l| l.find("<=").unwrap_or(0))
+            .collect();
+        if !op_pos.is_empty() {
+            let first = op_pos[0];
+            for (i, &pos) in op_pos.iter().enumerate() {
                 assert_eq!(
                     pos, first,
-                    "Semicolon at always block line {} not aligned. Expected {}, got {}",
+                    "<= at always block line {} not aligned. Expected {}, got {}",
                     i, first, pos
                 );
             }

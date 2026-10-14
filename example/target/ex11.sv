@@ -16,10 +16,10 @@ module vf3_tb_top;
 
     mailbox #(vf1_pkg::pkt_t) mb_gen2drv;
 
-    semaphore      sem          ;
-    vf1_pkg::pkt_t q    [     $];
-    int            assoc[string];
-    vf1_pkg::drv   drv_h        ;
+    semaphore      sem           ;
+    vf1_pkg::pkt_t q    [     $] ;
+    int            assoc [string];
+    vf1_pkg::drv   drv_h         ;
 
     covergroup cg_port with function sample(int port);
         option.per_instance = 1;

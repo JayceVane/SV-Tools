@@ -168,12 +168,14 @@ pub fn align_assign(
                         l.push_str(&format!("[{}]", bs));
                     }
                     let ml = max_len.get(len_idx).unwrap_or(&0);
+                    // statement trim_end：分号悬挂对齐移除后，输入残留的
+                    // 手工空格（"addr ;"）不再被悬挂重排掩盖，须在此清理
                     l = format!(
                         "{}{:<width$} {} {}",
                         indent.repeat(*ilvl_val),
                         l,
                         m.name("op").unwrap().as_str(),
-                        m.name("statement").unwrap().as_str(),
+                        m.name("statement").unwrap().as_str().trim_end(),
                         width = ml
                     );
                     prev_semi = l.trim_end().ends_with(';');
@@ -197,11 +199,9 @@ pub fn align_assign(
                 }
             }
 
-            // Semicolon alignment: for always block assignments (mask_op & 4),
-            // align semicolons within the same indent level group
-            if mask_op & 4 != 0 && options.align_comma() {
-                txt_new_tmp = align_semicolons(&txt_new_tmp);
-            }
+            // 分号悬挂（同缩进组对齐到最长行）已移除：语句（过程赋值）的分号
+            // 应贴合表达式（用户语义：代码不是表格）；声明区的表格化悬挂
+            // （decl 趟）不受影响。空行透明的组宽逻辑随之失效场景消失。
 
             // Don't remove trailing newline - blocks should end with newline
             // case 组无任何紧凑项时不重建（保持原文本，避免仅 trim 行尾的差异）
@@ -236,79 +236,6 @@ fn get_indent_level(
 /// Align semicolons in assignment lines within the same indent level group.
 /// Finds the max line length (excluding the semicolon) per indent group,
 /// then pads shorter lines so all semicolons line up vertically.
-fn align_semicolons(txt: &str) -> String {
-    let mut lines: Vec<&str> = txt.split('\n').collect();
-    // 尾部空元素是终止符标记，不是内容行（否则每层处理多补一个换行）
-    if txt.ends_with('\n') {
-        lines.pop();
-    }
-    let mut max_semi_pos: HashMap<usize, usize> = HashMap::new();
-
-    // First pass: calculate indent level groups and find max content length (before semicolon)
-    // 空行透明：不切组。空行增删（块内空行删除规则）不应改变对齐组宽，
-    // 否则两遍格式化宽度漂移（reg_ctrl 的 case default 项）
-    let mut current_group: usize = 0;
-    let mut prev_indent: usize = 0;
-    for l in &lines {
-        let trimmed = l.trim_end();
-        if trimmed.is_empty() {
-            continue;
-        }
-        let indent = l.len() - l.trim_start().len();
-        if indent != prev_indent {
-            current_group += 1;
-            prev_indent = indent;
-        }
-        if trimmed.ends_with(';') {
-            // Content before semicolon, trimmed of trailing spaces
-            let before_semi = trimmed[..trimmed.len() - 1].trim_end();
-            let content_len = before_semi.len();
-            let entry = max_semi_pos.entry(current_group).or_insert(0);
-            if content_len > *entry {
-                *entry = content_len;
-            }
-        }
-    }
-
-    // Second pass: pad lines to align semicolons
-    let mut result = String::new();
-    current_group = 0;
-    prev_indent = 0;
-    for l in &lines {
-        let trimmed = l.trim_end();
-        if trimmed.is_empty() {
-            result.push_str(l);
-            result.push('\n');
-            continue;
-        }
-        let indent = l.len() - l.trim_start().len();
-        if indent != prev_indent {
-            current_group += 1;
-            prev_indent = indent;
-        }
-        if trimmed.ends_with(';') {
-            if let Some(&max_pos) = max_semi_pos.get(&current_group) {
-                // Content before semicolon (trimmed of trailing spaces)
-                let before_semi = trimmed[..trimmed.len() - 1].trim_end();
-                let spaces_needed = max_pos.saturating_sub(before_semi.len());
-
-                // Reconstruct: indent + content + padding + semicolon
-                result.push_str(&format!(
-                    "{}{}{};\n",
-                    &l[..indent],
-                    before_semi.trim_start(),
-                    " ".repeat(spaces_needed)
-                ));
-                continue;
-            }
-        }
-        result.push_str(l);
-        result.push('\n');
-    }
-
-    result
-}
-
 /// 统计一行中括号深度 0 处的语句分隔符 ';' 数量（注释/字符串/括号内不计）。
 /// 同行多语句（≥2）表示紧凑写作风格。
 fn count_depth0_semicolons(line: &str) -> usize {
