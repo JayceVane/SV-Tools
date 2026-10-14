@@ -6,7 +6,7 @@ const { VcdSession } = require('../src/waveform/session');
 const { buildWaveformHtml } = require('../src/waveform/view');
 const { parseTimescaleSeconds } = require('../src/waveform/parser');
 
-/** 浮点与分组的公开验收语料；每种格式包含普通数、负零、特殊值及未知状态。 */
+/** 浮点、模拟量与分组的公开验收语料；位向量保留特殊值和未知状态。 */
 function fixtureVcd() {
     const signals = [
         ['fp64', 64, 'a', ['3ff8000000000000', '8000000000000000', '0000000000000001', '7ff0000000000000', '7ff8000000000001']],
@@ -20,12 +20,18 @@ function fixtureVcd() {
         ['mem[0][0]', 32, 'i', ['3f800000', '40000000', '00000001', '7f800000', '7fc00000']],
         ['mem[0][1]', 32, 'j', ['40000000', '40400000', '80000000', 'ff800000', '7fc00001']],
         ['mem[1][0]', 32, 'k', ['40400000', '40800000', '3f000000', '3f800000', '00000000']],
-        ['mem[1][1]', 32, 'l', ['40800000', '40a00000', '3f800000', 'bf800000', '00000000']]
+        ['mem[1][1]', 32, 'l', ['40800000', '40a00000', '3f800000', 'bf800000', '00000000']],
+        ['analog_gain', 64, 'm', ['0.125', '0.25', '0.5', '1', '0.75', '0.5', '0.25'], 'real'],
+        ['analog_offset', 64, 'n', ['0.1', '1.1', '0.4', '-0.1', '0.7', '0.6', '0.2'], 'real']
     ];
-    const lines = ['$timescale 1ns $end', '$scope module float_tb $end', ...signals.map(([name, width, id]) => `$var wire ${width} ${id} ${name} $end`), '$upscope $end', '$enddefinitions $end'];
+    const lines = ['$timescale 1ns $end', '$scope module float_tb $end', ...signals.map(([name, width, id, , type = 'wire']) => `$var ${type} ${width} ${id} ${name} $end`), '$upscope $end', '$enddefinitions $end'];
     for (let step = 0; step < 7; step++) {
         lines.push('#' + step * 100);
-        for (const [, , id, values] of signals) lines.push('b' + (step === 5 ? 'x' : step === 6 ? 'z' : BigInt('0x' + values[step]).toString(2)) + ' ' + id);
+        for (const [, , id, values, type] of signals) {
+            const value = type === 'real' ? 'r' + values[step]
+                : 'b' + (step === 5 ? 'x' : step === 6 ? 'z' : BigInt('0x' + values[step]).toString(2));
+            lines.push(value + ' ' + id);
+        }
     }
     lines.push('#700'); return lines.join('\n') + '\n';
 }

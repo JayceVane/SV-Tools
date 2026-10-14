@@ -4,8 +4,8 @@ const { test } = require('node:test');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
-const { setImmediate: nextTurn } = require('node:timers/promises');
 const I = require('../src/waveform/interaction');
+const { clientHarness } = require('./helpers/waveform-client-harness');
 
 test('Shift 范围锚点保持稳定，收缩范围不会残留上一次选中行', () => {
     const order = ['a', 'b', 'c', 'd', 'e'];
@@ -160,74 +160,6 @@ test('右侧边缘子菜单向左展开，各层始终约束在视口中', () =>
         assert.ok(Number.parseFloat(level.style.top) + level.offsetHeight <= h.window.innerHeight - 6);
     }
 });
-
-/** 运行真实 client 控制器，DOM 与消息边界留在夹具内。 */
-function clientHarness(saved) {
-    const model = require('../src/waveform/model'), nodes = new Map(), messages = [], documentListeners = {}, windowListeners = {};
-    const document = { activeElement: null, addEventListener(name, callback) { documentListeners[name] = callback; } };
-    class Element {
-        constructor(tag = 'div') {
-            this.tagName = tag.toUpperCase(); this.children = []; this.attributes = {}; this.style = {}; this.dataset = {}; this.listeners = {};
-            this.clientHeight = 400; this.scrollTop = 0; this.value = ''; this.classList = { toggle() {}, add() {} };
-        }
-        setAttribute(name, value) { this.attributes[name] = value; }
-        removeAttribute(name) { delete this.attributes[name]; }
-        append(...children) { for (const child of children) { this.children.push(child); child.parent = this; } }
-        appendChild(child) { this.append(child); return child; }
-        replaceChildren(...children) { this.children = []; this.append(...children); }
-        remove() { if (this.parent) this.parent.children = this.parent.children.filter(child => child !== this); }
-        addEventListener(name, callback) { this.listeners[name] = callback; }
-        focus() { document.activeElement = this; }
-        click() { this.onclick?.(); }
-        setPointerCapture() {}
-        getBoundingClientRect() { return { left: 250, top: 140 }; }
-    }
-    document.createElement = tag => new Element(tag); document.body = new Element('body');
-    document.getElementById = id => {
-        if (!nodes.has(id)) { const node = new Element(id === 'waveCanvas' ? 'canvas' : id === 'search' ? 'input' : 'div'); node.id = id; nodes.set(id, node); }
-        return nodes.get(id);
-    };
-    let state, menuOptions, persisted;
-    const window = { WaveModel: model, WaveInteractions: I, addEventListener(name, callback) { windowListeners[name] = callback; },
-        createWaveRenderer(options) {
-            state = options.state;
-            return { draw() {}, colors() {}, geometry: () => ({ plot: 600, names: 280 }), visibleRows: () => state.rows,
-                rowAt: y => state.rows.find(row => y >= row.y && y < row.y + row.height) };
-        }, createMemoryInspector: () => ({ refresh() {}, initialize() {}, toggle() {}, snapshot: () => ({}) }),
-        createWaveMenu(options) { menuOptions = options; return { contains: () => false, close: () => options.onClose() }; } };
-    const metadata = { vars: ['a', 'b', 'c'].map(name => ({ name, path: 'tb.' + name, scopePath: 'tb', width: 32, type: 'reg', id: name, changeCount: 2 })),
-        endTime: 100, secondsPerTick: 1e-9, timescale: '1 ns', scopes: [{ path: 'tb' }], fileBytes: 1000 };
-    const context = { window, document, BOOT: { fileName: 'test.vcd', fileKey: 'test', metadata },
-        acquireVsCodeApi: () => ({ postMessage: message => messages.push(message), getState: () => saved, setState: value => { persisted = value; } }),
-        requestAnimationFrame: callback => callback(), setTimeout, clearTimeout,
-        ResizeObserver: class { observe() {} }, MutationObserver: class { observe() {} } };
-    vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../src/waveform/client.js'), 'utf8'), context);
-    const canvas = document.getElementById('waveCanvas');
-    const pointer = (key, modifiers = {}) => {
-        const row = state.rows.find(item => model.signalKey(item.signal) === key), event = { button: 0, pointerId: 1, clientX: 260, clientY: 140 + row.y + 5,
-            offsetX: 10, offsetY: row.y + 5, target: canvas, ...modifiers };
-        canvas.listeners.pointerdown(event); canvas.listeners.pointerup(event);
-    };
-    const contextMenu = key => {
-        const row = state.rows.find(item => model.signalKey(item.signal) === key);
-        canvas.oncontextmenu({ offsetY: row.y + 5, clientX: 260, clientY: 140 + row.y + 5, preventDefault() {} });
-        return menuOptions;
-    };
-    const flush = async () => {
-        for (const message of messages) if (!message.done && message.requestId) {
-            message.done = true;
-            const result = message.type === 'window' ? { series: message.params.ids.map(id => ({ id, dense: [], changes: [] })) }
-                : { values: Object.fromEntries(message.params.ids.map(id => [id, '0'])) };
-            windowListeners.message({ data: { type: 'response', requestId: message.requestId, result } });
-        }
-        await nextTurn();
-    };
-    return { state, messages, pointer, contextMenu, flush, document, canvas, node: id => document.getElementById(id), documentListeners,
-        persisted: () => persisted, find: id => {
-            const visit = item => item.id === id ? item : item.children.map(visit).find(Boolean);
-            return visit(document.body);
-        } };
-}
 
 test('实际控制器：右键批量格式使用冻结目标，改变显示不重读窗口/游标数据', async () => {
     const h = clientHarness(); await h.flush();

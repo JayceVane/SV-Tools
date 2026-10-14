@@ -1,10 +1,10 @@
 /* Webview 控制器：有界查询、虚拟列表、交互和会话布局。 */
 (function () {
     'use strict';
-    const api = acquireVsCodeApi(), M = window.WaveModel, I = window.WaveInteractions;
+    const api = acquireVsCodeApi(), M = window.WaveModel, I = window.WaveInteractions, L = window.WaveRowLayout;
     const $ = id => document.getElementById(id);
     const canvas = $('waveCanvas'), tracks = $('tracks'), catalog = $('catalog');
-    const ROW_HEIGHT = 38, CATALOG_HEIGHT = 34, MAX_TRACKS = 2000, QUERY_POINT_BUDGET = 240000;
+    const CATALOG_HEIGHT = 34, MAX_TRACKS = 2000, QUERY_POINT_BUDGET = 240000;
     const state = { metadata: null, signals: new Map(), selected: [], rows: [], formats: Object.create(null), groups: Object.create(null), heights: Object.create(null),
         view: { start: 0, span: 1 }, cursorA: 0, cursorB: null, activeCursor: 'A', activeKey: null,
         multi: new Set(), selectionAnchor: null, fullName: false, snap: true, secondsPerTick: null,
@@ -18,7 +18,15 @@
     }, onChange() { viewportChanged(); persist(); } });
     const pending = new Map();
     let requestId = 0, paintPending = false, filtered = [], windowBusy = false, windowWanted = null;
-    let valuesBusy = false, valuesWanted = null, valuesKey = '', edgeVersion = 0, menu = null, groupDialog = null, drag = null;
+    let valuesBusy = false, valuesWanted = null, valuesKey = '', edgeVersion = 0, menu = null, groupDialog = null;
+    const gestures = window.createWaveRowGestures({ canvas, tracks, state, model: M, renderer,
+        refreshRows, commitRows: rebuildRows, paint, onSelection: applySelection,
+        onPan: view => { state.view = M.clampView(view.start, view.span, state.metadata.endTime); viewportChanged(); }, commitPan: persist,
+        onPlotClick(point, event, row) {
+            if (row) state.activeKey = M.signalKey(row.signal);
+            const g = renderer.geometry(), time = state.view.start + Math.max(0, (point.x - g.names) / g.plot) * state.view.span;
+            placeCursor(time, event.shiftKey ? 'B' : state.activeCursor, row?.signal);
+        }, onSettled: viewportChanged, onStart: () => hideMenu(false), blocked: () => !!groupDialog, status });
     $('title').textContent = BOOT.fileName;
 
     function status(text) { $('status').textContent = text; }
@@ -44,21 +52,19 @@
         $('viewRange').textContent = format(state.view.start) + ' → ' + format(state.view.start + state.view.span);
         $('rangeFit').disabled = state.cursorB === null || state.cursorB === state.cursorA;
         $('prevEdge').disabled = $('nextEdge').disabled = !state.activeKey;
-        canvas.setAttribute('aria-label', `波形；已添加 ${state.selected.length} 条，选中 ${state.multi.size} 条。Ctrl 点击多选，Shift 点击范围选择，右键或 Shift+F10 管理所选信号。`);
+        canvas.setAttribute('aria-label', `波形；已添加 ${state.selected.length} 条，选中 ${state.multi.size} 条。Ctrl 点击多选，Shift 点击范围选择；拖动名称排序，拖动模拟量底边调整行高，Esc 取消；右键或 Shift+F10 管理所选信号。`);
+    }
+    function refreshRows() {
+        state.rows = L.buildRows(state.selected, state.signals, state.formats, state.heights);
+        $('trackSpace').style.height = Math.max(L.totalHeight(state.rows), tracks.clientHeight) + 'px';
+        $('empty').hidden = !!state.rows.length;
     }
     function rebuildRows() {
-        let y = 0;
-        state.rows = state.selected.map(path => {
-            const signal = state.signals.get(path), analog = state.formats[path] === 'analog' || (/real/i.test(signal.type) && !state.formats[path]);
-            const height = analog ? state.heights[path] || 100 : ROW_HEIGHT;
-            const row = { signal, y, height }; y += height; return row;
-        });
-        $('trackSpace').style.height = Math.max(y, tracks.clientHeight) + 'px';
-        $('empty').hidden = !!state.rows.length;
+        refreshRows();
         updateSelectionCount();
         viewportChanged(); renderCatalog(); persist();
     }
-    function visibleIds() { return [...new Set(renderer.visibleRows().map(row => row.signal.id))].slice(0, 256).sort(); }
+    function visibleIds() { return [...new Set(L.visibleRows(state.rows, tracks.scrollTop, tracks.clientHeight).map(row => row.signal.id))].slice(0, 256).sort(); }
     function viewportChanged() {
         paint();
         if (!state.metadata) return;
@@ -239,7 +245,7 @@
         const groups = [...new Set(state.selected.map(path => state.groups[path]).filter(Boolean))];
         const items = [{ id: 'display-format', label: '显示格式' + (mixed ? ' · 混合' : ''), submenu: formatItems },
             action('analog-height', '增加模拟量行高', () => {
-                for (const path of targets) { state.formats[path] = 'analog'; state.heights[path] = Math.min(280, (state.heights[path] || 100) + 40); }
+                for (const path of targets) { state.formats[path] = 'analog'; state.heights[path] = L.analogHeight(L.analogHeight(state.heights[path]) + 40); }
                 rebuildRows(); status(`已调整 ${targets.length} 条模拟量波形行高`);
             }, { disabled: signals.some(signal => !M.supportsFormat(signal, 'analog')) }),
             { separator: true }, action('new-group', '新建分组…', () => showGroupDialog(targets))];
@@ -258,7 +264,8 @@
         const saved = api.getState(), restored = M.restoreState(saved, metadata, BOOT.fileKey);
         Object.assign(state, { view: restored.view, cursorA: restored.cursorA, cursorB: restored.cursorB });
         if (saved?.fileKey === BOOT.fileKey) {
-            state.formats = Object.assign(Object.create(null), saved.formats); state.groups = Object.assign(Object.create(null), saved.groups); state.heights = Object.assign(Object.create(null), saved.heights);
+            state.formats = Object.assign(Object.create(null), saved.formats); state.groups = Object.assign(Object.create(null), saved.groups);
+            state.heights = L.restoreHeights(saved.heights, state.signals);
             state.fullName = !!saved.fullName; state.snap = saved.snap !== false;
         }
         const seen = new Set();
@@ -298,7 +305,7 @@
     let filterTimer;
     $('search').oninput = () => { clearTimeout(filterTimer); filterTimer = setTimeout(filterCatalog, 100); };
     $('scope').onchange = $('constants').onchange = filterCatalog;
-    catalog.onscroll = renderCatalog; tracks.onscroll = viewportChanged;
+    catalog.onscroll = renderCatalog; tracks.onscroll = () => gestures.rowActive ? paint() : viewportChanged();
     $('addFiltered').onclick = () => addSignals(filtered.map(M.signalKey));
     $('clearSignals').onclick = () => { hideMenu(false); state.selected = []; state.activeKey = null; state.selectionAnchor = null; state.multi.clear(); rebuildRows(); };
     $('fit').onclick = () => state.metadata && setView({ start: 0, span: state.metadata.endTime });
@@ -315,43 +322,13 @@
         ++edgeVersion; setCursor(time, state.activeCursor); setView({ start: time - state.view.span / 2, span: state.view.span }); };
     $('jump').onclick = jump; $('jumpTime').onkeydown = event => { if (event.key === 'Enter') jump(); };
     $('cancel').onclick = () => api.postMessage({ type: 'cancel' });
-    canvas.oncontextmenu = event => { event.preventDefault(); showMenu(event, renderer.rowAt(event.offsetY)); };
+    canvas.oncontextmenu = event => { event.preventDefault(); gestures.cancel(); gestures.finishMotion(); showMenu(event, renderer.rowAt(event.offsetY)); };
     document.addEventListener('pointerdown', event => { if (menu && !menu.contains(event.target)) hideMenu(false); });
-    window.addEventListener('blur', () => { hideMenu(false); drag = null; });
-    window.addEventListener('resize', () => hideMenu(false));
-    canvas.addEventListener('pointerdown', event => {
-        if (event.button !== 0 || !state.metadata) return;
-        const row = renderer.rowAt(event.offsetY), g = renderer.geometry(); canvas.focus();
-        drag = { x: event.clientX, y: event.clientY, start: state.view.start, span: state.view.span,
-            name: event.offsetX < g.names, row, moved: false }; canvas.setPointerCapture(event.pointerId);
-    });
-    canvas.addEventListener('pointermove', event => {
-        if (!drag) return;
-        const dx = event.clientX - drag.x;
-        if (Math.abs(dx) + Math.abs(event.clientY - drag.y) > 4) drag.moved = true;
-        if (drag.moved && drag.name && drag.row && !drag.targets) {
-            const key = M.signalKey(drag.row.signal);
-            if (!state.multi.has(key)) applySelection(I.selectSignals(state.selected, [], key, key));
-            drag.targets = I.orderedTargets(state.selected, state.multi);
-        }
-        if (drag.moved && !drag.name) setView({ start: drag.start - dx / renderer.geometry().plot * drag.span, span: drag.span });
-    });
-    canvas.addEventListener('pointerup', event => {
-        if (!drag) return; const current = drag; drag = null;
-        if (current.name && current.row) {
-            if (current.moved) { const target = renderer.rowAt(event.offsetY); if (target) {
-                state.selected = I.moveSignals(state.selected, current.targets || [M.signalKey(current.row.signal)], M.signalKey(target.signal));
-                rebuildRows(); status(`已整体移动 ${(current.targets || []).length || 1} 条信号`);
-            } } else selectRow(current.row, event);
-        } else if (!current.moved) {
-            if (current.row) state.activeKey = M.signalKey(current.row.signal);
-            const g = renderer.geometry(), time = state.view.start + Math.max(0, (event.offsetX - g.names) / g.plot) * state.view.span;
-            placeCursor(time, event.shiftKey ? 'B' : state.activeCursor, current.row?.signal);
-        }
-    });
-    canvas.addEventListener('pointercancel', () => { drag = null; });
+    window.addEventListener('blur', () => { hideMenu(false); gestures.cancel(); });
+    window.addEventListener('resize', () => { hideMenu(false); gestures.cancel(); gestures.finishMotion(); });
     tracks.addEventListener('wheel', event => {
         if (!state.metadata) return;
+        if (gestures.rowActive) { event.preventDefault(); return; }
         if (event.ctrlKey || event.metaKey) { event.preventDefault(); const left = tracks.getBoundingClientRect().left, g = renderer.geometry();
             setView(M.zoomView(state.view, event.deltaY > 0 ? 1.25 : .8, (event.clientX - left - g.names) / g.plot, state.metadata.endTime));
         } else if (event.shiftKey || Math.abs(event.deltaX) > Math.abs(event.deltaY)) { event.preventDefault();
@@ -361,6 +338,10 @@
         if (event.offsetX >= g.names) placeCursor(state.view.start + (event.offsetX - g.names) / g.plot * state.view.span, event.shiftKey ? 'B' : state.activeCursor, state.signals.get(state.activeKey)); };
     document.addEventListener('keydown', event => {
         if (menu || groupDialog || /^(INPUT|SELECT|TEXTAREA)$/.test(event.target.tagName) || event.target.isContentEditable) return;
+        if (gestures.active) {
+            if (event.key === 'Escape') { gestures.cancel(); event.preventDefault(); }
+            return;
+        }
         const waveFocused = event.target === canvas;
         if (waveFocused && (event.key === 'ContextMenu' || event.key === 'F10' && event.shiftKey)) {
             const row = state.rows.find(item => M.signalKey(item.signal) === state.activeKey) || state.rows[0];
@@ -392,7 +373,8 @@
             removeSignals(I.orderedTargets(state.selected, state.multi)); event.preventDefault();
         }
     });
-    new ResizeObserver(() => { $('trackSpace').style.height = Math.max(state.rows.reduce((sum, row) => sum + row.height, 0), tracks.clientHeight) + 'px'; viewportChanged(); renderCatalog(); }).observe(tracks);
+    new ResizeObserver(() => { $('trackSpace').style.height = Math.max(L.totalHeight(state.rows), tracks.clientHeight) + 'px';
+        if (gestures.rowActive) paint(); else viewportChanged(); renderCatalog(); }).observe(tracks);
     new MutationObserver(() => { renderer.colors(); paint(); }).observe(document.body, { attributes: true, attributeFilter: ['class', 'data-vscode-theme-kind'] });
     if (BOOT.metadata) initialize(BOOT.metadata);
     else api.postMessage({ type: 'ready' });

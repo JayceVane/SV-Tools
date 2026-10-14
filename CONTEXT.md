@@ -1,8 +1,14 @@
 # 4.0 开发交接
 
-最后更新：2026-10-14。当前里程碑为本地 `4.0.0-alpha7`，分支 `codex/refactor-v4`。
+最后更新：2026-10-14。当前里程碑为本地 `4.0.0-alpha8`，分支 `codex/refactor-v4`。
 
 ## 完成内容
+
+- alpha8：Analog/real 行底边可直接拖动，默认100px、范围60–480px，保存恢复时校验高度；数字行维持38px。
+- 多选排序增加浮动名称与数量、插入线、实时让位及180ms动画；边缘自动滚动，减少动态效果偏好直接归位。
+- Pointer 捕获、Escape、失焦和取消统一处理；未完成手势恢复高度、选择和滚动，预览不逐帧查询或保存。
+- 纯行几何 `row-layout.js`、手势 `row-gesture.js` 与绘制分离；共享真实控制器测试夹具，避免重复。
+- alpha8 操作见 `docs/WAVEFORM.md`，验收、包核验和完整清单见 `docs/V4_ALPHA8.md`。
 
 - alpha7：显示格式归入子菜单，新增 FP64/FP32/TF32/BF16/FP16/FP8(E3M4)；二维 mem 共用浮点解码。
 - E3M4 按用户确认采用偏置 3、全 1 指数表示 Inf/NaN。TF32 支持 19 位以及低 13 位为零的 32 位 RTL 容器约定，不代表 NVIDIA ABI，也不自动舍入 FP32。
@@ -35,11 +41,16 @@
 
 ## 验证
 
+- alpha8：97 个 JS、golden36/36、Node444/444；新增几何6、真实控制器手势14、Canvas3项。Rust实现未改，alpha7的112项测试基线保留；alpha8 native/CLI版本同步重建。
+- 真实 Worker 与浏览器验证100→220px实时缩放、220→140px后Esc恢复、布局恢复、两条信号整体置顶及明暗主题；Canvas保持518px高，A/B及时间窗不变。
+- 同可见集合排序前后 window=2、values=4、edge=0，没有新增查询。无console警告/错误；预览报告与截图在 `bin/waveform-acceptance/run-K0UTnZ`，缩放报告在 `run-kRRV2v`。
+- 当前包 `bin/svtools-4.0.0-alpha8.vsix`，80条目、76项逐字节一致，核验见alpha8记录；临时浏览器与服务已关闭。
+
 - alpha7：92 个 JS、golden 36/36、Node 421/421、Rust 112/112；CLI/native 同步版本并重建，CLI 为 4.0.0-alpha7。
 - alpha7 浮点测试包括 FP16/BF16 各 65536 编码、E3M4 256 编码穷举，FP64/FP32 独立 DataView 对照，TF32 双布局、NaN/X/Z/负零与无效容器。
 - alpha7 真实浏览器与真实 VCD Worker 验收明暗主题、Shift 收缩、右键多选、混合位宽格式禁用、分组、状态恢复、二维 mem FP32 A/B、菜单键盘与边缘定位；无 console 警告/错误。
 - 验收产物 `bin/waveform-acceptance/run-gbrTl4`；临时浏览器与 loopback 服务已关闭。
-- 当前包 `bin/svtools-4.0.0-alpha7.vsix`；大小、SHA 与逐字节核验见 alpha7 记录。本轮未安装、推送、合并或发布。
+- alpha7 历史包 `bin/svtools-4.0.0-alpha7.vsix`；大小、SHA 与逐字节核验见 alpha7 记录。
 
 - alpha6：85 个 JS、golden 36/36、Node 382/382、Rust 原 112 项集通过；CLI/native 重建到 alpha6。
 - alpha6 真实 VS Code 1.141 宿主 22/22，接受补全后 Icarus 13 编译通过；外部 include 事件与未保存模型实测通过。
@@ -83,7 +94,7 @@ alpha1 本地提交869e4d1；alpha2 提交33ff207；alpha3 提交1cc5733；alpha
 
 用户于 2026-10-14 确认：先完善当前版本，再增加新功能。Vivado IP 管理已写入 `docs/ROADMAP.md`，目前延期、未启动；待用户决定开始新功能后再实现。
 
-1. 以 alpha7 VSIX 验证用户实际工程、多文件集、补全和浮点波形交互，优先修复实际使用反馈。
+1. 以 alpha8 VSIX 验证用户实际工程、多文件集、补全及波形缩放排序，优先修复实际使用反馈。
 2. 用实际100–500MB RTL波形对照仿真/GTKWave，评估更多信号数和事件密度。
 3. 下一轮统一 CompilePlan：源文件、include、宏、top、工作目录和引擎能力，避免 lint/仿真参数漂移。
 4. 随后实现内容驱动的增量源码索引与有配置键的只读缓存；不要恢复共享可写 xsim.dir。

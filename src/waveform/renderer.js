@@ -2,6 +2,7 @@
 (function () {
     'use strict';
     window.createWaveRenderer = function ({ canvas, ruler, tracks, state, model }) {
+        const L = window.WaveRowLayout;
         let palette;
         function colors() {
             const style = getComputedStyle(document.body);
@@ -101,8 +102,9 @@
                     ctx.setLineDash(value === 'z' ? [3, 3] : []); line(ctx, left, middle, right, middle, color); ctx.setLineDash([]);
                     if (right - left > 16) text(ctx, value ?? '?', left + 4, middle - 4, right - left - 8, color);
                 } else {
-                    ctx.strokeStyle = color; ctx.fillStyle = color; ctx.globalAlpha = .08;
-                    ctx.fillRect(left, high, right - left, low - high); ctx.globalAlpha = 1;
+                    const alpha = ctx.globalAlpha;
+                    ctx.strokeStyle = color; ctx.fillStyle = color; ctx.globalAlpha = alpha * .08;
+                    ctx.fillRect(left, high, right - left, low - high); ctx.globalAlpha = alpha;
                     ctx.beginPath(); ctx.moveTo(left, middle); ctx.lineTo(left + Math.min(4, (right - left) / 2), high);
                     ctx.lineTo(right - Math.min(4, (right - left) / 2), high); ctx.lineTo(right, middle);
                     ctx.lineTo(right - Math.min(4, (right - left) / 2), low); ctx.lineTo(left + Math.min(4, (right - left) / 2), low); ctx.closePath(); ctx.stroke();
@@ -138,7 +140,8 @@
             for (const bucket of series.dense || []) {
                 const left = x(bucket.start), right = Math.max(left + 2, x(bucket.end));
                 ctx.fillStyle = palette.bg; ctx.fillRect(left, top + 8, right - left, row.height - 16);
-                ctx.fillStyle = palette.bus; ctx.globalAlpha = .35; ctx.fillRect(left, top + 9, right - left, row.height - 18); ctx.globalAlpha = 1;
+                const alpha = ctx.globalAlpha;
+                ctx.fillStyle = palette.bus; ctx.globalAlpha = alpha * .35; ctx.fillRect(left, top + 9, right - left, row.height - 18); ctx.globalAlpha = alpha;
                 if (right - left > 24) text(ctx, '密集', left + 3, top + row.height / 2 + 4, right - left - 5, palette.bus);
             }
         }
@@ -155,6 +158,17 @@
             text(ctx, model.formatValue(a, signal, radix), g.names - 96, top + 17, 87, palette.a);
             text(ctx, state.cursorB === null ? '' : model.formatValue(b, signal, radix), g.names - 96, top + 31, 87, palette.b);
             line(ctx, 0, top + row.height, g.width, top + row.height, palette.border);
+            if (L.isAnalog(signal, state.formats[key])) {
+                const resizing = state.rowPresentation?.resizeKey === key || state.rowPresentation?.hoverResizeKey === key;
+                const color = resizing ? palette.accent : palette.dim, bottom = top + row.height;
+                text(ctx, `↕ ${row.height} px`, 12, bottom - 10, 85, color);
+                line(ctx, g.names - 28, bottom - 6, g.names - 12, bottom - 6, color);
+                line(ctx, g.names - 28, bottom - 3, g.names - 12, bottom - 3, color);
+                if (resizing) line(ctx, 0, bottom - 1, g.width, bottom - 1, palette.accent);
+            }
+            if (state.rowPresentation?.dragKeys?.has(key)) {
+                ctx.strokeStyle = palette.accent; ctx.strokeRect(2, top + 2, g.names - 4, row.height - 4);
+            }
         }
         function cursors(ctx, axis, g) {
             for (const [label, time, color] of [['A', state.cursorA, palette.a], ['B', state.cursorB, palette.b]]) {
@@ -164,8 +178,7 @@
             }
         }
         function visibleRows() {
-            const bottom = tracks.scrollTop + tracks.clientHeight;
-            return state.rows.filter(row => row.y + row.height >= tracks.scrollTop && row.y <= bottom);
+            return L.visibleRows(state.rowPresentation?.targetRows || state.rows, tracks.scrollTop, tracks.clientHeight, state.rowPresentation?.positions);
         }
         function draw() {
             const g = geometry(), ctx = context(canvas, g.width, g.height), axis = context(ruler, g.width, 35), marks = ticks();
@@ -174,17 +187,24 @@
             const valid = state.seriesKey === state.windowKey;
             for (const row of visibleRows()) {
                 const top = row.y - tracks.scrollTop, series = valid ? state.series.get(row.signal.id) : null;
+                ctx.save();
+                if (state.rowPresentation?.dragKeys?.has(model.signalKey(row.signal))) ctx.globalAlpha = .6;
                 ctx.save(); ctx.beginPath(); ctx.rect(g.names, top, g.plot, row.height); ctx.clip();
                 if (series) {
                     const format = state.formats[model.signalKey(row.signal)] || (/real/i.test(row.signal.type) ? 'analog' : 'hex');
                     if (format === 'analog') analog(ctx, row, series, top); else digital(ctx, row, series, top);
                     denseOverlay(ctx, row, series, top);
-                } else text(ctx, valid ? '无变更数据' : '加载时间窗口…', g.names + 12, top + 22, g.plot - 20, palette.dim);
-                ctx.restore(); names(ctx, row, top, g);
+                } else text(ctx, state.rowPresentation?.resizeKey || state.rowPresentation?.dragKeys ? '松开后加载新增可见信号…' : valid ? '无变更数据' : '加载时间窗口…', g.names + 12, top + 22, g.plot - 20, palette.dim);
+                ctx.restore(); names(ctx, row, top, g); ctx.restore();
+            }
+            if (state.rowPresentation?.insertionY !== null && state.rowPresentation?.insertionY !== undefined) {
+                const y = state.rowPresentation.insertionY - tracks.scrollTop;
+                ctx.lineWidth = 2; line(ctx, 0, y, g.width, y, palette.accent); ctx.lineWidth = 1;
+                ctx.fillStyle = palette.accent; ctx.fillRect(0, y - 3, 6, 6);
             }
             cursors(ctx, axis, g); line(ctx, g.names, 0, g.names, g.height, palette.border);
         }
         return { draw, geometry, visibleRows, x, colors,
-            rowAt: y => state.rows.find(row => row.y <= y + tracks.scrollTop && y + tracks.scrollTop < row.y + row.height) };
+            rowAt: y => L.rowAt(state.rows, y + tracks.scrollTop) };
     };
 })();

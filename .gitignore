@@ -38,6 +38,9 @@ test/*
 !test/*_test.js
 !test/vscode_vivado_host.js
 !test/vscode_completion_host.js
+!test/helpers/
+test/helpers/*
+!test/helpers/waveform-client-harness.js
 !test/fixtures/
 test/fixtures/*
 !test/fixtures/memory_dump.sv

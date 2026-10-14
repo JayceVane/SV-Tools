@@ -5,6 +5,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 const { test } = require('node:test');
 const model = require('../src/waveform/model');
+const layout = require('../src/waveform/row-layout');
 
 const rendererSource = fs.readFileSync(path.join(__dirname, '../src/waveform/renderer.js'), 'utf8');
 const dark = {
@@ -31,7 +32,7 @@ function recordingContext() {
     ctx.restore = () => Object.assign(ctx, stack.pop());
     ctx.beginPath = () => { currentPath = []; };
     for (const op of ['moveTo', 'lineTo', 'rect', 'closePath']) ctx[op] = (...args) => currentPath.push({ op, args });
-    for (const op of ['fillRect', 'fillText', 'strokeText', 'stroke', 'clip', 'setTransform', 'setLineDash']) {
+    for (const op of ['fillRect', 'strokeRect', 'fillText', 'strokeText', 'stroke', 'clip', 'setTransform', 'setLineDash']) {
         ctx[op] = (...args) => record(op, args);
     }
     ctx.measureText = value => ({ width: [...String(value)].reduce((width, char) => width + (/[^\x00-\x7f]/.test(char) ? 11 : 6), 0) });
@@ -44,12 +45,12 @@ function fixture({ width = 1000, height = 90, rowHeight = 44, changes = [{ t: 0,
     const canvas = { style: {}, getContext: () => context }, ruler = { style: {}, getContext: () => axis };
     const tracks = { clientWidth: width, clientHeight: height, scrollTop: 0 };
     const signal = { id: '#', path: 'tb.data', name: 'data', width: signalWidth, type: 'wire', range: `[${signalWidth - 1}:0]` };
-    const row = { signal, y: 0, height: rowHeight }, key = model.signalKey(signal);
+    const key = model.signalKey(signal), row = { key, signal, y: 0, height: rowHeight };
     const state = { view: { start: 0, span: 100 }, rows: [row], formats: {}, groups: {}, multi: new Set(),
         series: new Map([[signal.id, { changes, dense }]]), seriesKey: 'current', windowKey: 'current',
         valuesA: {}, valuesB: {}, cursorA: null, cursorB: null, secondsPerTick: 1e-9, fullName: false };
     let activePalette = palette;
-    const sandbox = { window: { devicePixelRatio: 1 }, document: { body: {} },
+    const sandbox = { window: { devicePixelRatio: 1, WaveRowLayout: layout }, document: { body: {} },
         getComputedStyle: () => ({ getPropertyValue: name => activePalette[name.slice(2)] || '' }) };
     vm.runInNewContext(rendererSource, sandbox, { filename: 'renderer.js' });
     const renderModel = { ...model, ...(label === undefined ? {} : { formatValue: () => label }), ...modelOverrides };
@@ -188,4 +189,40 @@ test('滚动后只有可见行画标签，行内文字始终位于总线的上�
     assert.ok(labels[0].args[2] - 11 > 9);
     assert.ok(labels[0].args[2] + 1 < 47);
     assert.equal(view.canvas.height, 50);
+});
+
+test('模拟量底边显示实际像素高度与可发现握柄，悬停强调底边；数字行没有缩放握柄', () => {
+    const view = fixture({ rowHeight: 160, height: 180 });
+    view.state.formats[view.key] = 'analog'; view.draw();
+    const handle = view.context.calls.find(call => call.op === 'fillText' && call.args[0] === '↕ 160 px');
+    assert.equal(handle.fill, dark.dim);
+    assert.ok(view.context.calls.some(call => call.op === 'stroke' && call.path.some(point => point.op === 'moveTo' && point.args[1] === 154)));
+    view.state.rowPresentation = { hoverResizeKey: view.key }; view.draw();
+    assert.equal(view.context.calls.find(call => call.op === 'fillText' && call.args[0] === '↕ 160 px').fill, dark.accent);
+    assert.ok(view.context.calls.some(call => call.op === 'stroke' && call.stroke === dark.accent
+        && call.path.some(point => point.op === 'lineTo' && point.args[0] === 1000 && point.args[1] === 159)));
+    delete view.state.formats[view.key]; view.draw();
+    assert.equal(view.context.calls.some(call => call.op === 'fillText' && call.args[0].startsWith('↕')), false);
+});
+
+test('排序选择集变淡并有名称轮廓，插入边界与目标 y 一致，不清除 A/B 标记', () => {
+    const view = fixture(); view.state.multi.add(view.key);
+    view.state.rowPresentation = { dragKeys: new Set([view.key]), insertionY: 44 };
+    view.state.cursorA = 20; view.state.cursorB = 80; view.draw();
+    const outline = view.context.calls.find(call => call.op === 'strokeRect');
+    assert.equal(outline.stroke, dark.accent); assert.equal(outline.alpha, .6);
+    assert.ok(view.context.calls.some(call => call.op === 'stroke' && call.lineWidth === 2
+        && call.path.some(point => point.op === 'moveTo' && point.args[0] === 0 && point.args[1] === 44)));
+    assert.equal(view.context.calls.find(call => call.op === 'fillRect' && call.fill === dark.bus).alpha, .08 * .6);
+    assert.deepEqual(view.axis.calls.filter(call => call.op === 'fillRect' && call.args[2] === 14).map(call => call.fill), [dark.a, dark.b]);
+});
+
+test('2000 条实际 Canvas 行仅绘制可见投影，位图仍是视口高度', () => {
+    const view = fixture({ label: '1.25', height: 380, rowHeight: 38 });
+    view.state.rows = Array.from({ length: 2000 }, (_, index) => ({ key: 'tb.s' + index,
+        signal: { ...view.signal, name: 's' + index, path: 'tb.s' + index }, y: index * 38, height: 38 }));
+    view.tracks.scrollTop = 3800; view.draw();
+    assert.equal(view.labels().length, 10); assert.equal(view.canvas.height, 380);
+    view.state.rowPresentation = { positions: new Map([['tb.s0', 3850], ['tb.s100', 0]]) }; view.draw();
+    assert.equal(view.labels().length, 11); assert.equal(view.canvas.height, 380);
 });

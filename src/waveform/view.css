@@ -48,7 +48,14 @@ aside { width: 252px; min-width: 175px; max-width: 45vw; resize: horizontal; ove
 #right { flex: 1; min-width: 0; display: flex; flex-direction: column; position: relative; }
 #ruler { height: 35px; width: 100%; display: block; background: var(--panel); }
 #tracks { flex: 1; overflow: auto; position: relative; min-height: 0; }#trackSpace { position: relative; min-width: 100%; }
-#waveCanvas { position: sticky; top: 0; left: 0; display: block; cursor: crosshair; }
+#waveCanvas { position: sticky; top: 0; left: 0; display: block; cursor: crosshair; touch-action: none; user-select: none; }
+.waveDragPreview { position: fixed; z-index: 12; pointer-events: none; width: 252px; max-width: calc(100vw - 24px); padding: 10px 12px;
+    background: var(--raised); color: var(--fg); border: 1px solid var(--accent); border-radius: 7px;
+    box-shadow: 0 8px 24px #0004; display: grid; gap: 5px; animation: waveDragAppear 100ms ease-out; }
+.waveDragName { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 12px Consolas, monospace; }
+.waveDragCount { color: var(--dim); font-size: 11px; }
+@keyframes waveDragAppear { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: translateY(0); } }
+@media (prefers-reduced-motion: reduce) { .waveDragPreview { animation: none; } }
 #empty { position: absolute; top: 42%; left: 10%; right: 10%; text-align: center; color: var(--dim); pointer-events: none; line-height: 1.8; }
 footer { display: flex; gap: 14px; align-items: center; padding: 6px 12px; border-top: 1px solid var(--border); background: var(--panel); min-height: 30px; color: var(--dim); font-size: 11px; }
 #status { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.hint { margin-left: auto; white-space: nowrap; }
