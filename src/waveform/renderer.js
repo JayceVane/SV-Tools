@@ -2,7 +2,7 @@
 (function () {
     'use strict';
     window.createWaveRenderer = function ({ canvas, ruler, tracks, state, model }) {
-        const L = window.WaveRowLayout;
+        const L = window.WaveRowLayout, C = window.WaveColumnLayout;
         let palette;
         function colors() {
             const style = getComputedStyle(document.body);
@@ -13,9 +13,7 @@
         }
         colors();
         function geometry() {
-            const width = Math.max(1, tracks.clientWidth);
-            const names = Math.min(state.fullName ? 340 : 270, Math.max(80, width * .42));
-            return { width, height: Math.max(1, tracks.clientHeight), names, plot: Math.max(1, width - names - 12) };
+            return { ...C.waveGeometry(tracks.clientWidth, state.columns?.names, state.fullName), height: Math.max(1, tracks.clientHeight) };
         }
         const x = time => { const g = geometry(); return g.names + (time - state.view.start) / state.view.span * g.plot; };
         function context(element, width, height) {

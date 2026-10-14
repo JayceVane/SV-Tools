@@ -86,7 +86,8 @@
                 button.dataset.menuAction = item.id || ''; button.disabled = !!item.disabled;
                 button.className = item.danger ? 'menuDanger' : '';
                 button.setAttribute('aria-label', item.label);
-                if (item.detail) { button.setAttribute('aria-description', item.detail); button.title = item.detail; }
+                if (item.detail) button.setAttribute('aria-description', item.detail);
+                button.title = item.detail ? `${item.label} · ${item.detail}` : item.label;
                 button.setAttribute('role', item.checked !== undefined ? 'menuitemradio' : 'menuitem');
                 if (item.checked !== undefined) button.setAttribute('aria-checked', String(item.checked));
                 if (item.disabled) button.setAttribute('aria-disabled', 'true');

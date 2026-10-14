@@ -6,6 +6,7 @@ const vm = require('node:vm');
 const { test } = require('node:test');
 const model = require('../src/waveform/model');
 const layout = require('../src/waveform/row-layout');
+const columns = require('../src/waveform/column-layout');
 
 const rendererSource = fs.readFileSync(path.join(__dirname, '../src/waveform/renderer.js'), 'utf8');
 const dark = {
@@ -50,7 +51,7 @@ function fixture({ width = 1000, height = 90, rowHeight = 44, changes = [{ t: 0,
         series: new Map([[signal.id, { changes, dense }]]), seriesKey: 'current', windowKey: 'current',
         valuesA: {}, valuesB: {}, cursorA: null, cursorB: null, secondsPerTick: 1e-9, fullName: false };
     let activePalette = palette;
-    const sandbox = { window: { devicePixelRatio: 1, WaveRowLayout: layout }, document: { body: {} },
+    const sandbox = { window: { devicePixelRatio: 1, WaveRowLayout: layout, WaveColumnLayout: columns }, document: { body: {} },
         getComputedStyle: () => ({ getPropertyValue: name => activePalette[name.slice(2)] || '' }) };
     vm.runInNewContext(rendererSource, sandbox, { filename: 'renderer.js' });
     const renderModel = { ...model, ...(label === undefined ? {} : { formatValue: () => label }), ...modelOverrides };

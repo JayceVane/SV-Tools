@@ -1,11 +1,11 @@
 /* Webview 控制器：有界查询、虚拟列表、交互和会话布局。 */
 (function () {
     'use strict';
-    const api = acquireVsCodeApi(), M = window.WaveModel, I = window.WaveInteractions, L = window.WaveRowLayout;
+    const api = acquireVsCodeApi(), M = window.WaveModel, I = window.WaveInteractions, L = window.WaveRowLayout, C = window.WaveColumnLayout;
     const $ = id => document.getElementById(id);
     const canvas = $('waveCanvas'), tracks = $('tracks'), catalog = $('catalog');
     const CATALOG_HEIGHT = 34, MAX_TRACKS = 2000, QUERY_POINT_BUDGET = 240000;
-    const state = { metadata: null, signals: new Map(), selected: [], rows: [], formats: Object.create(null), groups: Object.create(null), heights: Object.create(null),
+    const state = { metadata: null, signals: new Map(), selected: [], rows: [], formats: Object.create(null), groups: Object.create(null), heights: Object.create(null), columns: {},
         view: { start: 0, span: 1 }, cursorA: 0, cursorB: null, activeCursor: 'A', activeKey: null,
         multi: new Set(), selectionAnchor: null, fullName: false, snap: true, secondsPerTick: null,
         series: new Map(), seriesKey: '', windowKey: '', valuesA: Object.create(null), valuesB: Object.create(null) };
@@ -26,7 +26,19 @@
             if (row) state.activeKey = M.signalKey(row.signal);
             const g = renderer.geometry(), time = state.view.start + Math.max(0, (point.x - g.names) / g.plot) * state.view.span;
             placeCursor(time, event.shiftKey ? 'B' : state.activeCursor, row?.signal);
-        }, onSettled: viewportChanged, onStart: () => hideMenu(false), blocked: () => !!groupDialog, status });
+        }, onSettled: viewportChanged, onStart: () => hideMenu(false), blocked: () => !!groupDialog || columns.active, status });
+    const columnHandles = [
+        { element: $('catalogResize'), label: '设计信号目录宽度', getWidth: () => state.columns.catalog,
+            getEffectiveWidth: () => catalogGeometry().width, setWidth: value => setColumn('catalog', value), bounds: catalogGeometry },
+        { element: $('namesResize'), label: '信号名称与读值栏宽度', getWidth: () => state.columns.names,
+            getEffectiveWidth: () => renderer.geometry().names, setWidth: value => setColumn('names', value), bounds: () => renderer.geometry() }
+    ];
+    const columns = window.createWaveColumnResize({ handles: columnHandles, blocked: () => !!groupDialog || gestures.active,
+        onStart() { hideMenu(false); gestures.finishMotion(); document.body.classList.add('columnResizing'); },
+        onEnd() { document.body.classList.remove('columnResizing'); },
+        onPreview() { applyColumnLayout(); paint(); },
+        onCommit() { applyColumnLayout(); viewportChanged(); persist(); },
+        onCancel() { applyColumnLayout(); paint(); } });
     $('title').textContent = BOOT.fileName;
 
     function status(text) { $('status').textContent = text; }
@@ -37,12 +49,21 @@
     function persist() {
         api.setState({ fileKey: BOOT.fileKey, selected: state.selected, start: state.view.start, span: state.view.span,
             cursorA: state.cursorA, cursorB: state.cursorB, formats: state.formats, groups: state.groups,
-            heights: state.heights, fullName: state.fullName, snap: state.snap, memory: memory.snapshot() });
+            heights: state.heights, columns: state.columns, fullName: state.fullName, snap: state.snap, memory: memory.snapshot() });
+    }
+    function setColumn(key, width) { if (width === undefined) delete state.columns[key]; else state.columns[key] = width; }
+    function catalogGeometry() { return C.catalogGeometry(state.columns.catalog, window.innerWidth, $('layout').clientWidth); }
+    function applyColumnLayout() {
+        const width = catalogGeometry().width;
+        $('catalogPane').style.width = width + 'px'; $('catalogResize').style.left = width + 'px';
+        $('namesResize').style.left = renderer.geometry().names + 'px';
+        $('namesResize').style.height = $('ruler').clientHeight + tracks.clientHeight + 'px';
+        columns.sync();
     }
     function paint() {
         if (paintPending) return;
         paintPending = true;
-        requestAnimationFrame(() => { paintPending = false; renderer.draw(); updateReadout(); });
+        requestAnimationFrame(() => { paintPending = false; applyColumnLayout(); renderer.draw(); updateReadout(); });
     }
     function updateReadout() {
         const format = time => M.formatTime(time, state.secondsPerTick);
@@ -67,7 +88,7 @@
     function visibleIds() { return [...new Set(L.visibleRows(state.rows, tracks.scrollTop, tracks.clientHeight).map(row => row.signal.id))].slice(0, 256).sort(); }
     function viewportChanged() {
         paint();
-        if (!state.metadata) return;
+        if (!state.metadata || columns.active) return;
         const ids = visibleIds();
         const params = { ids, start: state.view.start, end: Math.min(state.metadata.endTime, state.view.start + state.view.span),
             pixels: Math.max(1, Math.min(4096, Math.floor(renderer.geometry().plot), Math.floor(QUERY_POINT_BUDGET / Math.max(1, ids.length)))) };
@@ -268,6 +289,7 @@
         if (saved?.fileKey === BOOT.fileKey) {
             state.formats = Object.assign(Object.create(null), saved.formats); state.groups = Object.assign(Object.create(null), saved.groups);
             state.heights = L.restoreHeights(saved.heights, state.signals);
+            state.columns = C.restoreColumns(saved.columns);
             state.fullName = !!saved.fullName; state.snap = saved.snap !== false;
         }
         const seen = new Set();
@@ -289,7 +311,7 @@
         $('loading').classList.add('hidden'); $('snap').classList.toggle('active', state.snap); $('fullName').classList.toggle('active', state.fullName);
         memory.refresh(state.cursorA, state.cursorB, state.secondsPerTick);
         memory.initialize(metadata.vars, saved?.fileKey === BOOT.fileKey ? saved.memory : null);
-        filterCatalog(); rebuildRows();
+        applyColumnLayout(); filterCatalog(); rebuildRows();
     }
     window.addEventListener('message', event => {
         const message = event.data;
@@ -324,13 +346,13 @@
         ++edgeVersion; setCursor(time, state.activeCursor); setView({ start: time - state.view.span / 2, span: state.view.span }); };
     $('jump').onclick = jump; $('jumpTime').onkeydown = event => { if (event.key === 'Enter') jump(); };
     $('cancel').onclick = () => api.postMessage({ type: 'cancel' });
-    canvas.oncontextmenu = event => { event.preventDefault(); gestures.cancel(); gestures.finishMotion(); showMenu(event, renderer.rowAt(event.offsetY)); };
+    canvas.oncontextmenu = event => { event.preventDefault(); columns.cancel(); gestures.cancel(); gestures.finishMotion(); showMenu(event, renderer.rowAt(event.offsetY)); };
     document.addEventListener('pointerdown', event => { if (menu && !menu.contains(event.target)) hideMenu(false); });
-    window.addEventListener('blur', () => { hideMenu(false); gestures.cancel(); });
-    window.addEventListener('resize', () => { hideMenu(false); gestures.cancel(); gestures.finishMotion(); });
+    window.addEventListener('blur', () => { hideMenu(false); columns.cancel(); gestures.cancel(); });
+    window.addEventListener('resize', () => { hideMenu(false); columns.cancel(); gestures.cancel(); gestures.finishMotion(); applyColumnLayout(); viewportChanged(); });
     tracks.addEventListener('wheel', event => {
         if (!state.metadata) return;
-        if (gestures.rowActive) { event.preventDefault(); return; }
+        if (gestures.rowActive || columns.active) { event.preventDefault(); return; }
         if (event.ctrlKey || event.metaKey) { event.preventDefault(); const left = tracks.getBoundingClientRect().left, g = renderer.geometry();
             setView(M.zoomView(state.view, event.deltaY > 0 ? 1.25 : .8, (event.clientX - left - g.names) / g.plot, state.metadata.endTime));
         } else if (event.shiftKey || Math.abs(event.deltaX) > Math.abs(event.deltaY)) { event.preventDefault();
@@ -339,6 +361,8 @@
     $('ruler').onclick = event => { if (!state.metadata) return; const g = renderer.geometry();
         if (event.offsetX >= g.names) placeCursor(state.view.start + (event.offsetX - g.names) / g.plot * state.view.span, event.shiftKey ? 'B' : state.activeCursor, state.signals.get(state.activeKey)); };
     document.addEventListener('keydown', event => {
+        if (columns.active) { if (event.key === 'Escape') { columns.cancel(); event.preventDefault(); } return; }
+        if (columnHandles.some(handle => handle.element === event.target)) return;
         if (menu || groupDialog || /^(INPUT|SELECT|TEXTAREA)$/.test(event.target.tagName) || event.target.isContentEditable) return;
         if (gestures.active) {
             if (event.key === 'Escape') { gestures.cancel(); event.preventDefault(); }
@@ -376,7 +400,7 @@
         }
     });
     new ResizeObserver(() => { $('trackSpace').style.height = Math.max(L.totalHeight(state.rows), tracks.clientHeight) + 'px';
-        if (gestures.rowActive) paint(); else viewportChanged(); renderCatalog(); }).observe(tracks);
+        if (gestures.rowActive || columns.active) paint(); else viewportChanged(); renderCatalog(); }).observe(tracks);
     new MutationObserver(() => { renderer.colors(); paint(); }).observe(document.body, { attributes: true, attributeFilter: ['class', 'data-vscode-theme-kind'] });
     if (BOOT.metadata) initialize(BOOT.metadata);
     else api.postMessage({ type: 'ready' });

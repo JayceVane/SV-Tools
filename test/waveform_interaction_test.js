@@ -195,6 +195,7 @@ test('图标与详情不污染菜单名称，分区和危险操作可识别，�
     const root = h.document.body.children[0], header = root.children[0], format = root.children[1], remove = root.children[2];
     assert.equal(header.children[2].textContent, summary); assert.equal(header.children[2].children.length, 0);
     assert.equal(format.getAttribute('aria-label'), '显示格式'); assert.equal(format.children[2].textContent, 'FP32');
+    assert.equal(format.title, '显示格式 · FP32'); assert.equal(remove.title, '移除所选信号');
     assert.equal(format.children[0].children[0].namespaceURI, 'http://www.w3.org/2000/svg');
     assert.equal(remove.className, 'menuDanger'); assert.equal(remove.children[0].getAttribute('aria-hidden'), 'true');
     h.key(format, 'ArrowRight'); const child = h.document.body.children[1];
