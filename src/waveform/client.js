@@ -235,7 +235,7 @@
         const formatItems = [];
         let category = null;
         for (const option of M.FORMAT_OPTIONS) {
-            if (category && category !== option.category) formatItems.push({ separator: true });
+            if (category !== option.category) formatItems.push({ separator: true, label: { integer: '整数', wave: '波形', float: '浮点' }[option.category] });
             category = option.category;
             formatItems.push(action('format-' + option.id, option.label, () => {
                 for (const path of targets) state.formats[path] = option.id;
@@ -243,20 +243,22 @@
             }, { checked: !mixed && formats[0] === option.id, ...I.formatAvailability(option, signals, M.supportsFormat) }));
         }
         const groups = [...new Set(state.selected.map(path => state.groups[path]).filter(Boolean))];
-        const items = [{ id: 'display-format', label: '显示格式' + (mixed ? ' · 混合' : ''), submenu: formatItems },
+        const items = [{ id: 'display-format', label: '显示格式', icon: 'format', detail: mixed ? '混合格式' : M.formatLabel(formats[0]), submenu: formatItems },
             action('analog-height', '增加模拟量行高', () => {
                 for (const path of targets) { state.formats[path] = 'analog'; state.heights[path] = L.analogHeight(L.analogHeight(state.heights[path]) + 40); }
                 rebuildRows(); status(`已调整 ${targets.length} 条模拟量波形行高`);
-            }, { disabled: signals.some(signal => !M.supportsFormat(signal, 'analog')) }),
-            { separator: true }, action('new-group', '新建分组…', () => showGroupDialog(targets))];
-        if (groups.length) items.push({ id: 'join-group', label: '加入已有分组', submenu: groups.map((name, index) =>
-            action('join-group-' + index, name, () => assignGroup(targets, name))) });
+            }, { icon: 'height', disabled: signals.some(signal => !M.supportsFormat(signal, 'analog')) }),
+            { separator: true, label: '分组' }, action('new-group', '新建分组…', () => showGroupDialog(targets), { icon: 'group-add' })];
+        if (groups.length) items.push({ id: 'join-group', label: '加入已有分组', icon: 'group', submenu: groups.map((name, index) =>
+            action('join-group-' + index, name, () => assignGroup(targets, name), { icon: 'group' })) });
         items.push(action('ungroup', '解除分组', () => {
             for (const path of targets) delete state.groups[path]; rebuildRows(); status(`已解除 ${targets.length} 条信号的分组`);
-        }, { disabled: targets.every(path => !state.groups[path]) }),
-        { separator: true }, action('remove-signals', '移除所选信号', () => removeSignals(targets)));
+        }, { icon: 'ungroup', disabled: targets.every(path => !state.groups[path]) }),
+        { separator: true }, action('remove-signals', '移除所选信号', () => removeSignals(targets), { icon: 'remove', danger: true }));
+        const subtitle = signals.length === 1 ? `${state.fullName ? signals[0].path + (signals[0].range || '') : signals[0].name} · ${/real/i.test(signals[0].type) ? 'real' : signals[0].width + ' bit'}`
+            : `${signals.length} 条信号 · ${new Set(signals.map(signal => signal.width)).size === 1 ? '相同位宽' : '混合位宽'}`;
         menu = window.createWaveMenu({ items, x: event.clientX, y: event.clientY, title: `已选 ${targets.length} 条信号`, returnFocus: canvas,
-            onClose: () => { menu = null; } });
+            subtitle, onClose: () => { menu = null; } });
     }
     function initialize(metadata) {
         metadata = { ...metadata, vars: M.prepareSignals(metadata.vars) };

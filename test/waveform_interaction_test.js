@@ -80,8 +80,9 @@ test('菜单位置限制在视口内，左边和上边不会因小坐标变为�
     assert.deepEqual(I.menuPosition(-50, -50, 220, 120, 800, 600), { x: 6, y: 6 });
 });
 
-function menuHarness() {
+function menuHarness(extra = {}) {
     const document = { activeElement: null };
+    const timers = new Map(); let clock = 0, timerId = 0;
     class Element {
         constructor(tag) { this.tagName = tag.toUpperCase(); this.children = []; this.attributes = {}; this.style = {}; this.dataset = {}; this.listeners = {}; this.disabled = false; }
         get offsetWidth() { return this.className?.includes('menu') ? 240 : 220; }
@@ -101,21 +102,24 @@ function menuHarness() {
         }
     }
     document.createElement = tag => new Element(tag); document.body = new Element('body');
+    document.createElementNS = (namespace, tag) => { const element = new Element(tag); element.namespaceURI = namespace; return element; };
     const window = { WaveInteractions: I, innerWidth: 600, innerHeight: 400 };
-    vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../src/waveform/menu.js'), 'utf8'), { window, document });
+    vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../src/waveform/menu.js'), 'utf8'), { window, document,
+        setTimeout(callback, delay) { const id = ++timerId; timers.set(id, { callback, due: clock + delay }); return id; }, clearTimeout: id => timers.delete(id) });
     const canvas = new Element('canvas'); let closes = 0, applies = 0;
     const menu = window.createWaveMenu({ x: 580, y: 390, title: '已选 2 条信号', returnFocus: canvas, onClose: () => closes++,
         items: [{ id: 'format', label: '显示格式', submenu: [
             { id: 'hex', label: 'Hex', checked: true, action: () => applies++ },
             { id: 'fp32', label: 'FP32', checked: false, disabled: true, detail: '仅适用 1/2', action: () => assert.fail('禁用格式不能应用') },
             { id: 'bin', label: 'Bin', checked: false, action: () => applies++ }
-        ] }, { id: 'new-group', label: '新建分组', action: () => applies++ }] });
+        ] }, { id: 'new-group', label: '新建分组', action: () => applies++ }], ...extra });
     const key = (element, name) => {
         let prevented = false, stopped = false;
         element.onkeydown({ key: name, preventDefault() { prevented = true; }, stopPropagation() { stopped = true; } });
         assert.equal(prevented, true, name); assert.equal(stopped, true, name);
     };
-    return { document, window, canvas, menu, key, counts: () => ({ closes, applies }) };
+    return { document, window, canvas, menu, key, counts: () => ({ closes, applies }),
+        tick(ms) { clock += ms; for (const [id, timer] of timers) if (timer.due <= clock) { timers.delete(id); timer.callback(); } }, timers };
 }
 
 test('菜单具备单选语义与禁用提示；方向键展开子菜单并跳过不兼容格式', () => {
@@ -144,7 +148,7 @@ test('Enter/Space 执行菜单操作一次并恢复波形焦点；关闭是幂�
 
 test('鼠标悬停打开子菜单，Escape 逐层收起，所有层都计入外部点击判断', () => {
     const h = menuHarness(), root = h.document.body.children[0], format = root.children[1];
-    format.listeners.pointerenter(); const submenu = h.document.body.children[1], hex = submenu.children[0];
+    format.listeners.pointerenter(); h.tick(90); const submenu = h.document.body.children[1], hex = submenu.children[0];
     assert.equal(h.menu.contains(hex), true); assert.equal(h.menu.contains(h.canvas), false);
     h.key(hex, 'Escape'); assert.equal(h.document.activeElement, format); assert.equal(h.document.body.children.length, 1);
     h.key(format, 'Escape'); assert.equal(h.document.body.children.length, 0); assert.equal(h.document.activeElement, h.canvas);
@@ -154,11 +158,58 @@ test('右侧边缘子菜单向左展开，各层始终约束在视口中', () =>
     const h = menuHarness(), root = h.document.body.children[0], format = root.children[1];
     h.key(format, 'ArrowRight'); const submenu = h.document.body.children[1];
     assert.ok(Number.parseFloat(submenu.style.left) < Number.parseFloat(root.style.left));
+    assert.equal(format.dataset.submenuSide, 'left');
     for (const level of h.document.body.children) {
         assert.ok(Number.parseFloat(level.style.left) >= 6);
         assert.ok(Number.parseFloat(level.style.left) + level.offsetWidth <= h.window.innerWidth - 6);
         assert.ok(Number.parseFloat(level.style.top) + level.offsetHeight <= h.window.innerHeight - 6);
     }
+});
+
+test('悬停切换给跨菜单移动留出时间，进入子菜单取消待收起任务', () => {
+    const h = menuHarness(), root = h.document.body.children[0], format = root.children[1], group = root.children[2];
+    format.listeners.pointerenter(); h.tick(40); format.listeners.pointerleave(); h.tick(100); assert.equal(h.document.body.children.length, 1);
+    format.listeners.pointerenter(); h.tick(89); assert.equal(h.document.body.children.length, 1);
+    h.tick(1); const child = h.document.body.children[1];
+    group.listeners.pointerenter(); h.tick(100); assert.equal(h.document.body.children.length, 2);
+    child.listeners.pointerenter(); h.tick(200); assert.equal(h.document.body.children.length, 2);
+    group.listeners.pointerenter(); h.tick(150); assert.equal(h.document.body.children.length, 1);
+    assert.equal(format.getAttribute('aria-expanded'), 'false');
+});
+
+test('关闭和键盘操作撤销悬停定时器，迟到回调不能重新打开已关闭菜单', () => {
+    const h = menuHarness(), format = h.document.body.children[0].children[1];
+    format.listeners.pointerenter(); assert.equal(h.timers.size, 1);
+    h.key(format, 'ArrowRight'); assert.equal(h.timers.size, 0); assert.equal(h.document.body.children.length, 2);
+    h.tick(500); assert.equal(h.document.body.children.length, 2);
+    h.menu.close(); format.listeners.pointerenter(); h.menu.close(); h.tick(500);
+    assert.equal(h.document.body.children.length, 0); assert.deepEqual(h.counts(), { closes: 1, applies: 0 });
+});
+
+test('图标与详情不污染菜单名称，分区和危险操作可识别，摘要以原文显示', () => {
+    const summary = '<img src=x onerror=alert(1)> · 32 bit';
+    const h = menuHarness({ subtitle: summary, items: [
+        { label: '显示格式', icon: 'format', detail: 'FP32', submenu: [{ separator: true, label: '浮点' }, { label: 'FP32', checked: true }] },
+        { label: '移除所选信号', icon: 'remove', danger: true }
+    ] });
+    const root = h.document.body.children[0], header = root.children[0], format = root.children[1], remove = root.children[2];
+    assert.equal(header.children[2].textContent, summary); assert.equal(header.children[2].children.length, 0);
+    assert.equal(format.getAttribute('aria-label'), '显示格式'); assert.equal(format.children[2].textContent, 'FP32');
+    assert.equal(format.children[0].children[0].namespaceURI, 'http://www.w3.org/2000/svg');
+    assert.equal(remove.className, 'menuDanger'); assert.equal(remove.children[0].getAttribute('aria-hidden'), 'true');
+    h.key(format, 'ArrowRight'); const child = h.document.body.children[1];
+    assert.equal(child.getAttribute('aria-label'), '显示格式'); assert.equal(child.children[0].getAttribute('role'), 'separator');
+    assert.equal(child.children[0].getAttribute('aria-label'), '浮点'); assert.equal(h.document.activeElement, child.children[1]);
+});
+
+test('实际控制器菜单给出信号摘要和当前格式，混合选择明确标记并保留格式分区', async () => {
+    const h = clientHarness(); await h.flush(); h.pointer('tb.a');
+    const single = h.contextMenu('tb.a'); assert.equal(single.subtitle, 'a · 32 bit'); assert.equal(single.items[0].detail, 'Hex');
+    h.state.formats['tb.a'] = 'fp32'; h.pointer('tb.b', { ctrlKey: true });
+    const mixed = h.contextMenu('tb.a'); assert.equal(mixed.subtitle, '2 条信号 · 相同位宽');
+    assert.equal(mixed.items[0].label, '显示格式'); assert.equal(mixed.items[0].detail, '混合格式');
+    assert.deepEqual(Array.from(mixed.items[0].submenu.filter(item => item.separator), item => item.label), ['整数', '波形', '浮点']);
+    assert.equal(mixed.items.find(item => item.id === 'remove-signals').danger, true);
 });
 
 test('实际控制器：右键批量格式使用冻结目标，改变显示不重读窗口/游标数据', async () => {
