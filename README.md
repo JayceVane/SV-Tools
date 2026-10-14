@@ -5,10 +5,12 @@
 
 改编自 Sublime Text [SystemVerilog](https://github.com/TheClams/SystemVerilog)（格式化）与 [Verilog-Gadget](https://github.com/poucotm/Verilog-Gadget)（生产力工具）插件。
 
-本 worktree 为 **4.0.0-alpha5 开发分支**。源码按 `src/` 分层，原生模块与 CLI 构建到 `bin/`；3.x 继续在原工程目录维护。
+本 worktree 为 **4.0.0-alpha6 开发分支**。源码按 `src/` 分层，原生模块与 CLI 构建到 `bin/`；3.x 继续在原工程目录维护。
 
 4.0 波形查看器采用后台流式加载与按需时间窗，增加双游标 Δt 和信号检索，已实测
 100/500 MiB VCD。操作说明、性能数据与验收范围见 [波形查看器](docs/WAVEFORM.md)。
+
+4.0 补全使用标准目录、容错语义模型和增量工程索引，支持 Verilog/SystemVerilog 版本选择、UVM 1.2/1800.2、类继承与泛型、端口/参数、数组与二维 mem 成员。配置、覆盖范围及限制见 [代码补全](docs/COMPLETION.md)。
 
 ## 功能总览
 

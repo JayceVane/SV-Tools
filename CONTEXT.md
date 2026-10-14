@@ -1,9 +1,12 @@
 # 4.0 开发交接
 
-最后更新：2026-10-13。当前里程碑为本地 `4.0.0-alpha5`，分支 `codex/refactor-v4`。
+最后更新：2026-10-14。当前里程碑为本地 `4.0.0-alpha6`，分支 `codex/refactor-v4`。
 
 ## 完成内容
 
+- alpha6 重构标准补全：Verilog/SV 版本表、UVM 1.2/1800.2 官方公开目录、容错作用域与泛型成员解析、增量工程/include 索引、准确片段与替换区间。
+- 覆盖 package/import、继承/可见性、TLM/factory、聚合类型、二维数组、覆盖率/约束/random、modport、命名连接及同文件类外实现。目录覆盖和语义边界分开，见 `docs/COMPLETION.md`。
+- 本轮交付完整清单、实测、包 SHA 和质量复核见 `docs/V4_ALPHA6.md`；历史 alpha5 记录继续保留。
 - 独立 worktree：`C:\Users\JayceVane\.codex\worktrees\svtools-v4\02_svtools`。
 - alpha1 完成格式化职责重构与扩展模块分离，见 `ARCHITECTURE.md` 和 `docs/V4_CHANGES.md`。
 - alpha2 修复 always 显式事件头的多余水平空白；inlineCompact 关闭时保持原文。
@@ -26,6 +29,10 @@
 
 ## 验证
 
+- alpha6：85 个 JS、golden 36/36、Node 382/382、Rust 原 112 项集通过；CLI/native 重建到 alpha6。
+- alpha6 真实 VS Code 1.141 宿主 22/22，接受补全后 Icarus 13 编译通过；外部 include 事件与未保存模型实测通过。
+- alpha6 512 文件/十万行 Node provider 基准：冷索引 793ms、热 p95 9.53ms、单文件 3.90ms、脏文档 672ms；热请求零 I/O。此值不是 IDE 绘制延迟。
+- 当前包 `bin/svtools-4.0.0-alpha6.vsix`，75 条目/2282176 字节，66 项字节一致性核验；未安装/推送/合并/发布。
 - alpha5 Rust 112/112；Rust 实现未改，alpha3 的 cargo check/fmt 检查继续保留。
 - 最终 alpha5：70 个 JS 语法检查、golden 36/36、Node 300/300；包核验见 docs/V4_ALPHA5.md。
 - alpha4 新增工具链合同 49：输出/日志 27，任务/编辑器边界 22；alpha5 新增 82 项工程管理/解析/停止合同。

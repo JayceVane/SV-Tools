@@ -43,6 +43,11 @@ flowchart LR
 | `src/toolchains/iverilog-controller.js` | 命令、事件、诊断归属和界面接线 | 进程字节流、厂商解析规则 |
 | `src/vivado/batch.js` | batch 成败、项目标记与语义错误 | 工程树、Tcl 生成 |
 | `src/workspace/sources.js` | 设计单元索引与缓存 | Lint 运行与界面接线 |
+| `src/editor/completion/catalog` 与生成数据 | 版本化规范名称、公开接口签名和来源/许可 | 用户工程解析和 VS Code API |
+| `src/editor/completion/syntax` | 容错词法、作用域、声明、类型与连接区间 | 规范目录、文件读取、完整 elaboration |
+| `src/editor/completion/index` | 文档版本缓存、工程/include 目录事件与容量预算 | 补全排序和原生格式化 |
+| `src/editor/completion/resolve` 与 `engine` | 词法可见性、泛型/成员解析、上下文候选、前缀与数量预算 | VS Code 类和文件读取 |
+| `src/editor/completion/provider` | 编辑器配置、取消、双替换区间与 SnippetString | 重复维护标准名录和领域类型规则 |
 
 固定声明/赋值模式使用惰性缓存。新增规则优先落在负责该构造的模块，只有新的词法事实才扩展扫描器；不能把某个布局例外复制到其它阶段。
 

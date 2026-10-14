@@ -37,6 +37,7 @@ test/*
 !test/render-vcd-badge.js
 !test/*_test.js
 !test/vscode_vivado_host.js
+!test/vscode_completion_host.js
 !test/fixtures/
 test/fixtures/*
 !test/fixtures/memory_dump.sv

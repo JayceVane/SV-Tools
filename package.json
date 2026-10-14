@@ -2,7 +2,7 @@
   "name": "svtools",
   "displayName": "SystemVerilog Tools",
   "description": "Verilog/SystemVerilog formatter, module instantiation, testbench generation, and productivity tools (Rust native backend)",
-  "version": "4.0.0-alpha5",
+  "version": "4.0.0-alpha6",
   "publisher": "JayceVane",
   "author": {
     "name": "JayceVane",
@@ -49,7 +49,7 @@
   ],
   "main": "./extension.js",
   "scripts": {
-    "test": "npm run check && node test/golden_test.js && node --test test/formatter_contract_test.js test/toolchain_test.js test/waveform_test.js test/editor_test.js test/workspace_test.js test/waveform_stream_test.js test/waveform_ui_test.js test/waveform_host_test.js test/waveform_memory_test.js test/waveform_memory_view_test.js test/process_output_test.js test/toolchain_task_test.js test/vivado_tree_test.js test/vivado_xpr_test.js test/vivado_commands_test.js",
+    "test": "npm run check && node test/golden_test.js && node --test test/formatter_contract_test.js test/toolchain_test.js test/waveform_test.js test/editor_test.js test/workspace_test.js test/waveform_stream_test.js test/waveform_ui_test.js test/waveform_host_test.js test/waveform_memory_test.js test/waveform_memory_view_test.js test/process_output_test.js test/toolchain_task_test.js test/vivado_tree_test.js test/vivado_xpr_test.js test/vivado_commands_test.js test/completion_syntax_test.js test/completion_catalog_test.js test/completion_engine_test.js test/completion_index_test.js test/completion_provider_test.js",
     "build:native": "node scripts/build-native.js",
     "package": "vsce package",
     "vscode:prepublish": "npm test",
@@ -1041,6 +1041,76 @@
               "description": "%cfg.vivado_structure_projectDir.desc%"
             }
           }
+        },
+        "svtools.completion.uvmVersion": {
+          "type": "string",
+          "enum": [
+            "1.2",
+            "1800.2",
+            "off"
+          ],
+          "default": "1.2",
+          "scope": "resource",
+          "description": "%cfg.completion_uvmVersion.desc%"
+        },
+        "svtools.completion.includePaths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "scope": "window",
+          "description": "%cfg.completion_includePaths.desc%"
+        },
+        "svtools.completion.maxFiles": {
+          "type": "integer",
+          "default": 5000,
+          "minimum": 1,
+          "maximum": 50000,
+          "scope": "window",
+          "description": "%cfg.completion_maxFiles.desc%"
+        },
+        "svtools.completion.maxFileSizeKB": {
+          "type": "integer",
+          "default": 2048,
+          "minimum": 1,
+          "maximum": 65536,
+          "scope": "window",
+          "description": "%cfg.completion_maxFileSizeKB.desc%"
+        },
+        "svtools.completion.maxTotalSourceMB": {
+          "type": "integer",
+          "default": 32,
+          "minimum": 1,
+          "maximum": 1024,
+          "scope": "window",
+          "description": "%cfg.completion_maxTotalSourceMB.desc%"
+        },
+        "svtools.completion.standard": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "1364-1995",
+            "1364-2001-noconfig",
+            "1364-2001",
+            "1364-2005",
+            "1800-2005",
+            "1800-2009",
+            "1800-2012",
+            "1800-2017",
+            "1800-2023"
+          ],
+          "default": "auto",
+          "scope": "resource",
+          "description": "%cfg.completion_standard.desc%"
+        },
+        "svtools.completion.maxItems": {
+          "type": "integer",
+          "default": 1000,
+          "minimum": 1,
+          "maximum": 10000,
+          "scope": "resource",
+          "description": "%cfg.completion_maxItems.desc%"
         }
       }
     }

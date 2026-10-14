@@ -1,26 +1,5 @@
 'use strict';
 
-const SV_KEYWORDS = [
-    'module', 'endmodule', 'input', 'output', 'inout', 'wire', 'reg',
-    'logic', 'always', 'always_comb', 'always_ff', 'always_latch',
-    'assign', 'begin', 'end', 'if', 'else', 'case', 'endcase',
-    'casex', 'casez', 'for', 'while', 'do', 'repeat', 'forever',
-    'function', 'endfunction', 'task', 'endtask', 'parameter',
-    'localparam', 'generate', 'endgenerate', 'genvar', 'interface',
-    'endinterface', 'modport', 'package', 'endpackage', 'class',
-    'endclass', 'typedef', 'enum', 'struct', 'union', 'packed',
-    'return', 'posedge', 'negedge', 'edge', 'or', 'and', 'not',
-    'integer', 'real', 'time', 'bit', 'byte', 'shortint', 'int',
-    'longint', 'shortreal', 'string', 'void', 'initial', 'final',
-    'default', 'signed', 'unsigned', 'automatic', 'static',
-    'virtual', 'extends', 'implements', 'import', 'export',
-    'pure', 'extern', 'fork', 'join', 'join_any', 'join_none',
-    'disable', 'wait', 'event', 'assert', 'assume', 'cover',
-    'property', 'endproperty', 'sequence', 'endsequence',
-    'covergroup', 'endgroup', 'rand', 'randc', 'constraint',
-    'new', 'super', 'this', 'null', 'unique', 'priority',
-];
-
 const SV_SNIPPETS = [
     // Always blocks
     { label: 'always', detail: 'always @(...)', body: 'always @(${1:*}) begin\n\t$0\nend' },
@@ -57,7 +36,7 @@ const SV_SNIPPETS = [
     { label: 'function', detail: 'function template', body: 'function automatic ${1:logic} ${2:name}(${3:input logic a});\n\t$0\nendfunction' },
     { label: 'task', detail: 'task template', body: 'task automatic ${1:name}(${2:input logic a});\n\t$0\nendtask' },
     // Testbench
-    { label: 'testbench', detail: 'testbench template', body: '`timescale 1ns / 1ps\n\nmodule ${1:tb}_${2:top};\n\n\treg clk;\n\treg rst_n;\n\n\t// Clock generation\n\tinitial begin\n\t\tclk = 1\'b0;\n\t\tforever #5 clk = ~clk;\n\tend\n\n\t// Reset & stimulus\n\tinitial begin\n\t\trst_n = 1\'b0;\n\t\t#100;\n\t\trst_n = 1\'b1;\n\t\t$0\n\t\t#1000;\n\t\t$$finish;\n\tend\n\n\t// DUT\n\t$2 u_dut (\n\t\t.clk   (clk),\n\t\t.rst_n (rst_n)\n\t);\n\nendmodule' },
+    { label: 'testbench', detail: 'testbench template', body: '`timescale 1ns / 1ps\n\nmodule ${1:tb}_${2:top};\n\n\treg clk;\n\treg rst_n;\n\n\t// Clock generation\n\tinitial begin\n\t\tclk = 1\'b0;\n\t\tforever #5 clk = ~clk;\n\tend\n\n\t// Reset & stimulus\n\tinitial begin\n\t\trst_n = 1\'b0;\n\t\t#100;\n\t\trst_n = 1\'b1;\n\t\t$0\n\t\t#1000;\n\t\t\\$finish;\n\tend\n\n\t// DUT\n\t$2 u_dut (\n\t\t.clk   (clk),\n\t\t.rst_n (rst_n)\n\t);\n\nendmodule' },
     { label: 'timescale', detail: '`timescale directive', body: '`timescale ${1:1ns} / ${2:1ps}' },
     { label: 'include', detail: '`include directive', body: '`include "${1:file.svh}"' },
     { label: 'define', detail: '`define directive', body: '`define ${1:NAME} ${2:value}' },
@@ -65,4 +44,4 @@ const SV_SNIPPETS = [
     { label: 'fsm', detail: 'FSM 3-process template', body: '// State definition\ntypedef enum logic [1:0] {\n\tIDLE,\n\tRUN,\n\tDONE\n} state_t;\n\nstate_t state, next_state;\n\n// State register\nalways_ff @(posedge ${1:clk} or negedge ${2:rst_n}) begin\n\tif (!$2)\n\t\tstate <= IDLE;\n\telse\n\t\tstate <= next_state;\nend\n\n// Next state logic\nalways_comb begin\n\tnext_state = state;\n\tcase (state)\n\t\tIDLE: $0\n\t\tRUN:  \n\t\tDONE: \n\t\tdefault: next_state = IDLE;\n\tendcase\nend\n\n// Output logic\nalways_comb begin\n\tcase (state)\n\t\tIDLE: ;\n\t\tRUN:  ;\n\t\tDONE: ;\n\t\tdefault: ;\n\tendcase\nend' },
 ];
 
-module.exports = { SV_KEYWORDS, SV_SNIPPETS };
+module.exports = { SV_SNIPPETS };

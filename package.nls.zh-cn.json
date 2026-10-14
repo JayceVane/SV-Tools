@@ -98,5 +98,12 @@
   "cmd.vivado_tree_quickElaborate.title": "仿真 Top 详细化（xelab）",
   "cmd.vivado_tree_expandAll.title": "全部展开",
   "cmd.vivado_tree_selectProject.title": "Vivado：选择工程",
-  "cmd.vivado_tree_stop.title": "Vivado：停止面板任务"
+  "cmd.vivado_tree_stop.title": "Vivado：停止面板任务",
+  "cfg.completion_uvmVersion.desc": "UVM 补全接口版本：UVM 1.2、IEEE 1800.2-2020（Accellera 2020.3.2）或关闭。独立于编译器配置。",
+  "cfg.completion_includePaths.desc": "补全索引额外读取的 HDL 头文件/库目录。相对路径基于工作区文件夹，支持 ${workspaceFolder}。",
+  "cfg.completion_maxFiles.desc": "补全工程索引的 HDL 文件数量上限。超过预算时标记补全列表不完整。",
+  "cfg.completion_maxFileSizeKB.desc": "补全索引读取的单个未打开 HDL 文件大小上限（KiB）。已打开文件使用当前未保存内容。",
+  "cfg.completion_maxTotalSourceMB.desc": "未打开文件补全索引的 UTF-8 源码总预算（MiB）；这是源码容量预算，不是堆内存上限。",
+  "cfg.completion_standard.desc": "补全关键词的语言标准。auto 根据文档语言及当前 `begin_keywords 指令选择。独立于编译器选项。",
+  "cfg.completion_maxItems.desc": "单次补全的候选项上限。宽泛请求会标记不完整，继续输入前缀可定位索引内其余声明。"
 }

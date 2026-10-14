@@ -55,7 +55,9 @@ function activate(context) {
 
     const dependencies = { vscode, loadNativeModule, reportNativeMissing };
     const { formatDocument } = createFormatter(dependencies);
-    const { provideDocumentSymbols, provideDefinition, provideCompletionItems, provideHover } = createLanguageProviders(dependencies);
+    const languageProviders = createLanguageProviders(dependencies);
+    const { provideDocumentSymbols, provideDefinition, provideCompletionItems, provideHover } = languageProviders;
+    context.subscriptions.push({ dispose: languageProviders.dispose });
     const editorCommands = createEditorCommands(dependencies);
     loadNativeModule();
 
@@ -102,7 +104,7 @@ function activate(context) {
             vscode.languages.registerDefinitionProvider(lang, { provideDefinition })
         );
         context.subscriptions.push(
-            vscode.languages.registerCompletionItemProvider(lang, { provideCompletionItems }, '.', ' ')
+            vscode.languages.registerCompletionItemProvider(lang, { provideCompletionItems }, '.', ':', '`', '$', '"', '/')
         );
         context.subscriptions.push(
             vscode.languages.registerHoverProvider(lang, { provideHover })
