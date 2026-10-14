@@ -1,24 +1,24 @@
 /* Webview 控制器：有界查询、虚拟列表、交互和会话布局。 */
 (function () {
     'use strict';
-    const api = acquireVsCodeApi(), M = window.WaveModel;
+    const api = acquireVsCodeApi(), M = window.WaveModel, I = window.WaveInteractions;
     const $ = id => document.getElementById(id);
     const canvas = $('waveCanvas'), tracks = $('tracks'), catalog = $('catalog');
     const ROW_HEIGHT = 38, CATALOG_HEIGHT = 34, MAX_TRACKS = 2000, QUERY_POINT_BUDGET = 240000;
     const state = { metadata: null, signals: new Map(), selected: [], rows: [], formats: Object.create(null), groups: Object.create(null), heights: Object.create(null),
         view: { start: 0, span: 1 }, cursorA: 0, cursorB: null, activeCursor: 'A', activeKey: null,
-        multi: new Set(), fullName: false, snap: true, secondsPerTick: null,
+        multi: new Set(), selectionAnchor: null, fullName: false, snap: true, secondsPerTick: null,
         series: new Map(), seriesKey: '', windowKey: '', valuesA: Object.create(null), valuesB: Object.create(null) };
     const renderer = window.createWaveRenderer({ canvas, ruler: $('ruler'), tracks, state, model: M });
     const memory = window.createMemoryInspector({ request, addSignals: keys => {
-        addSignals(keys); state.activeKey = keys[0]; state.multi = new Set(keys);
+        addSignals(keys); state.activeKey = keys[0]; state.selectionAnchor = keys[0]; state.multi = new Set(keys);
         const row = state.rows.find(item => M.signalKey(item.signal) === keys[0]);
         if (row) tracks.scrollTop = row.y;
         viewportChanged();
     }, onChange() { viewportChanged(); persist(); } });
     const pending = new Map();
     let requestId = 0, paintPending = false, filtered = [], windowBusy = false, windowWanted = null;
-    let valuesBusy = false, valuesWanted = null, valuesKey = '', edgeVersion = 0, menu = null, drag = null;
+    let valuesBusy = false, valuesWanted = null, valuesKey = '', edgeVersion = 0, menu = null, groupDialog = null, drag = null;
     $('title').textContent = BOOT.fileName;
 
     function status(text) { $('status').textContent = text; }
@@ -44,6 +44,7 @@
         $('viewRange').textContent = format(state.view.start) + ' → ' + format(state.view.start + state.view.span);
         $('rangeFit').disabled = state.cursorB === null || state.cursorB === state.cursorA;
         $('prevEdge').disabled = $('nextEdge').disabled = !state.activeKey;
+        canvas.setAttribute('aria-label', `波形；已添加 ${state.selected.length} 条，选中 ${state.multi.size} 条。Ctrl 点击多选，Shift 点击范围选择，右键或 Shift+F10 管理所选信号。`);
     }
     function rebuildRows() {
         let y = 0;
@@ -54,11 +55,10 @@
         });
         $('trackSpace').style.height = Math.max(y, tracks.clientHeight) + 'px';
         $('empty').hidden = !!state.rows.length;
-        $('signalCount').textContent = `${filtered.length.toLocaleString()} 个可用 · ${state.selected.length} 个已添加`;
-        state.windowKey = ''; valuesKey = '';
+        updateSelectionCount();
         viewportChanged(); renderCatalog(); persist();
     }
-    function visibleIds() { return [...new Set(renderer.visibleRows().map(row => row.signal.id))].slice(0, 256); }
+    function visibleIds() { return [...new Set(renderer.visibleRows().map(row => row.signal.id))].slice(0, 256).sort(); }
     function viewportChanged() {
         paint();
         if (!state.metadata) return;
@@ -152,7 +152,7 @@
         if (!state.metadata) return;
         filtered = M.filterSignals(state.metadata.vars, $('search').value, $('scope').value, $('constants').checked);
         catalog.scrollTop = 0; renderCatalog();
-        $('signalCount').textContent = `${filtered.length.toLocaleString()} 个可用 · ${state.selected.length} 个已添加`;
+        updateSelectionCount();
     }
     function addSignals(paths) {
         const selected = new Set(state.selected);
@@ -160,39 +160,97 @@
         state.selected = [...selected]; rebuildRows();
         if (selected.size === MAX_TRACKS) status('已添加 2000 条信号；建议按层级或检索条件拆分分析');
     }
-    function selectRow(row, event) {
-        const path = M.signalKey(row.signal), previous = state.activeKey;
-        if (event.shiftKey && previous) {
-            const a = state.selected.indexOf(previous), b = state.selected.indexOf(path);
-            for (const member of state.selected.slice(Math.min(a, b), Math.max(a, b) + 1)) state.multi.add(member);
-        } else if (event.ctrlKey || event.metaKey) {
-            if (state.multi.has(path)) state.multi.delete(path); else state.multi.add(path);
-        } else state.multi = new Set([path]);
-        state.activeKey = path; paint();
+    function updateSelectionCount() {
+        $('signalCount').textContent = `${filtered.length.toLocaleString()} 个可用 · ${state.selected.length} 个已添加 · ${state.multi.size} 个选中`;
     }
-    function hideMenu() { if (menu) menu.remove(); menu = null; }
+    function applySelection(selection) {
+        state.multi = new Set(selection.keys); state.selectionAnchor = selection.anchor; state.activeKey = selection.activeKey;
+        updateSelectionCount(); paint();
+    }
+    function selectRow(row, event) {
+        applySelection(I.selectSignals(state.selected, state.multi, M.signalKey(row.signal), state.selectionAnchor, event));
+    }
+    function hideMenu(restore = true) { if (menu) menu.close(restore); }
+    function assignGroup(targets, label) {
+        const grouped = I.assignGroup(state.selected, state.groups, targets, label);
+        state.selected = grouped.order; state.groups = grouped.groups;
+        rebuildRows(); status(`已将 ${targets.length} 条信号加入分组“${I.groupName(label)}”`);
+    }
+    function showGroupDialog(targets) {
+        hideMenu();
+        const overlay = document.createElement('div'); overlay.className = 'waveDialogOverlay';
+        const dialog = document.createElement('section'); dialog.className = 'waveGroupDialog';
+        dialog.setAttribute('role', 'dialog'); dialog.setAttribute('aria-modal', 'true'); dialog.setAttribute('aria-labelledby', 'waveGroupTitle');
+        const title = document.createElement('h2'); title.id = 'waveGroupTitle'; title.textContent = '新建信号分组';
+        const hint = document.createElement('p'); hint.textContent = `分组作用于所选 ${targets.length} 条信号，保留原有行顺序。`;
+        const label = document.createElement('label'); label.textContent = '分组名称'; label.htmlFor = 'waveGroupName';
+        const input = document.createElement('input'); input.id = 'waveGroupName'; input.maxLength = 80; input.placeholder = '例如：AXI 写通道';
+        const error = document.createElement('p'); error.id = 'waveGroupError'; error.className = 'dialogError'; error.setAttribute('role', 'alert');
+        input.setAttribute('aria-describedby', error.id);
+        const actions = document.createElement('div'); actions.className = 'dialogActions';
+        const cancel = document.createElement('button'); cancel.textContent = '取消';
+        const confirm = document.createElement('button'); confirm.textContent = '创建分组'; confirm.className = 'active';
+        actions.append(cancel, confirm); dialog.append(title, hint, label, input, error, actions); overlay.appendChild(dialog);
+        const close = () => { overlay.remove(); groupDialog = null; canvas.focus({ preventScroll: true }); };
+        groupDialog = { close }; cancel.onclick = close;
+        confirm.onclick = () => {
+            let name;
+            try { name = I.groupName(input.value); }
+            catch (validation) { error.textContent = validation.message; input.setAttribute('aria-invalid', 'true'); input.focus(); return; }
+            close(); assignGroup(targets, name);
+        };
+        input.oninput = () => { error.textContent = ''; input.removeAttribute('aria-invalid'); };
+        overlay.onkeydown = event => {
+            if (event.key === 'Escape') close();
+            else if (event.key === 'Enter') confirm.click();
+            else if (event.key === 'Tab') {
+                const controls = [input, cancel, confirm], index = controls.indexOf(document.activeElement);
+                controls[(index + (event.shiftKey ? -1 : 1) + controls.length) % controls.length].focus();
+            } else return;
+            event.preventDefault(); event.stopPropagation();
+        };
+        document.body.appendChild(overlay); input.focus();
+    }
+    function removeSignals(targets) {
+        const removing = new Set(targets);
+        state.selected = state.selected.filter(path => !removing.has(path));
+        state.multi = new Set(I.orderedTargets(state.selected, state.multi));
+        if (removing.has(state.activeKey)) state.activeKey = state.selected[0] || null;
+        if (removing.has(state.selectionAnchor)) state.selectionAnchor = state.activeKey;
+        rebuildRows(); status(`已移除 ${targets.length} 条信号`);
+    }
     function showMenu(event, row) {
-        hideMenu(); if (!row) return;
-        if (!state.multi.has(M.signalKey(row.signal))) state.multi = new Set([M.signalKey(row.signal)]);
-        state.activeKey = M.signalKey(row.signal); paint();
-        const targets = state.multi.has(M.signalKey(row.signal)) ? [...state.multi] : [M.signalKey(row.signal)];
-        menu = document.createElement('div'); menu.className = 'menu';
-        const action = (label, callback) => { const button = document.createElement('button'); button.textContent = label;
-            button.onclick = () => { callback(); hideMenu(); rebuildRows(); }; menu.appendChild(button); };
-        for (const [key, label] of [['hex', 'Hex · 十六进制'], ['bin', 'Bin · 二进制'], ['dec', 'Dec · 无符号'], ['sdec', 'SDec · 有符号'], ['analog', 'Analog · 数值轨迹']])
-            action(label, () => { for (const path of targets) state.formats[path] = key; });
-        action('模拟量行高 +', () => { for (const path of targets) { state.formats[path] = 'analog'; state.heights[path] = Math.min(280, (state.heights[path] || 100) + 40); } });
-        const input = document.createElement('input'); input.placeholder = '分组名，Enter 确认'; input.value = state.groups[M.signalKey(row.signal)] || ''; menu.appendChild(input);
-        input.onkeydown = key => { if (key.key === 'Enter') {
-            const label = input.value.trim(); for (const path of targets) { if (label) state.groups[path] = label; else delete state.groups[path]; }
-            const first = state.selected.findIndex(path => targets.includes(path)), rest = state.selected.filter(path => !targets.includes(path));
-            state.selected = [...rest.slice(0, first), ...state.selected.filter(path => targets.includes(path)), ...rest.slice(first)];
-            hideMenu(); rebuildRows();
-        } };
-        action('解除分组', () => { for (const path of targets) delete state.groups[path]; });
-        action('移除所选信号', () => { state.selected = state.selected.filter(path => !targets.includes(path)); state.multi.clear(); if (targets.includes(state.activeKey)) state.activeKey = null; });
-        document.body.appendChild(menu); menu.style.left = Math.min(event.clientX, window.innerWidth - menu.offsetWidth - 8) + 'px';
-        menu.style.top = Math.max(4, Math.min(event.clientY, window.innerHeight - menu.offsetHeight - 8)) + 'px';
+        hideMenu(false); if (!row || groupDialog) return;
+        applySelection(I.selectContextTargets(state.selected, state.multi, M.signalKey(row.signal), state.selectionAnchor));
+        const targets = Object.freeze(I.orderedTargets(state.selected, state.multi)), signals = targets.map(path => state.signals.get(path));
+        const formats = targets.map(path => state.formats[path] || (/real/i.test(state.signals.get(path).type) ? 'analog' : 'hex'));
+        const mixed = new Set(formats).size > 1;
+        const action = (id, label, callback, extra = {}) => ({ id, label, ...extra, action: () => { callback(); } });
+        const formatItems = [];
+        let category = null;
+        for (const option of M.FORMAT_OPTIONS) {
+            if (category && category !== option.category) formatItems.push({ separator: true });
+            category = option.category;
+            formatItems.push(action('format-' + option.id, option.label, () => {
+                for (const path of targets) state.formats[path] = option.id;
+                rebuildRows(); status(`已为 ${targets.length} 条信号设置 ${option.label}`);
+            }, { checked: !mixed && formats[0] === option.id, ...I.formatAvailability(option, signals, M.supportsFormat) }));
+        }
+        const groups = [...new Set(state.selected.map(path => state.groups[path]).filter(Boolean))];
+        const items = [{ id: 'display-format', label: '显示格式' + (mixed ? ' · 混合' : ''), submenu: formatItems },
+            action('analog-height', '增加模拟量行高', () => {
+                for (const path of targets) { state.formats[path] = 'analog'; state.heights[path] = Math.min(280, (state.heights[path] || 100) + 40); }
+                rebuildRows(); status(`已调整 ${targets.length} 条模拟量波形行高`);
+            }, { disabled: signals.some(signal => !M.supportsFormat(signal, 'analog')) }),
+            { separator: true }, action('new-group', '新建分组…', () => showGroupDialog(targets))];
+        if (groups.length) items.push({ id: 'join-group', label: '加入已有分组', submenu: groups.map((name, index) =>
+            action('join-group-' + index, name, () => assignGroup(targets, name))) });
+        items.push(action('ungroup', '解除分组', () => {
+            for (const path of targets) delete state.groups[path]; rebuildRows(); status(`已解除 ${targets.length} 条信号的分组`);
+        }, { disabled: targets.every(path => !state.groups[path]) }),
+        { separator: true }, action('remove-signals', '移除所选信号', () => removeSignals(targets)));
+        menu = window.createWaveMenu({ items, x: event.clientX, y: event.clientY, title: `已选 ${targets.length} 条信号`, returnFocus: canvas,
+            onClose: () => { menu = null; } });
     }
     function initialize(metadata) {
         metadata = { ...metadata, vars: M.prepareSignals(metadata.vars) };
@@ -208,7 +266,12 @@
             if (/parameter/i.test(signal.type) || !signal.changeCount || seen.has(signal.id)) return false;
             seen.add(signal.id); return true;
         }).slice(0, 16).map(M.signalKey);
+        for (const path of Object.keys(state.formats)) {
+            const signal = state.signals.get(path);
+            if (!signal || !M.supportsFormat(signal, state.formats[path])) delete state.formats[path];
+        }
         state.activeKey = state.selected[0] || null;
+        state.selectionAnchor = state.activeKey;
         const scope = $('scope');
         for (const path of new Set(metadata.scopes.map(item => item.path))) {
             const option = document.createElement('option'); option.value = path; option.textContent = path; scope.appendChild(option);
@@ -237,7 +300,7 @@
     $('scope').onchange = $('constants').onchange = filterCatalog;
     catalog.onscroll = renderCatalog; tracks.onscroll = viewportChanged;
     $('addFiltered').onclick = () => addSignals(filtered.map(M.signalKey));
-    $('clearSignals').onclick = () => { state.selected = []; state.activeKey = null; state.multi.clear(); rebuildRows(); };
+    $('clearSignals').onclick = () => { hideMenu(false); state.selected = []; state.activeKey = null; state.selectionAnchor = null; state.multi.clear(); rebuildRows(); };
     $('fit').onclick = () => state.metadata && setView({ start: 0, span: state.metadata.endTime });
     const zoom = factor => state.metadata && setView(M.zoomView(state.view, factor, .5, state.metadata.endTime));
     $('zoomIn').onclick = () => zoom(.5); $('zoomOut').onclick = () => zoom(2);
@@ -253,7 +316,9 @@
     $('jump').onclick = jump; $('jumpTime').onkeydown = event => { if (event.key === 'Enter') jump(); };
     $('cancel').onclick = () => api.postMessage({ type: 'cancel' });
     canvas.oncontextmenu = event => { event.preventDefault(); showMenu(event, renderer.rowAt(event.offsetY)); };
-    document.addEventListener('pointerdown', event => { if (menu && !menu.contains(event.target)) hideMenu(); });
+    document.addEventListener('pointerdown', event => { if (menu && !menu.contains(event.target)) hideMenu(false); });
+    window.addEventListener('blur', () => { hideMenu(false); drag = null; });
+    window.addEventListener('resize', () => hideMenu(false));
     canvas.addEventListener('pointerdown', event => {
         if (event.button !== 0 || !state.metadata) return;
         const row = renderer.rowAt(event.offsetY), g = renderer.geometry(); canvas.focus();
@@ -264,14 +329,19 @@
         if (!drag) return;
         const dx = event.clientX - drag.x;
         if (Math.abs(dx) + Math.abs(event.clientY - drag.y) > 4) drag.moved = true;
+        if (drag.moved && drag.name && drag.row && !drag.targets) {
+            const key = M.signalKey(drag.row.signal);
+            if (!state.multi.has(key)) applySelection(I.selectSignals(state.selected, [], key, key));
+            drag.targets = I.orderedTargets(state.selected, state.multi);
+        }
         if (drag.moved && !drag.name) setView({ start: drag.start - dx / renderer.geometry().plot * drag.span, span: drag.span });
     });
     canvas.addEventListener('pointerup', event => {
         if (!drag) return; const current = drag; drag = null;
         if (current.name && current.row) {
             if (current.moved) { const target = renderer.rowAt(event.offsetY); if (target) {
-                const path = M.signalKey(current.row.signal), from = state.selected.indexOf(path), to = state.selected.indexOf(M.signalKey(target.signal));
-                state.selected.splice(from, 1); state.selected.splice(to, 0, path); rebuildRows();
+                state.selected = I.moveSignals(state.selected, current.targets || [M.signalKey(current.row.signal)], M.signalKey(target.signal));
+                rebuildRows(); status(`已整体移动 ${(current.targets || []).length || 1} 条信号`);
             } } else selectRow(current.row, event);
         } else if (!current.moved) {
             if (current.row) state.activeKey = M.signalKey(current.row.signal);
@@ -290,14 +360,37 @@
     $('ruler').onclick = event => { if (!state.metadata) return; const g = renderer.geometry();
         if (event.offsetX >= g.names) placeCursor(state.view.start + (event.offsetX - g.names) / g.plot * state.view.span, event.shiftKey ? 'B' : state.activeCursor, state.signals.get(state.activeKey)); };
     document.addEventListener('keydown', event => {
-        if (/^(INPUT|SELECT|TEXTAREA)$/.test(event.target.tagName)) return;
-        if (event.key === 'Escape') { hideMenu(); state.multi.clear(); paint(); }
+        if (menu || groupDialog || /^(INPUT|SELECT|TEXTAREA)$/.test(event.target.tagName) || event.target.isContentEditable) return;
+        const waveFocused = event.target === canvas;
+        if (waveFocused && (event.key === 'ContextMenu' || event.key === 'F10' && event.shiftKey)) {
+            const row = state.rows.find(item => M.signalKey(item.signal) === state.activeKey) || state.rows[0];
+            if (!row) return;
+            const bounds = canvas.getBoundingClientRect();
+            showMenu({ clientX: bounds.left + Math.min(150, renderer.geometry().names - 10),
+                clientY: bounds.top + Math.max(0, Math.min(canvas.clientHeight - 10, row.y - tracks.scrollTop + row.height)) }, row);
+            event.preventDefault(); return;
+        }
+        if (waveFocused && (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'a') {
+            state.multi = new Set(state.selected); state.activeKey = state.activeKey || state.selected[0] || null;
+            state.selectionAnchor = state.selectionAnchor || state.activeKey; updateSelectionCount(); paint();
+            event.preventDefault(); return;
+        }
+        if (event.ctrlKey || event.metaKey || event.altKey) return;
+        if (event.key === 'Escape') { state.multi.clear(); state.selectionAnchor = null; updateSelectionCount(); paint(); }
         else if (event.key === 'f' || event.key === 'F') $('fit').click();
         else if (event.key === '+' || event.key === '=') zoom(.5);
         else if (event.key === '-') zoom(2);
         else if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') { event.preventDefault(); navigateEdge(event.key === 'ArrowLeft' ? 'previous' : 'next'); }
-        else if (event.key === 'Delete' && state.multi.size) { state.selected = state.selected.filter(path => !state.multi.has(path));
-            if (state.multi.has(state.activeKey)) state.activeKey = null; state.multi.clear(); rebuildRows(); }
+        else if (waveFocused && (event.key === 'ArrowUp' || event.key === 'ArrowDown') && state.rows.length) {
+            const current = Math.max(0, state.selected.indexOf(state.activeKey));
+            const next = Math.max(0, Math.min(state.rows.length - 1, current + (event.key === 'ArrowUp' ? -1 : 1)));
+            const row = state.rows[next]; selectRow(row, event);
+            if (row.y < tracks.scrollTop) tracks.scrollTop = row.y;
+            else if (row.y + row.height > tracks.scrollTop + tracks.clientHeight) tracks.scrollTop = row.y + row.height - tracks.clientHeight;
+            event.preventDefault();
+        } else if (event.key === 'Delete' && waveFocused && state.multi.size) {
+            removeSignals(I.orderedTargets(state.selected, state.multi)); event.preventDefault();
+        }
     });
     new ResizeObserver(() => { $('trackSpace').style.height = Math.max(state.rows.reduce((sum, row) => sum + row.height, 0), tracks.clientHeight) + 'px'; viewportChanged(); renderCatalog(); }).observe(tracks);
     new MutationObserver(() => { renderer.colors(); paint(); }).observe(document.body, { attributes: true, attributeFilter: ['class', 'data-vscode-theme-kind'] });

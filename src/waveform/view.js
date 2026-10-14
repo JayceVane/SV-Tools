@@ -7,7 +7,7 @@ let assets;
 
 /** 小型静态资源只读取一次；波形事件从不进入 HTML。 */
 function readAssets() {
-    if (!assets) assets = Object.fromEntries(['view.css', 'model.js', 'memory.js', 'memory-view.js', 'renderer.js', 'client.js'].map(name =>
+    if (!assets) assets = Object.fromEntries(['view.css', 'value-format.js', 'model.js', 'memory.js', 'memory-view.js', 'interaction.js', 'menu.js', 'renderer.js', 'client.js'].map(name =>
         [name, fs.readFileSync(path.join(__dirname, name), 'utf8')]));
     return assets;
 }
@@ -45,10 +45,10 @@ function buildWaveformHtml(metadata, meta) {
 <label><input id="constants" type="checkbox">显示 parameter 常量</label><span id="signalCount" class="subtle"></span></div>
 <div id="catalog" role="list" aria-label="可添加信号"><div id="catalogSpace"></div></div><div class="catalogActions"><button id="addFiltered">添加检索结果</button><button id="clearSignals">清空波形</button></div></aside>
 <section id="right" aria-label="时序波形"><canvas id="ruler"></canvas><div id="tracks"><div id="trackSpace"><canvas id="waveCanvas" tabindex="0" aria-label="波形；点击放置游标，名称栏选择和排序"></canvas></div>
-<div id="empty">从左侧添加信号，开始分析时序<br>Ctrl 点击多选 · 名称拖拽排序 · 右键设置进制、分组和模拟量</div></div>
+<div id="empty">从左侧添加信号，开始分析时序<br>Ctrl / ⌘ 点击多选 · Shift 连续选择 · 名称拖拽排序 · 右键显示格式与分组</div></div>
 <section id="memoryPanel" hidden aria-label="存储器查看器">
 <div class="memoryHeader"><span class="sectionTitle">MEMORY INSPECTOR</span><select id="memorySelect" aria-label="选择存储器"></select><button id="memoryClose" aria-label="关闭存储器视图">×</button></div>
-<div class="memoryTools"><select id="memoryRadix" aria-label="存储器进制"><option value="hex">Hex</option><option value="bin">Bin</option><option value="dec">Dec</option><option value="sdec">SDec</option></select>
+<div class="memoryTools"><select id="memoryRadix" aria-label="存储器显示格式"></select>
 <input id="memoryAddress" aria-label="存储器地址" placeholder="地址 / 行,列"><button id="memoryJump">定位</button>
 <span class="divider"></span><button id="memoryPrevRow" title="上一页地址或行">↑</button><button id="memoryNextRow" title="下一页地址或行">↓</button><button id="memoryPrevColumn" title="上一页列">← 列</button><button id="memoryNextColumn" title="下一页列">列 →</button><span id="memoryInfo" class="subtle"></span></div>
 <div class="memoryLegend"><span id="memoryTimeA" class="a"></span><span id="memoryTimeB" class="b"></span><span class="memoryChangedKey">Δ 值变化</span><span class="subtle">点击单元添加波形 · — 无初值 · 未 dump 无记录</span><span id="memoryReadStatus" role="status"></span></div>
@@ -56,6 +56,6 @@ function buildWaveformHtml(metadata, meta) {
 </section>
 <div id="loading"><div id="loadTitle">正在加载 VCD</div><progress id="progress"></progress><div id="loadDetail">后台解析，编辑器保持响应</div><div id="loadError" role="alert"></div><button id="cancel">取消加载</button></div></section></main>
 <footer><span id="status" role="status">准备加载</span><span class="hint">Ctrl + 滚轮缩放 · Shift + 滚轮平移 · 拖动波形平移 · Shift 点击放置 B</span></footer>
-<script nonce="${nonce}">const BOOT=${json};</script><script nonce="${nonce}">${content['model.js']}</script><script nonce="${nonce}">${content['memory.js']}</script><script nonce="${nonce}">${content['memory-view.js']}</script><script nonce="${nonce}">${content['renderer.js']}</script><script nonce="${nonce}">${content['client.js']}</script></body></html>`;
+<script nonce="${nonce}">const BOOT=${json};</script><script nonce="${nonce}">${content['value-format.js']}</script><script nonce="${nonce}">${content['model.js']}</script><script nonce="${nonce}">${content['memory.js']}</script><script nonce="${nonce}">${content['memory-view.js']}</script><script nonce="${nonce}">${content['interaction.js']}</script><script nonce="${nonce}">${content['menu.js']}</script><script nonce="${nonce}">${content['renderer.js']}</script><script nonce="${nonce}">${content['client.js']}</script></body></html>`;
 }
 module.exports = { buildWaveformHtml };

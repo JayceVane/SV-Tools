@@ -47,6 +47,32 @@ test('关闭存储器不查询；打开只查询当前64单元，单击使用原
     cell.onclick(); assert.deepEqual(h.additions, ['tb.mem[0][0]']);
 });
 
+test('存储器浮点格式复用精确游标原值，格式切换不重新查询', async () => {
+    const h = fixture(); h.view.initialize(signals(2, 2).map(signal => ({ ...signal, width: 32 })), null);
+    h.view.refresh(0, 100, 1e-9); h.view.toggle();
+    const before = h.queries.length;
+    response(h.queries[0], BigInt('0x3fc00000').toString(2)); response(h.queries[1], BigInt('0x80000000').toString(2)); await nextTurn();
+    h.node('memoryRadix').value = 'fp32'; h.node('memoryRadix').onchange();
+    const cell = buttons(h)[0]; assert.equal(cell.children[0].textContent, 'A 1.5'); assert.equal(cell.children[1].textContent, 'B -0');
+    assert.equal(h.queries.length, before); assert.equal(h.view.snapshot().radix, 'fp32');
+    const options = h.node('memoryRadix').children.flatMap(section => section.children);
+    assert.equal(options.find(option => option.value === 'fp64').disabled, true);
+    assert.equal(options.find(option => option.value === 'tf32').disabled, false);
+    h.node('memoryRadix').value = 'fp64'; h.node('memoryRadix').onchange();
+    assert.equal(h.view.snapshot().radix, 'fp32'); assert.equal(h.node('memoryRadix').value, 'fp32');
+});
+
+test('存储器恢复浮点格式时校验字宽，FP8 的特殊值与未知位不同', async () => {
+    const h = fixture(); h.view.initialize(signals(1, 2), { radix: 'fp32', open: true });
+    assert.equal(h.view.snapshot().radix, 'hex');
+    response(h.queries[0], '01110000'); await nextTurn();
+    h.node('memoryRadix').value = 'fp8e3m4'; h.node('memoryRadix').onchange();
+    assert.equal(buttons(h)[0].children[0].textContent, 'A +Inf');
+    h.view.refresh(10, null, 1e-9); response(h.queries[1], 'x'); await nextTurn();
+    assert.equal(buttons(h)[0].children[0].textContent, 'A X');
+    assert.equal(buttons(h)[0].children[0].classList.contains('unknown'), true);
+});
+
 test('快速翻页合并查询，旧页响应不覆盖新页，新页错误保留明确失败信息', async () => {
     const h = fixture(); h.view.initialize(signals(), null); h.view.toggle();
     h.node('memoryNextRow').onclick(); h.node('memoryNextRow').onclick();

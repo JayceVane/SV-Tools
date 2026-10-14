@@ -31,6 +31,18 @@ test('同名不同向量切片有独立持久化行标识，保留可读层级�
 
 function bus(width, type = 'wire') { return { width, type }; }
 
+test('波形标签、游标和存储器共用浮点目录，避免整数转换误读位模式', () => {
+    assert.equal(model.formatValue('00111111110000000000000000000000', bus(32), 'fp32'), '1.5');
+    assert.equal(model.formatValue('01111111110000000000000000000001', bus(32), 'fp32'), 'NaN');
+    assert.equal(model.formatValue('x', bus(32), 'fp32'), 'X');
+    assert.equal(model.formatLabel('fp8e3m4'), 'FP8 (E3M4)');
+    assert.equal(model.supportsFormat(bus(16), 'bf16'), true);
+    assert.equal(model.supportsFormat(bus(64), 'fp32'), false);
+    assert.equal(model.supportsFormat(bus(32, 'real'), 'fp32'), false);
+    assert.equal(model.supportsFormat(bus(1, 'real'), 'hex'), false);
+    assert.equal(model.supportsFormat(bus(1, 'real'), 'analog'), true);
+});
+
 test('128 位总线的 hex/unsigned/signed 显示不丢失低位精度', () => {
     const bits = '1' + '0'.repeat(126) + '1';
     const signal = bus(128);

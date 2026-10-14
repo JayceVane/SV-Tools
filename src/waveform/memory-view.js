@@ -15,6 +15,21 @@
         let valuesA = Object.create(null), valuesB = Object.create(null), cells = [];
 
         function snapshot() { return { open: isOpen, key: group?.key, rowStart, columnStart, radix }; }
+        function formatSignal() { return { width: group?.width, type: 'reg' }; }
+        function rebuildFormats(preferred = radix) {
+            const select = $('memoryRadix'); select.replaceChildren();
+            for (const [category, label] of [['integer', '整数'], ['float', '浮点']]) {
+                const section = document.createElement('optgroup'); section.label = label;
+                for (const format of model.FORMAT_OPTIONS.filter(option => option.category === category)) {
+                    const option = document.createElement('option'); option.value = format.id; option.textContent = format.label;
+                    option.disabled = !model.supportsFormat(formatSignal(), format.id);
+                    if (option.disabled) option.title = `${format.label} 与 ${group?.width || 0} 位存储器字宽不匹配`;
+                    section.appendChild(option);
+                }
+                select.appendChild(section);
+            }
+            radix = model.supportsFormat(formatSignal(), preferred) && preferred !== 'analog' ? preferred : 'hex'; select.value = radix;
+        }
         function setOpen(value) {
             isOpen = value && !!group;
             $('memoryPanel').hidden = !isOpen;
@@ -126,7 +141,7 @@
             $('memoryToggle').disabled = !group;
             $('memoryToggle').title = group ? `${groups.length} 个索引数组 · 按游标查看` : '没有可识别的索引数组；请在仿真时逐单元 dump';
             if (group) select.value = group.key;
-            radix = ['hex', 'bin', 'dec', 'sdec'].includes(saved?.radix) ? saved.radix : 'hex'; $('memoryRadix').value = radix;
+            rebuildFormats(saved?.radix || 'hex');
             rowStart = Number.isSafeInteger(saved?.rowStart) ? saved.rowStart : 0;
             columnStart = Number.isSafeInteger(saved?.columnStart) ? saved.columnStart : 0;
             if (index.diagnostics.length) $('memoryToggle').title += `；${index.diagnostics.length} 项定义无法归并，保留在普通波形中`;
@@ -134,8 +149,12 @@
         }
         function refresh(a, b, seconds) { cursorA = a; cursorB = b; secondsPerTick = seconds; queueValues(); }
         $('memorySelect').onchange = () => { group = groups.find(item => item.key === $('memorySelect').value);
-            rowStart = 0; columnStart = 0; rebuildPage(); onChange(); };
-        $('memoryRadix').onchange = () => { radix = $('memoryRadix').value; updateValues(); onChange(); };
+            rowStart = 0; columnStart = 0; rebuildFormats(); rebuildPage(); onChange(); };
+        $('memoryRadix').onchange = () => {
+            const chosen = $('memoryRadix').value;
+            if (!model.supportsFormat(formatSignal(), chosen) || chosen === 'analog') { $('memoryRadix').value = radix; $('memoryReadStatus').textContent = '该显示格式与存储器字宽不匹配'; return; }
+            radix = chosen; updateValues(); onChange();
+        };
         $('memoryClose').onclick = () => setOpen(false);
         $('memoryPrevRow').onclick = () => changePage(-PAGE_ROWS, 0); $('memoryNextRow').onclick = () => changePage(PAGE_ROWS, 0);
         $('memoryPrevColumn').onclick = () => changePage(0, -PAGE_COLUMNS); $('memoryNextColumn').onclick = () => changePage(0, PAGE_COLUMNS);

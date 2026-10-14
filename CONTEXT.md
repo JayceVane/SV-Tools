@@ -1,12 +1,18 @@
 # 4.0 开发交接
 
-最后更新：2026-10-14。当前里程碑为本地 `4.0.0-alpha6`，分支 `codex/refactor-v4`。
+最后更新：2026-10-14。当前里程碑为本地 `4.0.0-alpha7`，分支 `codex/refactor-v4`。
 
 ## 完成内容
 
+- alpha7：显示格式归入子菜单，新增 FP64/FP32/TF32/BF16/FP16/FP8(E3M4)；二维 mem 共用浮点解码。
+- E3M4 按用户确认采用偏置 3、全 1 指数表示 Inf/NaN。TF32 支持 19 位以及低 13 位为零的 32 位 RTL 容器约定，不代表 NVIDIA ABI，也不自动舍入 FP32。
+- Shift 选择独立锚点，右键保留已选集合；混合位宽禁用不适用格式，支持命名/加入/解除分组与多行拖动。
+- 菜单支持键盘、焦点恢复与屏幕边缘定位。数值取消矩形底色，随主题使用细轮廓，科学计数法缩略保留完整指数。
+- 完整操作与编码见 `docs/WAVEFORM.md`，本轮文件清单和包核验见 `docs/V4_ALPHA7.md`。
+
 - alpha6 重构标准补全：Verilog/SV 版本表、UVM 1.2/1800.2 官方公开目录、容错作用域与泛型成员解析、增量工程/include 索引、准确片段与替换区间。
 - 覆盖 package/import、继承/可见性、TLM/factory、聚合类型、二维数组、覆盖率/约束/random、modport、命名连接及同文件类外实现。目录覆盖和语义边界分开，见 `docs/COMPLETION.md`。
-- 本轮交付完整清单、实测、包 SHA 和质量复核见 `docs/V4_ALPHA6.md`；历史 alpha5 记录继续保留。
+- 补全交付完整清单、实测、包 SHA 和质量复核见 `docs/V4_ALPHA6.md`；历史记录继续保留。
 - 独立 worktree：`C:\Users\JayceVane\.codex\worktrees\svtools-v4\02_svtools`。
 - alpha1 完成格式化职责重构与扩展模块分离，见 `ARCHITECTURE.md` 和 `docs/V4_CHANGES.md`。
 - alpha2 修复 always 显式事件头的多余水平空白；inlineCompact 关闭时保持原文。
@@ -29,16 +35,22 @@
 
 ## 验证
 
+- alpha7：92 个 JS、golden 36/36、Node 421/421、Rust 112/112；CLI/native 同步版本并重建，CLI 为 4.0.0-alpha7。
+- alpha7 浮点测试包括 FP16/BF16 各 65536 编码、E3M4 256 编码穷举，FP64/FP32 独立 DataView 对照，TF32 双布局、NaN/X/Z/负零与无效容器。
+- alpha7 真实浏览器与真实 VCD Worker 验收明暗主题、Shift 收缩、右键多选、混合位宽格式禁用、分组、状态恢复、二维 mem FP32 A/B、菜单键盘与边缘定位；无 console 警告/错误。
+- 验收产物 `bin/waveform-acceptance/run-gbrTl4`；临时浏览器与 loopback 服务已关闭。
+- 当前包 `bin/svtools-4.0.0-alpha7.vsix`；大小、SHA 与逐字节核验见 alpha7 记录。本轮未安装、推送、合并或发布。
+
 - alpha6：85 个 JS、golden 36/36、Node 382/382、Rust 原 112 项集通过；CLI/native 重建到 alpha6。
 - alpha6 真实 VS Code 1.141 宿主 22/22，接受补全后 Icarus 13 编译通过；外部 include 事件与未保存模型实测通过。
 - alpha6 512 文件/十万行 Node provider 基准：冷索引 793ms、热 p95 9.53ms、单文件 3.90ms、脏文档 672ms；热请求零 I/O。此值不是 IDE 绘制延迟。
-- 当前包 `bin/svtools-4.0.0-alpha6.vsix`，75 条目/2282176 字节，66 项字节一致性核验；未安装/推送/合并/发布。
+- alpha6 历史包 `bin/svtools-4.0.0-alpha6.vsix`，75 条目/2282176 字节，66 项字节一致性核验。
 - alpha5 Rust 112/112；Rust 实现未改，alpha3 的 cargo check/fmt 检查继续保留。
 - 最终 alpha5：70 个 JS 语法检查、golden 36/36、Node 300/300；包核验见 docs/V4_ALPHA5.md。
 - alpha4 新增工具链合同 49：输出/日志 27，任务/编辑器边界 22；alpha5 新增 82 项工程管理/解析/停止合同。
 - 波形合同 94：兼容解析 14、流式/存储 34、视图规则 22、宿主 11、memory 模型 8、memory 控制器 5。
 - CLI 4.0.0-alpha5 重新构建并验证版本；alpha2 的 always 紧凑和幂等合同继续通过。
-- 当前 VSIX：bin/svtools-4.0.0-alpha5.vsix；大小/SHA256/逐字节核验见 alpha5 交付记录。
+- alpha5 历史 VSIX：bin/svtools-4.0.0-alpha5.vsix；大小/SHA256/逐字节核验见 alpha5 交付记录。
 - VSIX 的所有运行 JS/CSS 和 native 与构建逐字节一致，无 VCD/开发依赖/日志混入。
 - 浏览器使用真实 Worker 查看 100 MiB 语料并验证百万事件缩放、500ns 跳转、精确边沿、65条信号；Canvas 保持视口大小。
 - FIFO 生成语料验证明暗主题、A=585ns/B=620ns/Δt=35ns、模拟量、搜索与布局恢复，无 console 错误。
@@ -71,7 +83,7 @@ alpha1 本地提交869e4d1；alpha2 提交33ff207；alpha3 提交1cc5733；alpha
 
 用户于 2026-10-14 确认：先完善当前版本，再增加新功能。Vivado IP 管理已写入 `docs/ROADMAP.md`，目前延期、未启动；待用户决定开始新功能后再实现。
 
-1. 以 alpha6 VSIX 验证用户实际工程、多文件集、补全和波形交互，优先修复实际使用反馈。
+1. 以 alpha7 VSIX 验证用户实际工程、多文件集、补全和浮点波形交互，优先修复实际使用反馈。
 2. 用实际100–500MB RTL波形对照仿真/GTKWave，评估更多信号数和事件密度。
 3. 下一轮统一 CompilePlan：源文件、include、宏、top、工作目录和引擎能力，避免 lint/仿真参数漂移。
 4. 随后实现内容驱动的增量源码索引与有配置键的只读缓存；不要恢复共享可写 xsim.dir。

@@ -5,8 +5,10 @@
         let palette;
         function colors() {
             const style = getComputedStyle(document.body);
-            palette = Object.fromEntries(['bg', 'panel', 'border', 'fg', 'dim', 'grid', 'accent', 'bus', 'x', 'z', 'a', 'b', 'selection']
+            palette = Object.fromEntries(['bg', 'panel', 'border', 'fg', 'dim', 'grid', 'accent', 'bus', 'x', 'z', 'a', 'b', 'selection', 'labelText', 'labelHalo']
                 .map(key => [key, style.getPropertyValue('--' + key).trim()]));
+            palette.labelText ||= palette.fg;
+            palette.labelHalo ||= palette.bg;
         }
         colors();
         function geometry() {
@@ -28,20 +30,32 @@
         function line(ctx, x1, y1, x2, y2, color) {
             ctx.strokeStyle = color; ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
         }
-        function text(ctx, value, left, top, maxWidth, color) {
+        function text(ctx, value, left, top, maxWidth, color, halo) {
             const raw = String(value);
+            if (!raw || maxWidth <= 0) return;
             let label = raw;
             if (ctx.measureText(raw).width > maxWidth) {
-                let low = 0, high = raw.length;
+                const scientific = raw.match(/^([+-]?\d+(?:\.\d+)?)([eE][+-]?\d+)$/);
+                const source = scientific ? scientific[1] : raw;
+                const suffix = scientific ? '…' + scientific[2] : '…';
+                // 数值缩略仍须保留符号、整数部分及数量级；空间不足时不画。
+                let low = scientific ? source.match(/^[+-]?\d+/)[0].length : 0, high = source.length;
+                if (ctx.measureText(source.slice(0, low) + suffix).width > maxWidth) return;
                 while (low < high) {
                     const middle = Math.ceil((low + high) / 2);
-                    if (ctx.measureText(raw.slice(0, middle) + '…').width <= maxWidth) low = middle;
+                    if (ctx.measureText(source.slice(0, middle) + suffix).width <= maxWidth) low = middle;
                     else high = middle - 1;
                 }
-                label = raw.slice(0, low) + '…';
+                label = source.slice(0, low).replace(/\.$/, '') + suffix;
+            }
+            if (halo) {
+                ctx.save(); ctx.strokeStyle = halo; ctx.lineWidth = 1.6; ctx.lineJoin = 'round';
+                ctx.strokeText(label, left, top);
             }
             ctx.fillStyle = color;
-            ctx.fillText(label, left, top, Math.max(1, maxWidth));
+            // 省略后使用自然字形；Canvas maxWidth 会横向压缩细小数字。
+            ctx.fillText(label, left, top);
+            if (halo) ctx.restore();
         }
         function ticks() {
             const g = geometry(), ideal = state.view.span / Math.max(1, g.plot / 110);
@@ -94,9 +108,9 @@
                     ctx.lineTo(right - Math.min(4, (right - left) / 2), low); ctx.lineTo(left + Math.min(4, (right - left) / 2), low); ctx.closePath(); ctx.stroke();
                     if (right - left > 35) {
                         const label = model.formatValue(value, row.signal, state.formats[model.signalKey(row.signal)] || 'hex');
-                        const size = Math.min(right - left - 10, 160, label.length * 6.7 + 8);
-                        ctx.fillStyle = 'rgba(22,24,27,.92)'; ctx.fillRect(left + 5, middle - 9, size, 17);
-                        text(ctx, label, left + 9, middle + 3, size - 8, '#ffe0b2');
+                        const labelColor = value === null || /[xz]/i.test(value) ? color : palette.labelText;
+                        // 留出转折边沿，只给字符加细轮廓，不覆盖总线淡填充。
+                        text(ctx, label, left + 6, middle + 3, right - left - 12, labelColor, palette.labelHalo);
                     }
                 }
             });
@@ -135,7 +149,8 @@
             const label = state.fullName ? signal.path + (signal.range || '') : signal.name;
             text(ctx, label, 12, top + 18, g.names - 112, palette.fg);
             const type = /real/i.test(signal.type) ? 'real' : signal.range || signal.width + 'b';
-            text(ctx, `${group ? group + ' · ' : ''}${type} · ${state.formats[key] || (/real/i.test(signal.type) ? 'analog' : 'hex')}`, 12, top + 31, g.names - 112, palette.dim);
+            const format = state.formats[key] || (/real/i.test(signal.type) ? 'analog' : 'hex');
+            text(ctx, `${group ? group + ' · ' : ''}${type} · ${model.formatLabel?.(format) || format}`, 12, top + 31, g.names - 112, palette.dim);
             const a = state.valuesA[signal.id], b = state.valuesB[signal.id], radix = state.formats[key] || 'hex';
             text(ctx, model.formatValue(a, signal, radix), g.names - 96, top + 17, 87, palette.a);
             text(ctx, state.cursorB === null ? '' : model.formatValue(b, signal, radix), g.names - 96, top + 31, 87, palette.b);

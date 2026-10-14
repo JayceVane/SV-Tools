@@ -1,12 +1,28 @@
 /* 纯视图规则；Node 合同测试与 webview 复用同一实现。 */
 (function (root, factory) {
-    const api = factory();
+    const formats = typeof module === 'object' && module.exports ? require('./value-format') : root.WaveValueFormats;
+    const api = factory(formats);
     if (typeof module === 'object' && module.exports) module.exports = api;
     else root.WaveModel = api;
-})(typeof globalThis === 'object' ? globalThis : this, function () {
+})(typeof globalThis === 'object' ? globalThis : this, function (floating) {
     'use strict';
     const units = { s: 1, ms: 1e-3, us: 1e-6, ns: 1e-9, ps: 1e-12, fs: 1e-15 };
     const MAX_FORMAT_BITS = 65536;
+    const FORMAT_OPTIONS = Object.freeze([
+        { id: 'hex', label: 'Hex', category: 'integer' }, { id: 'bin', label: 'Bin', category: 'integer' },
+        { id: 'dec', label: 'Unsigned decimal', category: 'integer' }, { id: 'sdec', label: 'Signed decimal', category: 'integer' },
+        { id: 'analog', label: 'Analog', category: 'wave' },
+        ...floating.FORMAT_OPTIONS.map(option => ({ ...option, category: 'float' }))
+    ].map(Object.freeze));
+    const formatIds = new Set(FORMAT_OPTIONS.map(option => option.id));
+
+    /** 格式适用性由同一目录裁决，菜单、存储器及恢复状态共享。 */
+    function supportsFormat(signal, id) {
+        if (!signal || !formatIds.has(id)) return false;
+        if (floating.isFloat(id)) return floating.supports(signal, id);
+        return id === 'analog' || !/real/i.test(signal.type);
+    }
+    function formatLabel(id) { return FORMAT_OPTIONS.find(option => option.id === id)?.label || id; }
 
     /** @returns {{start:number,span:number}} 视口始终落在文件范围，最小一 tick。 */
     function clampView(start, span, end) {
@@ -61,6 +77,7 @@
     /** 宽总线用 BigInt，X/Z 保持可见，signed 按声明宽度二补码解释。 */
     function formatValue(value, signal, radix = 'hex') {
         if (value === null || value === undefined) return '—';
+        if (floating.isFloat(radix)) return floating.format(value, signal, radix);
         if (/real/i.test(signal.type)) return String(value);
         if (signal.width > MAX_FORMAT_BITS) return `${signal.width}b VCD ${String(value).slice(0, 64)}${String(value).length > 64 ? '…' : ''}`;
         const bits = binaryValue(value, signal.width);
@@ -114,5 +131,6 @@
             cursorA: Number.isFinite(valid.cursorA) ? Math.min(metadata.endTime, Math.max(0, valid.cursorA)) : 0,
             cursorB: Number.isFinite(valid.cursorB) ? Math.min(metadata.endTime, Math.max(0, valid.cursorB)) : null };
     }
-    return { clampView, zoomView, formatTime, parseTime, binaryValue, formatValue, valueAt, filterSignals, prepareSignals, signalKey, restoreState };
+    return { clampView, zoomView, formatTime, parseTime, binaryValue, formatValue, valueAt, filterSignals, prepareSignals, signalKey, restoreState,
+        FORMAT_OPTIONS, supportsFormat, formatLabel };
 });
