@@ -23,6 +23,11 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
+      - name: 校验 tag 与扩展版本一致
+        env:
+          TAG: ${{ github.ref_name }}
+        run: node -e 'if (process.env.TAG !== "v" + require("./package.json").version) process.exit(1)'
+
       - name: 安装 napi CLI
         run: npm ci --prefix src/native
 
@@ -30,16 +35,39 @@ jobs:
         run: node scripts/build-native.js
 
       - name: 打包 vsix（打包前自动跑完整测试）
+        env:
+          TAG: ${{ github.ref_name }}
         run: |
           npm ci
-          npm run package
+          npm run package -- --target win32-x64 --out "bin/svtools-$TAG-win32-x64.vsix"
         shell: bash
+
+      - name: 运行 Rust 回归
+        run: cargo test --manifest-path src/native/Cargo.toml
+
+      - name: 生成 SHA256 校验清单
+        run: |
+          $files = Get-Item bin/*.vsix, bin/svtools.win32-x64-msvc.node, bin/svtools.exe
+          $lines = $files | ForEach-Object { "{0}  {1}" -f (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant(), $_.Name }
+          $lines | Set-Content bin/SHA256SUMS.txt -Encoding ascii
+        shell: pwsh
 
       - name: 上传到 Release
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
         run: |
-          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --generate-notes
-          gh release upload "$TAG" bin/svtools.win32-x64-msvc.node bin/svtools.exe svtools-*.vsix --clobber
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            options=(--verify-tag --title "$TAG")
+            if [[ "$TAG" == *-* ]]; then
+              options+=(--prerelease --latest=false)
+            fi
+            if [[ -f "docs/releases/$TAG.md" ]]; then
+              options+=(--notes-file "docs/releases/$TAG.md")
+            else
+              options+=(--generate-notes)
+            fi
+            gh release create "$TAG" "${options[@]}"
+          fi
+          gh release upload "$TAG" bin/svtools.win32-x64-msvc.node bin/svtools.exe bin/*.vsix bin/SHA256SUMS.txt --clobber
         shell: bash

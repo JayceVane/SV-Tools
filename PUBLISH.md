@@ -1,3 +1,13 @@
+# 4.0 GitHub 预览版发布
+
+`4.0.0-preview.1` 仅通过 GitHub Release 发布。先在功能分支同步 master，运行完整回归并打包，随后创建 PR；合入后将同版本 tag 指向合入提交。原生模块、CLI 和 VSIX 均不写入 Git 历史。
+
+`.github/workflows/release.yml` 校验 tag 与 package.json，构建 Windows x64 原生模块及 VSIX，执行 Node/Rust 回归并上传 SHA256 清单。含 `-` 的 tag 使用 GitHub prerelease，不改变现有稳定版的 Latest 标记。若存在 `docs/releases/<tag>.md`，使用该文件作为发布说明。
+
+下一版本的开发代码不能补入已发布 tag。3.5.0 历史和稳定版附件继续保留。下文 Marketplace 操作为独立渠道的旧指南，此次不执行。
+
+---
+
 # VSCode 插件发布指南
 
 本文档说明如何将 SystemVerilog Tools（扩展 ID `svtools`）发布到 VSCode 应用市场。

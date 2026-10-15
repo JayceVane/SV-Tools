@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [master, "codex/refactor-v4"]
+    branches: [master, "codex/**"]
   pull_request:
   workflow_dispatch:
 

@@ -2,6 +2,14 @@
 
 All notable changes to the SystemVerilog VSCode Extension will be documented in this file.
 
+## [4.0.0-preview.1] - 2026-10-15
+
+**变更内容：** 汇总 alpha1–alpha13 为首个 GitHub 预览版，同步 3.5.0 正式发布基线；扩展、native、CLI 与锁文件统一版本。发布流程校验 tag、构建 Windows x64 包、执行完整回归并提供 SHA256 清单，带后缀的版本标为 prerelease。
+
+**为什么：** 将当前格式化、补全、工具链、Vivado 管理和波形改造交付为可安装版本，并从统一基线开始下一版本的电路视图开发。
+
+**影响面：** 通过 PR 合入原工程，3.5.0 的提交与已有发布保留。此次仅发布 GitHub，不发布 Marketplace；电路视图不进入此包。安装、功能与已知限制见 `docs/releases/v4.0.0-preview.1.md`。
+
 ## [4.0.0-alpha13] — if条件头紧凑
 
 **变更内容：** `if (...) begin`条件独立参与行内紧凑，清除嵌套拼接逗号前的空格，折叠逗号后、移位运算符旁的冗余空格；支持同一行多个条件、else if、限定词及多行条件，保留保护区和用户换行。
