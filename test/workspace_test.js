@@ -4,6 +4,17 @@ const path = require('node:path');
 const { test } = require('node:test');
 const { createWorkspaceSourceIndex } = require('../src/workspace/sources');
 
+test('工具快照和依赖目录被明确排除，防止重复设计单元污染索引', async () => {
+    const calls = [];
+    const index = createWorkspaceSourceIndex({ workspace: { workspaceFolders: [{}],
+        getConfiguration: () => ({ get: () => true }),
+        findFiles: async (pattern, exclude) => { calls.push({ pattern, exclude }); return []; }
+    } });
+    await index.scan();
+    assert.equal(calls.length, 4);
+    assert.ok(calls.every(call => call.exclude === '**/{.git,node_modules,.svtools,.Xil}/**'));
+});
+
 /** 以内存源码模拟多根工作区；扫描、读文件和时钟均由外部边界注入。 */
 function workspaceHarness(sources, { enabled = true, folders = [{ uri: { fsPath: __dirname } }] } = {}) {
     const searches = [];

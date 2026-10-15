@@ -2,7 +2,7 @@
   "name": "svtools",
   "displayName": "SystemVerilog Tools",
   "description": "Verilog/SystemVerilog formatter, module instantiation, testbench generation, and productivity tools (Rust native backend)",
-  "version": "4.0.0-preview.1",
+  "version": "4.1.0-alpha1",
   "publisher": "JayceVane",
   "author": {
     "name": "JayceVane",
@@ -49,11 +49,13 @@
   ],
   "main": "./extension.js",
   "scripts": {
-    "test": "npm run check && node test/golden_test.js && node --test test/formatter_contract_test.js test/formatter_conservation_test.js test/toolchain_test.js test/waveform_test.js test/editor_test.js test/workspace_test.js test/waveform_stream_test.js test/waveform_ui_test.js test/waveform_host_test.js test/waveform_memory_test.js test/waveform_memory_view_test.js test/waveform_float_test.js test/waveform_interaction_test.js test/waveform_renderer_test.js test/waveform_row_layout_test.js test/waveform_row_gesture_test.js test/waveform_column_layout_test.js test/waveform_column_resize_test.js test/waveform_column_client_test.js test/process_output_test.js test/toolchain_task_test.js test/vivado_tree_test.js test/vivado_xpr_test.js test/vivado_commands_test.js test/completion_syntax_test.js test/completion_catalog_test.js test/completion_engine_test.js test/completion_index_test.js test/completion_provider_test.js",
+    "test": "npm run check && node test/golden_test.js && node --test test/formatter_contract_test.js test/formatter_conservation_test.js test/toolchain_test.js test/waveform_test.js test/editor_test.js test/workspace_test.js test/waveform_stream_test.js test/waveform_ui_test.js test/waveform_host_test.js test/waveform_memory_test.js test/waveform_memory_view_test.js test/waveform_float_test.js test/waveform_interaction_test.js test/waveform_renderer_test.js test/waveform_row_layout_test.js test/waveform_row_gesture_test.js test/waveform_column_layout_test.js test/waveform_column_resize_test.js test/waveform_column_client_test.js test/process_output_test.js test/toolchain_task_test.js test/vivado_tree_test.js test/vivado_xpr_test.js test/vivado_commands_test.js test/completion_syntax_test.js test/completion_catalog_test.js test/completion_engine_test.js test/completion_index_test.js test/completion_provider_test.js && npm run test:circuit",
     "build:native": "node scripts/build-native.js",
     "package": "vsce package",
     "vscode:prepublish": "npm test",
-    "check": "node scripts/check-js.js"
+    "check": "node scripts/check-js.js",
+    "build:circuit": "node scripts/build-circuit-assets.js",
+    "test:circuit": "npm run build:circuit && node scripts/test-circuit.js"
   },
   "contributes": {
     "languages": [
@@ -353,6 +355,30 @@
         "title": "%cmd.vivado_tree_stop.title%",
         "category": "SystemVerilog",
         "icon": "$(debug-stop)"
+      },
+      {
+        "command": "svtools.circuit.open",
+        "title": "%cmd.circuit.open.title%",
+        "category": "SystemVerilog Tools",
+        "icon": "$(circuit-board)"
+      },
+      {
+        "command": "svtools.circuit.fromSource",
+        "title": "%cmd.circuit.fromSource.title%",
+        "category": "SystemVerilog Tools",
+        "icon": "$(circuit-board)"
+      },
+      {
+        "command": "svtools.circuit.fromVivado",
+        "title": "%cmd.circuit.fromVivado.title%",
+        "category": "SystemVerilog Tools",
+        "icon": "$(circuit-board)"
+      },
+      {
+        "command": "svtools.circuit.stop",
+        "title": "%cmd.circuit.stop.title%",
+        "category": "SystemVerilog Tools",
+        "icon": "$(circuit-board)"
       }
     ],
     "viewsContainers": {
@@ -498,6 +524,11 @@
           "command": "svtools.vivado.createProject",
           "group": "navigation@4",
           "when": "view == svtools.vivado.projectTree && !svtools.vivado.hasProject && !svtools.vivado.busy"
+        },
+        {
+          "command": "svtools.circuit.fromVivado",
+          "when": "view == svtools.vivado.projectTree && svtools.vivado.hasProject && !svtools.vivado.busy",
+          "group": "navigation@3"
         }
       ],
       "view/item/context": [
@@ -630,6 +661,22 @@
         {
           "command": "svtools.iverilog.openWaveform",
           "group": "4_simulation"
+        },
+        {
+          "command": "svtools.circuit.fromSource",
+          "group": "5_circuit"
+        },
+        {
+          "command": "svtools.circuit.open",
+          "group": "5_circuit"
+        },
+        {
+          "command": "svtools.circuit.fromVivado",
+          "group": "5_circuit"
+        },
+        {
+          "command": "svtools.circuit.stop",
+          "group": "5_circuit"
         }
       ]
     },
@@ -1111,12 +1158,64 @@
           "maximum": 10000,
           "scope": "resource",
           "description": "%cfg.completion_maxItems.desc%"
+        },
+        "svtools.circuit.yosysPath": {
+          "type": "string",
+          "default": "yosys",
+          "description": "%cfg.circuit.yosysPath%"
+        },
+        "svtools.circuit.frontend": {
+          "type": "string",
+          "enum": [
+            "verilog",
+            "slang"
+          ],
+          "default": "verilog",
+          "description": "%cfg.circuit.frontend%"
+        },
+        "svtools.circuit.sources": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "%cfg.circuit.sources%"
+        },
+        "svtools.circuit.includeDirs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "%cfg.circuit.includeDirs%"
+        },
+        "svtools.circuit.defines": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "%cfg.circuit.defines%"
+        },
+        "svtools.circuit.top": {
+          "type": "string",
+          "default": "",
+          "description": "%cfg.circuit.top%"
+        },
+        "svtools.circuit.generationTimeout": {
+          "type": "number",
+          "minimum": 5,
+          "maximum": 600,
+          "default": 120,
+          "description": "%cfg.circuit.generationTimeout%"
         }
       }
     }
   },
   "devDependencies": {
     "@types/vscode": "^1.74.0",
-    "@vscode/vsce": "^3.9.1"
+    "@vscode/vsce": "^3.9.1",
+    "elkjs": "0.12.0",
+    "netlistsvg": "1.0.2"
   }
 }

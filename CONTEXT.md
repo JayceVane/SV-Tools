@@ -1,4 +1,14 @@
-# 4.0 开发交接
+# 4.1 开发交接
+
+2026-10-15 当前状态：4.0.0-preview.1 已经由 PR #10 合入 master（4cc1c737c74e442c76fc618fd90bf6b0e42fcd04），GitHub 预发布已公开，稳定 Latest 仍为 3.5。原目录 `D:\Workspace\FPGA\02_svtools` 保持此发布基线；已有私有 Rust 调试缓存保留。发布地址：https://github.com/JayceVane/SV-Tools/releases/tag/v4.0.0-preview.1 。
+
+4.1.0-alpha1 位于独立 worktree `C:\Users\JayceVane\.codex\worktrees\svtools-circuit\02_svtools`，分支 `codex/feat-circuit-viewer`。已完成 Yosys JSON → netlistsvg 真实数据验证、独立模型、ELK.js + SVG 交互及 Vivado 同模型适配。Vivado 2022.1.2 真实只读工程验证通过；其首版视图为平坦 RTL 详细化。Yosys builtin/slang 两条实际流程均通过。操作与限制见 `docs/CIRCUIT.md`，交付记录见 `docs/V4_1_ALPHA1.md`。
+
+本轮包含 75 项电路测试（Node 24 与 Node 20 均通过）、121 项 Rust 测试、既有功能回归及公开 RTL 夹具验收。真实浏览器验证明暗主题、参数化模块下钻、网络高亮、平移缩放与源位置；VS Code 独立宿主启动被本机更新锁阻止，未将浏览器替身计为真实宿主通过。复验入口 `scripts/verify-circuit-host.ps1`。
+
+接下来：在 VS Code 更新结束后运行独立宿主验收；根据用户实用反馈完善电路交互，再评估逻辑锥和更大设计的局部加载。不得将 4.1 自动合入 master 或另发 Release。FSDB 仍取消，二维 mem 保留；Vivado IP 仍仅计划。
+
+以下为 4.0 历史交接（版本与工程边界以上文为准）：
 
 2026-10-15 发布交接：用户已授权将当前成果发布为 GitHub `4.0.0-preview.1`，通过 PR 合入原工程，并从合入基线独立开发下一版本。此授权替代下文“原目录只维护3.x”的历史边界；仍不得覆盖用户未提交内容。发布说明见 `docs/releases/v4.0.0-preview.1.md`。下一版本路线：Yosys JSON → netlistsvg 验证，独立电路模型，ELK.js + SVG 交互视图，Vivado 适配同一模型。
 

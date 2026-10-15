@@ -21,6 +21,7 @@
 const vscode = require('vscode');
 const { activateIverilog } = require('./toolchains/iverilog');
 const { activateWaveViewer } = require('./waveform');
+const { activateCircuitViewer } = require('./circuit');
 const { activateVivado } = require('./vivado');
 
 const { createNativeLoader } = require('./native-loader');
@@ -138,7 +139,8 @@ function activate(context) {
 
     // Vivado TCL 批处理运行与工程创建
     const vivado = activateVivado(context);
-    return { vivado };
+    const circuit = activateCircuitViewer(context, { vivado });
+    return { vivado, circuit };
 }
 
 /**

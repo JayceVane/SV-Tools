@@ -5,7 +5,7 @@
 
 改编自 Sublime Text [SystemVerilog](https://github.com/TheClams/SystemVerilog)（格式化）与 [Verilog-Gadget](https://github.com/poucotm/Verilog-Gadget)（生产力工具）插件。
 
-当前为 **4.0.0-preview.1**，在 3.5.0 基础上完成格式化器、补全、工具链与波形查看器重构。[GitHub 预发布下载](https://github.com/JayceVane/SV-Tools/releases/tag/v4.0.0-preview.1)提供 Windows x64 VSIX 与 CLI；在 VS Code 中通过“从 VSIX 安装”使用。源码位于 `src/`，构建产物位于 `bin/`。
+当前开发版本为 **4.1.0-alpha1**，新增内嵌电路结构查看器。已发布的 [4.0.0-preview.1](https://github.com/JayceVane/SV-Tools/releases/tag/v4.0.0-preview.1) 提供 Windows x64 VSIX 与 CLI，可在 VS Code 中通过“从 VSIX 安装”使用。4.1 在独立分支开发，尚未发布为 GitHub Release。源码位于 `src/`，构建产物位于 `bin/`。
 
 格式化只能改变普通空格、Tab、CR、LF；其它字符的内容、次数和顺序必须保持，即使输入
 全部乱码或语法不完整。无法安全提交的布局保留原文，详见 [格式化规范](docs/FORMAT_SPEC.md)。
@@ -45,6 +45,14 @@
 - 运行 TCL 脚本（工作区选择 / 右键当前文件）
 - ▶ 仿真（Icarus / Vivado xsim 引擎选择）与 ⊕ 工程文件管理按钮
 - 工程创建向导（源文件分类、器件选型逐级筛选、顶层识别）+ 工程结构模板
+
+**电路结构查看器**（4.1 alpha，可选本地工具）
+- 导入 Yosys JSON，或从当前 RTL 调用本机 Yosys 生成；支持配置源文件顺序、顶层、include 和宏
+- 独立电路模型与 ELK.js 正交布局，SVG 平移缩放、搜索、网络高亮、参数化模块下钻和源码定位
+- Vivado 工程只读 RTL 详细化，导出到同一模型；当前 Vivado 视图为平坦结构
+- 解析和布局运行在 Worker；超预算明确提示，并保留模块选择以便查看较小子模块
+
+命令面板搜索“电路结构”，或在 RTL 编辑器右键生成。Yosys 需单独安装并设置 `svtools.circuit.yosysPath`；`slang` 前端需要带该插件的 Yosys。导入 JSON 无需安装 Yosys。配置、数据语义、容量边界及验证命令见 [电路查看器](docs/CIRCUIT.md)。
 
 **CLI 格式化器**：独立 `svtools.exe`，无需 VSCode。
 

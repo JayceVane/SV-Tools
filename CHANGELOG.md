@@ -2,6 +2,14 @@
 
 All notable changes to the SystemVerilog VSCode Extension will be documented in this file.
 
+## [4.1.0-alpha1] - 2026-10-15
+
+**变更内容：** 新增内嵌电路结构查看器。先以真实 Yosys JSON 和 netlistsvg 验证连接，再将 Yosys、Vivado 适配到独立电路模型，使用 ELK.js + SVG 布局显示。提供 RTL 生成、JSON 导入、Vivado 只读详细化、层级浏览、网络搜索高亮和源码定位；模型保留位序、升降序总线、常量、参数和别名。
+
+**为什么：** 让用户在编辑器内核对 RTL 电路结构，同时使前端、布局器和工具方言各自独立。解析、验证和布局移入有容量与超时限制的 Worker，避免网表阻塞扩展宿主；生成复用已有任务取消、日志和进程管理。
+
+**影响面：** 新增四个电路命令与 `svtools.circuit.*` 设置，固定 ELK 运行资源随 VSIX 分发，Yosys 和 netlistsvg 不随包分发。Vivado 首版是平坦 RTL 视图；大电路按模块查看并实施展示预算。源码与补全索引统一排除 `.svtools`、`.Xil` 等生成目录，避免任务快照造成重复模块。CI 增加根依赖安装。4.0 preview 的发布资产不变；配置与验收见 `docs/CIRCUIT.md`、`docs/V4_1_ALPHA1.md`。
+
 ## [4.0.0-preview.1] - 2026-10-15
 
 **变更内容：** 汇总 alpha1–alpha13 为首个 GitHub 预览版，同步 3.5.0 正式发布基线；扩展、native、CLI 与锁文件统一版本。发布流程校验 tag、构建 Windows x64 包、执行完整回归并提供 SHA256 清单，带后缀的版本标为 prerelease。

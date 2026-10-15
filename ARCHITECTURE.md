@@ -1,4 +1,4 @@
-# SV Tools 4.0 架构
+# SV Tools 4.x 架构
 
 ## 技术方向
 
@@ -54,6 +54,13 @@ UTF-16，孤立代理项返回原始JS字符串，避免在守卫之前被UTF-8�
 | `src/toolchains/iverilog-controller.js` | 命令、事件、诊断归属和界面接线 | 进程字节流、厂商解析规则 |
 | `src/vivado/batch.js` | batch 成败、项目标记与语义错误 | 工程树、Tcl 生成 |
 | `src/workspace/sources.js` | 设计单元索引与缓存 | Lint 运行与界面接线 |
+| `src/workspace/source-policy.js` | 工程与补全共享的生成目录排除规则 | 任务目录创建、语义解析 |
+| `src/circuit/model.js` 与 `adapters/*` | 工具无关领域合同、Yosys/Vivado 方言转换与验证 | 布局坐标、Webview、工具进程 |
+| `src/circuit/projection.js` 与 `layout.js` | 当前模块连接投影、有界总线合并、ELK 几何 | 领域位序改写、文件读取、编辑器状态 |
+| `src/circuit/worker.js` 与 `session.js` | UTF-8 JSON 读取、模型、布局、RPC 容量/超时/销毁 | VS Code API、外部工具启动 |
+| `src/circuit/*-runner.js` 与 `source-request.js` | 本地工具参数、任务快照、源位置回映射 | 电路推断、SVG 绘制 |
+| `src/circuit/host.js` 与 `index.js` | 页面生命周期、命令、取消和受限源码定位 | 网表方言、布局算法 |
+| `src/circuit/client.js` 与 `renderer.js` | 纯文本详情、手势、SVG 和页面状态 | 文件路径访问、启动工具、解析 RTL |
 | `src/editor/completion/catalog` 与生成数据 | 版本化规范名称、公开接口签名和来源/许可 | 用户工程解析和 VS Code API |
 | `src/editor/completion/syntax` | 容错词法、作用域、声明、类型与连接区间 | 规范目录、文件读取、完整 elaboration |
 | `src/editor/completion/index` | 文档版本缓存、工程/include 目录事件与容量预算 | 补全排序和原生格式化 |
@@ -61,6 +68,32 @@ UTF-16，孤立代理项返回原始JS字符串，避免在守卫之前被UTF-8�
 | `src/editor/completion/provider` | 编辑器配置、取消、双替换区间与 SnippetString | 重复维护标准名录和领域类型规则 |
 
 固定声明/赋值模式使用惰性缓存。新增规则优先落在负责该构造的模块，只有新的词法事实才扩展扫描器；不能把某个布局例外复制到其它阶段。
+
+## 4.1 电路数据与交互
+
+技术方向是先验证工具实际输出，再建立独立模型，最终使用 ELK.js + SVG 提供交互。netlistsvg 只用于开发验证，正式页面不依赖其输出或内部对象。实现愿景是同一模型接入不同工具并支持局部逻辑浏览；当前交付模块级视图，逻辑锥和增量布局留作后续。
+
+```mermaid
+flowchart LR
+    Commands[VS Code 电路命令] --> Tasks[共享工具任务与取消]
+    Tasks --> Yosys[Yosys RTL 到 JSON]
+    Tasks --> Vivado[Vivado 只读 RTL 详细化]
+    Import[已有 JSON] --> Worker
+    Yosys --> Worker[Worker 读取与适配]
+    Vivado --> Worker
+    Worker --> Model[独立 Design 模型]
+    Model --> Projection[当前模块连接投影]
+    Projection --> ELK[ELK 正交布局]
+    ELK --> Host[宿主消息与请求世代]
+    Host --> SVG[SVG 页面与对象选择]
+    SVG -->|仅对象 ID| Host
+    Host -->|已验证位置| Source[编辑器源码定位]
+    Yosys -->|开发验证| Prototype[netlistsvg 对照]
+```
+
+模型中的位引用只在所属模块内有意义，数组为 LSB-first；坐标和 ELK ID 不进入领域模型。模块输入在内部连接图中是驱动端，但声明方向仍为 input，投影显式保留二者，避免布局语义污染详情。别名、常量、多驱动和未知方向保持事实，不能补造连接。
+
+每个面板独立 Worker，首次导入和导航有请求世代检查；关闭/刷新取消所属工具任务，旧布局和源码响应不能覆盖新页面。Worker 读取上限 64 MiB、堆预算 384 MiB、单请求 60 秒；单模块展示预算在投影前检查。模块目录先于布局发送，超大顶层报错后仍可选小模块。Webview 不接收可执行路径，仅发送已有对象 ID；nonce CSP、纯文本写入和宿主真实路径校验共同约束边界。完整预算及未实现范围见 `docs/CIRCUIT.md`。
 
 ## 实现愿景
 

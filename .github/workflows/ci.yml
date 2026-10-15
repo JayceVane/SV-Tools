@@ -34,6 +34,9 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('src/native/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-
 
+      - name: 安装扩展构建与测试依赖
+        run: npm ci
+
       - name: 安装 napi CLI
         run: npm ci --prefix src/native
 

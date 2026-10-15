@@ -3,7 +3,7 @@
 const path = require('node:path');
 const { parseDocument } = require('./syntax');
 const SOURCE_GLOB = '**/*.{v,sv,vh,svh}';
-const EXCLUDE_GLOB = '**/{.git,node_modules,.svtools,.Xil}/**';
+const { SOURCE_EXCLUDE_GLOB: EXCLUDE_GLOB } = require('../../workspace/source-policy');
 const keyOf = uri => uri.toString();
 
 /** 工程语义缓存只读取 HDL 文本，脏文档始终优先；文件事件逐项失效。 */

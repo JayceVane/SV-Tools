@@ -126,3 +126,18 @@ Source: https://github.com/gmlarumbe/tree-sitter-systemverilog
 
 This project uses tree-sitter-systemverilog as the SystemVerilog grammar
 for tree-sitter parsing (symbol extraction, AST analysis).
+
+-----------------------------------------------------------------------
+elkjs 0.12.0
+
+The circuit viewer distributes the unmodified elkjs bundled JavaScript
+layout library under the Eclipse Public License 2.0 (EPL-2.0).
+The full license is included as bin/vendor/ELK-LICENSE.md in the VSIX.
+Upstream source and corresponding version:
+https://github.com/kieler/elkjs/tree/0.12.0
+https://www.npmjs.com/package/elkjs/v/0.12.0
+
+The library is copied from the pinned npm dependency during the build;
+SV Tools does not modify the elkjs source or generated bundle.
+netlistsvg is used only by development verification and is not distributed
+with the extension.
