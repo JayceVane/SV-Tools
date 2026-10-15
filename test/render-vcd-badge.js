@@ -2,7 +2,8 @@
 // 生成一个含总线跳变的 VCD，走 buildWaveformHtml，输出明暗两个 HTML 供截图
 const fs = require('fs');
 const path = require('path');
-const { parseVcd, buildWaveformHtml } = require('../vcd.js');
+const { parseVcd } = require('../src/waveform/parser');
+const { buildWaveformHtml } = require('../src/waveform/view');
 
 const vcdText = `$timescale 1ns $end
 $scope module tb $end
@@ -48,7 +49,8 @@ if (!parsed || !parsed.vars || parsed.vars.length !== 2 || !parsed.changes.get('
 }
 console.log('vars:', parsed.vars.map(s => `${s.name}[${s.width}]`).join(', '));
 
-const html = buildWaveformHtml(parsed, { fileName: 'badge_contrast.vcd' });
+const nonce = 'badge-preview';
+let html = buildWaveformHtml(parsed, { fileName: 'badge_contrast.vcd', nonce });
 if (!/rgba\(22,24,27,\.92\)/.test(html)) {
   console.error('FAIL: new badge background not found in html');
   process.exit(1);
@@ -57,9 +59,23 @@ if (/fillStyle = PAL\.busSoft/.test(html)) {
   console.error('FAIL: badge text still uses PAL.busSoft');
   process.exit(1);
 }
+// 本地测试适配器只承载这个小 fixture；生产页面从 worker 查询数据。
+const fixture = JSON.stringify([...parsed.changes.entries()]).replace(/</g, '\\u003c');
+const bridge = `window.acquireVsCodeApi=()=>({getState:()=>null,setState:()=>{},postMessage:message=>{
+    if(!message.requestId)return;
+    const events=new Map(${fixture}), p=message.params;
+    let result;
+    if(message.type==='window')result={series:p.ids.map(id=>({id,changes:events.get(id)||[],dense:[]}))};
+    else if(message.type==='values')result={values:Object.fromEntries(p.ids.map(id=>[id,WaveModel.valueAt(events.get(id)||[],p.time)]))};
+    else if(message.type==='edge'){
+        const changes=events.get(p.id)||[];
+        const event=p.direction==='next'?changes.find(e=>e.t>p.time):changes.slice().reverse().find(e=>e.t<p.time);
+        result={time:event?event.t:null,value:event?event.value:null};
+    }
+    Promise.resolve().then(()=>window.postMessage({type:'response',requestId:message.requestId,result},'*'));
+}});`;
+html=html.replace(`<script nonce="${nonce}">const BOOT=`, `<script nonce="${nonce}">${bridge}</script><script nonce="${nonce}">const BOOT=`);
 const outDir = __dirname;
 fs.writeFileSync(path.join(outDir, 'badge-dark.html'), html);
-// 亮色版：注入 theme-kind 属性（真实环境由 webview 宿主设置）
-fs.writeFileSync(path.join(outDir, 'badge-light.html'),
-  html.replace('<body>', '<body data-vscode-theme-kind="vscode-light">'));
+fs.writeFileSync(path.join(outDir, 'badge-light.html'), html.replace('<body>', '<body data-vscode-theme-kind="vscode-light">'));
 console.log('OK: badge-dark.html / badge-light.html written, badge color assertions passed');

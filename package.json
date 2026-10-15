@@ -2,7 +2,7 @@
   "name": "svtools",
   "displayName": "SystemVerilog Tools",
   "description": "Verilog/SystemVerilog formatter, module instantiation, testbench generation, and productivity tools (Rust native backend)",
-  "version": "3.5.0",
+  "version": "4.0.0-preview.1",
   "publisher": "JayceVane",
   "author": {
     "name": "JayceVane",
@@ -49,10 +49,11 @@
   ],
   "main": "./extension.js",
   "scripts": {
-    "test": "node test/golden_test.js",
+    "test": "npm run check && node test/golden_test.js && node --test test/formatter_contract_test.js test/formatter_conservation_test.js test/toolchain_test.js test/waveform_test.js test/editor_test.js test/workspace_test.js test/waveform_stream_test.js test/waveform_ui_test.js test/waveform_host_test.js test/waveform_memory_test.js test/waveform_memory_view_test.js test/waveform_float_test.js test/waveform_interaction_test.js test/waveform_renderer_test.js test/waveform_row_layout_test.js test/waveform_row_gesture_test.js test/waveform_column_layout_test.js test/waveform_column_resize_test.js test/waveform_column_client_test.js test/process_output_test.js test/toolchain_task_test.js test/vivado_tree_test.js test/vivado_xpr_test.js test/vivado_commands_test.js test/completion_syntax_test.js test/completion_catalog_test.js test/completion_engine_test.js test/completion_index_test.js test/completion_provider_test.js",
     "build:native": "node scripts/build-native.js",
     "package": "vsce package",
-    "vscode:prepublish": "npm test"
+    "vscode:prepublish": "npm test",
+    "check": "node scripts/check-js.js"
   },
   "contributes": {
     "languages": [
@@ -235,95 +236,123 @@
         "command": "svtools.vivado.tree.addFile",
         "title": "%cmd.vivado_tree_addFile.title%",
         "category": "SystemVerilog Tools",
-        "icon": "$(add)"
+        "icon": "$(add)",
+        "enablement": "!svtools.vivado.busy"
       },
       {
         "command": "svtools.vivado.tree.removeFile",
         "title": "%cmd.vivado_tree_removeFile.title%",
         "category": "SystemVerilog Tools",
-        "icon": "$(remove)"
+        "icon": "$(remove)",
+        "enablement": "!svtools.vivado.busy"
       },
       {
         "command": "svtools.vivado.tree.setTopSynth",
         "title": "%cmd.vivado_tree_setTopSynth.title%",
         "category": "SystemVerilog Tools",
-        "icon": "$(arrow-up)"
+        "icon": "$(arrow-up)",
+        "enablement": "!svtools.vivado.busy"
       },
       {
         "command": "svtools.vivado.tree.setTopSim",
         "title": "%cmd.vivado_tree_setTopSim.title%",
         "category": "SystemVerilog Tools",
-        "icon": "$(arrow-up)"
+        "icon": "$(arrow-up)",
+        "enablement": "!svtools.vivado.busy"
       },
       {
         "command": "svtools.vivado.tree.moveToSim",
         "title": "%cmd.vivado_tree_moveToSim.title%",
-        "category": "SystemVerilog Tools"
+        "category": "SystemVerilog Tools",
+        "enablement": "!svtools.vivado.busy"
       },
       {
         "command": "svtools.vivado.tree.moveToSources",
         "title": "%cmd.vivado_tree_moveToSources.title%",
-        "category": "SystemVerilog Tools"
+        "category": "SystemVerilog Tools",
+        "enablement": "!svtools.vivado.busy"
       },
       {
         "command": "svtools.vivado.tree.elaborate",
         "title": "%cmd.vivado_tree_elaborate.title%",
         "category": "SystemVerilog Tools",
-        "icon": "$(checklist)"
+        "icon": "$(checklist)",
+        "enablement": "!svtools.vivado.busy"
       },
       {
         "command": "svtools.vivado.tree.synthesize",
         "title": "%cmd.vivado_tree_synthesize.title%",
         "category": "SystemVerilog Tools",
-        "icon": "$(run-all)"
+        "icon": "$(run-all)",
+        "enablement": "!svtools.vivado.busy"
       },
       {
         "command": "svtools.vivado.tree.implement",
         "title": "%cmd.vivado_tree_implement.title%",
         "category": "SystemVerilog Tools",
-        "icon": "$(debug-start)"
+        "icon": "$(debug-start)",
+        "enablement": "!svtools.vivado.busy"
       },
       {
         "command": "svtools.vivado.tree.reportSynth",
         "title": "%cmd.vivado_tree_reportSynth.title%",
         "category": "SystemVerilog Tools",
-        "icon": "$(graph)"
+        "icon": "$(graph)",
+        "enablement": "!svtools.vivado.busy"
       },
       {
         "command": "svtools.vivado.tree.reportImpl",
         "title": "%cmd.vivado_tree_reportImpl.title%",
         "category": "SystemVerilog Tools",
-        "icon": "$(watch)"
+        "icon": "$(watch)",
+        "enablement": "!svtools.vivado.busy"
       },
       {
         "command": "svtools.vivado.tree.reportImplUtil",
         "title": "%cmd.vivado_tree_reportImplUtil.title%",
         "category": "SystemVerilog Tools",
-        "icon": "$(list-tree)"
+        "icon": "$(list-tree)",
+        "enablement": "!svtools.vivado.busy"
       },
       {
         "command": "svtools.vivado.tree.reportTiming",
         "title": "%cmd.vivado_tree_reportTiming.title%",
         "category": "SystemVerilog Tools",
-        "icon": "$(watch)"
+        "icon": "$(watch)",
+        "enablement": "!svtools.vivado.busy"
       },
       {
         "command": "svtools.vivado.tree.bitstream",
         "title": "%cmd.vivado_tree_bitstream.title%",
         "category": "SystemVerilog Tools",
-        "icon": "$(package)"
+        "icon": "$(package)",
+        "enablement": "!svtools.vivado.busy"
       },
       {
         "command": "svtools.vivado.tree.quickElaborate",
         "title": "%cmd.vivado_tree_quickElaborate.title%",
         "category": "SystemVerilog Tools",
-        "icon": "$(zap)"
+        "icon": "$(zap)",
+        "enablement": "!svtools.vivado.busy"
       },
       {
         "command": "svtools.vivado.tree.expandAll",
         "title": "%cmd.vivado_tree_expandAll.title%",
         "category": "SystemVerilog Tools",
         "icon": "$(expand-all)"
+      },
+      {
+        "command": "svtools.vivado.tree.selectProject",
+        "title": "%cmd.vivado_tree_selectProject.title%",
+        "category": "SystemVerilog",
+        "icon": "$(folder-opened)",
+        "enablement": "!svtools.vivado.busy"
+      },
+      {
+        "command": "svtools.vivado.tree.stop",
+        "title": "%cmd.vivado_tree_stop.title%",
+        "category": "SystemVerilog",
+        "icon": "$(debug-stop)"
       }
     ],
     "viewsContainers": {
@@ -331,7 +360,7 @@
         {
           "id": "svtools-vivado",
           "title": "%viewcontainer.vivado.title%",
-          "icon": "$(chip)"
+          "icon": "src/vivado/chip.svg"
         }
       ]
     },
@@ -447,13 +476,28 @@
         },
         {
           "command": "svtools.vivado.tree.addFile",
-          "group": "navigation@0",
-          "when": "view == svtools.vivado.projectTree"
+          "group": "navigation@3",
+          "when": "view == svtools.vivado.projectTree && svtools.vivado.hasProject"
         },
         {
           "command": "svtools.vivado.tree.expandAll",
           "group": "navigation@2",
+          "when": "view == svtools.vivado.projectTree && svtools.vivado.hasProject"
+        },
+        {
+          "command": "svtools.vivado.tree.selectProject",
+          "group": "navigation@0",
           "when": "view == svtools.vivado.projectTree"
+        },
+        {
+          "command": "svtools.vivado.tree.stop",
+          "group": "navigation@0",
+          "when": "view == svtools.vivado.projectTree && svtools.vivado.busy"
+        },
+        {
+          "command": "svtools.vivado.createProject",
+          "group": "navigation@4",
+          "when": "view == svtools.vivado.projectTree && !svtools.vivado.hasProject && !svtools.vivado.busy"
         }
       ],
       "view/item/context": [
@@ -490,7 +534,7 @@
         {
           "command": "svtools.vivado.tree.elaborate",
           "group": "2_run@1",
-          "when": "view == svtools.vivado.projectTree && viewItem == topModule"
+          "when": "view == svtools.vivado.projectTree && viewItem =~ /^(module|topModule|referenceModule)$/"
         },
         {
           "command": "svtools.vivado.tree.synthesize",
@@ -526,6 +570,11 @@
           "command": "svtools.vivado.tree.reportTiming",
           "group": "3_report@4",
           "when": "view == svtools.vivado.projectTree && viewItem == topModule"
+        },
+        {
+          "command": "svtools.vivado.tree.addFile",
+          "group": "0_manage@0",
+          "when": "view == svtools.vivado.projectTree && viewItem == setRoot"
         }
       ],
       "editor/context": [
@@ -992,6 +1041,76 @@
               "description": "%cfg.vivado_structure_projectDir.desc%"
             }
           }
+        },
+        "svtools.completion.uvmVersion": {
+          "type": "string",
+          "enum": [
+            "1.2",
+            "1800.2",
+            "off"
+          ],
+          "default": "1.2",
+          "scope": "resource",
+          "description": "%cfg.completion_uvmVersion.desc%"
+        },
+        "svtools.completion.includePaths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "scope": "window",
+          "description": "%cfg.completion_includePaths.desc%"
+        },
+        "svtools.completion.maxFiles": {
+          "type": "integer",
+          "default": 5000,
+          "minimum": 1,
+          "maximum": 50000,
+          "scope": "window",
+          "description": "%cfg.completion_maxFiles.desc%"
+        },
+        "svtools.completion.maxFileSizeKB": {
+          "type": "integer",
+          "default": 2048,
+          "minimum": 1,
+          "maximum": 65536,
+          "scope": "window",
+          "description": "%cfg.completion_maxFileSizeKB.desc%"
+        },
+        "svtools.completion.maxTotalSourceMB": {
+          "type": "integer",
+          "default": 32,
+          "minimum": 1,
+          "maximum": 1024,
+          "scope": "window",
+          "description": "%cfg.completion_maxTotalSourceMB.desc%"
+        },
+        "svtools.completion.standard": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "1364-1995",
+            "1364-2001-noconfig",
+            "1364-2001",
+            "1364-2005",
+            "1800-2005",
+            "1800-2009",
+            "1800-2012",
+            "1800-2017",
+            "1800-2023"
+          ],
+          "default": "auto",
+          "scope": "resource",
+          "description": "%cfg.completion_standard.desc%"
+        },
+        "svtools.completion.maxItems": {
+          "type": "integer",
+          "default": 1000,
+          "minimum": 1,
+          "maximum": 10000,
+          "scope": "resource",
+          "description": "%cfg.completion_maxItems.desc%"
         }
       }
     }

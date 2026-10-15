@@ -1,0 +1,710 @@
+/**
+ * Copyright (c) 2025 JayceVane (JayceVane@163.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+// Vivado 集成入口：activateVivado 集成层（命令接线、输出通道/状态栏运行器、工程创建向导、
+// 增量文件管理、双引擎仿真、器件选型）+ 各子模块纯函数汇总导出。
+// extension.js 的 require('./vivado') 解析到本目录。
+
+const { createToolTaskManager } = require('../toolchains/job');
+const { createBufferedOutput } = require('../toolchains/channel');
+const { runVivadoBatchTask } = require('./batch');
+const { scanWorkspaceSources } = require('../workspace/sources');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+
+const { normalizeVivadoDir, findVivadoBinDir, buildBatchArgs } = require('./toolchain');
+const {
+    tclQuote, tclList, buildCreateProjectScript, buildAddFilesScript, buildRemoveFilesScript,
+    buildSimulateScript, firstModuleName,
+    buildOocReportsScript, parseUtilHierSummary, parseLogicLevelSummary
+} = require('./tclgen');
+const { buildExportPartsScript, parsePartsDump, partFilterOptions, filterParts, buildPartPickerHtml } = require('./parts');
+const { matchGlobList, classifyFiles, DEFAULT_STRUCTURE } = require('./structure');
+const { scanVerilogFiles, scanConstraintFiles, scanTclFiles, detectTopModules, guessSimTop } = require('./scan');
+const { activateProjectTree } = require('./projectTree');
+const { createProjectSelection } = require('./projects');
+
+const OUTPUT_CHANNEL_TITLE = 'SystemVerilog Tools · Vivado';
+
+// ---------------------------------------------------------------------------
+
+/** @returns {import('vscode')} deps 里注入的 vscode（单测时 mock） */
+function activateVivado(context, deps) {
+    const vscode = (deps && deps.vscode) || require('vscode');
+    const out = vscode.window.createOutputChannel(OUTPUT_CHANNEL_TITLE);
+    let projectTree = null;
+    const output = createBufferedOutput(out), tasks = createToolTaskManager({ onChange(job) { projectTree?.setRunning(job.finished ? null : job.state); } });
+    const projectSelection = createProjectSelection({ workspace: vscode.workspace, state: context.workspaceState });
+
+    let running = null;      // { job, scriptPath }，准备阶段也可停止。
+    let statusItem = null;
+    let binDirCache = null;
+
+    function log(msg) { out.appendLine(msg); }
+
+    function status(text, command) {
+        if (!statusItem) {
+            statusItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 90);
+            statusItem.name = 'svtools Vivado';
+        }
+        if (!text) { statusItem.hide(); return; }
+        statusItem.text = text;
+        statusItem.tooltip = 'svtools Vivado';
+        statusItem.command = command || undefined;
+        statusItem.show();
+    }
+
+    function resolveBinDir() {
+        if (binDirCache) return binDirCache;
+        const cfg = vscode.workspace.getConfiguration('svtools.vivado');
+        binDirCache = findVivadoBinDir(cfg.get('path'), process.env, null, process.platform);
+        return binDirCache;
+    }
+
+    // ---------------- Vivado 工程探测（决定标签页按钮显隐） ----------------
+
+    async function findProjectXpr() {
+        return projectSelection.current();
+    }
+
+    let hasProjectCtx;
+    async function refreshProjectContext() {
+        let xpr = null;
+        try { xpr = await findProjectXpr(); }
+        finally {
+            if (!!xpr !== hasProjectCtx) {
+                hasProjectCtx = !!xpr;
+                await vscode.commands.executeCommand('setContext', 'svtools.vivado.hasProject', hasProjectCtx);
+            }
+        }
+        return xpr;
+    }
+
+    async function selectProject(token) {
+        if (running || incrementalOperation) { vscode.window.showWarningMessage('请先停止当前 Vivado 任务再切换工程。'); return; }
+        const files = await projectSelection.discover();
+        const pick = await vscode.window.showQuickPick([
+            ...files.map(file => ({ label: path.basename(file), description: vscode.workspace.asRelativePath(file), file })),
+            { label: '浏览 .xpr 文件…', browse: true }
+        ], { placeHolder: '选择当前工程，后续面板和编辑器命令均使用此工程', matchOnDescription: true }, token);
+        if (!pick) return;
+        const file = pick.browse ? (await vscode.window.showOpenDialog({ canSelectMany: false, filters: { 'Vivado Project': ['xpr'] } }))?.[0]?.fsPath : pick.file;
+        if (token?.isCancellationRequested) return;
+        if (file) { await projectSelection.select(file); await refreshProjectContext(); }
+    }
+
+    /** 当前编辑器若是 Verilog 源文件返回 {path, isSv, rel}，否则提示并返回 null。 */
+    function currentVerilogFile() {
+        const editor = vscode.window.activeTextEditor;
+        if (!editor) { vscode.window.showErrorMessage('没有活动编辑器'); return null; }
+        const f = editor.document.fileName;
+        if (!/\.(sv|v|svh|vh)$/i.test(f)) {
+            vscode.window.showErrorMessage('当前文件不是 Verilog/SystemVerilog 源文件');
+            return null;
+        }
+        return { path: f, isSv: /\.(sv|svh)$/i.test(f), doc: editor.document };
+    }
+
+    const { parseXpr, samePath } = require('./xpr');
+    let incrementalOperation = null, incrementalCancelled = false, incrementalPicker = null;
+
+    /** 编辑器增量入口先占用选择/准备阶段，避免并发命令互相覆盖或重复提交。 */
+    async function incrementalAction(label, action) {
+        if (running || incrementalOperation || projectTree?.isBusy()) {
+            vscode.window.showWarningMessage('Vivado 正在处理任务，请等待完成或先停止。');
+            return { code: null, status: 'skipped', error: 'busy' };
+        }
+        incrementalOperation = label; incrementalCancelled = false;
+        incrementalPicker = vscode.CancellationTokenSource ? new vscode.CancellationTokenSource() : null; projectTree?.setRunning('preparing');
+        try { return await action(); }
+        catch (error) {
+            log('[vivado] ' + label + '失败：' + error.message);
+            vscode.window.showErrorMessage(label + '失败：' + error.message);
+            return { code: null, status: 'failed', error: error.message };
+        } finally { incrementalOperation = null; incrementalPicker?.dispose(); incrementalPicker = null; projectTree?.setRunning(running?.job.state || null); }
+    }
+
+    async function readEditorProject() {
+        const xpr = await refreshProjectContext();
+        if (!xpr) { vscode.window.showErrorMessage('未找到 Vivado 工程（.xpr），请先选择或创建工程'); return null; }
+        return parseXpr(xpr);
+    }
+    async function sameEditorProject(xpr) {
+        const current = await refreshProjectContext();
+        if (current && samePath(current, xpr)) return true;
+        vscode.window.showWarningMessage('工程已切换，已取消旧工程操作，请重新执行命令。');
+        return false;
+    }
+    const memberOf = (set, file) => set.files.some(member => samePath(member, file));
+
+    /** 文件集候选来自当前 XPR；移出只展示真实成员所在的集，仿真只展示 SimulationSrcs。 */
+    async function chooseEditorFileset(parsed, file, action) {
+        const sets = parsed.sets.filter(set => action === 'remove' ? memberOf(set, file)
+            : action === 'simulate' ? set.type === 'SimulationSrcs' : ['DesignSrcs', 'SimulationSrcs'].includes(set.type));
+        if (!sets.length) {
+            vscode.window.showWarningMessage(action === 'remove' ? '当前文件不在所选工程中。' : '所选工程中没有可用的' + (action === 'simulate' ? '仿真' : '源') + '文件集。');
+            return null;
+        }
+        const members = sets.filter(set => memberOf(set, file));
+        if (sets.length === 1 || action === 'simulate' && members.length === 1) return (members[0] || sets[0]).name;
+        const choices = [...sets].sort((a, b) => Number(memberOf(b, file)) - Number(memberOf(a, file)))
+            .map(set => ({ label: set.name, description: set.type + (memberOf(set, file) ? ' · 已包含当前文件' : ''), value: set.name }));
+        const pick = await vscode.window.showQuickPick(choices, { placeHolder: action === 'remove' ? '从哪个实际文件集移出？' : action === 'simulate' ? '选择工程仿真文件集' : '加入哪个工程文件集？' }, incrementalPicker?.token);
+        return pick && sets.some(set => set.name === pick.value) ? pick.value : null;
+    }
+
+    /** 独立动作目录保存脚本；准备后再次核对工程及文件集，busy 时不触碰现有脚本。 */
+    async function runIncrementalTcl(name, scriptBody, xpr, validate) {
+        if (incrementalCancelled) return { code: null, status: 'cancelled' };
+        if (running) { vscode.window.showWarningMessage('Vivado 正在运行，请先等待或停止。'); return { code: null, error: 'busy' }; }
+        if (!await sameEditorProject(xpr)) return { code: null, status: 'cancelled', error: 'project-changed' };
+        const valid = () => {
+            if (validate(parseXpr(xpr))) return true;
+            vscode.window.showWarningMessage('工程文件集或成员已变化，已取消操作，请重新执行命令。'); return false;
+        };
+        if (!valid()) return { code: null, status: 'cancelled', error: 'project-changed' };
+        const base = vscode.workspace.getWorkspaceFolder(vscode.Uri.file(xpr))?.uri.fsPath || path.dirname(xpr);
+        const parent = path.join(base, '.svtools', 'vivado', 'actions');
+        await fs.promises.mkdir(parent, { recursive: true });
+        const directory = await fs.promises.mkdtemp(path.join(parent, 'action-'));
+        const scriptPath = path.join(directory, name);
+        await fs.promises.writeFile(scriptPath, scriptBody, { flag: 'wx' });
+        if (incrementalCancelled || !await sameEditorProject(xpr) || !valid()) return { code: null, status: 'cancelled', error: 'project-changed' };
+        return runScript(scriptPath, { editorAction: true });
+    }
+
+    async function addCurrentToProject() {
+        return incrementalAction('加入文件', async () => {
+            const cur = currentVerilogFile(); if (!cur) return;
+            const parsed = await readEditorProject(); if (!parsed) return;
+            const target = await chooseEditorFileset(parsed, cur.path, 'add'); if (!target) return;
+            if (!await sameEditorProject(parsed.path)) return { code: null, status: 'cancelled', error: 'project-changed' };
+            const latestSet = parseXpr(parsed.path).sets.find(set => set.name === target);
+            if (latestSet && memberOf(latestSet, cur.path)) { vscode.window.showInformationMessage('文件已在 ' + target + ' 中。'); return; }
+            return runIncrementalTcl('add_file.tcl', buildAddFilesScript(parsed.path, cur.path, target, cur.isSv), parsed.path,
+                latest => latest.sets.some(set => set.name === target && ['DesignSrcs', 'SimulationSrcs'].includes(set.type)));
+        });
+    }
+
+    async function removeCurrentFromProject() {
+        return incrementalAction('移出文件', async () => {
+            const cur = currentVerilogFile(); if (!cur) return;
+            const parsed = await readEditorProject(); if (!parsed) return;
+            const target = await chooseEditorFileset(parsed, cur.path, 'remove'); if (!target) return;
+            return runIncrementalTcl('remove_file.tcl', buildRemoveFilesScript(parsed.path, cur.path, target), parsed.path,
+                latest => latest.sets.some(set => set.name === target && memberOf(set, cur.path)));
+        });
+    }
+
+    /** 当前文件作为实际仿真文件集的顶层；未保存修改先保存到工程引用的文件。 */
+    async function simulateWithVivado() {
+        return incrementalAction('仿真', async () => {
+            const cur = currentVerilogFile(); if (!cur) return;
+            if (cur.doc.isUntitled) { vscode.window.showErrorMessage('请先保存仿真源文件'); return; }
+            if (cur.doc.isDirty && !await cur.doc.save()) { vscode.window.showWarningMessage('源文件未保存，已取消仿真。'); return; }
+            const top = firstModuleName(cur.doc.getText());
+            if (!top) { vscode.window.showErrorMessage('当前文件里没有找到 module 声明'); return; }
+            const parsed = await readEditorProject(); if (!parsed) return;
+            const target = await chooseEditorFileset(parsed, cur.path, 'simulate'); if (!target) return;
+            const runtime = String(vscode.workspace.getConfiguration('svtools.vivado').get('simRuntime', '') || '');
+            return runIncrementalTcl('simulate.tcl', buildSimulateScript({ xprPath: parsed.path, top, file: cur.path, isSv: cur.isSv, runtime, fileset: target }), parsed.path,
+                latest => latest.sets.some(set => set.name === target && set.type === 'SimulationSrcs'));
+        });
+    }
+    /**
+     * 传递闭包收集综合文件集：入口文件 + 其文本中出现的工作区定义单元（词边界
+     * 匹配，含模块实例化/import 引用；注释误命中只多读文件，不影响 -top 综合）。
+     * package 必须先于 import 它的文件被 read_verilog（Vivado 逐文件即时编译，
+     * importer 在前会报 Synth 8-36 'xxx_pkg' is not declared——与 xvlog prj 顺序、
+     * iverilog 单遍编译同一约束），故收集后重排：package 文件在前，package 间按
+     * import 依赖拓扑排序。
+     * @param {string} entryFile
+     * @returns {Promise<string[]>}
+     */
+    async function collectSynthFiles(entryFile) {
+        const files = [entryFile];
+        let index;
+        // OOC 综合是重操作，强制刷新索引——不吃 10s TTL 缓存（刚建/改 package
+        // 的窗口期会拿到旧索引导致漏收依赖）
+        try { index = (await scanWorkspaceSources(true)).modules; } catch (err) { return files; }
+        const seen = new Set(files.map(f => path.resolve(f)));
+        const nameRes = [...index.keys()].map(n => ({ n, re: new RegExp('\\b' + n.replace(/[$]/g, '\\$') + '\\b') }));
+        for (let i = 0; i < files.length; i++) {
+            let text = '';
+            try { text = fs.readFileSync(files[i], 'utf8'); } catch (err) { continue; }
+            for (const { n, re } of nameRes) {
+                const f = index.get(n);
+                if (f && !seen.has(path.resolve(f)) && re.test(text)) {
+                    seen.add(path.resolve(f));
+                    files.push(f);
+                }
+            }
+        }
+        return orderForReadVerilog(files);
+    }
+
+    /** read_verilog 读序重排：package 文件在前（package 间按 import 拓扑），其余保持原序。 */
+    function orderForReadVerilog(files) {
+        const info = files.map(file => {
+            let text = '';
+            try { text = fs.readFileSync(file, 'utf8'); } catch (err) { /* 读不了按非 package 处理 */ }
+            const decl = text.match(/^[ \t]*(module|macromodule|interface|package|program)[ \t]+([A-Za-z_][A-Za-z0-9_$]*)/m) || [];
+            return {
+                file,
+                kind: decl[1] || '',
+                name: decl[2] || '',
+                imports: new Set([...text.matchAll(/\bimport\s+([A-Za-z_][A-Za-z0-9_$]*)\s*::/g)].map(m => m[1]))
+            };
+        });
+        const nameOf = new Map(info.filter(i => i.name).map(i => [i.name, i.file]));
+        const pkgFiles = new Set(info.filter(i => i.kind === 'package').map(i => i.file));
+        const ordered = [];
+        const done = new Set();
+        const visit = (it) => {
+            if (done.has(it.file)) return;
+            done.add(it.file);
+            for (const imp of it.imports) {
+                const dep = nameOf.get(imp);
+                if (dep && pkgFiles.has(dep)) visit(info.find(x => x.file === dep));
+            }
+            ordered.push(it);
+        };
+        for (const it of info) if (pkgFiles.has(it.file)) visit(it);
+        for (const it of info) if (!pkgFiles.has(it.file)) visit(it);
+        return ordered.map(i => i.file);
+    }
+
+    /** OOC 综合结束后：解析两份报告摘要进输出通道，并把 .rpt 打开到编辑器。 */
+    async function showOocReports(outDir, top, modeLabel) {
+        const utilRpt = path.join(outDir, 'utilization_hier.rpt');
+        const llRpt = path.join(outDir, 'logic_levels.rpt');
+        log('———— OOC 报告（' + top + (modeLabel ? '，' + modeLabel : '') + '）————');
+        try {
+            for (const s of parseUtilHierSummary(fs.readFileSync(utilRpt, 'utf8'))) log(s);
+        } catch (err) { /* 报告缺失时只开文件 */ }
+        try {
+            log(parseLogicLevelSummary(fs.readFileSync(llRpt, 'utf8')));
+        } catch (err) { /* 同上 */ }
+        log('完整报告: ' + utilRpt);
+        for (const f of [utilRpt, llRpt]) {
+            try { await vscode.window.showTextDocument(vscode.Uri.file(f), { preview: false }); } catch (err) { /* 打不开只留通道摘要 */ }
+        }
+    }
+
+    /**
+     * 标签页 Vivado 快捷入口：当前模块 OOC 综合 → 分层资源占用 + 逻辑级数
+     * 分布报告。不依赖/修改 .xpr 工程。两档可选（对比优化收益）：
+     * 保持层次 = -flatten_hierarchy none（可看子模块分摊，禁跨边界优化）；
+     * 全优化 = full（Vivado 默认，跨模块边界优化，层次被展平）。
+     * 两档都是 out_of_context，对比时只差 flatten 一个变量。
+     */
+    async function vivadoReports() {
+        const cur = currentVerilogFile();
+        if (!cur) return;
+        const text = cur.doc.getText();
+        if (/\buvm_[a-z0-9_]+/i.test(text)) {
+            vscode.window.showWarningMessage('当前文件使用 UVM（测试平台不可综合），请打开 RTL 模块文件再生成报告。');
+            return;
+        }
+        // 综合策略：保持层次（默认）/ 全优化，两档对比只差 -flatten_hierarchy
+        const modePick = await vscode.window.showQuickPick([
+            {
+                label: '保持层次（默认）',
+                description: '-flatten_hierarchy none：保留模块边界，可看子模块资源分摊；禁跨边界优化',
+                value: 'none'
+            },
+            {
+                label: '全优化',
+                description: '-flatten_hierarchy full（Vivado 默认）：跨模块边界优化，资源/时序最优；层次被展平',
+                value: 'full'
+            }
+        ], { placeHolder: 'OOC 综合策略（两档都为 out_of_context，可分别跑一次对比差别）' });
+        if (!modePick) return;   // 用户取消
+        const flatten = modePick.value;
+
+        // 综合顶层取自当前文件（不碰工程 top）；多模块文件让用户挑，单模块直取
+        const modules = [...text.matchAll(/^[ \t]*(?:module|macromodule)[ \t]+([A-Za-z_][A-Za-z0-9_$]*)/gm)].map(m => m[1]);
+        if (!modules.length) { vscode.window.showErrorMessage('当前文件里没有找到 module 声明'); return; }
+        let top = modules[0];
+        if (modules.length > 1) {
+            const pick = await vscode.window.showQuickPick(
+                modules.map(m => ({ label: m, description: m === modules[0] ? '文件中第一个模块' : '' })),
+                { placeHolder: '当前文件包含 ' + modules.length + ' 个 module，选择要综合的顶层' });
+            if (!pick) return;   // 用户取消
+            top = pick.label;
+        }
+
+        // 器件来源：工作区 .xpr → svtools.vivado.part 配置
+        let part = '';
+        const xpr = await findProjectXpr();
+        if (xpr) {
+            try { part = (fs.readFileSync(xpr, 'utf8').match(/Option Name="Part" Val="([^"]+)"/) || [])[1] || ''; } catch (err) { /* 读不到走配置 */ }
+        }
+        const cfg = vscode.workspace.getConfiguration('svtools.vivado');
+        if (!part) part = String(cfg.get('part', '') || '').trim();
+        if (!part) {
+            vscode.window.showErrorMessage(
+                '未找到器件型号：工作区没有 .xpr，且 svtools.vivado.part 未配置', '打开设置'
+            ).then(choice => {
+                if (choice === '打开设置') vscode.commands.executeCommand('workbench.action.openSettings', 'svtools.vivado.part');
+            });
+            return;
+        }
+
+        const files = await collectSynthFiles(cur.path);
+        const ws = vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders[0];
+        const base = ws ? ws.uri.fsPath : path.dirname(cur.path);
+        // 两档报告分目录存放，分别跑一次后可直接对比/不被覆盖
+        const outDir = path.join(base, '.svtools', 'vivado', 'ooc', flatten === 'full' ? 'opt' : 'hier');
+        const scriptPath = path.join(base, '.svtools', 'vivado', 'ooc_reports.tcl');
+        fs.mkdirSync(path.dirname(scriptPath), { recursive: true });
+        fs.writeFileSync(scriptPath, buildOocReportsScript({
+            files,
+            includeDirs: [...new Set(files.map(f => path.dirname(f)))],
+            top, part, outDir, flatten,
+            isSv: files.some(f => /\.(sv|svh)$/i.test(f))
+        }));
+        const modeLabel = flatten === 'full' ? '全优化（flatten full）' : '保持层次（flatten none）';
+        vscode.window.showInformationMessage(`OOC 综合中：${top}（${part}，${files.length} 个文件，${modeLabel}）— 可在 Vivado 输出通道查看进度`);
+        const r = await runScript(scriptPath, { quiet: true });
+        if (!r || r.code !== 0) {
+            out.show(true);
+            vscode.window.showErrorMessage('OOC 综合失败（详见 Vivado 输出通道）');
+            return;
+        }
+        await showOocReports(outDir, top, modeLabel);
+    }
+
+    /** 标签页 ▶ 按钮：选择仿真引擎。 */
+    async function simulatePick() {        const engine = await vscode.window.showQuickPick(
+            [
+                { label: '$(chip) Icarus Verilog', description: 'iverilog 编译 + vvp（无需 Vivado 工程）', value: 'iverilog' },
+                { label: '$(circuit-board) Vivado xsim', description: '行为仿真，当前文件置为 sim_1 顶层（需 Vivado 工程）', value: 'vivado' }
+            ],
+            { placeHolder: '选择仿真引擎' });
+        if (!engine) return;
+        if (engine.value === 'iverilog') return vscode.commands.executeCommand('svtools.iverilog.simulate');
+        return simulateWithVivado();
+    }
+
+    // ---------------- 器件选型（Vivado 向导式：系列 → 封装 → 速度 → 搜索选择） ----------------
+
+    let partsCache = null;   // null=未加载 []=空库
+    async function loadPartsCatalog() {
+        if (partsCache !== null) return partsCache;
+        const binDir = resolveBinDir();
+        if (!binDir) return (partsCache = []);
+        const ver = path.basename(path.dirname(binDir)) || 'unknown';   // 如 2022.1
+        const cacheDir = context.globalStoragePath || path.join(os.homedir(), '.svtools');
+        const dumpPath = path.join(cacheDir, 'vivado_parts_' + ver + '.txt');
+        try {
+            if (!fs.existsSync(dumpPath)) {
+                fs.mkdirSync(cacheDir, { recursive: true });
+                const scriptPath = path.join(cacheDir, 'export_parts.tcl');
+                fs.writeFileSync(scriptPath, buildExportPartsScript(dumpPath));
+                status('$(database) 导出 Vivado 器件库…');
+                try {
+                    await runScript(scriptPath, { quiet: true, timeoutMs: 120000 });
+                } finally { status(null); }
+            }
+            partsCache = parsePartsDump(fs.readFileSync(dumpPath, 'utf8'));
+        } catch (e) {
+            partsCache = [];
+        }
+        return partsCache;
+    }
+
+    /** 器件选型详情页（webview，Vivado 向导风格：筛选下拉 + 搜索联想 + 表格 + 详情）；返回 part 字符串（''=不设置），undefined=用户取消。 */
+    async function pickPart(defaultPart) {
+        const parts = await loadPartsCatalog();
+        if (!parts.length) {
+            // 导不出库（无 Vivado / 结构变化）：回退手输
+            const v = await vscode.window.showInputBox({
+                prompt: '器件型号（-part，如 xc7a35tcsg324-1，可留空后在 Vivado 中选择）',
+                value: defaultPart || ''
+            });
+            return v === undefined ? undefined : v.trim();
+        }
+        return new Promise((resolve) => {
+            const panel = vscode.window.createWebviewPanel(
+                'svtoolsPartPicker', '器件选型',
+                vscode.ViewColumn.Active,
+                { enableScripts: true, retainContextWhenHidden: true }
+            );
+            panel.webview.html = buildPartPickerHtml(parts, defaultPart);
+            let settled = false;
+            const finish = (v) => {
+                if (settled) return;
+                settled = true;
+                panel.dispose();
+                resolve(v);
+            };
+            panel.webview.onDidReceiveMessage(function (msg) {
+                if (!msg) return;
+                if (msg.type === 'pick') finish(String(msg.part || ''));
+                else if (msg.type === 'cancel') finish(undefined);
+            });
+            panel.onDidDispose(function () { finish(undefined); });
+        });
+    }
+
+    /** 运行 TCL 脚本。返回 Promise<{code, ms, issues, stdout}>。 */
+    async function runScript(scriptPath, opts = {}) {
+        if (running || incrementalOperation && !opts.editorAction || projectTree?.isBusy() && !opts.panel) {
+            vscode.window.showWarningMessage('Vivado 正在处理任务，请先等待或停止');
+            return { code: null, error: 'busy' };
+        }
+        const binDir = resolveBinDir();
+        if (!binDir) {
+            const pick = vscode.window.showErrorMessage(
+                '未找到 Vivado（vivado.bat）。请在设置 svtools.vivado.path 中指定安装目录', '打开设置');
+            if (pick && pick.then) pick.then(choice => {
+                if (choice) vscode.commands.executeCommand('workbench.action.openSettings', 'svtools.vivado.path');
+            });
+            return { code: null, error: 'not-found' };
+        }
+        const executable = path.join(binDir, process.platform === 'win32' ? 'vivado.bat' : 'vivado');
+        const args = buildBatchArgs(scriptPath, opts.tclArgs || [], opts.extraArgs || []);
+        const cwd = opts.cwd || path.dirname(scriptPath);
+        const timeoutMs = opts.timeoutMs === undefined
+            ? vscode.workspace.getConfiguration('svtools.vivado').get('timeoutMs', 0) : opts.timeoutMs;
+        if (!opts.quiet) out.show(true);
+        log('————————————————————————————————————');
+        log('[vivado] ' + executable + ' ' + args.join(' '));
+        log('[vivado] cwd: ' + cwd);
+        status('$(loading~spin) Vivado 运行中…', 'svtools.vivado.stop');
+        const job = tasks.start('vivado');
+        const task = { job, scriptPath };
+        running = task;
+        try {
+            await job.directory(path.join(path.dirname(scriptPath), 'tasks'), 'vivado');
+            const result = await runVivadoBatchTask({ task: job, executable, args, cwd, scriptPath, timeoutMs, onOutput: output.append });
+            output.flush();
+            log(`[vivado] ${result.ok ? '完成' : result.message}，耗时 ${(result.ms / 1000).toFixed(1)}s`);
+            if (result.logPath) log('完整日志：' + result.logPath);
+            await refreshProjectContext().catch(error => log('[vivado] 更新工程上下文失败：' + error.message));
+            if (!opts.quiet) await projectTree?.refresh(); return result;
+        } catch (error) {
+            log('[vivado] 任务失败：' + error.message);
+            return { code: null, status: job.signal.aborted ? 'cancelled' : 'failed', error: error.message };
+        } finally {
+            try { await job.finish(); } catch (error) { log('任务产物清理失败：' + error.message); }
+            if (running === task) { running = null; status(null); projectTree?.setRunning(null); }
+        }
+    }
+
+    function stopRun() {
+        if (incrementalOperation) { incrementalCancelled = true; incrementalPicker?.cancel(); }
+        if (!running) {
+            if (incrementalOperation) return true;
+            vscode.window.showInformationMessage('没有正在运行的 Vivado 任务');
+            return;
+        }
+        log('[vivado] 用户请求停止，终止进程树');
+        running.job.cancel('用户停止 Vivado');
+        return true;
+    }
+
+    // ---------------- 建工程向导（按工程结构模板，默认 src/sim/prj，可自定义） ----------------
+
+    function getStructure() {
+        const cfg = vscode.workspace.getConfiguration('svtools.vivado');
+        const st = cfg.get('structure', null);
+        if (!st || typeof st !== 'object') return JSON.parse(JSON.stringify(DEFAULT_STRUCTURE));
+        return {
+            sources: Array.isArray(st.sources) ? st.sources : DEFAULT_STRUCTURE.sources,
+            sim: Array.isArray(st.sim) ? st.sim : DEFAULT_STRUCTURE.sim,
+            constraints: Array.isArray(st.constraints) ? st.constraints : DEFAULT_STRUCTURE.constraints,
+            projectDir: String(st.projectDir || DEFAULT_STRUCTURE.projectDir)
+        };
+    }
+
+    function classifyByTbHeuristic(absFiles, rootDir) {
+        // 无结构模板可依据时的兜底：文件名 tb_ 前缀 / tb 目录归 sim
+        const out = { sources: [], sims: [], constraints: [], others: [] };
+        absFiles.forEach(f => {
+            const rel = path.relative(rootDir, f);
+            const base = path.basename(rel).toLowerCase().replace(/\.(sv|v)$/, '');
+            if (/^tb_|_tb$/.test(base) || /(^|[\\/])tb[\\/]/i.test(rel)) out.sims.push(f);
+            else out.sources.push(f);
+        });
+        return out;
+    }
+
+    async function createProject() {
+        const ws = vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders[0];
+        if (!ws) { vscode.window.showErrorMessage('请先打开一个工作区文件夹'); return; }
+        const cfg = vscode.workspace.getConfiguration('svtools.vivado');
+        const structure = getStructure();
+
+        // 1. 工程名
+        const name = await vscode.window.showInputBox({
+            prompt: 'Vivado 工程名', value: ws.name || 'prj',
+            validateInput: v => /^[A-Za-z_][A-Za-z0-9_]*$/.test(v.trim()) ? '' : '需为合法标识符（字母/数字/下划线，不以数字开头）'
+        });
+        if (name === undefined) return;
+
+        // 2. 工程目录（相对工作区，默认取结构模板的 projectDir，如 prj/）
+        const prjRel = await vscode.window.showInputBox({
+            prompt: '工程输出目录（相对工作区）',
+            value: structure.projectDir,
+            validateInput: v => v.trim() ? '' : '不能为空'
+        });
+        if (prjRel === undefined) return;
+
+        // 3. 扫描并按工程结构模板分类（src→sources、sim→sim_1、xdc→constrs_1）
+        const files = await scanVerilogFiles(vscode, ws.uri.fsPath);
+        const xdcFiles = await scanConstraintFiles(vscode, ws.uri.fsPath);
+        const all = files.concat(xdcFiles);
+        let groups = classifyFiles(all, ws.uri.fsPath, structure);
+        const tbFallback = classifyByTbHeuristic(groups.others.filter(f => /\.(sv|v)$/i.test(f)), ws.uri.fsPath);
+        groups = {
+            sources: groups.sources.concat(tbFallback.sources),
+            sims: groups.sims.concat(tbFallback.sims),
+            constraints: groups.constraints.concat(groups.others.filter(f => /\.xdc$/i.test(f))),
+            others: []
+        };
+        if (!files.length) {
+            // 工作区没有 Verilog 源码：询问是否按模板创建目录骨架（src/ sim/ prj/）
+            const skel = await vscode.window.showInformationMessage(
+                '工作区内没有 .v/.sv 源文件。按工程模板创建目录骨架（src/、sim/、' + prjRel.trim() + '/）？', '创建', '取消');
+            if (skel !== '创建') return;
+            for (const d of ['src', 'sim', prjRel.trim()]) {
+                await vscode.workspace.fs.createDirectory(vscode.Uri.file(path.join(ws.uri.fsPath, d)));
+            }
+            vscode.window.showInformationMessage('目录骨架已创建，把源码放入 src/、测试台放入 sim/ 后重新运行本命令');
+            return;
+        }
+
+        // 4. 源文件多选确认（结构模板分类 + 兜底启发，未分类默认不选）
+        const picks = await vscode.window.showQuickPick(
+            all.map(f => {
+                const rel = path.relative(ws.uri.fsPath, f);
+                const grp = groups.sources.includes(f) ? 'sources' :
+                    (groups.sims.includes(f) ? 'sim' :
+                        (groups.constraints.includes(f) ? 'constrs' : '未分类'));
+                return { label: rel, description: grp, picked: grp !== '未分类', abs: f, grp };
+            }),
+            { canPickMany: true, placeHolder: '选择加入工程的文件（按结构模板预分：sources/sim/constrs，未分类可手动勾选）' }
+        );
+        if (!picks) return;
+        const sources = picks.filter(p => p.grp !== 'sim' && p.grp !== 'constrs').map(p => p.abs);
+        const sims = picks.filter(p => p.grp === 'sim').map(p => p.abs);
+        const constraints = picks.filter(p => p.grp === 'constrs').map(p => p.abs);
+
+        // 5. 器件型号（Vivado 式逐级筛选：系列 → 封装 → 速度 → 搜索选择）
+        const part = await pickPart(cfg.get('part', '') || '');
+        if (part === undefined) return;
+
+        // 6. 顶层模块
+        const tops = await detectTopModules(vscode, sources);
+        const top = await vscode.window.showQuickPick(
+            [{ label: '(不设置)', value: '' }].concat(tops.map(t => ({ label: t, value: t }))),
+            { placeHolder: 'sources 顶层模块（' + (tops.length || 0) + ' 个候选，可跳过）' }
+        );
+        if (top === undefined) return;
+        const simTopGuess = sims.length ? await guessSimTop(vscode, sims) : '';
+
+        // 7. 生成脚本到 .svtools/vivado/（工具产物区，与仿真输出同约定）
+        const script = buildCreateProjectScript({
+            name: name.trim(),
+            dir: path.join(ws.uri.fsPath, prjRel.trim()),
+            part: part.trim(),
+            sources, sims, constraints,
+            top: top.value, simTop: simTopGuess
+        });
+        const scriptDir = path.join(ws.uri.fsPath, '.svtools', 'vivado');
+        await vscode.workspace.fs.createDirectory(vscode.Uri.file(scriptDir));
+        const scriptPath = path.join(scriptDir, 'create_prj.tcl');
+        // 直接写文件（openTextDocument 对不存在的文件会报错，不能先用）
+        await vscode.workspace.fs.writeFile(vscode.Uri.file(scriptPath), Buffer.from(script, 'utf8'));
+        vscode.window.showTextDocument(await vscode.workspace.openTextDocument(vscode.Uri.file(scriptPath)));
+        refreshProjectContext().catch(error => log('[vivado] 更新工程上下文失败：' + error.message));
+
+        // 8. 立即运行？
+        const run = await vscode.window.showInformationMessage(
+            '已生成 ' + path.relative(ws.uri.fsPath, scriptPath) + '，立即用 Vivado batch 创建工程？', '运行', '稍后手动运行');
+        if (run === '运行') return runScript(scriptPath);
+        return { scriptPath };
+    }
+
+    // ---------------- 命令接线 ----------------
+
+    context.subscriptions.push(out, { dispose() { tasks.cancelAll(); output.dispose(); statusItem?.dispose(); tasks.dispose().catch(error => console.error('Vivado 任务释放失败：', error)); } },
+        vscode.commands.registerCommand('svtools.vivado.runScript', async () => {
+            const editor = vscode.window.activeTextEditor;
+            if (editor && /\.tcl$/i.test(editor.document.fileName)) {
+                if (editor.document.isUntitled) { vscode.window.showErrorMessage('请先保存 TCL 脚本'); return; }
+                await editor.document.save();
+                return runScript(editor.document.fileName);
+            }
+            const ws = vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders[0];
+            if (!ws) { vscode.window.showErrorMessage('请先打开一个工作区'); return; }
+            const picks = await scanTclFiles(vscode, ws.uri.fsPath);
+            if (!picks.length) { vscode.window.showInformationMessage('工作区内没有 .tcl 脚本'); return; }
+            const sel = await vscode.window.showQuickPick(
+                picks.map(f => ({ label: path.relative(ws.uri.fsPath, f), abs: f })),
+                { placeHolder: '选择要运行的 TCL 脚本' });
+            if (!sel) return;
+            return runScript(sel.abs);
+        }),
+        vscode.commands.registerCommand('svtools.vivado.runActiveScript', async () => {
+            const editor = vscode.window.activeTextEditor;
+            if (!editor || !/\.tcl$/i.test(editor.document.fileName)) {
+                vscode.window.showErrorMessage('当前编辑器不是 .tcl 文件');
+                return;
+            }
+            if (editor.document.isUntitled) { vscode.window.showErrorMessage('请先保存 TCL 脚本'); return; }
+            await editor.document.save();
+            return runScript(editor.document.fileName);
+        }),
+        vscode.commands.registerCommand('svtools.vivado.stop', () => stopRun()),
+        vscode.commands.registerCommand('svtools.vivado.createProject', () => createProject()),
+        vscode.commands.registerCommand('svtools.vivado.addToFileset', () => addCurrentToProject()),
+        vscode.commands.registerCommand('svtools.vivado.removeFromFileset', () => removeCurrentFromProject()),
+        vscode.commands.registerCommand('svtools.vivado.simulate', () => simulateWithVivado()),
+        vscode.commands.registerCommand('svtools.vivado.reports', () => vivadoReports()),
+        vscode.commands.registerCommand('svtools.simulate.pick', () => simulatePick()),
+        vscode.workspace.onDidChangeWorkspaceFolders(() => refreshProjectContext().catch(error => log('[vivado] 更新工程上下文失败：' + error.message)))
+    );
+    refreshProjectContext().catch(error => log('[vivado] 更新工程上下文失败：' + error.message));
+
+    // 工程管理侧边栏：依赖层级文件树 + 右键管理 + 综合/实现/报告
+    // （层级用 iverilog 的工作区设计单元索引；写操作复用 runScript）
+    try {
+        projectTree = activateProjectTree(context, {
+            vscode, out, log, findProjectXpr: refreshProjectContext, runScript, selectProject, stopRun,
+            isRunning: () => !!running || !!incrementalOperation
+        });
+    } catch (err) {
+        log('[vivado] 工程树初始化失败: ' + (err && err.message));
+    }
+
+    return {
+        runScript, stopRun, createProject, simulateWithVivado,
+        refreshProjectContext,
+        resolveBinDir, projectTree, projectSelection
+    };
+}
+
+module.exports = {
+    ...require('./toolchain'),
+    ...require('./tclgen'),
+    ...require('./parts'),
+    ...require('./structure'),
+    ...require('./scan'),
+    activateVivado
+};

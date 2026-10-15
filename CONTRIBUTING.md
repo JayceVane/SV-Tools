@@ -29,13 +29,14 @@ Enhancement suggestions are welcome! Please provide:
 1. Fork and clone the repository
 2. Install dependencies:
    ```bash
-   npm install
+   npm ci
+   npm ci --prefix src/native
    ```
 3. Build the Rust native module (needed for formatter changes, requires `cargo`):
    ```bash
    npm run build:native
    ```
-4. Run the golden formatter tests before opening a PR:
+4. Run the formatter and integration contract tests before opening a PR:
    ```bash
    npm test
    ```
@@ -45,6 +46,18 @@ Formatter behaviour is defined by `docs/FORMAT_SPEC.md`; when implementation and
 disagree, fix the implementation. If the spec itself is wrong, change the spec together
 with a golden case in `example/`, then the code.
 
+## Source and build layout
+
+Runtime JavaScript lives in `src/editor/`, `src/toolchains/`, `src/waveform/`, and
+`src/vivado/`; `src/extension.js` assembles providers and commands. The root
+`extension.js` preserves the VS Code entry point. Rust lives in `src/native/`.
+`npm run build:native` builds napi and the CLI into `bin/`; do not commit generated
+`.node`, executable files, or `src/native/target/`.
+
+The native crate can also be checked with
+`cargo test --manifest-path src/native/Cargo.toml`. The JavaScript contracts run as
+part of `npm test`, including process timeout/termination and VCD parsing.
+
 ## Code Style
 
 ### JavaScript
@@ -53,10 +66,10 @@ with a golden case in `example/`, then the code.
 - Add JSDoc comments for functions
 
 ### Rust
-- Use 4 spaces for indentation and follow the surrounding style (the tree is not
-  `cargo fmt`-normalised, so don't reformat files you aren't changing)
-- Every formatting change needs a golden case: `example/<name>.sv` plus its expected
-  output in `example/target/<name>.sv`
+- Use 4 spaces for indentation and run `cargo fmt --manifest-path src/native/Cargo.toml`.
+- Every formatting change needs a golden case (`example/<name>.sv` and its expected
+  output in `example/target/<name>.sv`) or a minimal full-pipeline contract in
+  `test/formatter_contract_test.js` that checks preserved source and idempotency.
 - Idempotency is a hard requirement — formatting the golden output again must be
   byte-identical (`npm test` asserts this)
 

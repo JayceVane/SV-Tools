@@ -1,3 +1,13 @@
+# 4.0 GitHub 预览版发布
+
+`4.0.0-preview.1` 仅通过 GitHub Release 发布。先在功能分支同步 master，运行完整回归并打包，随后创建 PR；合入后将同版本 tag 指向合入提交。原生模块、CLI 和 VSIX 均不写入 Git 历史。
+
+`.github/workflows/release.yml` 校验 tag 与 package.json，构建 Windows x64 原生模块及 VSIX，执行 Node/Rust 回归并上传 SHA256 清单。含 `-` 的 tag 使用 GitHub prerelease，不改变现有稳定版的 Latest 标记。若存在 `docs/releases/<tag>.md`，使用该文件作为发布说明。
+
+下一版本的开发代码不能补入已发布 tag。3.5.0 历史和稳定版附件继续保留。下文 Marketplace 操作为独立渠道的旧指南，此次不执行。
+
+---
+
 # VSCode 插件发布指南
 
 本文档说明如何将 SystemVerilog Tools（扩展 ID `svtools`）发布到 VSCode 应用市场。
@@ -75,11 +85,13 @@ vsce --version
 
 ```bash
 npm install          # 只装 vsce 等打包依赖
-npm run build:native # 改了 Rust 层时需要重新构建原生模块
+npm run build:native # 构建当前平台 .node 与 CLI 到 bin/
 npm run package      # vsce package，打包前自动跑 npm test
 ```
 
-成功后生成 `svtools-<version>.vsix`（golden 测试未通过时打包会中止）。
+VSIX 运行时包含 `src/` JavaScript 与 `bin/*.node`，`.vscodeignore` 排除 Rust 源码和中间产物；Release 单独附加 `bin/svtools.exe`。
+
+成功后生成 `svtools-<version>.vsix`（完整测试未通过时打包会中止）。
 
 ---
 
@@ -102,7 +114,7 @@ npm run package      # vsce package，打包前自动跑 npm test
 ### 方法一：命令行发布（推荐）
 
 ```bash
-# 打包前会自动执行 npm test（golden 用例 + 幂等断言），失败即中止
+# 打包前会自动执行 npm test（golden、格式化和工具链合同），失败即中止
 vsce publish
 
 # 或指定版本递增（当前版本见 package.json）
@@ -160,7 +172,7 @@ ovsx publish
 
 ### 修改代码后更新
 
-1. 修改 `package.json` 中的版本号（并同步 `src-rust/Cargo.toml` 与 CHANGELOG.md）：
+1. 修改 `package.json` 中的版本号（并同步 `src/native/Cargo.toml`、`src/native/package.json` 与 CHANGELOG.md）：
    ```json
    "version": "2.0.1"  // 根据修改类型递增
    ```

@@ -1,86 +1,48 @@
-# Rust build artifacts
-src-rust/target/**
-src-rust/**/*.rs
-src-rust/Cargo.toml
-src-rust/Cargo.lock
-src-rust/build.rs
-src-rust/src/**
-src-rust/*.js
-src-rust/*.d.ts
-src-rust/node_modules/.package-lock.json
-src-rust/node_modules/@napi-rs/**
-src-rust/node_modules/.bin/**
-src-rust/.gitignore
+# 原生源代码、依赖和中间构建产物不进入 VSIX；运行时只加载 bin/*.node
+src/native/**
+bin/**
+!bin/*.node
 
-# Rust test executables
-src-rust/*.exe
-src-rust/*.pdb
-src-rust/*.txt
-
-# Duplicate node file (napi build creates both)
-src-rust/svtools.node
-src-rust/svtools.win32-x64-msvc.node
-
-# src-rust package.json (not needed at runtime)
-src-rust/package.json
-
-# Python backend (not needed for native version)
-processManager.js
-
-# Test files
-src-rust/test*.js
-src-rust/test*.rs
-src-rust/test*.sv
-src-rust/debug*.js
-src-rust/compare*.js
+# 开发与测试资源
+example/**
+test/**
+.github/**
+scripts/**
+docs/**
+convert_svg.py
+verify_keywords.py
 test*.js
 test*.py
 test*.sv
 test*.txt
-test/
 example.sv
-# 开发期资源：golden 用例、CI、构建脚本不进包
-example/**
-.github/**
-scripts/**
-convert_svg.py
-verify_keywords.py
 
-# Source control
+# 编辑器、依赖和版本控制
 .git/**
 .gitignore
-
-# IDE
 .idea/**
 .vscode/**
+node_modules/**
 *.swp
 *.swo
+package-lock.json
 
-# Node
-node_modules/**
-
-# Python
+# 本地资源
 python/**
 *.pyc
 __pycache__/**
-
-# Misc
 .arts/**
-*.md
-nul
-package-lock.json
-src-rust/package-lock.json
-
-# Private test project
-test_project/**
-
-# Bug notes (dev only)
-docs/**
-
-# AI tool state
 .opencode/**
 .sisyphus/**
 .codeartsdoer/**
-
-# Old vsix packages
+test_project/**
+.svtools/**
+ENVIRONMENT.md
+CONTEXT.md
+ARCHITECTURE.md
+INSTALL.md
+PUBLISH.md
+CONTRIBUTING.md
+SECURITY.md
+nul
 *.vsix

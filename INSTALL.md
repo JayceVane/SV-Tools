@@ -1,92 +1,78 @@
-# 开发环境搭建与本地安装
+# 开发环境与本地安装
 
-面向使用者的一条命令是：在 VSCode 扩展市场搜索 **SystemVerilog Tools** 安装即可（详见 [README.md](README.md)）。
-本文给需要跑源码、改格式化器或自己打包的人。
+本说明对应 4.0 开发分支。3.x 在原工程目录继续维护；4.0 使用独立 worktree、依赖与 Rust 构建缓存。
+
+## 技术方向
+
+扩展使用 CommonJS 连接 VS Code 与 Rust napi 核心。源码统一放在 src/，可发布的原生模块和 CLI 统一输出到 bin/。工具链各自构造参数和解析诊断，共享进程生命周期管理。
+
+## 实现愿景
+
+保留 3.x 的格式化、代码智能、代码生成、Icarus/Vivado 工具链和 VCD 界面；通过 golden、词法保真、配置和工具运行合同验证重构，在 VS Code 中按原快捷键和命令使用。
 
 ## 前置条件
 
-- Node.js 18+（扩展宿主与打包脚本）
-- VSCode 1.74 或更高
-- 改 Rust 层时需要 Rust 工具链（`cargo`）；只改 JS 层不需要
-- v3.0+ 不再需要 Python；仓库里的格式化/代码生成逻辑全部在 `src-rust/`
+- Node.js 18+、VS Code 1.74+
+- 修改或构建 Rust 核心需要 cargo
+- Icarus 和 Vivado 为可选的外部工具，沿用 svtools.iverilog.* / svtools.vivado.* 设置
 
 ## 项目结构
 
-```
+```text
 02_svtools/
-├── extension.js                    # 扩展入口：命令注册、DocumentFormattingProvider、Provider 装配
-├── iverilog.js                     # Icarus Verilog lint / 仿真 / 波形联动
-├── vcd.js                          # 内置 VCD 波形查看器（CustomTextEditorProvider + Canvas）
-├── vivado/                         # Vivado TCL 执行、器件库、工程创建向导
-├── syntaxes/systemverilog.tmLanguage.json
-├── templates/header_template.txt   # 文件头模板
-├── svtools.win32-x64-msvc.node     # Rust 原生模块（运行时加载；本地产物，不入库）
-├── src-rust/                       # Rust 源码：格式化核心 + napi 绑定 + CLI
-│   ├── src/{beautifier,preprocess,blank_rules,align,codegen,analyzer}/
-│   └── package.json                # napi 构建脚本
-├── example/                        # golden 输入
-├── example/target/                 # golden 期望输出
-├── docs/FORMAT_SPEC.md             # 格式化行为唯一权威规范
-└── test/golden_test.js             # golden 比对 + 幂等断言
+├── extension.js                 # VS Code 公开入口
+├── src/
+│   ├── extension.js             # Provider、命令与工具链装配
+│   ├── configuration.js         # VS Code → napi 配置适配
+│   ├── native-loader.js         # bin/ 平台产物加载
+│   ├── editor/                  # 格式化适配、命令、语言 Provider
+│   ├── workspace/               # 共享设计单元索引
+│   ├── toolchains/              # Icarus、xvlog 与共享进程执行器
+│   ├── waveform/                # VCD parser、HTML view 与 VS Code 集成
+│   ├── vivado/                  # TCL、工程树、器件与报告
+│   └── native/                  # Rust 源码、napi 绑定与 CLI
+├── bin/                         # svtools.<platform>.node 和 svtools(.exe)
+├── scripts/                     # 构建、JS 语法检查
+├── example/                     # golden 输入与 target 期望输出
+├── test/                        # 格式化、工具进程和波形合同
+└── docs/FORMAT_SPEC.md           # 格式化行为规范
 ```
 
-## 本地运行（F5）
-
-原生模块 `svtools.win32-x64-msvc.node` 不再随仓库提交（23MB 的二进制每次发版都会留在历史里），
-首次 clone 必须先自备：
+## 构建与验证
 
 ```bash
 npm install
-npm run build:native   # napi release 构建，并把 .node 复制到仓库根目录
-npm test               # golden 用例全部通过再进宿主
+npm run build:native
+npm test
+cargo test --manifest-path src/native/Cargo.toml
 ```
 
-不想装 Rust 工具链的话，从 GitHub Releases 下载对应 tag 的 `.node` 放到仓库根目录即可，
-效果与 `build:native` 相同。
+已有依赖时直接构建即可。构建脚本先执行 napi release 构建，再构建 CLI，将当前平台产物复制到 bin/；Rust 中间产物在 src/native/target/。无需 Rust 时可从对应版本 Releases 下载平台 .node 到 bin/；加载器会显示实际缺失或 ABI 错误和路径。
 
-然后按 `F5` 启动扩展开发宿主，在宿主窗口打开任意 `.sv`/`.v` 文件：
+npm test 依次运行 JS 语法检查、golden 输出与幂等断言、完整格式化合同、工具链运行与 VCD 解析测试。
 
-- `Shift+Alt+F` 格式化文档
-- `Ctrl+Shift+C` 生成模块例化、`Ctrl+Shift+T` 生成 testbench、`Ctrl+Shift+X` 对齐选中文本
+## VS Code 本地运行
 
-## 格式化改动的验证方式
+按 F5 启动扩展开发宿主。在宿主打开 .sv/.v 文件，Shift+Alt+F 格式化，Ctrl+Shift+C 例化、Ctrl+Shift+T 生成测试台、Ctrl+Shift+X 对齐选区。开发宿主断点使用 src/**/*.js。
 
-`docs/FORMAT_SPEC.md` 是格式化行为的唯一定义，实现与它冲突时先修实现；规范本身有问题则先改规范、附 golden 用例，再改实现。
-
-`npm test` 对 `example/*.sv` 逐个断言两件事：输出与 `example/target/` 一致；对 target 再格式化一次仍是 target（幂等）。
-
-新增用例：把最小复现放进 `example/`，用 CLI 生成后再人工校对，最后固化到 `example/target/`：
+新增格式化样例时，把最小输入放在 example/，生成后人工检查期望输出，再运行完整测试：
 
 ```bash
-src-rust/target/release/svtools.exe example/ex15_new_case.sv > example/target/ex15_new_case.sv
+bin/svtools.exe example/new_case.sv > example/target/new_case.sv
 npm test
 ```
 
-## 打包与发布
+## 打包
 
 ```bash
-npm run package        # 生成 svtools-<version>.vsix（打包前自动跑 npm test）
+npm run package
 ```
 
-安装产物验证：宿主窗口里 `Extensions → … → Install from VSIX`，或
-`code --install-extension svtools-<version>.vsix`。
+VSIX 包含根入口、src/ 的 JavaScript、语法/模板资源和 bin/*.node；Rust 源代码、中间构建产物、CLI、测试与开发脚本不会进入扩展包。安装产物后验证编辑器命令、工具链状态栏、Vivado 活动栏与波形查看器。发布流程见 PUBLISH.md。
 
-发布流程见 [PUBLISH.md](PUBLISH.md)。
+## 常见问题
 
-## 排查
-
-**"svtools native module not loaded" / Cannot find module**
-根目录缺少与当前平台匹配的 `.node`。Windows x64 需要 `svtools.win32-x64-msvc.node`，
-执行 `npm run build:native` 生成；`.vsix` 里已含该文件，说明安装本身没问题。
-
-**格式化没有生效**
-确认文件语言模式是 Verilog / SystemVerilog，再看输出面板的报错。
-
-**仿真/lint 秒退且无 stderr（exit 0xC0000135）**
-装的是 Cygwin 构建的 Icarus Verilog 且 `cygwin1.dll` 不在 PATH 上。用
-`svtools.iverilog.cygwinPath` 指向 cygwin 的 bin 目录（例如 iverilog 装在非 Cygwin 根时，
-指向其兄弟目录 `cygwin64/bin`）。
-
-**波形没自动打开**
-仿真需产出 `.vcd`；`svtools.iverilog.autoOpenWaveform` 默认开启，设置了
-`svtools.iverilog.waveViewer` 时改走外部查看器（`.fst` 等格式也走外部）。
+- 原生模块加载失败：检查报错中的 bin/ 文件名，执行 npm run build:native 后重新加载窗口。
+- 格式化没有生效：确认语言模式为 Verilog/SystemVerilog，再检查扩展宿主日志。
+- Icarus 秒退且无 stderr：Cygwin 构建需要 cygwin1.dll，用 svtools.iverilog.cygwinPath 指向其 bin 目录。
+- 波形未打开：仿真需生成 .vcd，并启用 svtools.iverilog.autoOpenWaveform；设置 waveViewer 时走外部查看器。

@@ -96,5 +96,14 @@
   "cmd.vivado_tree_reportTiming.title": "Timing Report (WNS/TNS)",
   "cmd.vivado_tree_bitstream.title": "Generate Bitstream",
   "cmd.vivado_tree_quickElaborate.title": "Elaborate Sim Top (xelab)",
-  "cmd.vivado_tree_expandAll.title": "Expand All"
+  "cmd.vivado_tree_expandAll.title": "Expand All",
+  "cmd.vivado_tree_selectProject.title": "Vivado: Select project",
+  "cmd.vivado_tree_stop.title": "Vivado: Stop panel task",
+  "cfg.completion_uvmVersion.desc": "UVM completion API profile: UVM 1.2, IEEE 1800.2-2020 (Accellera 2020.3.2), or disabled. Does not change compiler settings.",
+  "cfg.completion_includePaths.desc": "Additional HDL include/library directories for completion indexing. Relative paths resolve from each workspace folder; supports ${workspaceFolder}.",
+  "cfg.completion_maxFiles.desc": "Maximum HDL files indexed for completion. Exceeding the budget returns an incomplete completion list.",
+  "cfg.completion_maxFileSizeKB.desc": "Maximum size of a closed HDL source indexed for completion, in KiB. Open documents use their current unsaved buffer.",
+  "cfg.completion_maxTotalSourceMB.desc": "Total UTF-8 source budget for closed-document completion indexing, in MiB. This is a source budget, not a heap memory limit.",
+  "cfg.completion_standard.desc": "Completion keyword standard. Auto uses the document language and active `begin_keywords directive. This setting does not change compiler options.",
+  "cfg.completion_maxItems.desc": "Maximum items per completion request. Broad requests are marked incomplete; keep typing to narrow candidates without losing indexed declarations."
 }

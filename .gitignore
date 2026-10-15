@@ -1,6 +1,8 @@
 # Node modules
 node_modules/
 package-lock.json
+!/package-lock.json
+!/src/native/package-lock.json
 
 # VSCode
 .vscode-test/
@@ -33,6 +35,16 @@ test-inst.js
 test/*
 !test/golden_test.js
 !test/render-vcd-badge.js
+!test/*_test.js
+!test/vscode_vivado_host.js
+!test/vscode_completion_host.js
+!test/helpers/
+test/helpers/*
+!test/helpers/waveform-client-harness.js
+!test/fixtures/
+test/fixtures/*
+!test/fixtures/memory_dump.sv
+!test/fixtures/memory_dump.vcd
 
 # OS
 .DS_Store
@@ -52,3 +64,6 @@ ENVIRONMENT.md
 
 # Extension simulation artifacts
 .svtools/
+
+# 编译产物集中在 bin；源代码留在 src
+bin/*
