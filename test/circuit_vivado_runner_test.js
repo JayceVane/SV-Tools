@@ -55,3 +55,20 @@ test('Vivado runner cancels before launching and validates XPR/timeout', async t
     f.task.throwIfCancelled = () => { throw new Error('cancelled'); };
     await assert.rejects(runVivadoCircuit(f.options), /cancelled/); assert.equal(f.calls.filter(call => typeof call === 'object').length, 0);
 });
+
+test('Vivado runner forwards file-local top and source without rewriting the project', async t => {
+    const f = await fixture(t), sourcePath = path.join(f.root, 'current.sv');
+    const source = 'module child(input a, output b); assign b=a; endmodule\n'; await fs.writeFile(sourcePath, source);
+    await runVivadoCircuit({ ...f.options, top: 'child', sourcePath });
+    const script = await fs.readFile(f.calls[1].args[5], 'utf8');
+    assert.ok(script.includes(' child ')); assert.ok(script.includes(sourcePath.replace(/\\/g, '/')));
+    assert.equal(await fs.readFile(f.projectPath, 'utf8'), '<Project/>'); assert.equal(await fs.readFile(sourcePath, 'utf8'), source);
+});
+
+test('Vivado runner rejects invalid or absent source/top before starting a process', async t => {
+    const f = await fixture(t), sourcePath = path.join(f.root, 'source.txt'); await fs.writeFile(sourcePath, 'x');
+    for (const options of [{ top: '' }, { top: 'child\nexit' }, { sourcePath }, { top: 'child', sourcePath }, { top: 'child', sourcePath: path.join(f.root, 'missing.sv') }]) {
+        await assert.rejects(runVivadoCircuit({ ...f.options, ...options }));
+    }
+    assert.equal(f.calls.filter(call => typeof call === 'object').length, 0);
+});

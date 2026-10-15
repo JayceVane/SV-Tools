@@ -66,6 +66,34 @@ test('Yosys ERROR、非零退出及日志失败不能伪装成功', async t => {
     }
 });
 
+test('Yosys 不存在时提示配置工具路径，保留完整日志位置', async t => {
+    const { root, task } = await fixture(t);
+    task.run = async () => ({ code: -1, errorMessage: 'spawn yosys ENOENT', logPath: 'missing-yosys.log' });
+    await assert.rejects(runYosysCircuit({ task, executable: 'yosys', sources: ['top.sv'], top: 'top',
+        outputBase: root, sourceRoot: root }), error => {
+        assert.equal(error.code, 'YOSYS_NOT_FOUND');
+        assert.match(error.message, /svtools\.circuit\.yosysPath/);
+        assert.match(error.message, /missing-yosys\.log/);
+        return true;
+    });
+});
+
+test('YoWASP cmd 启动器的空格 include 使用真实目录副本', async t => {
+    const { root, task } = await fixture(t);
+    const include = path.join(root, 'include space');
+    await fs.mkdir(include);
+    await fs.writeFile(path.join(include, 'defs.vh'), '`define WIDTH 8');
+    task.run = async () => {
+        await fs.writeFile(path.join(await task.directory(root, 'yosys'), 'circuit.json'), '{}');
+        return { code: 0 };
+    };
+    const result = await runYosysCircuit({ task, executable: 'yowasp-yosys.cmd', sources: ['top.sv'], top: 'top',
+        outputBase: root, sourceRoot: root, includeDirs: [include] });
+    const alias = result.sourceDirectories[0].from;
+    assert.equal((await fs.lstat(alias)).isSymbolicLink(), false);
+    assert.equal(await fs.readFile(path.join(alias, 'defs.vh'), 'utf8'), '`define WIDTH 8');
+});
+
 test('未保存 RTL 使用隔离快照并保留源文件与源序', async t => {
     const { root, task } = await fixture(t);
     const original = path.join(root, 'current.sv');

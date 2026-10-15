@@ -1,5 +1,11 @@
 # 4.1 开发交接
 
+2026-10-16 alpha2：已修复 RTL 右键 URI 被当作 JSON、缺少 Yosys 的默认体验；新增固定 @yowasp/yosys 0.68.1207 的离线 WASM 后端。默认 `yosysPath=bundled`，可覆盖为外部路径；打包包含 WASM/share/许可，不包含 Python 或 npm runtime。编辑器标题栏 `fromVivadoFile` 选择当前文件模块 top，工程面板 `fromVivado` 保留工程 top。当前文件 Vivado 要求已保存的工程综合源，只用 `synth_design -rtl -top`，不保存或更改 XPR。
+
+alpha2 实测：电路96/96（Node20/24）、既有Node511项510通过1可选跳过、Golden38/38、Rust121/121；内置工具在Node16/20/24执行真实RTL流程。包内419个文件逐字节核对；解包后使用VS Code自身Node模式完成新网表→Worker→ELK与原生ABI，在当前用户D盘工作区以公开夹具验证源位置。真实Vivado的工程top=top、文件top=leaf结构不同，外部文件明确拒绝且工程文件SHA256均不变。交付见 `docs/V4_1_ALPHA2.md`。
+
+真正UI宿主仍被VS Code安装器的vscode-updating互斥锁阻挡；alpha2 SDK尝试日志 `bin/circuit-alpha2-host.log`，不能将Electron-as-Node编译测试当作完整UI宿主通过。用户工程曾临时配置现有YoWASP启动器用于诊断；已仅移除本轮添加的覆盖设置，使安装alpha2后用默认内置引擎，其他原设置保留。未终止安装器、未绕过更新锁。PR #11 继续保留Draft；master仍为已发布4.0 preview。
+
 2026-10-15 当前状态：4.0.0-preview.1 已经由 PR #10 合入 master（4cc1c737c74e442c76fc618fd90bf6b0e42fcd04），GitHub 预发布已公开，稳定 Latest 仍为 3.5。原目录 `D:\Workspace\FPGA\02_svtools` 保持此发布基线；已有私有 Rust 调试缓存保留。发布地址：https://github.com/JayceVane/SV-Tools/releases/tag/v4.0.0-preview.1 。
 
 4.1.0-alpha1 位于独立 worktree `C:\Users\JayceVane\.codex\worktrees\svtools-circuit\02_svtools`，分支 `codex/feat-circuit-viewer`。已完成 Yosys JSON → netlistsvg 真实数据验证、独立模型、ELK.js + SVG 交互及 Vivado 同模型适配。Vivado 2022.1.2 真实只读工程验证通过；其首版视图为平坦 RTL 详细化。Yosys builtin/slang 两条实际流程均通过。操作与限制见 `docs/CIRCUIT.md`，交付记录见 `docs/V4_1_ALPHA1.md`。

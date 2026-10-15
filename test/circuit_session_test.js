@@ -93,3 +93,14 @@ test('并发旧文件加载不能覆盖新会话的实际模型', async t => {
     const graph = await session.request('layout', { moduleId: descriptor.top });
     assert.equal(graph.name, 'new');
 });
+
+test('误选带文件头注释的 RTL 时提示正确入口，不直接暴露 JSON 解析异常', async t => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'svtools-circuit-wrong-file-'));
+    const session = new CircuitSession();
+    t.after(async () => { session.dispose(); await fs.rm(root, { recursive: true, force: true }); });
+    const filePath = path.join(root, 'top.sv');
+    await fs.writeFile(filePath, '// ------- header -------\nmodule top; endmodule');
+    await assert.rejects(session.request('load', { filePath }), /RTL.*查看 RTL 电路/);
+    await fs.writeFile(filePath, '{"modules":');
+    await assert.rejects(session.request('load', { filePath }), /有效.*JSON/);
+});

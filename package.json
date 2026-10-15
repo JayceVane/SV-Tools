@@ -2,7 +2,7 @@
   "name": "svtools",
   "displayName": "SystemVerilog Tools",
   "description": "Verilog/SystemVerilog formatter, module instantiation, testbench generation, and productivity tools (Rust native backend)",
-  "version": "4.1.0-alpha1",
+  "version": "4.1.0-alpha2",
   "publisher": "JayceVane",
   "author": {
     "name": "JayceVane",
@@ -379,6 +379,12 @@
         "title": "%cmd.circuit.stop.title%",
         "category": "SystemVerilog Tools",
         "icon": "$(circuit-board)"
+      },
+      {
+        "command": "svtools.circuit.fromVivadoFile",
+        "title": "%cmd.circuit.fromVivadoFile.title%",
+        "category": "SV Tools",
+        "icon": "$(circuit-board)"
       }
     ],
     "viewsContainers": {
@@ -492,6 +498,11 @@
           "alt": "svtools.vivado.runScript",
           "group": "navigation@0",
           "when": "resourceExtname == .tcl"
+        },
+        {
+          "command": "svtools.circuit.fromVivadoFile",
+          "when": "resourceScheme == file && (editorLangId == verilog || editorLangId == systemverilog || editorLangId == system-verilog)",
+          "group": "navigation@4"
         }
       ],
       "view/title": [
@@ -606,9 +617,19 @@
           "command": "svtools.vivado.tree.addFile",
           "group": "0_manage@0",
           "when": "view == svtools.vivado.projectTree && viewItem == setRoot"
+        },
+        {
+          "command": "svtools.circuit.fromVivado",
+          "when": "view == svtools.vivado.projectTree && viewItem == topModule && !svtools.vivado.busy",
+          "group": "2_run@0"
         }
       ],
       "editor/context": [
+        {
+          "command": "svtools.circuit.open",
+          "when": "resourceScheme == file && resourceExtname =~ /\\.json$/i",
+          "group": "9_svtools"
+        },
         {
           "command": "svtools.formatDocument",
           "when": "editorLangId == verilog || editorLangId == systemverilog || editorLangId == system-verilog",
@@ -664,10 +685,7 @@
         },
         {
           "command": "svtools.circuit.fromSource",
-          "group": "5_circuit"
-        },
-        {
-          "command": "svtools.circuit.open",
+          "when": "resourceScheme == file && resourceExtname =~ /\\.(sv|v)$/i",
           "group": "5_circuit"
         },
         {
@@ -1161,7 +1179,7 @@
         },
         "svtools.circuit.yosysPath": {
           "type": "string",
-          "default": "yosys",
+          "default": "bundled",
           "description": "%cfg.circuit.yosysPath%"
         },
         "svtools.circuit.frontend": {
@@ -1215,7 +1233,9 @@
   "devDependencies": {
     "@types/vscode": "^1.74.0",
     "@vscode/vsce": "^3.9.1",
+    "@yowasp/yosys": "0.68.1207",
     "elkjs": "0.12.0",
-    "netlistsvg": "1.0.2"
+    "netlistsvg": "1.0.2",
+    "tar-stream": "3.1.8"
   }
 }

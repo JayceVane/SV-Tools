@@ -22,7 +22,8 @@ function remapSources(model, sourceMap = {}, sourceDirectories = []) {
                 for (const directory of sourceDirectories) {
                     const relative = path.relative(directory.from, item.source.path);
                     if (relative !== '..' && !relative.startsWith('..' + path.sep) && !path.isAbsolute(relative)) {
-                        item.source = { ...item.source, path: path.join(directory.to, relative) };
+                        const mapped = path.join(directory.to, relative);
+                        item.source = { ...item.source, path: replacements.get(path.resolve(mapped)) || mapped };
                         break;
                     }
                 }
@@ -45,7 +46,15 @@ async function load({ filePath, format, stage, top, title, sourceRoot, sourceMap
     }
     const bytes = Buffer.concat(chunks, length);
     if (version !== loadSequence) throw new Error('电路加载已被取代');
-    const raw = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes).replace(/^\uFEFF/, ''));
+    const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes).replace(/^\uFEFF/, '');
+    let raw;
+    try { raw = JSON.parse(text); }
+    catch (error) {
+        if (!(error instanceof SyntaxError)) throw error;
+        const hint = /\.(?:sv|v)$/i.test(filePath) ? '这是 RTL 源文件，请使用“查看 RTL 电路（Yosys）”。'
+            : '请选择 Yosys 或本插件 Vivado 导出的 JSON 网表。';
+        throw new Error(path.basename(filePath) + ' 不是有效的电路 JSON。' + hint);
+    }
     format ||= raw?.engine === 'vivado' ? 'vivado' : 'yosys';
     const adapters = { yosys: () => require('./adapters/yosys').fromYosys,
         vivado: () => require('./adapters/vivado').fromVivado };

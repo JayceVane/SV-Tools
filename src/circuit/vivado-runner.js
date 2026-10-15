@@ -7,24 +7,30 @@ const DEFAULT_TIMEOUT_MS = 120000;
 const MAX_EXPORT_BYTES = 64 * 1024 * 1024;
 
 /**
- * 在独立任务目录执行 Vivado RTL 详细化，并返回完整、非空的真实对象 JSON。
- * @param {{task:object,executable:string,projectPath:string,outputBase:string,timeoutMs?:number,onOutput?:Function}} options
+ * 在独立任务目录执行 Vivado RTL 详细化；sourcePath 必须是工程综合源，top 只覆盖本次运行。
+ * @param {{task:object,executable:string,projectPath:string,outputBase:string,top?:string,sourcePath?:string,timeoutMs?:number,onOutput?:Function}} options
  * @returns {Promise<{filePath:string,sourceRoot:string}>} 调用者在 task.finish() 前读取产物。
  * @throws {Error} 任务取消、Vivado 失败、未生成文件或产物超出安全预算。
  */
-async function runVivadoCircuit({ task, executable, projectPath, outputBase, timeoutMs = DEFAULT_TIMEOUT_MS, onOutput }) {
+async function runVivadoCircuit({ task, executable, projectPath, outputBase, top, sourcePath, timeoutMs = DEFAULT_TIMEOUT_MS, onOutput }) {
     if (!task || typeof executable !== 'string' || !executable || typeof projectPath !== 'string' || !projectPath || typeof outputBase !== 'string' || !outputBase) {
         throw new TypeError('Vivado 电路导出需要任务、可执行文件、XPR 和产物目录');
     }
     if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) throw new TypeError('Vivado 电路导出超时必须为正数');
+    if (top !== undefined && (typeof top !== 'string' || !top || /[\r\n\0]/.test(top))) throw new TypeError('Vivado 电路顶层无效');
+    if (sourcePath !== undefined && (typeof sourcePath !== 'string' || !sourcePath || /[\r\n\0]/.test(sourcePath) || !top)) {
+        throw new TypeError('Vivado 当前源文件需要有效路径及显式顶层');
+    }
     await task.waitForPrevious();
     const project = path.resolve(projectPath);
     const projectStat = await fs.stat(project);
     if (!projectStat.isFile() || !/\.xpr$/i.test(project)) throw new Error('Vivado 工程必须是 XPR 文件');
+    const source = sourcePath === undefined ? undefined : path.resolve(sourcePath);
+    if (source && (!/\.(?:sv|v)$/i.test(source) || !(await fs.stat(source)).isFile())) throw new Error('Vivado 电路源文件必须是 Verilog/SystemVerilog 普通文件');
     const directory = await task.directory(outputBase, 'circuit-vivado');
     const filePath = path.join(directory, 'circuit.vivado.json');
     const scriptPath = path.join(directory, 'export-circuit.tcl');
-    const script = buildVivadoExportScript({ projectPath: project, outputPath: filePath, exporterPath: path.join(__dirname, 'vivado-export.tcl') });
+    const script = buildVivadoExportScript({ projectPath: project, outputPath: filePath, exporterPath: path.join(__dirname, 'vivado-export.tcl'), top, sourcePath: source });
     await fs.writeFile(scriptPath, script, 'utf8');
     task.throwIfCancelled();
     const result = await runVivadoBatchTask({ task, executable,

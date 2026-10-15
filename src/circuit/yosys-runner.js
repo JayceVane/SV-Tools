@@ -72,7 +72,7 @@ async function includeAliases({ task, executable, sourceRoot, includeDirs = [] }
         if (!/^[A-Za-z0-9_./:\-]+$/.test(relative)) {
             const aliases = await task.directory(path.join(sourceRoot, '.svtools', 'circuit'), 'includes');
             const alias = path.join(aliases, 'include' + index);
-            if (/(?:^|[\\/])yowasp-yosys(?:\.exe)?$/i.test(executable)) {
+            if (/(?:^|[\\/])yowasp-yosys(?:\.(?:exe|cmd|bat))?$/i.test(executable)) {
                 // WASI 不跟随指向挂载点外的目录链接；用有界副本保留 include 内的相对结构。
                 await fs.cp(absolute, alias, { recursive: true, filter: async source => {
                     task.throwIfCancelled();
@@ -99,38 +99,49 @@ async function includeAliases({ task, executable, sourceRoot, includeDirs = [] }
  * @returns {Promise<{filePath:string,sourceRoot:string}>} 独立任务目录内的真实 JSON；失败不返回旧产物。
  */
 async function runYosysCircuit(options) {
-    const { task, executable, sources, outputBase, sourceRoot, onOutput, env } = options;
+    const { task, executable = 'bundled', sources, outputBase, sourceRoot, onOutput, env } = options;
     if (typeof executable !== 'string' || !executable || typeof sourceRoot !== 'string' || !sourceRoot) {
         throw new Error('请配置本地 Yosys 路径和电路工作目录');
     }
     if (options.timeoutMs !== undefined && (!Number.isFinite(options.timeoutMs) || options.timeoutMs <= 0)) throw new Error('Yosys 超时必须为正数');
-    const command = /[\\/]/.test(executable) ? path.resolve(sourceRoot, executable) : executable;
+    const isBundled = executable === 'bundled';
+    let command = /[\\/]/.test(executable) ? path.resolve(sourceRoot, executable) : executable;
     const directory = await task.directory(outputBase, 'yosys');
     const filePath = path.join(directory, 'circuit.json');
     const scriptPath = path.join(directory, 'circuit.ys');
     let wrapperPath = path.join(directory, 'sources.sv');
-    if (options.frontend === 'slang' && !/^[A-Za-z0-9_./:\-]+$/.test(path.relative(sourceRoot, wrapperPath).replace(/\\/g, '/'))) {
+    if (!isBundled && options.frontend === 'slang' && !/^[A-Za-z0-9_./:\-]+$/.test(path.relative(sourceRoot, wrapperPath).replace(/\\/g, '/'))) {
         wrapperPath = path.join(await task.directory(path.join(sourceRoot, '.svtools', 'circuit'), 'input'), 'sources.sv');
     }
-    const wrapperSources = options.frontend === 'slang'
+    const bundled = isBundled ? await require('./yosys-bundled').prepareBundledYosys({ ...options, directory }) : null;
+    const wrapperSources = bundled ? bundled.sources : options.frontend === 'slang'
         ? sources.map(file => path.relative(path.dirname(wrapperPath), path.resolve(sourceRoot, file))) : sources;
     await fs.writeFile(wrapperPath, buildSourceWrapper({ ...options, sources: wrapperSources }), 'utf8');
-    const aliases = await includeAliases(options);
-    const inputPath = options.frontend === 'slang' ? path.relative(sourceRoot, wrapperPath).replace(/\\/g, '/') : wrapperPath;
-    await fs.writeFile(scriptPath, buildYosysScript({ ...options, sources: [inputPath], includeDirs: aliases.directories, outputPath: filePath }), 'utf8');
+    const aliases = bundled ? { directories: bundled.includeDirs, sourceDirectories: bundled.sourceDirectories } : await includeAliases(options);
+    const inputPath = bundled ? bundled.inputPath : options.frontend === 'slang' ? path.relative(sourceRoot, wrapperPath).replace(/\\/g, '/') : wrapperPath;
+    await fs.writeFile(scriptPath, buildYosysScript({ ...options, sources: [inputPath], includeDirs: aliases.directories,
+        outputPath: bundled ? bundled.outputPath : filePath }), 'utf8');
     task.throwIfCancelled();
     let reportedError = false;
-    const result = await task.run(command, ['-Q', '-T', '-s', scriptPath.replace(/\\/g, '/')], {
-        cwd: sourceRoot, env, stage: 'yosys', timeoutMs: options.timeoutMs || DEFAULT_TIMEOUT_MS,
+    if (bundled) command = bundled.command;
+    const result = await task.run(command, bundled ? bundled.args : ['-Q', '-T', '-s', scriptPath.replace(/\\/g, '/')], {
+        cwd: sourceRoot, env: bundled ? { ...process.env, ...env, ELECTRON_RUN_AS_NODE: '1' } : env,
+        stage: 'yosys', timeoutMs: options.timeoutMs || DEFAULT_TIMEOUT_MS,
         onStdout: onOutput, onStderr: onOutput, onLine(line) { if (/^\s*ERROR:/i.test(line)) reportedError = true; }
     });
     task.throwIfCancelled();
+    if (/\bENOENT\b/.test(result.errorMessage || '')) {
+        throw Object.assign(new Error('未找到 Yosys：' + command
+            + '。请将 svtools.circuit.yosysPath 设置为已安装的 yosys 或 yowasp-yosys 的可执行文件路径。'
+            + '\n完整日志：' + result.logPath), { code: 'YOSYS_NOT_FOUND' });
+    }
     if (!processSucceeded(result) || reportedError) {
         throw new Error('Yosys 电路生成失败：' + (result.errorMessage || result.logError || result.output?.slice(-2000)
             || `exit ${result.code}`) + '\n完整日志：' + result.logPath);
     }
     const stat = await fs.stat(filePath).catch(error => { throw new Error('Yosys 未生成电路 JSON：' + error.message); });
     if (!stat.isFile() || !stat.size) throw new Error('Yosys 生成了空电路 JSON');
-    return { filePath, sourceRoot, sourceDirectories: aliases.sourceDirectories };
+    // Slang 的 src 可能是相对 guest 路径，先按 WASI 根解析，再由 Worker 映射回宿主。
+    return { filePath, sourceRoot: bundled ? '/' : sourceRoot, sourceDirectories: aliases.sourceDirectories };
 }
 module.exports = { buildYosysScript, buildSourceWrapper, runYosysCircuit, yosysQuote };

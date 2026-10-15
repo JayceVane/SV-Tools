@@ -106,15 +106,16 @@
   "cfg.completion_maxTotalSourceMB.desc": "Total UTF-8 source budget for closed-document completion indexing, in MiB. This is a source budget, not a heap memory limit.",
   "cfg.completion_standard.desc": "Completion keyword standard. Auto uses the document language and active `begin_keywords directive. This setting does not change compiler options.",
   "cfg.completion_maxItems.desc": "Maximum items per completion request. Broad requests are marked incomplete; keep typing to narrow candidates without losing indexed declarations.",
-  "cmd.circuit.open.title": "Open Circuit Netlist",
+  "cmd.circuit.open.title": "Open Circuit Netlist (JSON)",
   "cmd.circuit.fromSource.title": "View RTL Circuit (Yosys)",
-  "cmd.circuit.fromVivado.title": "View Project Circuit (Vivado)",
+  "cmd.circuit.fromVivado.title": "View Project Top Circuit (Vivado)",
   "cmd.circuit.stop.title": "Stop Circuit Generation",
-  "cfg.circuit.yosysPath": "Local Yosys executable path. Install Yosys separately; RTL is processed locally.",
+  "cfg.circuit.yosysPath": "Use bundled for the included offline Yosys WASM engine; no Python or separate tool installation is required. Alternatively specify a local Yosys executable.",
   "cfg.circuit.frontend": "verilog uses read_verilog -sv. slang requires read_slang with --keep-hierarchy support in the selected Yosys build.",
   "cfg.circuit.sources": "Ordered RTL source paths, relative to the workspace folder or absolute. The active file is appended if absent.",
   "cfg.circuit.includeDirs": "Local HDL include directories, relative to the workspace folder or absolute.",
   "cfg.circuit.defines": "Preprocessor definitions such as SYNTHESIS or WIDTH=8.",
   "cfg.circuit.top": "Top module for RTL circuit generation. Leave empty to choose from the active file.",
-  "cfg.circuit.generationTimeout": "Maximum circuit generation time in seconds."
+  "cfg.circuit.generationTimeout": "Maximum circuit generation time in seconds.",
+  "cmd.circuit.fromVivadoFile.title": "View Current File Circuit (Vivado)"
 }

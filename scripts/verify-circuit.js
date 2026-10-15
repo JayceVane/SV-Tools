@@ -12,7 +12,7 @@ const { layoutModule } = require('../src/circuit/layout');
 
 /** 使用本地工具复现 Yosys → netlistsvg → 独立模型 → ELK，全过程保留真实输入和日志。 */
 async function main() {
-    const { values } = parseArgs({ options: { yosys: { type: 'string', default: 'yosys' },
+    const { values } = parseArgs({ options: { yosys: { type: 'string', default: 'bundled' },
         frontend: { type: 'string', default: 'verilog' }, out: { type: 'string', default: 'bin/circuit-validation' } } });
     const executable = /[\\/]/.test(values.yosys) ? path.resolve(values.yosys) : values.yosys;
     const parent = path.resolve(values.out);

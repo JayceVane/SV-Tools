@@ -2,6 +2,14 @@
 
 All notable changes to the SystemVerilog VSCode Extension will be documented in this file.
 
+## [4.1.0-alpha2] - 2026-10-16
+
+**变更内容：** 默认集成固定版本 Yosys WASM 与完整工具资源，离线生成无需 Python、系统 PATH 或运行时下载。新增编辑器标题栏 Vivado 入口，按当前文件同名模块、唯一模块或用户选择确定本次 top；工程面板和 top 节点入口继续使用工程 top。修复 RTL 右键 URI 误走 JSON 导入，导入菜单与错误提示明确区分源文件和网表，外部工具缺失给出配置项及日志位置。
+
+**为什么：** 用户实际遇到源文件头 `//` 被当成 JSON、`spawn yosys ENOENT` 两个相邻问题；仅修正错误文字不能提供可用的查看流程。内置工具将路径映射与编译放在独立进程，保留取消、宏、include、相对 readmem 和未保存正文回映射；领域模型与页面不依赖具体后端。
+
+**影响面：** VSIX 增加 YoWASP 0.68.1207 的原始 WASM、share 和第三方许可；外部 Yosys 路径仍可覆盖默认。Vivado 只读流程不保存、更改工程 top 或增删文件；当前文件入口要求已保存的工程综合源，工程外/未保存内容可用内置 Yosys。两条 top 策略已在真实 Vivado 2022.1.2 验证且工程文件 SHA256 不变。详情与验收见 `docs/V4_1_ALPHA2.md`。
+
 ## [4.1.0-alpha1] - 2026-10-15
 
 **变更内容：** 新增内嵌电路结构查看器。先以真实 Yosys JSON 和 netlistsvg 验证连接，再将 Yosys、Vivado 适配到独立电路模型，使用 ELK.js + SVG 布局显示。提供 RTL 生成、JSON 导入、Vivado 只读详细化、层级浏览、网络搜索高亮和源码定位；模型保留位序、升降序总线、常量、参数和别名。

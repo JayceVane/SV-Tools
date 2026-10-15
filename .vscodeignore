@@ -1,9 +1,11 @@
 # 原生源代码、依赖和中间产物不进入 VSIX；发布原生模块及固定 ELK 资源
 src/native/**
+src/circuit/licenses/**
 bin/**
 !bin/*.node
 !bin/vendor/elk.bundled.js
 !bin/vendor/ELK-LICENSE.md
+!bin/vendor/yosys/**
 
 # 开发与测试资源
 example/**

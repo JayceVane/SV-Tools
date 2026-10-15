@@ -27,7 +27,7 @@ namespace eval svtools_circuit {
         } else {
             set nets [get_nets -quiet -segments -top_net_of_hierarchical_group -of_objects $object]
         }
-        if {[llength $nets] > 1} { error "多个独立 net 连接到同一位对象：$object" }
+        if {[llength $nets] > 1} { error "多个独立 net 连接到同一位对象: $object" }
         if {![llength $nets]} { return null }
         return [jsonString [get_property NAME [lindex $nets 0]]]
     }
@@ -40,7 +40,7 @@ namespace eval svtools_circuit {
             set left [get_property BUS_START $object]
             set right [get_property BUS_STOP $object]
             if {![string is integer -strict $left] || ![string is integer -strict $right] || ![regexp {\[(-?[0-9]+)\]$} $name ignored index]} {
-                error "不能完整读取总线位索引：$name"
+                error "不能完整读取总线位索引: $name"
             }
             # BUS_NAME 不含实例前缀；从实际位对象名字只移除最后一个索引。
             set qualifiedBus [string range $name 0 [expr {[string length $name] - [string length $index] - 3}]]
@@ -50,14 +50,45 @@ namespace eval svtools_circuit {
         return $result
     }
 
-    proc exportProject {projectPath outputPath} {
+    proc findSource {sourceSet sourcePath} {
+        foreach file [get_files -quiet -of_objects $sourceSet] {
+            set filePath [file normalize [get_property NAME $file]]
+            if {($::tcl_platform(platform) eq {windows} && [string equal -nocase $filePath $sourcePath]) || [string equal $filePath $sourcePath]} {
+                return $file
+            }
+        }
+        return {}
+    }
+
+    # 只读工程不允许更改文件集；当前文件入口只使用已经参与综合的工程源。
+    proc prepareSource {sourcePath} {
+        set sourcePath [file normalize $sourcePath]
+        if {![file isfile $sourcePath]} { error "当前 RTL 源文件不存在: $sourcePath" }
+        set sourceSet [current_fileset]
+        set selected [findSource $sourceSet $sourcePath]
+        if {$selected eq {} || ![string is true -strict [get_property USED_IN_SYNTHESIS $selected]]} {
+            error "当前文件不是工程综合源，请先将文件加入工程并保存，或使用内置 Yosys 查看: $sourcePath"
+        }
+    }
+
+    proc exportProject {projectPath outputPath {requestedTop {}} {sourcePath {}}} {
         variable MAX_CELLS
         variable MAX_NETS
         variable MAX_PINS
         open_project -read_only $projectPath
-        # -rtl 明确请求详细化，不打开旧 synth_1，也不启动综合/实现 run。
-        synth_design -rtl -name svtools_circuit_rtl
+        if {$sourcePath ne {}} {
+            if {$requestedTop eq {}} { error {指定 RTL 源文件时必须显式选择顶层} }
+            prepareSource $sourcePath
+        }
         set top [get_property TOP [current_fileset]]
+        set synthesisArgs [list -rtl -name svtools_circuit_rtl]
+        if {$requestedTop ne {}} {
+            # -top 仅影响本次详细化，保持工程 TOP、文件集和 compile order 不变。
+            lappend synthesisArgs -top $requestedTop
+            set top $requestedTop
+        }
+        # -rtl 明确请求详细化，不打开旧 synth_1，也不启动综合/实现 run。
+        synth_design {*}$synthesisArgs
         set cells [get_cells -quiet -hierarchical -filter {IS_PRIMITIVE == 1 || IS_BLACKBOX == 1}]
         set nets [get_nets -quiet -hierarchical]
         set ports [get_ports -quiet]

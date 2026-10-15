@@ -1,6 +1,8 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const { fromVivado } = require('../src/circuit/adapters/vivado');
 const { buildVivadoExportScript } = require('../src/circuit/vivado-export');
 
@@ -85,4 +87,19 @@ test('Vivado Tcl entry quotes paths and delegates only to the read-only exporter
     assert.match(text, /svtools_circuit::exportProject/); assert.match(text, /source \{C:\/extension\/vivado-export.tcl\}/);
     assert.ok(text.includes('\\$x\\[1\\]')); assert.ok(text.includes('exit 1')); assert.ok(!/save_project|launch_runs|update_compile_order/.test(text));
     assert.throws(() => buildVivadoExportScript({ projectPath: 'x\nexit 0', outputPath: 'x', exporterPath: 'y' }), /路径无效/);
+});
+
+test('Vivado Tcl entry passes optional top/source separately and rejects invalid overrides', () => {
+    const base = { projectPath: '/project.xpr', outputPath: '/output.json', exporterPath: '/export.tcl' };
+    assert.match(buildVivadoExportScript(base), /exportProject \{\/project\.xpr\} \{\/output\.json\} \{\} \{\}/);
+    const text = buildVivadoExportScript({ ...base, top: 'child$[0]', sourcePath: '/rtl/current {module}.sv' });
+    assert.ok(text.includes('{child$[0]}')); assert.ok(text.includes('{module}'));
+    assert.throws(() => buildVivadoExportScript({ ...base, sourcePath: '/file.sv' }), /必须显式/);
+    for (const top of ['', 1, 'child\nexit 0', 'child\0']) assert.throws(() => buildVivadoExportScript({ ...base, top }), /顶层或源文件无效/);
+});
+
+test('Vivado exporter performs no project or fileset mutations for a file-local top', () => {
+    const text = fs.readFileSync(path.join(__dirname, '../src/circuit/vivado-export.tcl'), 'utf8');
+    assert.match(text, /open_project -read_only/); assert.match(text, /lappend synthesisArgs -top \$requestedTop/);
+    assert.doesNotMatch(text, /^\s*(?:set_property|save_project|save_project_as|add_files|remove_files|update_compile_order|import_files)\b/m);
 });

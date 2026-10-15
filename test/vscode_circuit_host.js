@@ -13,8 +13,8 @@ async function run() {
     assert.ok(circuit);
     const checks = [];
     const commands = await vscode.commands.getCommands();
-    for (const command of ['open', 'fromSource', 'fromVivado', 'stop']) assert.ok(commands.includes('svtools.circuit.' + command));
-    checks.push('真实扩展注册四个电路命令');
+    for (const command of ['open', 'fromSource', 'fromVivado', 'fromVivadoFile', 'stop']) assert.ok(commands.includes('svtools.circuit.' + command));
+    checks.push('真实扩展注册五个电路命令，当前文件与工程 Vivado 入口独立');
     const jsonPath = path.join(root, 'circuit.json');
     await fs.writeFile(jsonPath, JSON.stringify({ modules: { top: { ports: {
         a: { direction: 'input', bits: [2] }, y: { direction: 'output', bits: [2] }
@@ -37,14 +37,20 @@ async function run() {
         assert.equal(loaded.design.provenance.hierarchy, 'flat');
         checks.push('真实宿主自动识别Vivado JSON与flat来源');
     } finally { imported.dispose(); }
-    if (process.env.SVTOOLS_CIRCUIT_YOSYS) {
+    {
         const filePath = path.join(root, 'top.sv');
         const disk = 'module host_top(input wire a, output wire y);\nassign y = a;\nendmodule\n';
         await fs.writeFile(filePath, disk);
         const document = await vscode.workspace.openTextDocument(vscode.Uri.file(filePath));
         const editor = await vscode.window.showTextDocument(document);
         await editor.edit(edit => edit.replace(new vscode.Range(1, 0, 1, document.lineAt(1).text.length), 'assign y = ~a;'));
-        await vscode.workspace.getConfiguration('svtools.circuit', document.uri).update('yosysPath', process.env.SVTOOLS_CIRCUIT_YOSYS, vscode.ConfigurationTarget.Workspace);
+        await assert.rejects(circuit.fromVivadoFile(), /先保存当前 RTL.*Vivado.*内置 Yosys/);
+        assert.equal(document.isDirty, true);
+        assert.equal(await fs.readFile(filePath, 'utf8'), disk);
+        checks.push('当前文件 Vivado 入口拒绝 dirty 正文，不保存、不展示磁盘旧版');
+        const config = vscode.workspace.getConfiguration('svtools.circuit', document.uri);
+        if (process.env.SVTOOLS_CIRCUIT_YOSYS) await config.update('yosysPath', process.env.SVTOOLS_CIRCUIT_YOSYS, vscode.ConfigurationTarget.Workspace);
+        else assert.equal(config.get('yosysPath', 'bundled'), 'bundled');
         const rtl = await circuit.fromSource();
         try {
             const loaded = await rtl.loaded;
@@ -53,7 +59,7 @@ async function run() {
             assert.ok(loaded.graph.nodes.some(node => node.detail === '$not'));
             assert.equal(await fs.readFile(filePath, 'utf8'), disk);
             assert.equal(document.isDirty, true);
-            checks.push('未保存正文真实生成电路，源码磁盘与脏文档保持原状态');
+            checks.push((process.env.SVTOOLS_CIRCUIT_YOSYS ? '显式 Yosys' : '默认内置 Yosys') + '对未保存正文真实生成电路，源码磁盘与脏文档保持原状态');
         } finally { rtl.dispose(); }
     }
     await fs.writeFile(path.join(root, '..', 'host-report.json'), JSON.stringify({

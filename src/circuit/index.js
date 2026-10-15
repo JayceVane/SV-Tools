@@ -45,6 +45,38 @@ function activateCircuitViewer(context, { vivado, vscode = require('vscode') }) 
             });
     }
 
+    async function rtlDocument(uri) {
+        const document = uri?.fsPath ? await vscode.workspace.openTextDocument(uri) : vscode.window.activeTextEditor?.document;
+        if (!document || document.uri.scheme !== 'file' || !/\.(?:sv|v)$/i.test(document.uri.fsPath)) {
+            throw new Error('请先保存并打开 Verilog/SystemVerilog RTL 文件');
+        }
+        return document;
+    }
+
+    async function chooseFileTop(document) {
+        const candidates = await scanTop(document);
+        if (!candidates.length) throw new Error('当前文件没有可识别的模块，无法选择 Vivado 顶层');
+        const fileName = path.basename(document.uri.fsPath, path.extname(document.uri.fsPath));
+        const sameName = candidates.find(candidate => candidate.name === fileName);
+        if (sameName) return sameName.name;
+        if (candidates.length === 1) return candidates[0].name;
+        const chosen = await vscode.window.showQuickPick(candidates.map(candidate => ({ label: candidate.name, value: candidate.name })),
+            { placeHolder: '选择当前文件中要查看的 Vivado 顶层模块' });
+        return chosen?.value;
+    }
+
+    function requireSavedVivadoFile(document) {
+        if (document.isDirty) throw new Error('请先保存当前 RTL，再用 Vivado 查看；未保存内容可使用内置 Yosys');
+    }
+
+    async function selectedVivadoProject() {
+        const projectPath = await vivado.projectSelection.current();
+        if (!projectPath) throw new Error('请先在 Vivado 面板选择工程');
+        const bin = vivado.resolveBinDir();
+        if (!bin) throw new Error('未找到 Vivado，请配置 svtools.vivado.path');
+        return { projectPath, bin, root: rootOf(vscode.Uri.file(projectPath)) };
+    }
+
     async function runJob(title, runner, signal) {
         const task = manager.start('circuit');
         const abort = () => task.cancel('电路页面已关闭或刷新');
@@ -84,11 +116,7 @@ function activateCircuitViewer(context, { vivado, vscode = require('vscode') }) 
     }
 
     async function fromSource(uri) {
-        const active = vscode.window.activeTextEditor;
-        const document = uri?.fsPath ? await vscode.workspace.openTextDocument(uri) : active?.document;
-        if (!document || document.uri.scheme !== 'file' || !/\.(?:sv|v)$/i.test(document.uri.fsPath)) {
-            throw new Error('请先打开 Verilog/SystemVerilog RTL 文件');
-        }
+        const document = await rtlDocument(uri);
         const config = settings(document.uri);
         let top = config.get('top', '');
         if (!top) {
@@ -112,26 +140,39 @@ function activateCircuitViewer(context, { vivado, vscode = require('vscode') }) 
             }
             for (const directory of options.includeDirs) if (!roots.includes(directory)) roots.push(directory);
             const result = await runYosysCircuit({ ...options, task, outputBase,
-                executable: config.get('yosysPath', 'yosys'), timeoutMs: config.get('generationTimeout', 120) * 1000,
+                executable: config.get('yosysPath', 'bundled'), timeoutMs: config.get('generationTimeout', 120) * 1000,
                 onOutput: output.append });
             return { ...result, format: 'yosys', stage: 'rtl', top, title: options.title, sourceMap: options.sourceMap };
         }, signal), roots);
     }
 
-    async function fromVivado() {
-        const projectPath = await vivado.projectSelection.current();
-        if (!projectPath) throw new Error('请先在 Vivado 面板选择工程');
-        const bin = vivado.resolveBinDir();
-        if (!bin) throw new Error('未找到 Vivado，请配置 svtools.vivado.path');
-        const root = rootOf(vscode.Uri.file(projectPath));
-        return open(({ signal }) => runJob('生成工程电路 · Vivado RTL', async task => {
+    function openVivado({ projectPath, bin, root, document, top }) {
+        const sourcePath = document?.uri.fsPath;
+        const roots = [root, path.dirname(projectPath)];
+        if (sourcePath) roots.push(path.dirname(sourcePath));
+        return open(({ signal }) => runJob(document ? '生成当前文件电路 · Vivado RTL' : '生成工程电路 · Vivado RTL', async task => {
+            // 刷新时再次检查，避免用户编辑后仍显示磁盘上的旧正文。
+            if (document) requireSavedVivadoFile(document);
             const { runVivadoCircuit } = require('./vivado-runner');
-            const result = await runVivadoCircuit({ task, projectPath,
+            const result = await runVivadoCircuit({ task, projectPath, top, sourcePath,
                 executable: path.join(bin, process.platform === 'win32' ? 'vivado.bat' : 'vivado'),
-                outputBase: path.join(root, '.svtools', 'circuit'), timeoutMs: settings().get('generationTimeout', 120) * 1000,
+                outputBase: path.join(root, '.svtools', 'circuit'), timeoutMs: settings(document?.uri).get('generationTimeout', 120) * 1000,
                 onOutput: output.append });
-            return { ...result, format: 'vivado', title: path.basename(projectPath) };
-        }, signal), [root, path.dirname(projectPath)]);
+            return { ...result, format: 'vivado', title: sourcePath ? path.basename(sourcePath) + ' · ' + top : path.basename(projectPath) };
+        }, signal), roots);
+    }
+
+    async function fromVivado() {
+        return openVivado(await selectedVivadoProject());
+    }
+
+    async function fromVivadoFile(uri) {
+        const document = await rtlDocument(uri);
+        requireSavedVivadoFile(document);
+        const project = await selectedVivadoProject();
+        const top = await chooseFileTop(document);
+        if (!top) return;
+        return openVivado({ ...project, document, top });
     }
 
     async function openNetlist(uri) {
@@ -143,12 +184,17 @@ function activateCircuitViewer(context, { vivado, vscode = require('vscode') }) 
             top: settings(uri).get('top', '') || undefined }), [root, path.dirname(uri.fsPath)]);
     }
 
+    /** @param {object} [uri] 编辑器右键传入的资源；RTL 先生成，JSON 才直接导入。 */
+    function openCircuit(uri) {
+        return /\.(?:sv|v)$/i.test(uri?.fsPath || '') ? fromSource(uri) : openNetlist(uri);
+    }
+
     function stop() {
         manager.cancelAll('用户停止电路生成');
         for (const scan of scans) scan.dispose(Object.assign(new Error('顶层扫描已取消'), { code: 'TOOL_CANCELLED' }));
         scans.clear();
     }
-    const commands = { open: openNetlist, fromSource, fromVivado, stop };
+    const commands = { open: openCircuit, fromSource, fromVivado, fromVivadoFile, stop };
     for (const [name, action] of Object.entries(commands)) {
         context.subscriptions.push(vscode.commands.registerCommand('svtools.circuit.' + name,
             (...args) => Promise.resolve().then(() => action(...args)).catch(fail)));
@@ -157,6 +203,6 @@ function activateCircuitViewer(context, { vivado, vscode = require('vscode') }) 
         for (const panel of panels) panel.dispose();
         panels.clear(); stop(); manager.dispose().catch(fail);
     } });
-    return { fromSource, fromVivado, openNetlist };
+    return { fromSource, fromVivado, fromVivadoFile, openNetlist };
 }
 module.exports = { activateCircuitViewer, insideRoots };

@@ -8,26 +8,27 @@
 
 ## 使用
 
-命令面板搜索“电路结构”（英文界面搜索 Circuit）：
+命令面板搜索“电路”（英文界面搜索 Circuit）：
 
 | 命令 ID | 操作 |
 |---|---|
-| `svtools.circuit.fromSource` | 当前 `.v` / `.sv` 调用本地 Yosys 生成并显示 |
+| `svtools.circuit.fromSource` | 当前 `.v` / `.sv` 默认调用内置 Yosys 生成并显示 |
 | `svtools.circuit.open` | 导入已有 Yosys JSON 或本插件 Vivado 导出 JSON |
 | `svtools.circuit.fromVivado` | 读取当前选中 XPR，执行只读 RTL 详细化并显示 |
+| `svtools.circuit.fromVivadoFile` | 编辑器标题栏查看当前文件，临时使用该文件模块作为 Vivado top |
 | `svtools.circuit.stop` | 停止电路生成及顶层扫描 |
 
 RTL 编辑器右键也有入口。Vivado 入口复用现有面板的工程选择与 `svtools.vivado.path`，不修改用户的工程配置。生成物和日志放在工作区 `.svtools/circuit/` 的独立任务目录，工程/补全索引会忽略这些目录。
 
-当前未保存的编辑器正文会生成任务快照，不保存、格式化或替换磁盘文件；工具返回的快照位置回映射到原文件。其他源文件从磁盘读取。源码定位只接受模型中已有位置，并在宿主核对真实路径范围。
+Yosys 入口对当前未保存正文生成任务快照，不保存、格式化或替换磁盘文件；工具返回的快照位置回映射到原文件。其他源文件从磁盘读取。Vivado 当前文件入口要求先保存，不自动修改编辑器正文。源码定位只接受模型中已有位置，并在宿主核对真实路径范围。JSON 导入只出现在 JSON 编辑器上下文与命令面板；旧绑定传入 RTL URI 时也会转入生成流程。
 
 ## Yosys 配置
 
-VSIX 不捆绑 Yosys。使用本机可执行文件，或安装工具后通过 PATH 查找；导入已有 JSON 无需安装。前端能力取决于所配置 Yosys 及其插件。
+VSIX 内置固定 YoWASP/Yosys 0.68.1207 的 WASM 和 share，首次使用也可离线运行，无需 Python、系统 PATH 或额外安装。默认值 `bundled` 使用内置工具；需要本机其它版本时，配置其可执行文件路径即可。内置 builtin/slang 前端均经真实编译验证；外部前端能力由所选工具及其插件决定。
 
 ```json
 {
-  "svtools.circuit.yosysPath": "yosys",
+  "svtools.circuit.yosysPath": "bundled",
   "svtools.circuit.frontend": "verilog",
   "svtools.circuit.top": "my_top",
   "svtools.circuit.sources": ["rtl/package.sv", "rtl/child.sv", "rtl/top.sv"],
@@ -41,11 +42,15 @@ VSIX 不捆绑 Yosys。使用本机可执行文件，或安装工具后通过 PA
 
 `verilog` 使用 `read_verilog -sv`，适用范围由 Yosys 内建前端决定。需要更完整 SystemVerilog 时选择 `slang`，要求工具提供 `read_slang` 插件；本机未装插件时会报告工具错误，不会静默换前端。生成采用 `prep`，保留层级和已收集存储器；导入含未降低 process/memory 的原始中间 JSON 会明确提示先运行 `proc` / `memory_collect` 或 `prep`。
 
-宏以 `NAME` 或 `NAME=正文` 形式配置，保留正文中的空格及引号，不支持换行宏。生成器用独立 HDL 包装文件传递宏和有序 include，避免不同前端的命令行引号差异。include 路径含空格时使用任务内安全别名；原生 Yosys 用目录链接，识别出的 `yowasp-yosys` 用有预算的目录快照以适配 WASI。WASI 快照遇到符号链接或超预算会报错，可改用原生 Yosys或缩小 include 目录。
+宏以 `NAME` 或 `NAME=正文` 形式配置，保留正文中的空格及引号，不支持换行宏。生成器用独立 HDL 包装文件传递宏和有序 include，避免不同前端的命令行引号差异。内置引擎直接映射明确配置的源目录/include 与任务目录，支持空格、中文路径及工作区相对 readmem 文件。外部原生 Yosys 的空格 include 使用目录链接，识别出的 `yowasp-yosys` exe/cmd/bat 则使用有预算的目录快照；外部 YoWASP 快照遇到符号链接或超预算会报错。
 
 ## Vivado 数据
 
 本版调用 `open_project -read_only` 与 `synth_design -rtl`，输出标明 `vivado / elaborated-rtl / flat`。单元使用完整实例路径，但不提供可下钻的 Vivado 模块树。跨层级网络使用真实 segments 与 canonical net 归一，避免同名局部网络误连。
+
+编辑器右上角“查看当前文件电路（Vivado）”优先选择与文件名相同的模块，或文件内唯一模块；有多个候选时供用户选择。只用 `synth_design -rtl -top` 覆盖本次查看，忽略 Yosys top 设置，不写入 XPR。工程管理面板标题和 top 节点入口均保留工程 top。两个入口复用所选 XPR，互不改变对方的 top。
+
+当前文件必须是所选工程的已保存综合源。Vivado 2022.1.2 的只读模式不允许临时增删文件或改项目属性，因此工程外/未保存文件会明确提示先加入并保存，或改用内置 Yosys；不会自动保存、加入文件、改工程 top 或读磁盘旧版冒充未保存正文。
 
 升序、降序、非零/负起点总线按真实 BUS 元数据还原。黑盒保留为未知实例；稀疏内部总线不补造缺失位。可显示寄存器、算术、逻辑、常量和存储器类单元，但不是门级时序、布局布线或时序报告视图。真实验收使用 Vivado 2022.1.2；其他版本需复验 Tcl 对象属性与导出格式。
 
@@ -75,15 +80,17 @@ VSIX 不捆绑 Yosys。使用本机可执行文件，或安装工具后通过 PA
 
 ## 验证与开发
 
-固定开发依赖 `elkjs@0.12.0`、`netlistsvg@1.0.2`。只有未修改的 ELK bundle 及 EPL-2.0 许可进入 VSIX。工具生成物、验证工程、Python/WASM 工具和测试夹具均不进入发布包。
+固定开发依赖 `elkjs@0.12.0`、`netlistsvg@1.0.2`、`@yowasp/yosys@0.68.1207`。ELK bundle/许可，以及原始 Yosys core WASM、share、校验清单与第三方许可进入 VSIX；不包含 Python、netlistsvg、开发 node_modules、验证工程、用户生成物或测试夹具。原始资源文件内的版权声明保留，完整声明见 `bin/vendor/yosys/THIRD-PARTY-NOTICES.txt`。
 
 ```powershell
 npm.cmd ci
 npm.cmd run test:circuit
-node scripts/verify-circuit.js --yosys <yosys可执行文件>
+node scripts/verify-circuit.js
+node scripts/verify-circuit.js --yosys bundled --frontend slang
+node scripts/verify-circuit.js --yosys <外部yosys可执行文件>
 node scripts/verify-circuit.js --yosys <带slang的yosys> --frontend slang
 node scripts/verify-circuit-vivado.js --vivado <Vivado安装目录>
-./scripts/verify-circuit-host.ps1 -CodePath <Code.exe> -YosysPath <yosys可执行文件>
+./scripts/verify-circuit-host.ps1 -CodePath <Code.exe>
 ```
 
 Yosys 验证从公开 RTL 创建独立夹具，检查宏、空格 include 路径、参数化层级、寄存器、MUX、加法器、存储器和升序/非零起点位映射，然后执行真正的 netlistsvg 与 ELK。Vivado 验证新建独立工程，核对跨层连接和 I/O buffer，并逐文件比较工程树 SHA256，验证只读流程未改变工程文件内容。
