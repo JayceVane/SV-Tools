@@ -296,3 +296,45 @@ test('注释与宏中的伪 always 头原样保留', () => {
     assert.ok(formatted.startsWith(macro), formatted);
     assert.ok(formatted.includes(comment), formatted);
 });
+
+const ifConditionHeader = "if (grant != ({{(WIDTH-1){1'b0}}  ,   1'b1}    << i))";
+const compactIfConditionHeader = "if (grant != ({{(WIDTH-1){1'b0}}, 1'b1} << i))";
+for (const inlineCompact of [true, false]) {
+    for (const indentStyle of ['1tbs', 'gnu']) test(`if嵌套拼接条件紧凑：inline=${inlineCompact}，style=${indentStyle}`, () => {
+        const original = 'task automatic check(input logic [WIDTH-1:0] req, input logic [WIDTH-1:0] grant);\n'
+            + 'int i = 0;\nfor(i = 0; i < WIDTH; i = i + 1) begin\nif (req[i]) break;\nend\n'
+            + ifConditionHeader + ' begin\nerr_cnt = err_cnt + 1;\n'
+            + '$error("Test failed at req = %b, grant = %b expected %b", req, grant, ({{(WIDTH-1){1\'b0}},1\'b1} << i));\nend\nendtask\n';
+        // GNU配置直接提供其块布局；本合同独立验证条件紧凑和开关，不混入块样式转换。
+        const source = indentStyle === 'gnu' ? original.replace(/ begin\n/g, '\nbegin\n') : original;
+        const formatted = formatStable(source, { inlineCompact, indentStyle });
+        assert.ok(formatted.includes(inlineCompact ? compactIfConditionHeader : ifConditionHeader), formatted);
+        assert.equal(formatted.replace(/[ \t\r\n]/g, ''), source.replace(/[ \t\r\n]/g, ''));
+    });
+}
+
+test('if条件中的字符串、块注释、转义标识符与宏体保持原文', () => {
+    const literal = String.raw`"中文  if(a , b); \"保留\""`, comment = '/* if  保留  (,) */', escaped = '\\req.if[0] ';
+    const macro = '`define READY \\\n  if (check( a  ,   b )) begin \\\n    q=1; end\n';
+    const source = macro + 'module demo;\ninitial begin\nif (match( ' + literal + ' ,  ' + escaped + ') '
+        + comment + ' &&   ready ) begin\nq=1;\nend\nend\nendmodule\n';
+    const formatted = formatStable(source);
+    assert.ok(formatted.includes('if (match('), formatted);
+    assert.ok(formatted.includes('&& ready)'), formatted);
+    for (const protectedText of [literal, comment, escaped, macro]) assert.ok(formatted.includes(protectedText), formatted);
+    assert.equal(formatted.replace(/[ \t\r\n]/g, ''), source.replace(/[ \t\r\n]/g, ''));
+});
+
+test('多行if条件逐行紧凑且保留用户换行', () => {
+    const source = 'module demo;\ninitial begin\nif (grant != (\n{{(WIDTH-1){1\'b0}}  ,   1\'b1}    << i\n)) begin\nq=1;\nend\nend\nendmodule\n';
+    const formatted = formatStable(source);
+    assert.match(formatted, /if \(grant != \(\n\s*\{\{\(WIDTH-1\)\{1'b0\}\}, 1'b1\} << i\n\s*\)\)/);
+});
+
+test('同一行的多个if和else if都能紧凑条件且不改重复拼接字符', () => {
+    const source = 'module demo;\ninitial begin if (f( a  ,   b )) begin\nq=1;\nend else if (f( c  ,   d )) begin\nq=0;\nend\nend\nendmodule\n';
+    const formatted = formatStable(source);
+    assert.ok(formatted.includes('if (f(a, b))'), formatted);
+    assert.ok(formatted.includes('else if (f(c, d))'), formatted);
+    assert.equal(formatted.replace(/[ \t\r\n]/g, ''), source.replace(/[ \t\r\n]/g, ''));
+});

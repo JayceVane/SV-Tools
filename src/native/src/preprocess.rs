@@ -18,9 +18,9 @@ pub fn preprocess_text(text: &str, indent_style: &str, inline_compact: bool) -> 
     } else {
         text
     };
-    // always 事件控制头与完整语句采用相同行内紧凑语义，范围止于事件列表闭括号。
+    // if 条件与 always 事件头独立于语句结束符紧凑，范围止于平衡的闭括号。
     let text = if inline_compact {
-        normalize_always_event_controls(&text)
+        normalize_control_headers(&text)
     } else {
         text
     };
@@ -305,36 +305,34 @@ fn trailing_close_kw(cur: &str) -> Option<usize> {
     None
 }
 
-/// 仅规范 always 系列的显式事件控制头；块体、其它语句和用户换行不参与此规则。
-fn normalize_always_event_controls(text: &str) -> String {
+/// 紧凑 if 条件与 always 显式事件控制头；词法保护区、块体和用户换行保留。
+fn normalize_control_headers(text: &str) -> String {
     static HEAD: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| {
-        Regex::new(r"^[ \t]*(?P<keyword>always(?:_ff|_comb|_latch)?)\b")
-            .expect("valid always header pattern")
+        Regex::new(r"\b(?:if|always(?:_ff|_comb|_latch)?)\b").expect("valid control header pattern")
     });
     let masked = source_scan::mask_non_code(text);
-    let mut offset = 0;
     let mut edits: Vec<(std::ops::Range<usize>, String)> = Vec::new();
-    for line in masked.split('\n') {
-        if let Some(header) = HEAD.captures(line) {
-            let keyword = header.name("keyword").unwrap();
-            let event = source_scan::next_code_offset(text, offset + keyword.end());
-            if text.as_bytes().get(event) == Some(&b'@') {
-                let open = source_scan::next_code_offset(text, event + 1);
-                if text.as_bytes().get(open) == Some(&b'(') {
-                    if let Some(close) = source_scan::find_matching(text, open) {
-                        let start = offset + keyword.start();
-                        let range = start..close + 1;
-                        if !edits
-                            .last()
-                            .is_some_and(|(previous, _)| previous.end > start)
-                        {
-                            edits.push((range.clone(), compact_inline_whitespace(&text[range])));
-                        }
-                    }
-                }
+    for keyword in HEAD.find_iter(&masked) {
+        let start = keyword.start();
+        if edits
+            .last()
+            .is_some_and(|(previous, _)| previous.end > start)
+        {
+            continue;
+        }
+        let mut open = source_scan::next_code_offset(text, keyword.end());
+        if keyword.as_str() != "if" {
+            if text.as_bytes().get(open) != Some(&b'@') {
+                continue;
+            }
+            open = source_scan::next_code_offset(text, open + 1);
+        }
+        if text.as_bytes().get(open) == Some(&b'(') {
+            if let Some(close) = source_scan::find_matching(text, open) {
+                let range = start..close + 1;
+                edits.push((range.clone(), compact_inline_whitespace(&text[range])));
             }
         }
-        offset += line.len() + 1;
     }
     let mut output = text.to_string();
     for (range, header) in edits.into_iter().rev() {
@@ -896,6 +894,77 @@ mod directive_contract_tests {
 }
 
 #[cfg(test)]
+mod if_condition_tests {
+    use super::*;
+
+    #[test]
+    fn nested_replication_and_shift_only_compact_the_condition() {
+        let input = "if (grant != ({{(WIDTH-1){1'b0}}  ,   1'b1}    << i)) begin\nerr_cnt  =   err_cnt + 1;\nend";
+        let expected =
+            "if (grant != ({{(WIDTH-1){1'b0}}, 1'b1} << i)) begin\nerr_cnt  =   err_cnt + 1;\nend";
+        assert_eq!(normalize_control_headers(input), expected);
+    }
+
+    #[test]
+    fn inline_else_and_qualified_conditions_are_all_selected() {
+        for prefix in [
+            "",
+            "else ",
+            "end else ",
+            "unique ",
+            "unique0 ",
+            "priority ",
+            "initial begin ",
+        ] {
+            let input = format!("{prefix}if (check( a  ,   b )) begin");
+            assert_eq!(
+                normalize_control_headers(&input),
+                format!("{prefix}if (check(a, b)) begin")
+            );
+        }
+        assert_eq!(
+            normalize_control_headers("if (f( a  ,  b )) if (g( c  ,  d )) q  =   d;"),
+            "if (f(a, b)) if (g(c, d)) q  =   d;"
+        );
+    }
+
+    #[test]
+    fn protected_text_and_macro_bodies_are_not_reinterpreted() {
+        let input = concat!(
+            "// if (f( a  ,   b ))\n",
+            "`define READY \\\n  if (f( a  ,   b )) begin \\\n    q=1; end\n",
+            "if (match( \"中文  if(a , b)\" ,  \\req.if[0] ) /* 保留  (,) */ &&   ready ) begin"
+        );
+        let expected = input
+            .replace("if (match( ", "if (match(")
+            .replace("\" ,  ", "\", ")
+            .replace("&&   ready )", "&& ready)");
+        assert_eq!(normalize_control_headers(input), expected);
+        assert_eq!(
+            normalize_control_headers("wire \\if(a,b) ;\nwire if_counter;\n"),
+            "wire \\if(a,b) ;\nwire if_counter;\n"
+        );
+    }
+
+    #[test]
+    fn multiline_conditions_keep_breaks_and_unbalanced_conditions_are_passthrough() {
+        let input =
+            "if (grant != (\n    {{(WIDTH-1){1'b0}}  ,   1'b1}    << i\n)) begin\nq  =   d;\nend";
+        assert_eq!(
+            normalize_control_headers(input),
+            input.replace("}}  ,   ", "}}, ").replace("}    <<", "} <<")
+        );
+        for incomplete in [
+            "if (f( a  , b )",
+            "if (a + { b  , c ) begin",
+            "if (match(\"未闭合",
+        ] {
+            assert_eq!(normalize_control_headers(incomplete), incomplete);
+        }
+    }
+}
+
+#[cfg(test)]
 mod always_event_tests {
     use super::*;
     use crate::config::FormatOptions;
@@ -970,14 +1039,14 @@ mod always_event_tests {
     fn event_compaction_does_not_touch_the_body_or_unrelated_statements() {
         let input = "logic   flag;\nalways @(posedge   clk) begin\nq  <=   d;\nend\nalways_comb begin\nx  =   y;\nend\nalways #10 clk  =   ~clk;\n";
         let expected = input.replace("@(posedge   clk)", "@(posedge clk)");
-        assert_eq!(normalize_always_event_controls(input), expected);
+        assert_eq!(normalize_control_headers(input), expected);
     }
 
     #[test]
     fn multiline_event_layout_and_comments_are_preserved() {
         let comment = "/*保留\n  posedge  fake (,);\n*/";
         let input = format!("always_ff @(\n    posedge   get_clk(i_clk , nested(a, b)) or\n    {}\n    negedge   rst_n\n) begin\nq <= d;\nend", comment);
-        let output = normalize_always_event_controls(&input);
+        let output = normalize_control_headers(&input);
         assert_eq!(output.matches('\n').count(), input.matches('\n').count());
         assert!(output.contains(comment), "{}", output);
         assert!(
@@ -992,13 +1061,13 @@ mod always_event_tests {
     #[test]
     fn fake_headers_in_comments_and_macros_are_not_selected() {
         let input = "// always @(posedge   clk)\n`define CLOCKED \\\n  always @(posedge   clk) begin \\\n    q <= d; end\n";
-        assert_eq!(normalize_always_event_controls(input), input);
+        assert_eq!(normalize_control_headers(input), input);
     }
 
     #[test]
     fn incomplete_event_controls_are_passthrough() {
         let input = "always_ff @(posedge   get_clk(\"unclosed\"";
-        assert_eq!(normalize_always_event_controls(input), input);
-        normalize_always_event_controls("always @(\nalways @(posedge   clk))");
+        assert_eq!(normalize_control_headers(input), input);
+        normalize_control_headers("always @(\nalways @(posedge   clk))");
     }
 }

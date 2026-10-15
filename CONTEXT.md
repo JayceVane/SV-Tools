@@ -1,8 +1,11 @@
 # 4.0 开发交接
 
-最后更新：2026-10-15。当前里程碑为本地 `4.0.0-alpha12`，分支 `codex/refactor-v4`。
+最后更新：2026-10-15。当前里程碑为本地 `4.0.0-alpha13`，分支 `codex/refactor-v4`。
 
 ## 完成内容
+
+- alpha13：修复`if (...) begin`未走单行分号紧凑路径的问题；与always事件头共用词法屏蔽、平衡括号与紧凑规则，支持重复拼接/移位、多条件、else if及用户换行。
+- inlineCompact=false保留条件空白，保护区/宏/转义标识符保留；alpha12字符保全不变。用户task增加golden，完整清单与根因见`docs/V4_ALPHA13.md`。
 
 - alpha12：格式化只允许改变ASCII空格、Tab、CR、LF，其余字符的内容/数量/顺序必须一致；乱码、不完整语法和全部配置同样受约束，异常或不安全候选保留对应入口原文。
 - Rust全文/普通段/兼容beautifier/选区对齐共享守卫；NAPI严格UTF-16保留孤立代理项，编辑器替换前独立复核。代码生成命令不受布局规则限制，无效UTF-8 CLI输入不写坏原文件或已有输出。
@@ -56,6 +59,9 @@
 - alpha2/3 的波形与存储器交付记录继续保留。
 
 ## 验证
+
+- alpha13：104个JS、golden38/38（19个样例）、Node510/510、Rust121/121；新增Rust4与Node7，针对性if合同11/11。native/CLI同步重建，原18个golden目标未改。
+- 当前包`bin/svtools-4.0.0-alpha13.vsix`，83条目/79项逐字节一致、61个运行JS/CSS，106个中英文配置引用和公共JS/TS签名通过。SHA与实测见alpha13记录。
 
 - alpha12：104个JS、golden36/36、Node503/503、Rust117/117；新增5项Rust、7项编辑器、20项真实native/CLI合同。固定14×6与变异64×6语料两轮守恒/幂等，正常排版仍生效，native/CLI同步重建。
 - 当前包 `bin/svtools-4.0.0-alpha12.vsix`；日志、质量与包核验见alpha12交付记录。本轮不需要临时浏览器或预览服务。
@@ -125,7 +131,8 @@ alpha1 本地提交869e4d1；alpha2 提交33ff207；alpha3 提交1cc5733；alpha
 
 用户于 2026-10-14 确认：先完善当前版本，再增加新功能。Vivado IP 管理已写入 `docs/ROADMAP.md`，目前延期、未启动；待用户决定开始新功能后再实现。
 
-1. 以 alpha12 VSIX 验证用户实际工程及错误/乱码输入，保持字符保全最高优先级；独立修复旧选区赋值对齐的unsupported lookahead。
+1. 以 alpha13 VSIX 验证用户实际工程，保持字符保全最高优先级；独立修复旧选区赋值对齐的unsupported lookahead。
+2. 单独处理GNU+inlineCompact=false从同行begin转换时的首轮/二轮缩进差异；本轮GNU条件回归使用GNU原有块布局，不代表样式转换已修复。
 2. 用实际100–500MB RTL波形对照仿真/GTKWave，评估更多信号数和事件密度。
 3. 下一轮统一 CompilePlan：源文件、include、宏、top、工作目录和引擎能力，避免 lint/仿真参数漂移。
 4. 随后实现内容驱动的增量源码索引与有配置键的只读缓存；不要恢复共享可写 xsim.dir。
