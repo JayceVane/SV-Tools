@@ -23,7 +23,7 @@
   },
   "homepage": "https://github.com/JayceVane/SV-Tools",
   "engines": {
-    "vscode": "^1.74.0"
+    "vscode": "^1.106.0"
   },
   "categories": [
     "Formatters",

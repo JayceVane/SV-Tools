@@ -1,5 +1,7 @@
 # 电路结构查看器（4.1 alpha）
 
+4.1 alpha2要求VS Code 1.106或更新版本；内置固定WASM需要新版V8类型支持。纯Node开发验收基线为22.20.0，CI覆盖22/24。不支持的宿主会提示升级或配置外部Yosys，4.0 preview仍可用于旧版VS Code。
+
 ## 目标与数据来源
 
 在编辑器里查看 RTL 生成的电路连接，核对模块、寄存器、MUX、运算和存储器。技术路线为真实 Yosys JSON → netlistsvg 对照 → 独立电路模型 → ELK.js + SVG 交互；Vivado 适配同一模型。netlistsvg 用于开发验收，不参与运行时显示。

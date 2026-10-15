@@ -22,7 +22,14 @@ async function main(configPath) {
     const wasi = new WASI({ version: 'preview1', returnOnExit: true, args: config.args,
         env: { YOSYS_DATDIR: '/share', PWD: '/' },
         preopens: { '/share': path.join(assets, 'share'), ...config.preopens } });
-    const module = await WebAssembly.compile(bytes);
+    let module;
+    try { module = await WebAssembly.compile(bytes); }
+    catch (error) {
+        if (!(error instanceof WebAssembly.CompileError)) throw error;
+        throw new Error(`当前扩展宿主无法加载内置 Yosys WASM（Node ${process.versions.node}，V8 ${process.versions.v8}）。`
+            + '请升级到 VS Code 1.106 或更新版本；自定义宿主请使用受支持的新版 Node/V8，也可配置 svtools.circuit.yosysPath 为外部 Yosys。'
+            + '\n原始错误：' + error.message);
+    }
     const instance = await WebAssembly.instantiate(module, { wasi_snapshot_preview1: wasi.wasiImport });
     process.exitCode = wasi.start(instance);
 }

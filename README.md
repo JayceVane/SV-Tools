@@ -58,7 +58,7 @@
 
 ## 系统要求
 
-- Visual Studio Code 1.74.0+
+- Visual Studio Code 1.106.0+（内置 Yosys 的 WASM 需要新版扩展宿主）
 - 无需 Python；语法检查/仿真需要 [Icarus Verilog](http://iverilog.icarus.com/)（可选），Vivado 功能需要本机 Vivado 安装
 
 ## 安装

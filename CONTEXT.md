@@ -2,7 +2,7 @@
 
 2026-10-16 alpha2：已修复 RTL 右键 URI 被当作 JSON、缺少 Yosys 的默认体验；新增固定 @yowasp/yosys 0.68.1207 的离线 WASM 后端。默认 `yosysPath=bundled`，可覆盖为外部路径；打包包含 WASM/share/许可，不包含 Python 或 npm runtime。编辑器标题栏 `fromVivadoFile` 选择当前文件模块 top，工程面板 `fromVivado` 保留工程 top。当前文件 Vivado 要求已保存的工程综合源，只用 `synth_design -rtl -top`，不保存或更改 XPR。
 
-alpha2 实测：电路96/96（Node20/24）、既有Node511项510通过1可选跳过、Golden38/38、Rust121/121；内置工具在Node16/20/24执行真实RTL流程。包内419个文件逐字节核对；解包后使用VS Code自身Node模式完成新网表→Worker→ELK与原生ABI，在当前用户D盘工作区以公开夹具验证源位置。真实Vivado的工程top=top、文件top=leaf结构不同，外部文件明确拒绝且工程文件SHA256均不变。交付见 `docs/V4_1_ALPHA2.md`。
+alpha2 实测：电路96/96（实际独立Node22/24二进制）、既有Node511项510通过1可选跳过、Golden38/38、Rust121/121；内置工具在Node22/24执行真实RTL流程；Node20无法加载该WASM，最低VS Code提高为1.106，CI覆盖22/24。较早Node22.15.1仍默认关闭exnref，纯Node基线22.20.0。此前npx调用实际仍用Node24，撤回旧Node16/20通过的记录。包内419个文件逐字节核对；解包后使用VS Code自身Node模式完成新网表→Worker→ELK与原生ABI，在当前用户D盘工作区以公开夹具验证源位置。真实Vivado的工程top=top、文件top=leaf结构不同，外部文件明确拒绝且工程文件SHA256均不变。交付见 `docs/V4_1_ALPHA2.md`。
 
 真正UI宿主仍被VS Code安装器的vscode-updating互斥锁阻挡；alpha2 SDK尝试日志 `bin/circuit-alpha2-host.log`，不能将Electron-as-Node编译测试当作完整UI宿主通过。用户工程曾临时配置现有YoWASP启动器用于诊断；已仅移除本轮添加的覆盖设置，使安装alpha2后用默认内置引擎，其他原设置保留。未终止安装器、未绕过更新锁。PR #11 继续保留Draft；master仍为已发布4.0 preview。
 
@@ -10,7 +10,7 @@ alpha2 实测：电路96/96（Node20/24）、既有Node511项510通过1可选跳
 
 4.1.0-alpha1 位于独立 worktree `C:\Users\JayceVane\.codex\worktrees\svtools-circuit\02_svtools`，分支 `codex/feat-circuit-viewer`。已完成 Yosys JSON → netlistsvg 真实数据验证、独立模型、ELK.js + SVG 交互及 Vivado 同模型适配。Vivado 2022.1.2 真实只读工程验证通过；其首版视图为平坦 RTL 详细化。Yosys builtin/slang 两条实际流程均通过。操作与限制见 `docs/CIRCUIT.md`，交付记录见 `docs/V4_1_ALPHA1.md`。
 
-本轮包含 75 项电路测试（Node 24 与 Node 20 均通过）、121 项 Rust 测试、既有功能回归及公开 RTL 夹具验收。真实浏览器验证明暗主题、参数化模块下钻、网络高亮、平移缩放与源位置；VS Code 独立宿主启动被本机更新锁阻止，未将浏览器替身计为真实宿主通过。复验入口 `scripts/verify-circuit-host.ps1`。
+本轮包含 75 项电路测试（Node 24通过；当时标注Node20的npx命令实际仍是Node24，此处撤回该兼容声明）、121 项 Rust 测试、既有功能回归及公开 RTL 夹具验收。真实浏览器验证明暗主题、参数化模块下钻、网络高亮、平移缩放与源位置；VS Code 独立宿主启动被本机更新锁阻止，未将浏览器替身计为真实宿主通过。复验入口 `scripts/verify-circuit-host.ps1`。
 
 接下来：在 VS Code 更新结束后运行独立宿主验收；根据用户实用反馈完善电路交互，再评估逻辑锥和更大设计的局部加载。不得将 4.1 自动合入 master 或另发 Release。FSDB 仍取消，二维 mem 保留；Vivado IP 仍仅计划。
 
