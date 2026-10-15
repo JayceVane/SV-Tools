@@ -23,6 +23,15 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            src/native/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('src/native/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
       - name: 校验 tag 与扩展版本一致
         env:
           TAG: ${{ github.ref_name }}

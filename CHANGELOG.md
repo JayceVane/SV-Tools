@@ -11,6 +11,7 @@ All notable changes to the SystemVerilog VSCode Extension will be documented in 
 **影响面：** 通过 PR 合入原工程，3.5.0 的提交与已有发布保留。此次仅发布 GitHub，不发布 Marketplace；电路视图不进入此包。安装、功能与已知限制见 `docs/releases/v4.0.0-preview.1.md`。
 
 发布 CI 同时校验 Node 20：FP16 穷举参考值改为按位精确提升至 Float32 后交给平台解码；新运行时额外对照原生 Float16。生产解码算法不变。
+Rust 属性/维度解析回归改为独立公开语料，移除对本机私有厂商工程的依赖；CI 与发布复用 Cargo 缓存。
 
 ## [4.0.0-alpha13] — if条件头紧凑
 

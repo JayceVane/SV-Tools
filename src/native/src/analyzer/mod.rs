@@ -695,14 +695,19 @@ endmodule
     }
 
     #[test]
-    fn test_parse_aurora_axi_to_ll() {
-        let source = std::fs::read_to_string(
-            r"D:\Workspace\FPGA\02_svtools\test_project\sfp_wapper\aurora_64b66b\aurora_64b66b_0_example_axi_to_ll.v"
-        ).expect("test file not found");
-        let result = extract_symbols(&source);
+    fn test_parse_attributes_and_dimension_references() {
+        // 独立语料覆盖属性名与维度参数，不能依赖开发机上的厂商工程文件。
+        let source = r#"
+(* keep_hierarchy = "yes", description = "attribute_name" *)
+module dimension_example #(parameter DATA_WIDTH = 64) (input wire clk);
+    wire [0:(DATA_WIDTH-1)] LL_OP_DATA_INT;
+    wire [(DATA_WIDTH/8)-1:0] i_rem;
+endmodule
+"#;
+        let result = extract_symbols(source);
         // Module name must not be picked from (* ... *) attribute
         assert_eq!(result.symbols.len(), 1);
-        assert_eq!(result.symbols[0].name, "aurora_64b66b_0_EXAMPLE_AXI_TO_LL");
+        assert_eq!(result.symbols[0].name, "dimension_example");
         // Net/var names must not be picked from dimension expressions.
         // 模块级 parameter 声明本身按设计进入 children（大纲展示参数）；
         // 需要防的是维度表达式 [0:(DATA_WIDTH-1)] 里的参数引用产生重复项
