@@ -120,11 +120,31 @@ test('FP32 全部指数区间及伪随机 32 位模式与 DataView 一致', () =
     }
 });
 
-test('FP16 全部 65536 个编码与平台 Float16 解码一致', () => {
-    const view = new DataView(new ArrayBuffer(2));
+/** 将 half 的位域精确提升到 binary32，再由平台解码，兼容没有 getFloat16 的运行时。 */
+function referenceFloat16(pattern, view) {
+    const sign = (pattern & 0x8000) << 16;
+    let exponent = (pattern >>> 10) & 0x1f;
+    let fraction = pattern & 0x3ff;
+    if (exponent === 0 && fraction !== 0) {
+        exponent = 113;
+        while ((fraction & 0x400) === 0) { fraction <<= 1; exponent--; }
+        fraction &= 0x3ff;
+    } else if (exponent === 31) exponent = 255;
+    else if (exponent !== 0) exponent += 112;
+    view.setUint32(0, (sign | (exponent << 23) | (fraction << 13)) >>> 0);
+    return view.getFloat32(0);
+}
+
+test('FP16 全部 65536 个编码与精确提升后的平台 Float32 解码一致', () => {
+    const view = new DataView(new ArrayBuffer(4));
+    const half = new DataView(new ArrayBuffer(2));
     for (let pattern = 0; pattern <= 0xffff; pattern++) {
-        view.setUint16(0, pattern);
-        expectNumber(values.decode(pattern.toString(2), signal(16), 'fp16'), view.getFloat16(0), pattern.toString(16));
+        const expected = referenceFloat16(pattern, view);
+        if (typeof half.getFloat16 === 'function') {
+            half.setUint16(0, pattern);
+            assert.equal(expected, half.getFloat16(0), pattern.toString(16));
+        }
+        expectNumber(values.decode(pattern.toString(2), signal(16), 'fp16'), expected, pattern.toString(16));
     }
 });
 

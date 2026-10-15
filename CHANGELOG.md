@@ -10,6 +10,8 @@ All notable changes to the SystemVerilog VSCode Extension will be documented in 
 
 **影响面：** 通过 PR 合入原工程，3.5.0 的提交与已有发布保留。此次仅发布 GitHub，不发布 Marketplace；电路视图不进入此包。安装、功能与已知限制见 `docs/releases/v4.0.0-preview.1.md`。
 
+发布 CI 同时校验 Node 20：FP16 穷举参考值改为按位精确提升至 Float32 后交给平台解码；新运行时额外对照原生 Float16。生产解码算法不变。
+
 ## [4.0.0-alpha13] — if条件头紧凑
 
 **变更内容：** `if (...) begin`条件独立参与行内紧凑，清除嵌套拼接逗号前的空格，折叠逗号后、移位运算符旁的冗余空格；支持同一行多个条件、else if、限定词及多行条件，保留保护区和用户换行。
