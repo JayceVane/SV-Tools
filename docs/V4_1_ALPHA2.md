@@ -21,7 +21,7 @@ Vivado 当前文件必须已保存且属于所选工程综合源。只读模式�
 |---|---|
 | JS 语法 | 139 文件，`circuit-alpha2-package.log` |
 | Golden | 19 用例、38/38 断言 |
-| 既有 Node | 511 项：510 通过、1 项可选目录重建跳过、0 失败 |
+| 既有 Node | 512 项：511 通过、1 项可选目录重建跳过、0 失败；`circuit-alpha2-final-regression.log` |
 | 电路 Node | 96/96，实际独立Node22/24二进制；`circuit-alpha2-node22-real.log`、`circuit-alpha2-package.log` |
 | Rust | 121/121，`circuit-alpha2-rust.log` |
 | 真实内置 Yosys | 固定0.68.1207，Node22.20.0/22.21.1/24.17.0成功编译；`circuit-alpha2-node22-base.log`、`circuit-alpha2-node22-real.log`。旧Node20/22.15.1的升级提示已核验，见`circuit-alpha2-legacy-rejection.log`。此前npx未切换运行时，撤回旧Node16/20通过记录 |
@@ -81,6 +81,8 @@ Vivado 当前文件必须已保存且属于所选工程综合源。只读模式�
 | `src/native/Cargo.toml` | crate版本同步 |
 | `src/native/package-lock.json` | napi锁版本同步 |
 | `src/native/package.json` | napi包版本同步 |
+| `test/toolchain_test.js` | 拆分确定性日志保留与真实进程启动超时，去除400ms启动假设 |
+| `docs/bugs/env-runner-timeout-startup-race.md` | Windows CI进程冷启动与测试竞态 |
 | `test/circuit_bundled_test.js` | 真实无PATH编译、两个前端、readmem与脏正文回映射 |
 | `test/circuit_commands_test.js` | 真实注册/Worker/ELK与入口/top/取消/错误策略 |
 | `test/circuit_pipeline_test.js` | 缺工具消息、YoWASP cmd目录快照 |

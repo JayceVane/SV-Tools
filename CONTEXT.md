@@ -2,7 +2,7 @@
 
 2026-10-16 alpha2：已修复 RTL 右键 URI 被当作 JSON、缺少 Yosys 的默认体验；新增固定 @yowasp/yosys 0.68.1207 的离线 WASM 后端。默认 `yosysPath=bundled`，可覆盖为外部路径；打包包含 WASM/share/许可，不包含 Python 或 npm runtime。编辑器标题栏 `fromVivadoFile` 选择当前文件模块 top，工程面板 `fromVivado` 保留工程 top。当前文件 Vivado 要求已保存的工程综合源，只用 `synth_design -rtl -top`，不保存或更改 XPR。
 
-alpha2 实测：电路96/96（实际独立Node22/24二进制）、既有Node511项510通过1可选跳过、Golden38/38、Rust121/121；内置工具在Node22/24执行真实RTL流程；Node20无法加载该WASM，最低VS Code提高为1.106，CI覆盖22/24。较早Node22.15.1仍默认关闭exnref，纯Node基线22.20.0。此前npx调用实际仍用Node24，撤回旧Node16/20通过的记录。包内419个文件逐字节核对；解包后使用VS Code自身Node模式完成新网表→Worker→ELK与原生ABI，在当前用户D盘工作区以公开夹具验证源位置。真实Vivado的工程top=top、文件top=leaf结构不同，外部文件明确拒绝且工程文件SHA256均不变。交付见 `docs/V4_1_ALPHA2.md`。
+alpha2 实测：电路96/96（实际独立Node22/24二进制）、既有Node512项511通过1可选跳过、Golden38/38、Rust121/121；内置工具在Node22/24执行真实RTL流程；Node20无法加载该WASM，最低VS Code提高为1.106，CI覆盖22/24。较早Node22.15.1仍默认关闭exnref，纯Node基线22.20.0。此前npx调用实际仍用Node24，撤回旧Node16/20通过的记录。包内419个文件逐字节核对；解包后使用VS Code自身Node模式完成新网表→Worker→ELK与原生ABI，在当前用户D盘工作区以公开夹具验证源位置。真实Vivado的工程top=top、文件top=leaf结构不同，外部文件明确拒绝且工程文件SHA256均不变。交付见 `docs/V4_1_ALPHA2.md`。
 
 真正UI宿主仍被VS Code安装器的vscode-updating互斥锁阻挡；alpha2 SDK尝试日志 `bin/circuit-alpha2-host.log`，不能将Electron-as-Node编译测试当作完整UI宿主通过。用户工程曾临时配置现有YoWASP启动器用于诊断；已仅移除本轮添加的覆盖设置，使安装alpha2后用默认内置引擎，其他原设置保留。未终止安装器、未绕过更新锁。PR #11 继续保留Draft；master仍为已发布4.0 preview。
 

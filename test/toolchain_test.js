@@ -46,14 +46,28 @@ test('runner 将 cwd 和环境交给子进程', async () => {
 
 test('runner 超时会完成调用，并保留已输出日志', { timeout: 5000 }, async () => {
     let timeoutCount = 0;
-    const result = await runNode('process.stdout.write("ready"); setInterval(() => {}, 1000);', [], {
-        timeoutMs: 400,
+    // Windows CI繁忙时，真实Node启动可能超过超时；这里显式保证日志先于超时到达。
+    const child = new EventEmitter();
+    child.stdout = new PassThrough();
+    child.stderr = new PassThrough();
+    child.kill = () => { queueMicrotask(() => child.emit('close', null, 'SIGKILL')); return true; };
+    const result = await runProcess('mock-tool', [], {
+        platform: 'linux',
+        spawn: () => { queueMicrotask(() => child.stdout.write('ready')); return child; },
+        timeoutMs: 20,
         onTimeout: () => { timeoutCount++; }
     });
     assert.equal(result.stdout, 'ready');
     assert.equal(result.timedOut, true);
     assert.equal(result.stopped, true);
     assert.equal(timeoutCount, 1);
+    assert.ok(result.elapsedMs < 4000);
+});
+
+test('runner 真实子进程超时包含启动阶段，不要求超时前已输出', { timeout: 5000 }, async () => {
+    const result = await runNode('setInterval(() => {}, 1000);', [], { timeoutMs: 50 });
+    assert.equal(result.timedOut, true);
+    assert.equal(result.stopped, true);
     assert.ok(result.elapsedMs < 4000);
 });
 
