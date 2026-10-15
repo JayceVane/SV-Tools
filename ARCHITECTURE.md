@@ -15,6 +15,8 @@ flowchart LR
     Preprocess --> Engine[Token 与结构事件调度]
     Engine --> Align[构造布局与列宽]
     Align --> Blank[统一空行裁决]
+    Blank --> Guard[字符保全与异常回退]
+    Pipeline -->|原文| Guard
     Scan[共享词法事实与原文区间] --> Preprocess
     Scan --> Engine
     Scan --> Align
@@ -22,6 +24,13 @@ flowchart LR
 ```
 
 每一阶段都遵守原文保护合同：结构识别可以屏蔽受保护的内容，但输出必须从原文区间取值。主循环的保护 token 不能替代后续对齐器的保护；对齐器重新识别文本时也要复用同一词法事实。
+
+alpha12增加不可配置的输出提交条件：仅忽略ASCII空格/Tab/CR/LF，其余字符的值、
+数量和顺序必须与该入口原文相同。Rust `format_guard` 用无中间副本的迭代比较约束
+全文、普通段、兼容beautifier及选区对齐；捕获布局异常并回退原文。NAPI先严格读取
+UTF-16，孤立代理项返回原始JS字符串，避免在守卫之前被UTF-8转换替换。编辑器的
+`format-safety.js`在全文/选区和对齐替换之前按UTF-16复核，保护旧或错误native边界。
+模块实例、Testbench、头部和重复代码等生成命令保留其新增/改写语义。
 
 ## 模块边界
 
@@ -33,7 +42,9 @@ flowchart LR
 | `formatter/session` 与布局模块 | 单次调用的缩进、续行、输出提交 | 跨请求共享可变状态 |
 | `align/*` | 构造的列宽和布局，按原文区间重建 | 提前裁决用户空行 |
 | `blank_rules` | 空行配置与结构边界 | 改写字面量或注释正文 |
-| `bindings` | Rust 与 napi-rs 调用适配 | 格式化规则 |
+| `format_guard` | 四种ASCII布局字符外的序列校验，异常与不安全候选回退 | 语法识别、布局配置、纠正乱码编码 |
+| `bindings` | Rust 与 napi-rs 调用适配、布局入口的无损UTF-16边界 | 格式化规则 |
+| `src/editor/format-safety.js` | 编辑器替换前的UTF-16字符保全 | 原生算法、代码生成政策 |
 | `src/toolchains/process.js` | 进程启动、完成、超时和终止 | 输出存储、引擎参数、FPGA 诊断语义 |
 | `src/toolchains/output.js` | UTF-8 解码、有界摘要、逐行回调、日志背压 | 编译成败、编辑器更新 |
 | `src/toolchains/job.js` | 任务身份、取消、进程槽、独立目录和清理 | 编译参数、诊断规则 |

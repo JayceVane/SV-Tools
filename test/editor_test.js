@@ -35,16 +35,17 @@ function formatterHarness(native, overrides = {}) {
 test('编辑器格式化准确读取选择范围并传递原文和配置', async () => {
     const range = { start: { line: 2, character: 0 }, end: { line: 4, character: 9 } };
     const source = 'initial $display("中文");\n';
+    const expected = '    initial $display("中文");\n';
     let received;
     const harness = formatterHarness({ formatText: (text, options) => {
         received = { text, options };
-        return 'formatted source\n';
+        return expected;
     } }, { tabSize: 2, useTab: true, inlineCompact: false, blankCompact: false, maxConsecutiveEmptyLines: -1 });
     const document = { getText: actualRange => {
         assert.equal(actualRange, range);
         return source;
     } };
-    assert.equal(await harness.formatter.formatDocument(document, range), 'formatted source\n');
+    assert.equal(await harness.formatter.formatDocument(document, range), expected);
     assert.equal(received.text, source);
     assert.equal(received.options.nbSpace, 2);
     assert.equal(received.options.useTab, true);
@@ -59,6 +60,50 @@ test('全文格式化读取整个文档并返回原生结果', async () => {
     const document = { getText: range => { assert.equal(range, null); return source; } };
     assert.equal(await harness.formatter.formatDocument(document), source);
     assert.deepEqual(harness.errors, []);
+});
+
+for (const [label, output] of [
+    ['删除字符', 'module demo; endmodul\n'],
+    ['添加字符', 'module demo;; endmodule\n'],
+    ['重排字符', 'endmodule module demo;\n'],
+    ['替换字符', 'module Demo; endmodule\n'],
+    ['错误返回类型', null]
+]) test(`编辑器拒绝原生结果${label}，全文与选区均保留原文`, async context => {
+    context.mock.method(console, 'warn', () => {});
+    const source = 'module demo; endmodule\n', range = { start: 0, end: 1 };
+    const h = formatterHarness({ formatText: () => output });
+    for (const selection of [null, range]) {
+        assert.equal(await h.formatter.formatDocument({ getText: actual => { assert.equal(actual, selection); return source; } }, selection), source);
+    }
+    assert.deepEqual(h.errors, []);
+});
+
+test('编辑器按UTF-16保全孤立代理项、非布局空白与NUL，不接受有损替换', async context => {
+    context.mock.method(console, 'warn', () => {});
+    for (const character of ['\ud800', '\udfff', '\u0000', '\u000b', '\u000c', '\u00a0', '\u3000', '\ufeff', '\u2028', '\u2029', '\u200b']) {
+        const source = 'a' + character + 'b\r\n';
+        const h = formatterHarness({ formatText: () => 'a�b\n' });
+        assert.equal(await h.formatter.formatDocument({ getText: () => source }), source);
+    }
+});
+
+test('对齐选区也校验原生结果，只有排版变化才能创建替换', async context => {
+    context.mock.method(console, 'warn', () => {});
+    const source = 'logic a;\n\u00a0', selection = { start: 0, end: 1 }, replacements = [];
+    let result;
+    const commands = createEditorCommands({
+        loadNativeModule: () => ({ alignCode: (text, tabSize) => { assert.equal(text, source); assert.equal(tabSize, 4); return result; } }),
+        reportNativeMissing() { assert.fail('native missing'); },
+        vscode: { workspace: { getConfiguration: () => configuration() }, window: {
+            activeTextEditor: { selection, document: { getText: range => { assert.equal(range, selection); return source; } },
+                edit: async callback => callback({ replace: (...args) => replacements.push(args) }) },
+            showErrorMessage: message => assert.fail(message)
+        } }
+    });
+    for (result of ['logic a;\n', 'logic b;\n\u00a0', undefined]) await commands.alignSelectedCode();
+    assert.equal(replacements.length, 0);
+    result = '\tlogic a;\r\n\u00a0'; await commands.alignSelectedCode();
+    assert.deepEqual(replacements, [[selection, result]]);
 });
 
 test('原生模块缺失时编辑器格式化返回 null，并报告一次', async () => {

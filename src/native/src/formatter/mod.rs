@@ -25,8 +25,10 @@ impl VerilogBeautifier {
     pub fn new(options: FormatOptions) -> Self {
         Self { options }
     }
+    /// 兼容入口也执行字符保全，未知语法或异常不得破坏非布局字符。
     pub fn beautify_text(&mut self, text: &str) -> String {
-        Engine::new(self.options.clone()).format(text)
+        let options = self.options.clone();
+        crate::format_guard::format(text, || Engine::new(options).format(text))
     }
 }
 struct Engine {

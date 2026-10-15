@@ -4,6 +4,7 @@ pub mod beautifier;
 pub mod blank_rules;
 pub mod codegen;
 pub mod config;
+mod format_guard;
 pub mod formatter;
 pub mod parser;
 #[cfg_attr(
@@ -26,7 +27,12 @@ use config::FormatOptions;
 /// 完整格式化：`` `pragma protect `` 加密区原样透传（BASE64 行长是编码
 /// 规范的一部分，重排会破坏解密；且长载荷会使对齐器二次方变慢），
 /// 其余普通代码段独立格式化后按原顺序拼接。
+/// 只允许改动 ASCII 空格/Tab/CR/LF；不安全结果或布局异常返回原文。
 pub fn format_with_protect_passthrough(text: &str, options: &FormatOptions) -> String {
+    format_guard::format(text, || format_document(text, options))
+}
+
+fn format_document(text: &str, options: &FormatOptions) -> String {
     // 行尾归一须先于加密区切分：CRLF 的 \r 会让段间空行判定失效
     // （`\r\n` 行被视为非空内容，段边界空行被丢弃）
     let text = text.replace("\r\n", "\n").replace('\r', "\n");
@@ -36,7 +42,7 @@ pub fn format_with_protect_passthrough(text: &str, options: &FormatOptions) -> S
     }
     if segments.len() == 1 {
         return match segments.into_iter().next().unwrap() {
-            preprocess::ProtectSegment::Code(s) => format_code_segment(&s, options),
+            preprocess::ProtectSegment::Code(s) => format_segment(&s, options),
             preprocess::ProtectSegment::Protected(s) => s,
         };
     }
@@ -50,7 +56,7 @@ pub fn format_with_protect_passthrough(text: &str, options: &FormatOptions) -> S
                 // 原没有就不加（§6 不增空行原则）
                 let lead_blank = i > 0 && s.starts_with('\n');
                 let trail_blank = i + 1 < n && s.trim_end_matches('\n').len() + 2 <= s.len();
-                let f = format_code_segment(&s, options);
+                let f = format_segment(&s, options);
                 // 段首空行由拼接层统一裁决（格式化结果不保留前导换行）
                 let f_body = f.trim_start_matches('\n');
                 if i + 1 == n {
@@ -77,8 +83,12 @@ pub fn format_with_protect_passthrough(text: &str, options: &FormatOptions) -> S
     out
 }
 
-/// 格式化单个普通代码段（不含加密区）。
+/// 格式化单个普通代码段（不含加密区），遵守与全文相同的字符保全条件。
 pub fn format_code_segment(text: &str, options: &FormatOptions) -> String {
+    format_guard::format(text, || format_segment(text, options))
+}
+
+fn format_segment(text: &str, options: &FormatOptions) -> String {
     let indent_style = options.indent_style().to_string();
 
     // Preprocess: merge standalone 'begin' for 1tbs style

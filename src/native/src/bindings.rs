@@ -1,12 +1,33 @@
 //! napi-rs host 适配；格式化核心不处理 JavaScript 运行时。
 use crate::{analyzer, codegen, config::*, parser};
 use napi::bindgen_prelude::*;
+use napi::{Env, JsString};
 use napi_derive::napi;
 
 /// Format Verilog/SystemVerilog text.
 #[napi]
-pub fn format_text(text: String, options: FormatOptions) -> Result<String> {
-    Ok(crate::format_with_protect_passthrough(&text, &options))
+pub fn format_text(env: Env, text: JsString, options: FormatOptions) -> Result<JsString> {
+    layout_js_string(env, text, |source| {
+        crate::format_with_protect_passthrough(source, &options)
+    })
+}
+
+/// 两个布局入口共用 UTF-16 边界，代码生成命令仍保留各自的改写语义。
+fn layout_js_string(
+    env: Env,
+    text: JsString,
+    layout: impl FnOnce(&str) -> String,
+) -> Result<JsString> {
+    // 先严格读取 UTF-16；String 入参会将孤立代理项替换成 U+FFFD，事后无法追回原文。
+    let original = text.into_utf16()?;
+    let source = match original.as_str() {
+        Ok(source) => source,
+        Err(_) => {
+            eprintln!("[svtools] Invalid UTF-16; original text preserved.");
+            return Ok(original.into_value());
+        }
+    };
+    env.create_string(&layout(&source))
 }
 
 /// Generate module instantiation code.
@@ -88,8 +109,10 @@ pub fn repeat_code(template: String, options: RepeatOptions) -> Result<String> {
 
 /// Align selected Verilog code.
 #[napi]
-pub fn align_code(text: String, tab_size: u32) -> Result<String> {
-    Ok(codegen::align_code::align_code(&text, tab_size))
+pub fn align_code(env: Env, text: JsString, tab_size: u32) -> Result<JsString> {
+    layout_js_string(env, text, |source| {
+        codegen::align_code::align_code(source, tab_size)
+    })
 }
 
 /// Generate file header from template.

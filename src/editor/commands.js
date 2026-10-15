@@ -3,6 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 const { buildModuleOptions, buildTestbenchOptions } = require('../configuration');
+const { preservesCharacters } = require('./format-safety');
 
 /** @param {{vscode: object, loadNativeModule: () => object|null, reportNativeMissing: () => void}} deps @returns {object} 编辑器命令实现；由扩展入口统一注册。 */
 function createEditorCommands({ vscode, loadNativeModule, reportNativeMissing }) {
@@ -171,6 +172,10 @@ function createEditorCommands({ vscode, loadNativeModule, reportNativeMissing })
 
         try {
             const result = native.alignCode(text, config.get('tabSize', 4));
+            if (!preservesCharacters(text, result)) {
+                console.warn('Alignment changed non-layout characters; original text preserved.');
+                return;
+            }
             await editor.edit(editBuilder => {
                 editBuilder.replace(selection, result);
             });

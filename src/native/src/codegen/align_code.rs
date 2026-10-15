@@ -62,6 +62,10 @@ pub fn normalize_for_parsing(codes: &str) -> String {
 /// Align Verilog code based on assignment operators.
 /// Replicates Python `vg_core.align_code()`.
 pub fn align_code(text: &str, tab_size: u32) -> String {
+    crate::format_guard::format(text, || align_selection(text, tab_size))
+}
+
+fn align_selection(text: &str, tab_size: u32) -> String {
     let lines: Vec<&str> = text.split('\n').collect();
 
     // Determine alignment type from first non-empty line

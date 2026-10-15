@@ -5,7 +5,10 @@
 
 改编自 Sublime Text [SystemVerilog](https://github.com/TheClams/SystemVerilog)（格式化）与 [Verilog-Gadget](https://github.com/poucotm/Verilog-Gadget)（生产力工具）插件。
 
-本 worktree 为 **4.0.0-alpha11 开发分支**。源码按 `src/` 分层，原生模块与 CLI 构建到 `bin/`；3.x 继续在原工程目录维护。
+本 worktree 为 **4.0.0-alpha12 开发分支**。源码按 `src/` 分层，原生模块与 CLI 构建到 `bin/`；3.x 继续在原工程目录维护。
+
+格式化只能改变普通空格、Tab、CR、LF；其它字符的内容、次数和顺序必须保持，即使输入
+全部乱码或语法不完整。无法安全提交的布局保留原文，详见 [格式化规范](docs/FORMAT_SPEC.md)。
 
 4.0 波形查看器采用后台流式加载与按需时间窗，增加双游标 Δt 和信号检索，已实测
 100/500 MiB VCD。操作说明、性能数据与验收范围见 [波形查看器](docs/WAVEFORM.md)。

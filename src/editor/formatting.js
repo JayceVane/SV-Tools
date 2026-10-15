@@ -1,6 +1,7 @@
 'use strict';
 
 const { buildFormatOptions } = require('../configuration');
+const { preservesCharacters } = require('./format-safety');
 
 /** @param {{vscode: object, loadNativeModule: () => object|null, reportNativeMissing: () => void}} deps @returns {{formatDocument: (document: object, range?: object) => Promise<string|null>}} */
 function createFormatter({ vscode, loadNativeModule, reportNativeMissing }) {
@@ -23,6 +24,10 @@ function createFormatter({ vscode, loadNativeModule, reportNativeMissing }) {
 
         try {
             const formattedText = native.formatText(text, options);
+            if (!preservesCharacters(text, formattedText)) {
+                console.warn('Formatting changed non-layout characters; original text preserved.');
+                return text;
+            }
             return formattedText;
         } catch (error) {
             vscode.window.showErrorMessage(`Formatting failed: ${error.message}`);
