@@ -82,6 +82,7 @@ async function fixture(t, options = {}) {
             }
         }, Uri: { file: uri }, ViewColumn: { Beside: 2 }, ProgressLocation: { Notification: 15 }
     };
+    state.vscode = vscode;
     state.circuit = activateCircuitViewer(context, { vscode, vivado: { projectSelection: { current: async () => state.projectPath },
         resolveBinDir: () => path.join(root, 'Vivado', 'bin') } });
     t.after(async () => {
@@ -219,4 +220,14 @@ test('取消当前文件顶层扫描释放 Worker，不创建页面或运行 Viv
     assert.equal(await f.commands.get('svtools.circuit.fromVivadoFile')(), undefined);
     assert.equal(f.progress[0].title, '读取 RTL 顶层'); assert.equal(f.panels.length, 0); assert.equal(f.vivadoGenerated.length, 0);
     assert.deepEqual(f.errors, []);
+});
+
+
+test('RTL命令的默认请求自动包含工作区子模块，而不是仅编译当前文件', async t => {
+    const f = await fixture(t, { text: 'module top; half_adder child(); endmodule' });
+    const library = path.join(f.root, 'arbitrary-name.sv'); await fs.writeFile(library, 'module half_adder; endmodule');
+    f.vscode.workspace.findFiles = async () => [uri(library), uri(f.rtl)];
+    const binding = await f.commands.get('svtools.circuit.fromSource')(uri(f.rtl));
+    try { assert.equal((await binding.loaded).ok, true); assert.deepEqual(f.generated[0].sources, [library, f.rtl]); }
+    finally { binding.dispose(); }
 });

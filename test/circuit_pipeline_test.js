@@ -159,3 +159,23 @@ test('源位置前缀ERROR使任务失败，摘要保留真实语法错误而不
         });
     }
 });
+
+
+test('Slang先输出通用ERROR再输出源码诊断时，摘要优先保留具体错误', async t => {
+    for (const code of [0, 1]) {
+        const { root, task } = await fixture(t);
+        task.run = async (_, args, options) => {
+            options.onLine('ERROR: Design elaboration failed; see full log for details');
+            options.onLine('Top level design units: full_adder');
+            options.onLine("source0/full_adder.sv:1:31: error: use of undeclared identifier 'impl_t'");
+            return { code, output: '(node:123) ExperimentalWarning: WASI', logPath: 'elaboration.log' };
+        };
+        await assert.rejects(runYosysCircuit({ task, executable: 'yosys', frontend: 'slang', sources: ['full_adder.sv'], top: 'full_adder', outputBase: root, sourceRoot: root }), error => {
+            assert.match(error.message, /full_adder.sv:1:31: error: use of undeclared identifier 'impl_t'/);
+            assert.match(error.message, /svtools\.circuit\.sources/);
+            assert.match(error.message, /完整日志：elaboration.log/);
+            assert.doesNotMatch(error.message, /see full log for details|ExperimentalWarning/);
+            return true;
+        });
+    }
+});

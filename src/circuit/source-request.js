@@ -22,21 +22,28 @@ function configuredPaths(values, root) {
  * @param {{document:object,root:string,top:string,config:object,task:object,outputBase:string}} options
  * @returns {Promise<object>} 未保存正文写入任务快照，保留相对 include 与源码映射；不保存或改写用户文件。
  */
-async function prepareSourceRequest({ document, root, top, config, task, outputBase }) {
+async function prepareSourceRequest({ document, root, top, config, task, outputBase, resolveSources }) {
     const filePath = document.uri.fsPath;
-    const sources = configuredPaths(config.sources || [], root);
+    let sources = configuredPaths(config.sources || [], root);
     const key = value => process.platform === 'win32' ? value.toLowerCase() : value;
     if (!sources.some(file => key(file) === key(filePath))) sources.push(filePath);
-    const includeDirs = [...new Set([path.dirname(filePath), ...configuredPaths(config.includeDirs || [], root)])];
-    const sourceMap = {};
-    if (document.isDirty) {
-        const text = document.getText();
-        if (Buffer.byteLength(text, 'utf8') > MAX_BUFFER_BYTES) throw new Error('未保存 RTL 快照超过 16 MiB');
-        const directory = await task.directory(outputBase, 'source');
-        const snapshot = path.join(directory, path.basename(filePath));
-        await fs.writeFile(snapshot, text, 'utf8');
-        for (let index = 0; index < sources.length; index++) if (key(sources[index]) === key(filePath)) sources[index] = snapshot;
-        sourceMap[snapshot] = filePath;
+    const configuredIncludes = configuredPaths(config.includeDirs || [], root);
+    const current = { file: filePath, text: document.getText?.(), isDirty: document.isDirty };
+    const context = resolveSources ? await resolveSources({ current, root, top, sources, isExplicit: !!config.sources?.length, includeDirs: configuredIncludes, task }) : { sources, documents: [current] };
+    sources = context.sources;
+    const includeDirs = [...new Set([path.dirname(filePath), ...configuredIncludes, ...sources.map(file => path.dirname(file))])];
+    const buffers = new Map(context.documents.map(buffer => [key(path.resolve(buffer.file)), buffer]));
+    const sourceMap = {}; let snapshotBytes = 0;
+    for (let index = 0; index < sources.length; index++) {
+        const original = sources[index], buffer = buffers.get(key(path.resolve(original)));
+        if (!buffer?.isDirty) continue;
+        snapshotBytes += Buffer.byteLength(buffer.text || '', 'utf8');
+        if (snapshotBytes > 64 * 1024 * 1024) throw new Error('未保存 RTL 依赖快照总量超过64 MiB');
+        if (typeof buffer.text !== 'string' || Buffer.byteLength(buffer.text, 'utf8') > MAX_BUFFER_BYTES) throw new Error('未保存 RTL 快照超过 16 MiB');
+        const directory = path.join(await task.directory(outputBase, 'source'), String(index));
+        await fs.mkdir(directory, { recursive: true });
+        const snapshot = path.join(directory, path.basename(original));
+        await fs.writeFile(snapshot, buffer.text, 'utf8'); sources[index] = snapshot; sourceMap[snapshot] = original;
     }
     return { sources, includeDirs, defines: config.defines || [], frontend: config.frontend || 'auto',
         top, sourceRoot: root, title: path.basename(filePath), sourceMap };

@@ -47,6 +47,9 @@ test/fixtures/*
 !test/fixtures/memory_dump.sv
 !test/fixtures/memory_dump.vcd
 !test/fixtures/circuit-demo.sv
+!test/fixtures/circuit-enum/
+test/fixtures/circuit-enum/*
+!test/fixtures/circuit-enum/*.sv
 
 # OS
 .DS_Store

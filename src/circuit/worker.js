@@ -6,6 +6,7 @@ const path = require('node:path');
 const { createHash } = require('node:crypto');
 const { findModule } = require('./model');
 const { layoutModule } = require('./layout');
+const { createSourcePathMapper } = require('./source-paths');
 const MAX_JSON_BYTES = 64 * 1024 * 1024;
 const MAX_MESSAGE_BYTES = 16 * 1024 * 1024;
 let design;
@@ -13,21 +14,10 @@ let loadSequence = 0;
 
 /** 只有快照文件映射回原文位置，模型坐标与原始 JSON 均不发送到扩展宿主。 */
 function remapSources(model, sourceMap = {}, sourceDirectories = []) {
-    const replacements = new Map(Object.entries(sourceMap).map(([from, to]) => [path.resolve(from), to]));
+    const mapPath = createSourcePathMapper({ sourceMap, sourceDirectories });
     for (const module of model.modules) {
         for (const item of [module, ...module.ports, ...module.cells, ...module.cells.flatMap(cell => cell.ports)]) {
-            if (item.source && replacements.has(path.resolve(item.source.path))) {
-                item.source = { ...item.source, path: replacements.get(path.resolve(item.source.path)) };
-            } else if (item.source) {
-                for (const directory of sourceDirectories) {
-                    const relative = path.relative(directory.from, item.source.path);
-                    if (relative !== '..' && !relative.startsWith('..' + path.sep) && !path.isAbsolute(relative)) {
-                        const mapped = path.join(directory.to, relative);
-                        item.source = { ...item.source, path: replacements.get(path.resolve(mapped)) || mapped };
-                        break;
-                    }
-                }
-            }
+            if (item.source) item.source = { ...item.source, path: mapPath(item.source.path) };
         }
     }
 }
@@ -69,6 +59,7 @@ async function load({ filePath, format, stage, top, title, sourceRoot, sourceMap
 
 const commands = {
     load,
+    sourceClosure: payload => require('./source-dependencies').resolveSourceClosure(payload),
     topCandidates: ({ text }) => {
         if (typeof text !== 'string' || Buffer.byteLength(text, 'utf8') > 16 * 1024 * 1024) {
             throw new Error('RTL 顶层扫描超过 16 MiB');

@@ -2,13 +2,13 @@
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const { processSucceeded } = require('../toolchains/result');
+const { MAX_ERROR_CHARS, createYosysDiagnostics, yosysErrorHint } = require('./yosys-diagnostics');
 const MAX_SOURCES = 4096;
 const DEFAULT_TIMEOUT_MS = 120000;
 const MAX_INCLUDE_SNAPSHOT_BYTES = 64 * 1024 * 1024;
 const MAX_INCLUDE_SNAPSHOT_FILES = 4096;
 const MAX_INCLUDE_SNAPSHOT_ENTRIES = 16384;
 const MAX_WRAPPER_BYTES = 4 * 1024 * 1024;
-const MAX_ERROR_CHARS = 2000;
 
 /** @param {string} value Yosys 命令中的单个词。@returns {string} 带引用的词；拒绝换行与 NUL。 */
 function yosysQuote(value) {
@@ -125,16 +125,13 @@ async function runYosysCircuit(options) {
     await fs.writeFile(scriptPath, buildYosysScript({ ...options, frontend, sources: [inputPath], includeDirs: aliases.directories,
         outputPath: bundled ? bundled.outputPath : filePath }), 'utf8');
     task.throwIfCancelled();
-    let firstError;
+    const diagnostics = createYosysDiagnostics({ sourceRoot: bundled ? '/' : sourceRoot,
+        sourceMap: options.sourceMap, sourceDirectories: aliases.sourceDirectories });
     if (bundled) command = bundled.command;
     const result = await task.run(command, bundled ? bundled.args : ['-Q', '-T', '-s', scriptPath.replace(/\\/g, '/')], {
         cwd: sourceRoot, env: bundled ? { ...process.env, ...env, ELECTRON_RUN_AS_NODE: '1' } : env,
         stage: 'yosys', timeoutMs: options.timeoutMs || DEFAULT_TIMEOUT_MS,
-        onStdout: onOutput, onStderr: onOutput, onLine(line) {
-            if (!firstError && /^\s*(?:ERROR:|.+:\d+(?::\d+)?:\s*(?:fatal )?error:|内置 Yosys：)/i.test(line)) {
-                firstError = line.slice(0, MAX_ERROR_CHARS);
-            }
-        }
+        onStdout: onOutput, onStderr: onOutput, onLine: diagnostics.onLine
     });
     task.throwIfCancelled();
     if (/\bENOENT\b/.test(result.errorMessage || '')) {
@@ -142,10 +139,10 @@ async function runYosysCircuit(options) {
             + '。请将 svtools.circuit.yosysPath 设置为已安装的 yosys 或 yowasp-yosys 的可执行文件路径。'
             + '\n完整日志：' + result.logPath), { code: 'YOSYS_NOT_FOUND' });
     }
-    if (!processSucceeded(result) || firstError) {
-        const detail = result.errorMessage || result.logError || firstError || result.output?.slice(-MAX_ERROR_CHARS) || `exit ${result.code}`;
-        const hint = frontend === 'verilog' && /syntax error|unexpected TOK_|Unsupported SystemVerilog/i.test(detail)
-            ? '\n当前为 Yosys 旧 Verilog 前端；SystemVerilog 可使用内置 auto 或支持 read_slang 的 slang 前端。' : '';
+    const diagnostic = diagnostics.getError();
+    if (!processSucceeded(result) || diagnostic) {
+        const detail = result.errorMessage || result.logError || diagnostic || result.output?.slice(-MAX_ERROR_CHARS) || `exit ${result.code}`;
+        const hint = yosysErrorHint(detail, frontend);
         throw new Error('Yosys 电路生成失败：' + detail + hint + '\n完整日志：' + result.logPath);
     }
     const stat = await fs.stat(filePath).catch(error => { throw new Error('Yosys 未生成电路 JSON：' + error.message); });

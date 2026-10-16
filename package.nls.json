@@ -112,7 +112,7 @@
   "cmd.circuit.stop.title": "Stop Circuit Generation",
   "cfg.circuit.yosysPath": "Use bundled for the included offline Yosys WASM engine; no Python or separate tool installation is required. Alternatively specify a local Yosys executable.",
   "cfg.circuit.frontend": "auto uses Slang with bundled Yosys and read_verilog -sv with external tools. slang/verilog explicitly override the choice; external slang requires read_slang support.",
-  "cfg.circuit.sources": "Ordered RTL source paths, relative to the workspace folder or absolute. The active file is appended if absent.",
+  "cfg.circuit.sources": "Ordered RTL source files. Empty: discover module/interface/package dependencies within the current workspace folder. Non-empty: use this exact order, then append the current file if missing; no automatic discovery.",
   "cfg.circuit.includeDirs": "Local HDL include directories, relative to the workspace folder or absolute.",
   "cfg.circuit.defines": "Preprocessor definitions such as SYNTHESIS or WIDTH=8.",
   "cfg.circuit.top": "Top module for RTL circuit generation. Leave empty to choose from the active file.",

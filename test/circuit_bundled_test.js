@@ -80,3 +80,13 @@ for (const scope of ['compilation-unit', 'module']) test(`默认内置前端支�
     assert.equal(await fs.readFile(original, 'utf8'), disk);
     assert.match(await fs.readFile(path.join(path.dirname(generated.filePath), 'circuit.ys'), 'utf8'), /^read_slang /);
 });
+
+
+test('真实Slang拒绝不可见类型、字符串枚举及缺子模块，正确枚举保留层级并通过完整真值表', { timeout: 30000 }, async t => {
+    const out = await fs.mkdtemp(path.join(os.tmpdir(), 'svtools-enum-'));
+    t.after(() => fs.rm(out, { recursive: true, force: true }));
+    const { verifyEnumCircuit } = require('../scripts/verify-circuit-enum');
+    const report = await verifyEnumCircuit({ out });
+    assert.equal(report.truthTableRows, 8); assert.equal(report.sourceUnchanged, true);
+    assert.equal(Object.keys(report.failures).length, 3); assert.equal(report.enumVariants.length, 2);
+});

@@ -5,6 +5,7 @@ const { createToolTaskManager } = require('../toolchains/job');
 const { createBufferedOutput } = require('../toolchains/channel');
 const { runYosysCircuit } = require('./yosys-runner');
 const { prepareSourceRequest } = require('./source-request');
+const { createCircuitSourceResolver } = require('./source-context');
 const { CircuitSession } = require('./session');
 const { bindCircuitPanel } = require('./host');
 const { createCircuitHtml } = require('./view');
@@ -20,6 +21,7 @@ function insideRoots(file, roots) {
 /** @param {object} context @param {{vivado:object,vscode?:object}} dependencies @returns {object} 注册电路数据入口及面板生命周期。 */
 function activateCircuitViewer(context, { vivado, vscode = require('vscode') }) {
     const manager = createToolTaskManager();
+    const resolveSources = createCircuitSourceResolver({ vscode });
     const channel = vscode.window.createOutputChannel('SV Tools · Circuit');
     const output = createBufferedOutput(channel);
     const panels = new Set();
@@ -133,7 +135,7 @@ function activateCircuitViewer(context, { vivado, vscode = require('vscode') }) 
         const root = rootOf(document.uri), outputBase = path.join(root, '.svtools', 'circuit');
         const roots = [root, path.dirname(document.uri.fsPath), ...(vscode.workspace.workspaceFolders || []).map(folder => folder.uri.fsPath)];
         return open(({ signal }) => runJob('生成 RTL 电路 · Yosys', async task => {
-            const options = await prepareSourceRequest({ document, root, top, task, outputBase,
+            const options = await prepareSourceRequest({ document, root, top, task, outputBase, resolveSources,
                 config: Object.fromEntries(['sources', 'includeDirs', 'defines', 'frontend'].map(key => [key, config.get(key)])) });
             for (const file of options.sources) if (!insideRoots(file, [root])) {
                 if (!roots.includes(path.dirname(file))) roots.push(path.dirname(file));

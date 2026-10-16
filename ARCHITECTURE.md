@@ -79,6 +79,10 @@ alpha5将页面热路径分成两个纯索引：`graph-index.js`管理模块拓�
 
 client只持有相机逻辑状态，requestAnimationFrame每帧提交一次最新变换。视口几何在换图和ResizeObserver中更新，滚轮不再同步读取布局。换图、加载、取消与销毁清理待提交帧；手动相机在窗口变化后重裁剪，保持缩放和平移。缩小总览逐级隐藏不可读细节，正常倍率恢复；不将裁剪推入领域模型或ELK，不提高硬预算。
 
+alpha6把当前文件的编译上下文拆为`source-context.js`（VS Code发现、取消与正文快照适配）、`source-dependencies.js`（Worker内的有界文件依赖闭包）和`source-request.js`（有序请求与私有快照）。依赖收集复用completion/syntax纯语义解析器，只选择待编译文件，不推导电路或执行预处理器。显式sources绕过发现；默认按引用收集模块、接口和包，歧义报错，最终语义仍交给Slang。字面include关系防止重复独立读入，宏上下文须显式文件表。
+
+`source-paths.js`集中处理精确快照和目录回映射，供Worker模型定位与`yosys-diagnostics.js`共用。诊断收集器有界保留首条源码错误及通用错误，选择前者而不依赖跨stdout/stderr的到达先后。runner保留启动/日志/取消失败和前端策略，不再自己解析逐行错误。
+
 技术方向是先验证工具实际输出，再建立独立模型，最终使用 ELK.js + SVG 提供交互。netlistsvg 只用于开发验证，正式页面不依赖其输出或内部对象。实现愿景是同一模型接入不同工具并支持局部逻辑浏览；当前交付模块级视图，逻辑锥和增量布局留作后续。
 
 ```mermaid
