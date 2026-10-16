@@ -56,6 +56,7 @@ UTF-16，孤立代理项返回原始JS字符串，避免在守卫之前被UTF-8�
 | `src/workspace/sources.js` | 设计单元索引与缓存 | Lint 运行与界面接线 |
 | `src/workspace/source-policy.js` | 工程与补全共享的生成目录排除规则 | 任务目录创建、语义解析 |
 | `src/circuit/model.js` 与 `adapters/*` | 工具无关领域合同、Yosys/Vivado 方言转换与验证 | 布局坐标、Webview、工具进程 |
+| `src/circuit/register-symbol.js` | 已知Yosys字级时序单元的纯展示语义与参数极性 | 改写网表、猜测未知单元/工具的引脚功能 |
 | `src/circuit/projection.js` 与 `layout.js` | 当前模块连接投影、有界总线合并、ELK 几何 | 领域位序改写、文件读取、编辑器状态 |
 | `src/circuit/worker.js` 与 `session.js` | UTF-8 JSON 读取、模型、布局、RPC 容量/超时/销毁 | VS Code API、外部工具启动 |
 | `src/circuit/*-runner.js` 与 `source-request.js` | 本地工具参数、任务快照、源位置回映射 | 电路推断、SVG 绘制 |

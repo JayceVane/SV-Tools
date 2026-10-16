@@ -121,7 +121,7 @@ test('SVG 按文字显示 RTL 标签，端口点击优先于所属单元，不�
     const elements = walk(page.ui('circuit'));
     assert.equal(elements.some(element => ['SCRIPT', 'IMG'].includes(element.tagName)), false);
     assert.match(page.ui('designTitle').textContent, /<img/);
-    const pin = findData(page, 'data-port-id', 'a-y'); clickObject(page, pin.children[0]);
+    const pin = findData(page, 'data-port-id', 'a-y'); clickObject(page, pin.children.find(e => e.classList.contains('pinHit')));
     assert.deepEqual(page.client.getState().selection, { type: 'port', id: 'a-y' });
     assert.equal(page.ui('selectionName').textContent, 'Y');
     assert.match(page.ui('properties').textContent, /LSB → MSB/);
@@ -295,5 +295,58 @@ test('手动相机在窗口改变后重新裁剪，保持平移和缩放', () =>
     page.ui('zoomIn').dispatch('click'); page.window.paint(); const camera = page.client.getState().camera;
     page.ui('circuit').clientWidth = 300; page.window.dispatch('resize'); page.window.paint();
     assert.deepEqual(page.client.getState().camera, camera); assert.equal(page.client.getState().isFit, false);
+    page.client.destroy();
+});
+
+
+test('时钟三角与 CLK 端口对齐，低有效气泡与普通直线端点各自独立', () => {
+    const page = fakePage(), message = graphMessage(), node = message.graph.nodes[1];
+    node.width = 196; node.symbol = 'DFF'; node.description = 'D 型触发器 · 异步装载';
+    node.parameters = { CLK_POLARITY: '1', ALOAD_POLARITY: '0' };
+    node.ports.push({ id: 'clk', label: 'CLK', direction: 'input', role: 'clock', polarity: 1, description: '时钟，上升沿触发', x: -8, y: 16, width: 8, height: 8, bits: ['clk'] },
+        { id: 'load', label: 'ALOAD', direction: 'input', role: 'control', polarity: 0, description: '异步装载，低电平有效；Q ← AD（常量 0）', x: -8, y: 60, width: 8, height: 8, bits: ['rst'] });
+    page.client.receive(message);
+    const clk = findData(page, 'data-port-id', 'clk'), low = findData(page, 'data-port-id', 'load');
+    const mark = walk(clk).find(e => e.classList.contains('clockMark'));
+    assert.ok(mark);
+    assert.equal(mark.getAttribute('d'), 'M 0 15 L 7 20 L 0 25');
+    assert.equal(walk(clk).find(e => e.classList.contains('pinDot')).getAttribute('d'), 'M -8 20 L 0 20');
+    assert.equal(walk(page.ui('circuit')).filter(e => e.classList.contains('clockMark')).length, 1);
+    assert.equal(walk(clk).filter(e => e.classList.contains('polarityBubble')).length, 0);
+    assert.equal(walk(low).filter(e => e.classList.contains('polarityBubble')).length, 1);
+    assert.equal(walk(low).filter(e => e.classList.contains('pinDot')).length, 0);
+    assert.equal(walk(low).find(e => e.classList.contains('pinLabel')).textContent, 'ALOAD');
+    clickObject(page, walk(low).find(e => e.classList.contains('polarityBubble')));
+    assert.deepEqual(page.client.getState().selection, { type: 'port', id: 'load' });
+    assert.match(page.ui('properties').textContent, /异步装载.*低电平/);
+    clickObject(page, findData(page, 'data-node-id', node.id));
+    assert.match(page.ui('properties').textContent, /异步装载/);
+    assert.match(page.ui('properties').textContent, /ALOAD_POLARITY/);
+    page.client.destroy();
+});
+
+test('下降沿 CLK 同时包含时钟三角与气泡，未知极性及无时钟寄存器不生成虚假三角', () => {
+    for (const polarity of [0, undefined]) {
+        const page = fakePage(), message = graphMessage(), node = message.graph.nodes[1];
+        node.ports.push({ id: 'clk', label: 'CLK', role: 'clock', polarity, direction: 'input', x: -8, y: 16, width: 8, height: 8, bits: ['clk'] });
+        page.client.receive(message);
+        const clk = findData(page, 'data-port-id', 'clk');
+        assert.equal(walk(clk).filter(e => e.classList.contains('clockMark')).length, polarity === 0 ? 1 : 0);
+        assert.equal(walk(clk).filter(e => e.classList.contains('polarityBubble')).length, polarity === 0 ? 1 : 0);
+        if (polarity === undefined) assert.equal(walk(clk).find(e => e.classList.contains('pinLabel')).textContent, 'CLK?');
+        page.client.destroy();
+    }
+    const page = fakePage(); page.client.receive(graphMessage());
+    assert.equal(walk(page.ui('circuit')).filter(e => e.classList.contains('clockMark')).length, 0);
+    page.client.destroy();
+});
+
+
+test('普通输出端接线覆盖 ELK 端口外边缘到单元边框，端口中心不会留下断线', () => {
+    const page = fakePage(), message = graphMessage(), node = message.graph.nodes[0];
+    Object.assign(node.ports[0], { x: 160, y: 16, width: 8, height: 8 });
+    page.client.receive(message);
+    const pin = findData(page, 'data-port-id', 'a-y');
+    assert.equal(walk(pin).find(e => e.classList.contains('pinDot')).getAttribute('d'), 'M 168 20 L 160 20');
     page.client.destroy();
 });

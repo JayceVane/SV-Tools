@@ -67,8 +67,13 @@
             if (!node) return null;
             const properties = [['类型', KINDS[node.kind] || node.kind]];
             if (node.detail) properties.push(['说明', node.detail]);
+            if (node.description) properties.push(['时序语义', node.description]);
+            if (node.parameters) {
+                const entries = Object.entries(node.parameters);
+                properties.push(['工具参数', entries.slice(0, 32).map(([name, value]) => `${name}: ${String(value).slice(0, 256)}`).join('\n') + (entries.length > 32 ? '\n…（仅显示前 32 项）' : '')]);
+            }
             if (node.toolName && node.toolName !== node.label) properties.push(['工具名称', node.toolName]);
-            if (node.ports?.length) properties.push(['引脚', node.ports.map(port => `${port.label || port.id} · ${port.declaredDirection || port.direction || 'unknown'} · ${(port.bits || []).length} bit`).join('\n')]);
+            if (node.ports?.length) properties.push(['引脚', node.ports.map(port => `${port.label || port.id} · ${port.declaredDirection || port.direction || 'unknown'} · ${(port.bits || []).length} bit${port.description ? ' · ' + port.description : ''}`).join('\n')]);
             if (node.kind === 'constant') properties.push(...bitsProperties(node.ports?.[0]?.bits, index));
             if (node.source?.path) properties.push(['源码', `${node.source.path}:${node.source.line || 1}`]);
             return { name: node.label || node.id, kind: KINDS[node.kind] || node.kind, properties, cellId: node.cellId, moduleId: node.moduleId, source: node.source };
@@ -77,7 +82,7 @@
             const entry = index.ports.get(String(selection.id));
             if (entry) {
                 const { node, port } = entry;
-                return { name: port.label || port.id, kind: ['input', 'output', 'inout'].includes(node.kind) ? '模块端口' : '单元引脚', properties: [['所属单元', node.label || node.id], ['方向', port.declaredDirection || port.direction || 'unknown'], ...bitsProperties(port.bits, index)], cellId: node.cellId, source: node.source };
+                return { name: port.label || port.id, kind: ['input', 'output', 'inout'].includes(node.kind) ? '模块端口' : '单元引脚', properties: [['所属单元', node.label || node.id], ['方向', port.declaredDirection || port.direction || 'unknown'], ...(port.description ? [['语义', port.description]] : []), ...bitsProperties(port.bits, index)], cellId: node.cellId, source: node.source };
             }
         }
         if (selection.type === 'edge') {

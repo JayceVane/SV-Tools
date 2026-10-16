@@ -5,8 +5,9 @@
 })(typeof globalThis === 'object' ? globalThis : this, function (graphIndex, viewport) {
     'use strict';
     const SVG_NS = 'http://www.w3.org/2000/svg';
+    const POLARITY_RADIUS = 4;
     const KINDS = new Set(['input', 'output', 'inout', 'constant', 'register', 'mux', 'arithmetic', 'logic', 'memory', 'instance', 'unknown', 'junction']);
-    const SYMBOLS = { register: 'D  Q', mux: 'MUX', arithmetic: 'ƒ', logic: 'LOGIC', memory: 'MEM', instance: '↗', constant: '#', unknown: '?' };
+    const SYMBOLS = { register: 'REG', mux: 'MUX', arithmetic: 'ƒ', logic: 'LOGIC', memory: 'MEM', instance: '↗', constant: '#', unknown: '?' };
     const OPERATORS = { $add: '+', $sub: '−', $mul: '×', $mult: '×', $div: '÷', $mod: '%', $neg: '−',
         $and: '&', $or: 'OR', $xor: 'XOR', $xnor: 'XNOR', $not: 'NOT', $logic_not: '!', $logic_and: '&&', $logic_or: '||',
         $eq: '=', $ne: '≠', $lt: '<', $le: '≤', $gt: '>', $ge: '≥', $shl: '≪', $shr: '≫', $sshl: '≪', $sshr: '≫', gnd: '0', vcc: '1' };
@@ -47,31 +48,44 @@
         return element(document, 'rect', { width, height, rx: node.kind === 'junction' ? Math.min(width, height) / 2 : 6, class: 'cellBody' });
     }
 
+    function appendPin(document, group, port, width, height) {
+        const x = finite(port.x) + finite(port.width) / 2, y = finite(port.y) + finite(port.height) / 2;
+        const left = x < width / 2, boundary = left ? 0 : width, inward = left ? 1 : -1;
+        const endpoint = finite(port.x) + (left ? 0 : finite(port.width));
+        const declared = port.declaredDirection || port.direction || 'unknown';
+        const isLow = port.polarity === 0, isClock = port.role === 'clock' && [0, 1].includes(port.polarity);
+        const note = [port.label || port.id, declared, `${(port.bits || []).length} bit`, port.description].filter(Boolean).join(' · ');
+        const pin = element(document, 'g', { class: 'pin', 'data-port-id': port.id, role: 'button', tabindex: '-1', 'aria-label': note });
+        pin.appendChild(element(document, 'title', {}, note));
+        pin.appendChild(element(document, 'circle', { cx: x, cy: y, r: 2 * POLARITY_RADIUS, class: 'pinHit' }));
+        // ELK 连线终止于端口外边缘，命中中心与接线端点不能混用。
+        pin.appendChild(element(document, 'path', { d: `M ${endpoint} ${y} L ${boundary - (isLow ? 2 * POLARITY_RADIUS * inward : 0)} ${y}`, class: isLow ? 'pinStem' : 'pinDot' }));
+        if (isLow) pin.appendChild(element(document, 'circle', { cx: boundary - POLARITY_RADIUS * inward, cy: y, r: POLARITY_RADIUS, class: 'polarityBubble' }));
+        if (isClock) pin.appendChild(element(document, 'path', { d: `M ${boundary} ${y - 5} L ${boundary + 7 * inward} ${y} L ${boundary} ${y + 5}`, class: 'clockMark' }));
+        if (port.label && height >= 70 && width >= 110) {
+            const unknownPolarity = ['clock', 'control'].includes(port.role) && ![0, 1].includes(port.polarity);
+            const label = port.label + (unknownPolarity ? '?' : '');
+            const start = boundary + (isClock ? 14 : 10) * inward;
+            pin.appendChild(element(document, 'text', { x: start, y: y + 4, 'text-anchor': left ? 'start' : 'end', class: 'pinLabel' }, shorten(label, Math.max(24, (width - 65) / 2))));
+        }
+        group.appendChild(pin); return pin;
+    }
+
     function appendNode(document, layer, node, nodes, ports) {
         const kind = KINDS.has(node.kind) ? node.kind : 'unknown';
         const width = Math.max(2, finite(node.width, 120)), height = Math.max(2, finite(node.height, 56));
         const group = element(document, 'g', { class: `cell kind-${kind}`, transform: `translate(${finite(node.x)} ${finite(node.y)})`, 'data-node-id': node.id, role: 'button', tabindex: '0', 'aria-label': `${node.label || node.id}${node.moduleId ? '，模块实例，可进入' : ''}` });
-        group.appendChild(element(document, 'title', {}, [node.label || node.id, node.toolName, node.detail].filter(Boolean).join('\n')));
+        group.appendChild(element(document, 'title', {}, [node.label || node.id, node.toolName, node.detail, node.description].filter(Boolean).join('\n')));
         group.appendChild(nodeBody(document, node, width, height));
         if (height >= 50 && width >= 85 && SYMBOLS[kind]) {
             const operator = String(node.detail || '').replace(/^RTL_/, '$').toLowerCase();
-            const symbol = ['logic', 'arithmetic'].includes(kind) && Object.hasOwn(OPERATORS, operator) ? OPERATORS[operator] : SYMBOLS[kind];
+            const symbol = ['logic', 'arithmetic'].includes(kind) && Object.hasOwn(OPERATORS, operator) ? OPERATORS[operator] : node.symbol || SYMBOLS[kind];
             group.appendChild(element(document, 'text', { x: width / 2, y: height / 2 + 4, 'text-anchor': 'middle', class: 'cellSymbol' }, symbol));
             group.appendChild(element(document, 'text', { x: 0, y: -10, class: 'cellLabel' }, shorten(node.label, width)));
         } else if (width >= 35) group.appendChild(element(document, 'text', { x: 10, y: height / 2 + 4, class: 'cellLabel' }, shorten(node.label, width - 20)));
-        if (kind === 'register' && height >= 40) group.appendChild(element(document, 'path', { d: `M 0 ${height - 20} L 7 ${height - 15} L 0 ${height - 10}`, class: 'clockMark' }));
         for (const port of node.ports || []) {
-            const x = finite(port.x) + finite(port.width) / 2, y = finite(port.y) + finite(port.height) / 2;
-            const declared = port.declaredDirection || port.direction || 'unknown';
-            const portGroup = element(document, 'g', { class: 'pin', 'data-port-id': port.id, role: 'button', tabindex: '-1', 'aria-label': `${port.label || port.id}，${declared}` });
-            portGroup.appendChild(element(document, 'circle', { cx: x, cy: y, r: 7, class: 'pinHit' }));
-            portGroup.appendChild(element(document, 'circle', { cx: x, cy: y, r: 3, class: 'pinDot' }));
-            portGroup.appendChild(element(document, 'title', {}, `${port.label || port.id} · ${declared} · ${(port.bits || []).length} bit`));
-            if (port.label && height >= 70 && width >= 110) {
-                const left = x < width / 2;
-                portGroup.appendChild(element(document, 'text', { x: x + (left ? 9 : -9), y: y + 4, 'text-anchor': left ? 'start' : 'end', class: 'pinLabel' }, shorten(port.label, Math.max(24, (width - 65) / 2))));
-            }
-            group.appendChild(portGroup); ports.set(String(port.id), { element: portGroup, port, node });
+            const portGroup = appendPin(document, group, port, width, height);
+            ports.set(String(port.id), { element: portGroup, port, node });
         }
         layer.appendChild(group); nodes.set(String(node.id), { element: group, node });
     }

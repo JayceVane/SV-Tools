@@ -2,12 +2,14 @@
 
 const { createHash } = require('crypto');
 const { findModule } = require('./model');
+const { registerSymbol } = require('./register-symbol');
 
 const MAX_NODES = 2_000;
 const MAX_EDGES = 6_000;
 const MAX_LAYOUT_BIT_REFERENCES = 200_000;
 const MAX_PORTS = 16_384;
 const PORT_SIZE = 8;
+const MIN_REGISTER_WIDTH = 196; // 留出完整控制名与中央符号的间距。
 
 function stableId(prefix, value) { return `${prefix}:${createHash('sha256').update(JSON.stringify(value)).digest('hex').slice(0, 24)}`; }
 function inverse(direction) { return direction === 'input' ? 'output' : direction === 'output' ? 'input' : direction; }
@@ -76,11 +78,15 @@ function projectModule(design, moduleId) {
         connect(terminal);
     }
     for (const cell of module.cells) {
-        const ports = cell.ports.map(port => graphPort(port));
+        const semantics = registerSymbol(cell);
+        const ports = cell.ports.map(port => ({ ...graphPort(port), ...semantics?.ports[port.name] }));
         const label = !cell.moduleId && cell.name.startsWith('$')
             ? cell.type.replace(/^\$/, '') + (cell.source?.line ? ' @' + cell.source.line : '') : cell.name;
+        const size = nodeSize(label, ports);
+        if (semantics) size.width = Math.max(MIN_REGISTER_WIDTH, size.width);
         addNode({ id: `node:${cell.id}`, cellId: cell.id, moduleId: cell.moduleId, source: cell.source, label, toolName: cell.name,
-            detail: cell.type, kind: cell.kind, x: 0, y: 0, ...nodeSize(label, ports), ports });
+            detail: cell.type, kind: cell.kind, x: 0, y: 0, ...size,
+            ...(semantics ? { symbol: semantics.symbol, description: semantics.description, parameters: cell.parameters } : {}), ports });
         ports.forEach(connect);
     }
     for (const [bit, net] of nets) {

@@ -38,7 +38,7 @@ function range(raw) {
 }
 function cellKind(type, isModule) {
     if (isModule) return 'instance';
-    if (/^\$(?:[as]?dff|aldff|sdff|dlatch|sr|ff|_.*(?:DFF|DFFE|DLATCH|SR))/.test(type)) return 'register';
+    if (/^\$(?:[as]?dff|aldff|sdff|a?dlatch|sr|ff|_.*(?:DFF|DFFE|DLATCH|SR))/.test(type)) return 'register';
     if (/^\$(?:mem|_.*RAM)/.test(type)) return 'memory';
     if (/^\$(?:[bp]?mux|demux|_.*MUX)/.test(type)) return 'mux';
     if (/^\$(?:add|sub|neg|mul|div|mod|pow|alu|macc|fa|lcu|shl|shr|sshl|sshr|shift|shiftx)(?:$|_)/.test(type)) return 'arithmetic';
