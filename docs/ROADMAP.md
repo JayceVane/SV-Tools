@@ -4,7 +4,7 @@
 
 ## 当前优先级
 
-4.0.0-preview.1 已发布并通过 PR 合入原工程。用户已授权按“Yosys JSON → netlistsvg 验证 → 独立模型 → ELK.js + SVG；Vivado 共用模型”路线开发下一版本。4.1.0-alpha8 已实现模块级电路视图、离线内置 Yosys，以及当前文件/工程 top 两种 Vivado 入口。alpha3修复未引用模块的Vivado编译顺序，并将标题栏默认改回Yosys。alpha4默认内置Slang，修复timeunit/timeprecision解析。alpha5优化按帧输入、视口SVG挂载、总览细节和增量高亮。alpha6补齐工作区子模块/包依赖闭包及具体源码错误摘要。alpha7修正时钟位置、控制极性与时序单元说明。alpha8修复generate后例化布局及带注释的选区对齐。当前优先完成真实 UI 宿主验收、处理使用反馈并保持旧功能回归；边界和进度见 `CIRCUIT.md`、`V4_1_ALPHA8.md`。
+4.0.0-preview.1 已发布并通过 PR 合入原工程。用户已授权按“Yosys JSON → netlistsvg 验证 → 独立模型 → ELK.js + SVG；Vivado 共用模型”路线开发下一版本。4.1.0-alpha9 已实现模块级电路视图、离线内置 Yosys，以及当前文件/工程 top 两种 Vivado 入口。alpha3修复未引用模块的Vivado编译顺序，并将标题栏默认改回Yosys。alpha4默认内置Slang，修复timeunit/timeprecision解析。alpha5优化按帧输入、视口SVG挂载、总览细节和增量高亮。alpha6补齐工作区子模块/包依赖闭包及具体源码错误摘要。alpha7修正时钟位置、控制极性与时序单元说明。alpha8修复generate后例化布局及带注释的选区对齐。alpha9强化单比特/总线线型、位宽标记与标签交互。当前优先完成真实 UI 宿主验收、处理使用反馈并保持旧功能回归；边界和进度见 `CIRCUIT.md`、`V4_1_ALPHA9.md`。
 
 电路后续候选：局部逻辑锥、按模块缓存与增量布局、大设计按需加载、Vivado 层级保留。它们尚未实现，不以提高当前硬预算冒充大设计支持。
 

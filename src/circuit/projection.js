@@ -20,8 +20,10 @@ function graphPort(port, direction = port.direction) {
 function nodeSize(label, ports, small = false) {
     const inputs = ports.filter(port => port.direction !== 'output').length;
     const outputs = ports.length - inputs;
-    return { width: small ? Math.min(180, Math.max(70, label.length * 7.3 + 28)) : Math.min(280, Math.max(132, label.length * 7 + 40)),
-        height: Math.max(small ? 36 : 62, Math.max(inputs, outputs) * 22 + 32) };
+    const bitCount = small && ports.length === 1 ? ports[0].bits.length : 0;
+    const widthLabel = bitCount > 1 ? `${bitCount} bit` : '';
+    return { width: small ? Math.min(180, Math.max(70, label.length * 7.3 + 28, widthLabel.length * 7.3 + 28)) : Math.min(280, Math.max(132, label.length * 7 + 40)),
+        height: Math.max(small ? (bitCount > 1 ? 66 : 36) : 62, Math.max(inputs, outputs) * 22 + 32) };
 }
 function netLabel(bits, aliases) {
     const candidate = aliases.get(bits[0]);

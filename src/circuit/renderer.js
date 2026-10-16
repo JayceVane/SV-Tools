@@ -6,6 +6,7 @@
     'use strict';
     const SVG_NS = 'http://www.w3.org/2000/svg';
     const POLARITY_RADIUS = 4;
+    const PORT_KINDS = new Set(['input', 'output', 'inout']);
     const KINDS = new Set(['input', 'output', 'inout', 'constant', 'register', 'mux', 'arithmetic', 'logic', 'memory', 'instance', 'unknown', 'junction']);
     const SYMBOLS = { register: 'REG', mux: 'MUX', arithmetic: 'ƒ', logic: 'LOGIC', memory: 'MEM', instance: '↗', constant: '#', unknown: '?' };
     const OPERATORS = { $add: '+', $sub: '−', $mul: '×', $mult: '×', $div: '÷', $mod: '%', $neg: '−',
@@ -55,7 +56,7 @@
         const declared = port.declaredDirection || port.direction || 'unknown';
         const isLow = port.polarity === 0, isClock = port.role === 'clock' && [0, 1].includes(port.polarity);
         const note = [port.label || port.id, declared, `${(port.bits || []).length} bit`, port.description].filter(Boolean).join(' · ');
-        const pin = element(document, 'g', { class: 'pin', 'data-port-id': port.id, role: 'button', tabindex: '-1', 'aria-label': note });
+        const pin = element(document, 'g', { class: `pin${(port.bits || []).length > 1 ? ' bus' : ''}`, 'data-bit-width': (port.bits || []).length, 'data-port-id': port.id, role: 'button', tabindex: '-1', 'aria-label': note });
         pin.appendChild(element(document, 'title', {}, note));
         pin.appendChild(element(document, 'circle', { cx: x, cy: y, r: 2 * POLARITY_RADIUS, class: 'pinHit' }));
         // ELK 连线终止于端口外边缘，命中中心与接线端点不能混用。
@@ -74,7 +75,8 @@
     function appendNode(document, layer, node, nodes, ports) {
         const kind = KINDS.has(node.kind) ? node.kind : 'unknown';
         const width = Math.max(2, finite(node.width, 120)), height = Math.max(2, finite(node.height, 56));
-        const group = element(document, 'g', { class: `cell kind-${kind}`, transform: `translate(${finite(node.x)} ${finite(node.y)})`, 'data-node-id': node.id, role: 'button', tabindex: '0', 'aria-label': `${node.label || node.id}${node.moduleId ? '，模块实例，可进入' : ''}` });
+        const bitCount = PORT_KINDS.has(kind) ? node.ports?.[0]?.bits?.length || 0 : 0;
+        const group = element(document, 'g', { class: `cell kind-${kind}${bitCount > 1 ? ' busPort' : ''}`, transform: `translate(${finite(node.x)} ${finite(node.y)})`, 'data-node-id': node.id, role: 'button', tabindex: '0', 'aria-label': `${node.label || node.id}${node.moduleId ? '，模块实例，可进入' : ''}` });
         group.appendChild(element(document, 'title', {}, [node.label || node.id, node.toolName, node.detail, node.description].filter(Boolean).join('\n')));
         group.appendChild(nodeBody(document, node, width, height));
         if (height >= 50 && width >= 85 && SYMBOLS[kind]) {
@@ -82,12 +84,33 @@
             const symbol = ['logic', 'arithmetic'].includes(kind) && Object.hasOwn(OPERATORS, operator) ? OPERATORS[operator] : node.symbol || SYMBOLS[kind];
             group.appendChild(element(document, 'text', { x: width / 2, y: height / 2 + 4, 'text-anchor': 'middle', class: 'cellSymbol' }, symbol));
             group.appendChild(element(document, 'text', { x: 0, y: -10, class: 'cellLabel' }, shorten(node.label, width)));
-        } else if (width >= 35) group.appendChild(element(document, 'text', { x: 10, y: height / 2 + 4, class: 'cellLabel' }, shorten(node.label, width - 20)));
+        } else if (width >= 35) {
+            group.appendChild(element(document, 'text', { x: 10, y: height / 2 + (bitCount > 1 ? -3 : 4), class: 'cellLabel' }, shorten(node.label, width - 20)));
+            if (bitCount > 1) group.appendChild(element(document, 'text', { x: 10, y: height / 2 + 12, class: 'portWidth' }, `${bitCount} bit`));
+        }
         for (const port of node.ports || []) {
             const portGroup = appendPin(document, group, port, width, height);
             ports.set(String(port.id), { element: portGroup, port, node });
         }
         layer.appendChild(group); nodes.set(String(node.id), { element: group, node });
+    }
+
+    function appendWire(document, layer, edge, edges, marker) {
+        const d = edgePath(edge.sections);
+        if (!d) return;
+        const bitCount = (edge.bits || []).length;
+        const group = element(document, 'g', { class: `wire${bitCount > 1 ? ' bus' : ''}`, 'data-bit-width': bitCount, 'data-edge-id': edge.id });
+        group.appendChild(element(document, 'title', {}, `${edge.label || edge.netId || edge.id} · ${bitCount} bit`));
+        group.appendChild(element(document, 'path', { d, class: 'wireHit' }));
+        group.appendChild(element(document, 'path', { d, class: 'wireLine' }));
+        if (marker) {
+            const { x, y, vertical } = marker;
+            const mark = element(document, 'g', { class: 'busMark' });
+            mark.appendChild(element(document, 'path', { d: `M ${x - 5} ${y + 6} L ${x + 5} ${y - 6}`, class: 'busSlash' }));
+            mark.appendChild(element(document, 'text', { x: x + (vertical ? 11 : 9), y: y + (vertical ? 4 : -8), class: 'busWidth' }, bitCount));
+            group.appendChild(mark);
+        }
+        layer.appendChild(group); edges.set(String(edge.id), { element: group, edge });
     }
 
     /**
@@ -97,20 +120,13 @@
      * @returns {object} DOM 索引和纯展示操作；不修改传入网表。
      */
     function renderGraph(svg, graph) {
-        const index = graphIndex.createGraphIndex(graph), scene = viewport.createViewportIndex(graph);
+        const markers = viewport.createBusMarkers(graph.edges || [], graph.nodes || []);
+        const index = graphIndex.createGraphIndex(graph), scene = viewport.createViewportIndex(graph, markers);
         const document = svg.ownerDocument, nodes = new Map(), ports = new Map(), edges = new Map();
         const layer = element(document, 'g', { class: 'graphLayer' });
         const wireLayer = element(document, 'g', { class: 'wireLayer' }), nodeLayer = element(document, 'g', { class: 'nodeLayer' });
         layer.appendChild(wireLayer); layer.appendChild(nodeLayer);
-        for (const edge of graph.edges || []) {
-            const d = edgePath(edge.sections);
-            if (!d) continue;
-            const group = element(document, 'g', { class: `wire${(edge.bits || []).length > 1 ? ' bus' : ''}`, 'data-edge-id': edge.id });
-            group.appendChild(element(document, 'title', {}, `${edge.label || edge.netId || edge.id} · ${(edge.bits || []).length} bit`));
-            group.appendChild(element(document, 'path', { d, class: 'wireHit' }));
-            group.appendChild(element(document, 'path', { d, class: 'wireLine' }));
-            wireLayer.appendChild(group); edges.set(String(edge.id), { element: group, edge });
-        }
+        for (const edge of graph.edges || []) appendWire(document, wireLayer, edge, edges, markers.get(String(edge.id)));
         for (const node of graph.nodes || []) appendNode(document, nodeLayer, node, nodes, ports);
         svg.replaceChildren(layer);
         let order = 0;
@@ -174,5 +190,5 @@
         return { layer, nodes, ports, edges, index, setSelection, setSearch, setViewport, hitTarget };
     }
 
-    return { edgePath, renderGraph };
+    return { edgePath, busMarker: viewport.busMarker, renderGraph };
 });

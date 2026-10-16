@@ -78,6 +78,8 @@ alpha2 默认使用固定版本内置 Yosys WASM。alpha4将前端选择集中�
 
 内置 Slang 的 `src` 可能省略开头斜杠，适配时先按 guest 根解析，再经目录映射与快照映射两步还原真实文件。编辑器标题栏默认Yosys；RTL右键选择当前文件Vivado top，工程面板沿用工程top。alpha3修正原先仅传`-top`的缺口：工程旧层级会AutoDisabled无关源，只读原工程无法重算。当前文件入口先在任务目录`save_project_as -exclude_run_results`，确认当前项目已切到副本后仅在副本设置top并`update_compile_order`。原工程及源码不变；工程外或脏正文仍明确提示改用内置Yosys。Tcl导出器显式按UTF-8加载，错误汇总优先具体Vivado诊断而非Tcl收尾。
 
+alpha9将总线标记位置放在viewport的纯几何层：规范化冗余共线折点，容许ELK浮点误差，以稀疏网格避让标签。renderer与裁剪索引复用同一标记Map，显示位宽只取连线或端口自身bits长度，不猜测范围、不改网络连接；平移和选择不重算标记。
+
 alpha5将页面热路径分成两个纯索引：`graph-index.js`管理模块拓扑、搜索文本与位别名，`viewport.js`管理静态包围盒树和折线相交查询。renderer只保留带过扫描边界的可见对象在活动SVG中；屏外DOM与数据仍由索引持有，重入保持原始绘制顺序、已选状态与对象身份。选择只写入前后状态的差集；搜索不重复构造文本。
 
 client只持有相机逻辑状态，requestAnimationFrame每帧提交一次最新变换。视口几何在换图和ResizeObserver中更新，滚轮不再同步读取布局。换图、加载、取消与销毁清理待提交帧；手动相机在窗口变化后重裁剪，保持缩放和平移。缩小总览逐级隐藏不可读细节，正常倍率恢复；不将裁剪推入领域模型或ELK，不提高硬预算。

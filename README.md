@@ -5,7 +5,7 @@
 
 改编自 Sublime Text [SystemVerilog](https://github.com/TheClams/SystemVerilog)（格式化）与 [Verilog-Gadget](https://github.com/poucotm/Verilog-Gadget)（生产力工具）插件。
 
-当前开发版本为 **4.1.0-alpha8**，新增内嵌电路结构查看器。已发布的 [4.0.0-preview.1](https://github.com/JayceVane/SV-Tools/releases/tag/v4.0.0-preview.1) 提供 Windows x64 VSIX 与 CLI，可在 VS Code 中通过“从 VSIX 安装”使用。4.1 在独立分支开发，尚未发布为 GitHub Release。源码位于 `src/`，构建产物位于 `bin/`。
+当前开发版本为 **4.1.0-alpha9**，新增内嵌电路结构查看器。已发布的 [4.0.0-preview.1](https://github.com/JayceVane/SV-Tools/releases/tag/v4.0.0-preview.1) 提供 Windows x64 VSIX 与 CLI，可在 VS Code 中通过“从 VSIX 安装”使用。4.1 在独立分支开发，尚未发布为 GitHub Release。源码位于 `src/`，构建产物位于 `bin/`。
 
 格式化只能改变普通空格、Tab、CR、LF；其它字符的内容、次数和顺序必须保持，即使输入
 全部乱码或语法不完整。无法安全提交的布局保留原文，详见 [格式化规范](docs/FORMAT_SPEC.md)。
@@ -52,6 +52,7 @@
 - 独立电路模型与 ELK.js 正交布局，SVG 平移缩放、搜索、网络高亮、参数化模块下钻和源码定位
 - 编辑器右上角默认使用内置 Yosys；RTL 右键用 Vivado 查看当前文件模块，工程面板使用工程 top
 - Yosys 寄存器按明确参数显示触发沿与控制极性，锁存器独立符号；引脚详情保留原始名称、语义与工具参数
+- 单比特细线与多比特粗线区分，总线斜杠位宽标记、I/O位数与可点击标签，选中和总览保留线型差异
 - 相机按帧刷新、视口外 SVG 按需挂载；总览自动简化细节，选择与搜索共享拓扑索引
 - 解析和布局运行在 Worker；超预算明确提示，并保留模块选择以便查看较小子模块
 

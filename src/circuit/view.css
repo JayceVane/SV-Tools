@@ -80,15 +80,26 @@ main { min-height: 0; flex: 1; display: flex; }
 .pin:hover .pinStem, .pin.selected .pinStem,
 .pin:hover .polarityBubble, .pin.selected .polarityBubble,
 .pin:hover .clockMark, .pin.selected .clockMark { stroke: var(--accent); }
-.wire { cursor: pointer; }
-.wireLine { fill: none; stroke: var(--wire); stroke-width: 1.3; vector-effect: non-scaling-stroke; pointer-events: none; }
-.wire.bus .wireLine { stroke-width: 2; }
+.pin.bus .pinDot, .pin.bus .pinStem { stroke-width: 2.8; }
+.busPort .cellBody { stroke-width: 2; }
+.portWidth { fill: var(--muted); font-size: 11px; pointer-events: none; }
+.wire { cursor: pointer; --wireWidth: 1.3; --activeWireWidth: 2.7; }
+.wire.bus { --wireWidth: 2.8; --activeWireWidth: 4.2; }
+.wireLine { fill: none; stroke: var(--wire); stroke-width: var(--wireWidth); vector-effect: non-scaling-stroke; pointer-events: none; }
 .wireHit { fill: none; stroke: transparent; stroke-width: 12; vector-effect: non-scaling-stroke; }
-.wire:hover .wireLine, .wire.selected .wireLine { stroke: var(--accent); stroke-width: 2.7; }
-.wire.searchMatch:not(.selected) .wireLine { stroke: var(--mux); stroke-width: 2.5; }
+.busSlash { fill: none; stroke: var(--wire); stroke-width: 1.5; vector-effect: non-scaling-stroke; pointer-events: stroke; }
+.busWidth { fill: var(--fg); font-size: 12px; font-weight: 600; paint-order: stroke; stroke: var(--bg); stroke-width: 3; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
+.wire:hover .wireLine, .wire.selected .wireLine { stroke: var(--accent); stroke-width: var(--activeWireWidth); }
+.wire:hover .busSlash, .wire.selected .busSlash { stroke: var(--accent); }
+.wire:hover .busWidth, .wire.selected .busWidth { fill: var(--accent); }
+.wire.searchMatch:not(.selected) .wireLine { stroke: var(--mux); stroke-width: var(--activeWireWidth); }
+.wire.searchMatch:not(.selected) .busSlash { stroke: var(--mux); }
+.wire.searchMatch:not(.selected) .busWidth { fill: var(--mux); }
 .canvasLegend { pointer-events: none; position: absolute; bottom: 14px; left: 16px; display: flex; flex-wrap: wrap; gap: 15px; font-size: 11px; color: var(--muted); }
 .canvasLegend span::before { content: ''; display: inline-block; width: 6px; height: 6px; margin-right: 5px; border-radius: 2px; vertical-align: 1px; background: var(--logic); }
 .canvasLegend .legendRegister::before { background: var(--register); }.canvasLegend .legendMux::before { background: var(--mux); }.canvasLegend .legendInstance::before { background: var(--instance); }
+.canvasLegend .legendWire::before, .canvasLegend .legendBus::before { width: 15px; height: 0; border-radius: 0; background: none; border-top: 1.3px solid var(--wire); vertical-align: 3px; }
+.canvasLegend .legendBus::before { border-top-width: 2.8px; }
 .message { position: absolute; inset: 0; padding: 25px; display: flex; flex-direction: column; gap: 13px; justify-content: center; align-items: center; background: var(--bg); text-align: center; }
 .messageGlyph { color: var(--accent); font-size: 38px; }.message strong { font-size: 17px; font-weight: 600; }.message span { color: var(--muted); white-space: pre-wrap; overflow-wrap: anywhere; max-width: 640px; line-height: 1.6; }
 body[data-mode="error"] .messageGlyph, body[data-mode="error"] .message strong { color: var(--error); }
@@ -110,6 +121,9 @@ footer { min-height: 29px; border-top: 1px solid var(--border); display: flex; a
 
 /* 依据屏幕可读尺寸减少总览绘制，放大后恢复完整引脚和文字。 */
 .graphLayer[data-detail="compact"] .pinLabel,
+.graphLayer[data-detail="compact"] .busWidth,
+.graphLayer[data-detail="overview"] .busMark,
+.graphLayer[data-detail="overview"] .portWidth,
 .graphLayer[data-detail="overview"] .cellLabel,
 .graphLayer[data-detail="overview"] .cellSymbol,
 .graphLayer[data-detail="overview"] .clockMark,

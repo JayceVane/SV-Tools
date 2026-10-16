@@ -364,3 +364,90 @@ test('长工具参数明确标记截断与总项数，不把部分参数伪装�
     assert.ok(value.length < 10000);
     assert.equal(node.parameters.P0.length, 500);
 });
+
+
+test('总线依据真实位数添加斜杠与位宽，单比特名称中的范围不会造成误判', () => {
+    const page = fakePage(), message = graphMessage();
+    message.graph.edges[1].bits = ['b2']; message.graph.edges[1].label = 'single[31:0]';
+    page.client.receive(message);
+    const bus = findData(page, 'data-edge-id', 'e1'), scalar = findData(page, 'data-edge-id', 'e2');
+    assert.ok(bus.classList.contains('bus'));
+    assert.equal(bus.getAttribute('data-bit-width'), '2');
+    const badge = walk(bus).find(e => e.classList.contains('busWidth'));
+    assert.ok(badge); assert.equal(badge.textContent, '2');
+    assert.equal(walk(bus).filter(e => e.classList.contains('busSlash')).length, 1);
+    assert.equal(scalar.classList.contains('bus'), false);
+    assert.equal(walk(scalar).filter(e => e.classList.contains('busWidth')).length, 0);
+    const busPin = findData(page, 'data-port-id', 'a-y');
+    assert.ok(busPin.classList.contains('bus'));
+    clickObject(page, badge);
+    assert.deepEqual(page.client.getState().selection, { type: 'edge', id: 'e1' });
+    assert.match(page.ui('properties').textContent, /位宽2/);
+    page.client.destroy();
+});
+
+test('多比特IO显示实际位宽，不根据名称补造向量范围', () => {
+    for (const bits of [['b2'], Array.from({ length: 8 }, (_, i) => 'n:' + i)]) {
+        const page = fakePage(), message = graphMessage(), node = message.graph.nodes[0];
+        Object.assign(node, { kind: 'input', label: 'data[99:0]', height: 48 });
+        node.ports[0].bits = bits;
+        page.client.receive(message);
+        const cell = findData(page, 'data-node-id', node.id), widths = walk(cell).filter(e => e.classList.contains('portWidth'));
+        assert.equal(widths.length, bits.length > 1 ? 1 : 0);
+        if (widths.length) assert.equal(widths[0].textContent, '8 bit');
+        assert.equal(node.label, 'data[99:0]');
+        page.client.destroy();
+    }
+});
+
+test('总线装饰随所属连线裁剪恢复，选中及总览状态保留位宽身份', () => {
+    const page = fakePage(), graph = graphMessage().graph, drawing = R.renderGraph(page.ui('circuit'), graph);
+    const edge = drawing.edges.get('e1').element, badge = walk(edge).find(e => e.classList.contains('busWidth'));
+    assert.ok(badge);
+    drawing.setViewport({ x: -10000, y: -10000, scale: 1 }, 900, 600);
+    assert.equal(edge.parentNode, null);
+    drawing.setSelection({ type: 'edge', id: 'e1' });
+    drawing.setViewport({ x: 0, y: 0, scale: .2 }, 900, 600);
+    assert.ok(edge.parentNode); assert.ok(edge.classList.contains('selected')); assert.ok(edge.classList.contains('bus'));
+    assert.equal(drawing.layer.getAttribute('data-detail'), 'overview');
+    drawing.setViewport({ x: 0, y: 0, scale: 1 }, 900, 600);
+    assert.equal(walk(edge).find(e => e.classList.contains('busWidth')), badge);
+});
+
+test('总线标记选择可读的正交长段，不在短线或无效折点上伪造标签', () => {
+    const section = (startPoint, endPoint, bendPoints) => ({ startPoint, endPoint, bendPoints });
+    assert.deepEqual(R.busMarker([section({ x: 10, y: 20 }, { x: 110, y: 20 })], 32), { x: 60, y: 20, vertical: false });
+    assert.deepEqual(R.busMarker([section({ x: 20, y: 200 }, { x: 20, y: 0 })], 8), { x: 20, y: 100, vertical: true });
+    assert.deepEqual(R.busMarker([section({ x: 0, y: 0 }, { x: 100, y: 300 }, [{ x: 100, y: 0 }])], 16), { x: 50, y: 0, vertical: false });
+    for (const sections of [[], [section({ x: 0, y: 0 }, { x: 10, y: 0 })], [section({ x: NaN, y: 0 }, { x: 100, y: 0 })], [section({ x: 0, y: 0 }, { x: 100, y: 100 })]]) assert.equal(R.busMarker(sections, 32), null);
+    assert.equal(R.busMarker([section({ x: 0, y: 0 }, { x: 100, y: 0 })], 1), null);
+    assert.deepEqual(R.busMarker([section({ x: 0, y: 0 }, { x: 100, y: 0 }, [{ x: 40, y: 0 }, { x: 80, y: 0 }])], 32), { x: 50, y: 0, vertical: false });
+});
+
+
+test('高倍率仅位宽文字进入视口时仍保留总线，不按中心线提前裁剪', () => {
+    const page = fakePage(), graph = graphMessage().graph;
+    graph.edges[0].bits = Array.from({ length: 16 }, (_, i) => 'n:' + i);
+    graph.edges[0].sections = [{ startPoint: { x: -22, y: 0 }, endPoint: { x: -22, y: 100 } }];
+    const drawing = R.renderGraph(page.ui('circuit'), graph);
+    drawing.setViewport({ x: 0, y: 0, scale: 8 }, 800, 600);
+    assert.ok(drawing.edges.get('e1').element.parentNode);
+    assert.equal(walk(drawing.edges.get('e1').element).find(e => e.classList.contains('busWidth')).textContent, '16');
+});
+
+
+test('ELK近似水平段可标注位宽，共线路由的不同位组不会覆盖彼此数字', () => {
+    const V = require('../src/circuit/viewport');
+    const almost = R.busMarker([{ startPoint: { x: 0, y: 20 }, endPoint: { x: 100, y: 20 + 1e-12 } }], 32);
+    assert.ok(almost); assert.equal(almost.x, 50); assert.ok(Math.abs(almost.y - 20) < 1e-6);
+    const edges = ['a', 'b'].map(id => ({ id, bits: Array(16).fill('n:1'), sections: [{ startPoint: { x: 0, y: 0 }, endPoint: { x: 400, y: 0 } }] }));
+    const markers = V.createBusMarkers(edges);
+    assert.equal(markers.size, 2); assert.notDeepEqual(markers.get('a'), markers.get('b'));
+    assert.deepEqual([...V.createBusMarkers(edges)], [...markers]);
+    const avoided = V.createBusMarkers([{ ...edges[0], sections: [{ startPoint: { x: 0, y: 0 }, endPoint: { x: 200, y: 0 } }] }], [{ x: 80, y: -30, width: 40, height: 60 }]);
+    assert.equal(avoided.get('a').x, 150);
+    assert.equal(V.createBusMarkers([], [{ x: 1e100, y: 0, width: 100, height: 50 }]).size, 0);
+    const shared = ['low', 'high'].map(id => ({ id, bits: Array(8).fill('n:1'), sections: [{ startPoint: { x: 0, y: 100 }, bendPoints: [{ x: 0, y: 0 }], endPoint: { x: 80, y: 0 } }] }));
+    const placed = V.createBusMarkers(shared);
+    assert.equal(placed.size, 2); assert.equal(placed.get('low').vertical, false); assert.equal(placed.get('high').vertical, true);
+});

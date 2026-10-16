@@ -12,21 +12,24 @@ const out = path.resolve(option('--out', 'bin/circuit-interaction'));
 const label = option('--label', 'current');
 const count = Number(option('--nodes', '2000'));
 const initialScale = Number(option('--scale', '.75'));
+const busWidth = Number(option('--bus-width', '1'));
+if (!Number.isInteger(busWidth) || busWidth < 1 || busWidth > 64) throw new Error('--bus-width 必须为 1..64');
 if (!Number.isFinite(initialScale) || initialScale < .0001 || initialScale > 8) throw new Error('--scale 必须为 .0001..8');
 if (!Number.isInteger(count) || count < 4 || count > 2000) throw new Error('--nodes 必须为 4..2000');
 fs.mkdirSync(out, { recursive: true });
 
-function browserScenario(count) {
+function browserScenario(count, busWidth = 1) {
+    const bits = index => Array.from({ length: busWidth }, (_, bit) => `b${index}:${bit}`);
     const nodes = [], edges = [];
     const columns = 40, pitchX = 250, pitchY = 160;
     for (let i = 0; i < count; i++) {
         const x = i % columns * pitchX, y = Math.floor(i / columns) * pitchY;
         nodes.push({ id: 'n' + i, label: 'pipeline_' + i, kind: i % 3 ? 'logic' : 'register', detail: i % 3 ? '$add' : '$dff', x, y, width: 160, height: 100,
-            ports: [{ id: 'p' + i + 'd', label: 'D', direction: 'input', x: 0, y: 35, bits: ['b' + i] }, { id: 'p' + i + 'q', label: 'Q', direction: 'output', x: 160, y: 35, bits: ['b' + (i + 1)] }] });
+            ports: [{ id: 'p' + i + 'd', label: 'D', direction: 'input', x: 0, y: 35, bits: bits(i) }, { id: 'p' + i + 'q', label: 'Q', direction: 'output', x: 160, y: 35, bits: bits(i + 1) }] });
         for (let branch = 1; branch <= 3; branch++) {
             if (i < branch) continue;
             const previous = nodes[i - branch], sx = previous.x + 160, sy = previous.y + 35;
-            edges.push({ id: 'e' + i + '-' + branch, netId: 'net' + (i - branch), label: 'data_' + (i - branch), source: 'p' + (i - branch) + 'q', target: 'p' + i + 'd', bits: ['b' + i], sections: [{ startPoint: { x: sx, y: sy }, bendPoints: [{ x: sx + 35 + branch * 7, y: sy }, { x: sx + 35 + branch * 7, y: y + 35 }], endPoint: { x, y: y + 35 } }] });
+            edges.push({ id: 'e' + i + '-' + branch, netId: 'net' + (i - branch), label: 'data_' + (i - branch), source: 'p' + (i - branch) + 'q', target: 'p' + i + 'd', bits: bits(i), sections: [{ startPoint: { x: sx, y: sy }, bendPoints: [{ x: sx + 35 + branch * 7, y: sy }, { x: sx + 35 + branch * 7, y: y + 35 }], endPoint: { x, y: y + 35 } }] });
         }
     }
     const message = { type: 'graph', design: { id: 'perf', top: 'top', title: '交互性能验收', modules: [{ id: 'top', name: 'top' }] }, graph: { id: 'top', name: 'top', width: columns * pitchX, height: Math.ceil(count / columns) * pitchY, nodes, edges, signals: [] } };
@@ -63,7 +66,7 @@ function browserScenario(count) {
         const select = await sample(i => selectTargets[i % selectTargets.length].dispatchEvent(new FocusEvent('focusin', { bubbles: true })));
         await next(); const selectionClassWrites = classes; observer.disconnect();
         const visible = [...svg.querySelectorAll('.cell,.wire')].filter(item => getComputedStyle(item).display !== 'none').length;
-        const result = { count, edges: edges.length, domElements: svg.querySelectorAll('*').length, visibleObjects: visible, loadMs, pan, zoom, select, panTransforms, zoomTransforms, selectionClassWrites, browser: navigator.userAgent };
+        const result = { count, busWidth, visibleBusMarkers: svg.querySelectorAll('.busMark').length, edges: edges.length, domElements: svg.querySelectorAll('*').length, visibleObjects: visible, loadMs, pan, zoom, select, panTransforms, zoomTransforms, selectionClassWrites, browser: navigator.userAgent };
         window.benchmarkResult = result;
         return result;
     })();
@@ -120,7 +123,7 @@ async function main() {
         await call('Page.addScriptToEvaluateOnNewDocument', { source: 'window.acquireVsCodeApi = () => ({postMessage(){},setState(){},getState(){return {views:[[JSON.stringify(["perf","top"]),{camera:{x:40,y:40,scale:' + initialScale + '},isFit:false}]]}}});' });
         await call('Page.navigate', { url: 'http://127.0.0.1:' + server.address().port });
         for (let i = 0; i < 100; i++) { const ready = await call('Runtime.evaluate', { expression: '!!window.CircuitClient' }); if (ready.result.value) break; await new Promise(resolve => setTimeout(resolve, 50)); }
-        const evaluated = await call('Runtime.evaluate', { expression: '(' + browserScenario + ')(' + count + ')', awaitPromise: true, returnByValue: true });
+        const evaluated = await call('Runtime.evaluate', { expression: '(' + browserScenario + ')(' + count + ',' + busWidth + ')', awaitPromise: true, returnByValue: true });
         if (evaluated.exceptionDetails || errors.length) throw new Error(JSON.stringify({ exception: evaluated.exceptionDetails, errors }));
         const result = { label, initialScale, ...evaluated.result.value };
         const screenshot = await call('Page.captureScreenshot', { format: 'png' });
