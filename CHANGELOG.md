@@ -2,6 +2,14 @@
 
 All notable changes to the SystemVerilog VSCode Extension will be documented in this file.
 
+## [4.0.0-beta.2] - 2026-10-16
+
+**变更内容：** 按用户确定的发布版本策略，将当前电路查看器与格式化完善汇总为4.0第二个预览阶段，扩展、原生模块、CLI及锁文件统一为4.0.0-beta.2。包含离线内置Yosys/Slang、工作区依赖收集、Vivado两种top入口、时序符号、复杂画布交互优化、总线位宽区分及Aurora例化对齐Golden。
+
+**为什么：** 当前功能仍在预览阶段，正式版本统一以4.0.0交付。此前4.1.0-alpha1至alpha9保留为开发历史，后续不继续使用4.1作为当前发布系列。
+
+**影响面：** 本轮只同步版本、文档和发布产物，运行逻辑与alpha9一致。GitHub标记prerelease，尚不发布Marketplace；旧preview.1及原工程保持。SemVer将beta.2排在preview.1和4.1 alpha之前，已有这些版本的用户需手动安装VSIX并确认替换。发布说明见`docs/releases/v4.0.0-beta.2.md`，验证和文件清单见`docs/V4_BETA2.md`。
+
 ## [4.1.0-alpha9] - 2026-10-16
 
 **变更内容：** 区分单比特细线与多比特粗线，选中/搜索时保持粗细差异；多比特端点同步加粗，I/O显示实际位数。总线在可读长段添加斜杠与位宽，标记可点击选网，文字使用轮廓衬底而非方形背景。总览逐级隐藏文字，粗线身份保留。

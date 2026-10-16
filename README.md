@@ -5,7 +5,7 @@
 
 改编自 Sublime Text [SystemVerilog](https://github.com/TheClams/SystemVerilog)（格式化）与 [Verilog-Gadget](https://github.com/poucotm/Verilog-Gadget)（生产力工具）插件。
 
-当前开发版本为 **4.1.0-alpha9**，新增内嵌电路结构查看器。已发布的 [4.0.0-preview.1](https://github.com/JayceVane/SV-Tools/releases/tag/v4.0.0-preview.1) 提供 Windows x64 VSIX 与 CLI，可在 VS Code 中通过“从 VSIX 安装”使用。4.1 在独立分支开发，尚未发布为 GitHub Release。源码位于 `src/`，构建产物位于 `bin/`。
+当前预览版本为 **4.0.0-beta.2**，包含内嵌电路结构查看器及此前格式化、补全、波形和工具链改进。[GitHub 预发布](https://github.com/JayceVane/SV-Tools/releases/tag/v4.0.0-beta.2) 提供 Windows x64 VSIX 与 CLI；通过“从 VSIX 安装”使用，安装后重载窗口。此前 4.1 alpha 开发成果统一归入 4.0 预览系列，正式版目标为 **4.0.0**。源码位于 `src/`，构建产物位于 `bin/`。
 
 格式化只能改变普通空格、Tab、CR、LF；其它字符的内容、次数和顺序必须保持，即使输入
 全部乱码或语法不完整。无法安全提交的布局保留原文，详见 [格式化规范](docs/FORMAT_SPEC.md)。
@@ -46,7 +46,7 @@
 - ▶ 仿真（Icarus / Vivado xsim 引擎选择）与 ⊕ 工程文件管理按钮
 - 工程创建向导（源文件分类、器件选型逐级筛选、顶层识别）+ 工程结构模板
 
-**电路结构查看器**（4.1 alpha，可选本地工具）
+**电路结构查看器**（4.0 beta，可选本地工具）
 - 内置离线 Yosys，无需 Python 或额外安装；从当前 RTL 生成，或导入已有 JSON，支持源文件顺序、顶层、include 和宏
 - 默认自动收集工作区子模块与包依赖，显式 sources 保留编译顺序；错误摘要显示原文件行列
 - 独立电路模型与 ELK.js 正交布局，SVG 平移缩放、搜索、网络高亮、参数化模块下钻和源码定位
