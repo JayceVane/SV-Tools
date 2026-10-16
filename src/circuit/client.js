@@ -9,7 +9,7 @@
 })(typeof globalThis === 'object' ? globalThis : this, function (graphIndex) {
     'use strict';
     const MIN_SCALE = .0001, MAX_SCALE = 8, PADDING = 40, MAX_SAVED_VIEWS = 12;
-    const MAX_DETAIL_BITS = 256;
+    const MAX_DETAIL_BITS = 256, MAX_PARAMETERS = 32, MAX_PARAMETER_CHARS = 256;
     const finite = (value, fallback) => Number.isFinite(value) ? value : fallback;
     const text = value => value === undefined || value === null ? '—' : String(value);
     const KINDS = { input: '输入端口', output: '输出端口', inout: '双向端口', constant: '常量', register: '寄存器', mux: '选择器', arithmetic: '算术单元', logic: '组合逻辑', memory: '存储器', instance: '模块实例', unknown: '连接节点', junction: '连接节点' };
@@ -42,6 +42,11 @@
         return graph ? graphIndex.createGraphIndex(graph).search(query).matches : [];
     }
 
+    function parameterText(value) {
+        const raw = String(value);
+        return raw.length > MAX_PARAMETER_CHARS ? `${raw.slice(0, MAX_PARAMETER_CHARS)}…（共 ${raw.length} 字符）` : raw;
+    }
+
     function bitsProperties(bits, index) {
         const values = Array.isArray(bits) ? bits : [];
         const shown = values.slice(0, MAX_DETAIL_BITS);
@@ -70,7 +75,7 @@
             if (node.description) properties.push(['时序语义', node.description]);
             if (node.parameters) {
                 const entries = Object.entries(node.parameters);
-                properties.push(['工具参数', entries.slice(0, 32).map(([name, value]) => `${name}: ${String(value).slice(0, 256)}`).join('\n') + (entries.length > 32 ? '\n…（仅显示前 32 项）' : '')]);
+                properties.push(['工具参数', entries.slice(0, MAX_PARAMETERS).map(([name, value]) => `${name}: ${parameterText(value)}`).join('\n') + (entries.length > MAX_PARAMETERS ? `\n…（仅显示前 ${MAX_PARAMETERS} 项，共 ${entries.length} 项）` : '')]);
             }
             if (node.toolName && node.toolName !== node.label) properties.push(['工具名称', node.toolName]);
             if (node.ports?.length) properties.push(['引脚', node.ports.map(port => `${port.label || port.id} · ${port.declaredDirection || port.direction || 'unknown'} · ${(port.bits || []).length} bit${port.description ? ' · ' + port.description : ''}`).join('\n')]);

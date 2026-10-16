@@ -2,7 +2,7 @@
 
 2026-10-16：用户sync_resetn截图暴露寄存器符号错误。只读重编译证明$aldff连接正确（D=1、AD=0、CLK_POLARITY=1、ALOAD_POLARITY=0）；问题为时钟三角固定左下、空心普通端点误导、极性和原始参数未传到展示层。新增register-symbol纯展示模块，已知Yosys字级单元解释参数；三角按CLK几何定位，低有效控制/下降沿时钟带空心气泡，普通端点用直线连接，未知极性问号，LATCH/SR/FF独立符号。补齐$adlatch归类。ELK连线到端口外边缘，不是命中中心，已修正两侧短线接点。
 
-alpha7电路146/146、既有Node511通过1可选跳过、Golden38/38、Rust121/121，JS语法152文件。用户实际源只读生成6节点/5连线、哈希不变；解包后实际Qoder Node24.15.0/Electron42.2.0编译、Worker/ELK和原生formatText ABI通过，Edge155正式页面浅深主题与控制气泡选择通过。包442文件、426运行文件逐字节一致；性能基准2000节点/5994边保持视口挂载及按帧输入。完整数据/清单见docs/V4_1_ALPHA7.md。初次ABI探针误用n.format，改为实际导出的formatText后通过，属于验收脚本错误而非扩展故障。
+alpha7电路147/147、既有Node511通过1可选跳过、Golden38/38、Rust121/121，JS语法152文件。用户实际源只读生成6节点/5连线、哈希不变；解包后实际Qoder Node24.15.0/Electron42.2.0编译、Worker/ELK和原生formatText ABI通过，Edge155正式页面浅深主题与控制气泡选择通过。包442文件、426运行文件逐字节一致；性能基准2000节点/5994边保持视口挂载及按帧输入。完整数据/清单见docs/V4_1_ALPHA7.md。初次ABI探针误用n.format，改为实际导出的formatText后通过，属于验收脚本错误而非扩展故障。
 
 继续独立worktree及Draft PR11，原master保持4.0 preview；尚未进行本轮完整IDE Webview宿主验收，不自动合并或创建Release。后续优先真实IDE UI、使用反馈及现有回归；Vivado/未知门级单元不按名称推断时序极性。
 

@@ -350,3 +350,17 @@ test('普通输出端接线覆盖 ELK 端口外边缘到单元边框，端口中
     assert.equal(walk(pin).find(e => e.classList.contains('pinDot')).getAttribute('d'), 'M 168 20 L 160 20');
     page.client.destroy();
 });
+
+
+test('长工具参数明确标记截断与总项数，不把部分参数伪装成完整值', () => {
+    const message = graphMessage(), node = message.graph.nodes[1];
+    node.parameters = Object.fromEntries(Array.from({ length: 40 }, (_, i) => ['P' + i, '0'.repeat(500)]));
+    const detail = C.describeSelection(message.graph, { type: 'node', id: node.id });
+    const value = detail.properties.find(([name]) => name === '工具参数')[1];
+    assert.match(value, /共 500 字符/);
+    assert.match(value, /P31:/);
+    assert.doesNotMatch(value, /P32:/);
+    assert.match(value, /仅显示前 32 项，共 40 项/);
+    assert.ok(value.length < 10000);
+    assert.equal(node.parameters.P0.length, 500);
+});

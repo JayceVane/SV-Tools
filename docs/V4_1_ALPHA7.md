@@ -19,7 +19,7 @@
 | JS语法 | 152文件；bin/circuit-alpha7-package.log |
 | Golden | 38/38，19用例 |
 | 既有Node | 512项：511通过、1可选目录重建跳过 |
-| 电路Node | 146/146，新增8项 |
+| 电路Node | 147/147，新增9项 |
 | Rust | 121/121；bin/circuit-alpha7-rust.log |
 | 用户实际RTL | 内置Slang→Yosys→Worker→ELK，6节点/5连线，原源码SHA256不变；bin/circuit-alpha7-user-register.log |
 | 解包后Qoder | Node24.15.0/Electron42.2.0的实际运行时执行编译、Worker/ELK、符号元数据及formatText ABI；bin/circuit-alpha7-qoder-packaged-final.log、qoder-native.log |
@@ -34,9 +34,9 @@
 
 ## 安装包
 
-`bin/svtools-4.1.0-alpha7-win32-x64.vsix`。442文件、18,521,607字节，426个运行文件逐字节一致，证据为bin/circuit-alpha7-package-report.json。
+`bin/svtools-4.1.0-alpha7-win32-x64.vsix`。442文件、18,521,693字节，426个运行文件逐字节一致，证据为bin/circuit-alpha7-package-report.json。
 
-SHA256：`af6b323a09288c7cf007279a0edf56557a1d1ce6dbfffbf3c0d3252195706fcd`。
+SHA256：`00737e7311cbc9ef9c754cef0c9176f4ef5e15644ddb8cb2e95ef8a86f4e132c`。
 
 安装后重载窗口，重新生成电路即可使用新符号。完整模型保留所有真实位连接，未修改用户RTL、设置及XPR。
 
@@ -65,6 +65,6 @@ SHA256：`af6b323a09288c7cf007279a0edf56557a1d1ce6dbfffbf3c0d3252195706fcd`。
 | `src/circuit/client.js` | 有界参数展示及引脚语义详情 |
 | `src/circuit/view.css` | 区分直线端点与气泡，选中仍保持空心 |
 | `test/circuit_symbols_test.js` | 5项参数、类型、真实ELK及连接保真回归 |
-| `test/circuit_view_test.js` | 3项绘图/选择/端点回归及既有命中适配 |
+| `test/circuit_view_test.js` | 4项绘图/选择/端点/参数截断回归及既有命中适配 |
 
 安装包、原生二进制、真实编译日志、截图和基准数据均在已忽略的bin/中，不提交。没有新增依赖或修改打包资源白名单。
