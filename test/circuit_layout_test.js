@@ -44,10 +44,12 @@ test('projection aggregates a bus without losing aliases, bit order or partial c
     const design = makeDesign({ ports: { a: { direction: 'input', bits: [2, 3, 4, 5] }, y: { direction: 'output', bits: [2, 3] }, z: { direction: 'output', bits: [4, 5] } },
         netnames: { a: { bits: [2, 3, 4, 5], offset: 4, upto: 1 }, alias: { bits: [2, 3, 4, 5] } } });
     const graph = project(design);
-    assert.equal(graph.nodes.length, 3);
-    assert.equal(graph.edges.length, 2);
-    assert.deepEqual(graph.edges.map(edge => edge.bits), [['n:2', 'n:3'], ['n:4', 'n:5']]);
-    assert.deepEqual(graph.edges.map(edge => edge.label), ['a[6:7]', 'a[4:5]']);
+    assert.equal(graph.nodes.length, 4);
+    assert.equal(graph.edges.length, 3);
+    const branches = graph.edges.filter(edge => !edge.bundleNode);
+    assert.deepEqual(branches.map(edge => edge.bits), [['n:2', 'n:3'], ['n:4', 'n:5']]);
+    assert.deepEqual(branches.map(edge => edge.label), ['a[6:7]', 'a[4:5]']);
+    assert.deepEqual(graph.edges.find(edge => edge.bundleNode).bits, ['n:2', 'n:3', 'n:4', 'n:5']);
     assert.equal(graph.signals.length, 2);
     assert.equal(graph.nodes[0].ports[0].direction, 'output');
     assert.equal(graph.nodes[1].ports[0].direction, 'input');
@@ -79,7 +81,8 @@ test('all four constant states get explicit sources and repeated constant bits s
     const design = makeDesign({ cells: { sink: cell('$and', { A: ['0', '0', '1', 'x', 'z'] }, { A: 'input' }) } });
     const graph = project(design);
     assert.equal(graph.nodes.filter(node => node.kind === 'constant').length, 4);
-    assert.equal(graph.edges.length, 4);
+    assert.equal(graph.edges.filter(edge => !edge.bundleNode).length, 4);
+    assert.deepEqual(graph.edges.find(edge => edge.bundleNode).bits, ['c:0', 'c:0', 'c:1', 'c:x', 'c:z']);
     assert.deepEqual(design.modules[0].cells[0].ports[0].bits, ['c:0', 'c:0', 'c:1', 'c:x', 'c:z']);
 });
 

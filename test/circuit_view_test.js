@@ -451,3 +451,38 @@ test('ELK近似水平段可标注位宽，共线路由的不同位组不会覆�
     const placed = V.createBusMarkers(shared);
     assert.equal(placed.size, 2); assert.equal(placed.get('low').vertical, false); assert.equal(placed.get('high').vertical, true);
 });
+
+test('拼接拆分节点显示分支位位置与真实线宽，详情说明重复映射',()=>{
+    const message=graphMessage(),page=fakePage();
+    message.graph.nodes.push({id:'bundle',kind:'bus',label:'D · 2 bit',detail:'总线拼接，仅表示位连接',routing:'join',x:50,y:200,width:164,height:84,ports:[
+        {id:'full',label:'2 bit',direction:'output',bits:['n:1','n:1'],x:164,y:42,width:8,height:8},
+        {id:'part',label:'[1:0]',wireLabel:'1b ×2',direction:'input',bits:['n:1'],bitPositions:[[0,1]],x:0,y:42,width:8,height:8}
+    ]});
+    page.client.receive(message);
+    const root=findData(page,'data-node-id','bundle');
+    assert.ok(walk(root).some(e=>e.classList.contains('busSpine')));
+    assert.ok(walk(root).some(e=>e.classList.contains('mappingLabel')&&e.textContent==='1b ×2'));
+    const taps=walk(root).filter(e=>e.classList.contains('busTap'));
+    assert.equal(taps.filter(e=>e.classList.contains('bus')).length,1);
+    const detail=C.describeSelection(message.graph,{type:'port',id:'part'});
+    assert.equal(detail.properties.find(([key])=>key==='端口位映射（LSB=0）')[1],'n:1 → 0, 1');
+    assert.equal(C.describeSelection(message.graph,{type:'node',id:'bundle'}).kind,'总线连接');
+    page.client.destroy();
+});
+
+test('宽总线分支为完整位位置标签预留空间，常用切片不截断', () => {
+    const { fromYosys } = require('../src/circuit/adapters/yosys');
+    const { projectModule } = require('../src/circuit/projection');
+    const bits = Array.from({ length: 1024 }, (_, i) => i + 2);
+    const design = fromYosys({ modules: { top: { ports: {
+        a: { direction: 'input', bits },
+        y: { direction: 'output', bits: bits.slice(0, 512) },
+        z: { direction: 'output', bits: bits.slice(512) }
+    } } } });
+    const graph = projectModule(design, design.top), page = fakePage();
+    page.client.receive({ ...graphMessage(), graph: { ...graph, width: 800, height: 400 } });
+    const labels = walk(page.ui('circuit')).filter(element => element.classList.contains('mappingLabel')).map(element => element.textContent);
+    assert.ok(labels.includes('512b [1023:512]'));
+    assert.ok(labels.includes('512b [511:0]'));
+    page.client.destroy();
+});

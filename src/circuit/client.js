@@ -12,7 +12,7 @@
     const MAX_DETAIL_BITS = 256, MAX_PARAMETERS = 32, MAX_PARAMETER_CHARS = 256;
     const finite = (value, fallback) => Number.isFinite(value) ? value : fallback;
     const text = value => value === undefined || value === null ? '—' : String(value);
-    const KINDS = { input: '输入端口', output: '输出端口', inout: '双向端口', constant: '常量', register: '寄存器', mux: '选择器', arithmetic: '算术单元', logic: '组合逻辑', memory: '存储器', instance: '模块实例', unknown: '连接节点', junction: '连接节点' };
+    const KINDS = { input: '输入端口', output: '输出端口', inout: '双向端口', constant: '常量', register: '寄存器', mux: '选择器', arithmetic: '算术单元', logic: '组合逻辑', memory: '存储器', instance: '模块实例', unknown: '连接节点', junction: '连接节点', bus: '总线连接' };
 
     /** @param {object} camera 用户保存的相机。 @returns {object} 有界有限相机。 */
     function cleanCamera(camera) {
@@ -63,6 +63,17 @@
         return properties;
     }
 
+    function mappingText(port) {
+        let remaining = MAX_DETAIL_BITS;
+        const rows = [];
+        for (const [i, positions] of port.bitPositions.entries()) {
+            if (!remaining) break;
+            const shown = positions.slice(0, remaining); remaining -= shown.length;
+            rows.push(`${port.bits[i]} → ${shown.join(', ')}${shown.length < positions.length ? ' …' : ''}`);
+        }
+        return rows.join('\n') + (port.bitPositions.reduce((sum, positions) => sum + positions.length, 0) > MAX_DETAIL_BITS ? `\n…（最多显示${MAX_DETAIL_BITS}个目标位置）` : '');
+    }
+
     /** @param {object} graph 当前模块。 @param {{type:string,id:string}|null} selection 选择标识。 @param {object} [index] 当前模块共享索引。 @returns {object|null} 安全的文本详情和可执行宿主动作。 */
     function describeSelection(graph, selection, index) {
         if (!graph || !selection) return null;
@@ -87,7 +98,7 @@
             const entry = index.ports.get(String(selection.id));
             if (entry) {
                 const { node, port } = entry;
-                return { name: port.label || port.id, kind: ['input', 'output', 'inout'].includes(node.kind) ? '模块端口' : '单元引脚', properties: [['所属单元', node.label || node.id], ['方向', port.declaredDirection || port.direction || 'unknown'], ...(port.description ? [['语义', port.description]] : []), ...bitsProperties(port.bits, index)], cellId: node.cellId, source: node.source };
+                return { name: port.label || port.id, kind: ['input', 'output', 'inout'].includes(node.kind) ? '模块端口' : '单元引脚', properties: [['所属单元', node.label || node.id], ['方向', port.declaredDirection || port.direction || 'unknown'], ...(port.description ? [['语义', port.description]] : []), ...(port.bitPositions ? [['端口位映射（LSB=0）', mappingText(port)]] : []), ...bitsProperties(port.bits, index)], cellId: node.cellId, source: node.source };
             }
         }
         if (selection.type === 'edge') {
@@ -95,7 +106,7 @@
             if (!edge) return null;
             const portName = id => { const entry = index.ports.get(String(id)); return entry ? `${entry.node.label || entry.node.id}.${entry.port.label || entry.port.id}` : id; };
             const endpoints = new Set();
-            for (const item of index.netEdges.get(String(edge.netId)) || []) { endpoints.add(portName(item.source)); endpoints.add(portName(item.target)); }
+            for (const item of index.networkEdges(edge)) { endpoints.add(portName(item.source)); endpoints.add(portName(item.target)); }
             return { name: edge.label || edge.netId, kind: '网络', properties: [...bitsProperties(edge.bits, index), ['网络 ID', edge.netId], ['连接端点', [...endpoints].join('\n')]] };
         }
         return null;

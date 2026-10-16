@@ -59,6 +59,7 @@ UTF-16，孤立代理项返回原始JS字符串，避免在守卫之前被UTF-8�
 | `src/workspace/source-policy.js` | 工程与补全共享的生成目录排除规则 | 任务目录创建、语义解析 |
 | `src/circuit/model.js` 与 `adapters/*` | 工具无关领域合同、Yosys/Vivado 方言转换与验证 | 布局坐标、Webview、工具进程 |
 | `src/circuit/register-symbol.js` | 已知Yosys字级时序单元的纯展示语义与参数极性 | 改写网表、猜测未知单元/工具的引脚功能 |
+| `src/circuit/bus-routing.js` | 由端口实际位序及成员网络生成纯展示拼接/拆分、重复/重排映射 | 更改领域位序、推断RTL声明范围、添加硬件单元 |
 | `src/circuit/projection.js` 与 `layout.js` | 当前模块连接投影、有界总线合并、ELK 几何 | 领域位序改写、文件读取、编辑器状态 |
 | `src/circuit/worker.js` 与 `session.js` | UTF-8 JSON 读取、模型、布局、RPC 容量/超时/销毁 | VS Code API、外部工具启动 |
 | `src/circuit/*-runner.js` 与 `source-request.js` | 本地工具参数、任务快照、源位置回映射 | 电路推断、SVG 绘制 |
@@ -238,3 +239,5 @@ flowchart TD
 R6 是把源码文件引用当完整模块层级、把仿真引用当文件集成员。本轮对应边界已拆分并
 以合同、真实宿主和工具验证约束。创建向导/OOC/报告集成仍位于既有组合入口，后续
 变更应沿这些边界继续分离，不能把引擎或模型内部状态重新塞回事件接线函数。
+
+总线连接投影发生在真实位网络分组之后、ELK输入之前。完整端口主干保留全部位序及重复项，分支保持原网络身份，并记录每个线位在完整端口中的位置。主干引用成员网络ID，拓扑索引按成员关系高亮，不通过主干递归扩散到无关位；普通引脚继续局部选择。连接节点计入原有展示预算，硬件cellCount不包含这些节点。

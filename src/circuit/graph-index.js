@@ -25,13 +25,28 @@
         };
     }
 
+    const networkIds = edge => edge.netIds?.length ? edge.netIds : [edge.netId];
+    function networkEdges(netEdges, ids) {
+        const found = new Map();
+        for (const id of new Set(ids)) for (const edge of netEdges.get(key(id)) || []) found.set(key(edge.id), edge);
+        return [...found.values()];
+    }
+
+    function selectedEdges(netEdges, portEdges, pin, edge, id) {
+        if (edge) return networkEdges(netEdges, networkIds(edge));
+        if (!pin) return [];
+        const incident = portEdges.get(id) || [];
+        if (pin.node.kind === 'bus' || incident.some(item => item.bundleNode)) return networkEdges(netEdges, incident.flatMap(networkIds));
+        return incident;
+    }
+
     function selectObjects({ nodes, ports, edges, netEdges, portEdges }, value) {
         const nodeIds = new Set(), portIds = new Set(), edgeIds = new Set(), connected = new Set();
         const id = key(value?.id), node = value?.type === 'node' ? nodes.get(id) : null;
         const pin = value?.type === 'port' ? ports.get(id) : null, edge = value?.type === 'edge' ? edges.get(id) : null;
         if (node) nodeIds.add(id);
         if (pin) { nodeIds.add(key(pin.node.id)); portIds.add(id); }
-        for (const item of edge ? netEdges.get(key(edge.netId)) || [] : pin ? portEdges.get(id) || [] : []) {
+        for (const item of selectedEdges(netEdges, portEdges, pin, edge, id)) {
             edgeIds.add(key(item.id)); portIds.add(key(item.source)); portIds.add(key(item.target));
         }
         for (const portId of portIds) { const entry = ports.get(portId); if (entry) connected.add(key(entry.node.id)); }
@@ -54,12 +69,14 @@
             for (const port of node.ports || []) ports.set(key(port.id), { port, node });
         }
         for (const edge of graph.edges || []) {
-            edges.set(key(edge.id), edge); add(netEdges, edge.netId, edge); add(portEdges, edge.source, edge); add(portEdges, edge.target, edge);
+            edges.set(key(edge.id), edge);
+            for (const id of new Set([edge.netId, ...networkIds(edge)])) add(netEdges, id, edge);
+            add(portEdges, edge.source, edge); add(portEdges, edge.target, edge);
             records.push({ type: 'edge', id: key(edge.id), netId: key(edge.netId), text: searchable([edge.label, edge.netId]) });
         }
         signals.forEach((signal, index) => { for (const bit of new Set(signal.bits || [])) add(signalBits, bit, index); });
         const topology = { nodes, ports, edges, netEdges, portEdges };
-        return { ...topology, search: createSearch(records), selection: value => selectObjects(topology, value), relatedSignals: bits => findSignals(signalBits, signals, bits) };
+        return { ...topology, networkEdges: edge => networkEdges(netEdges, networkIds(edge)), search: createSearch(records), selection: value => selectObjects(topology, value), relatedSignals: bits => findSignals(signalBits, signals, bits) };
     }
     return { createGraphIndex };
 });

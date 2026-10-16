@@ -3,6 +3,7 @@
 const { createHash } = require('crypto');
 const { findModule } = require('./model');
 const { registerSymbol } = require('./register-symbol');
+const { addBusConnections } = require('./bus-routing');
 
 const MAX_NODES = 2_000;
 const MAX_EDGES = 6_000;
@@ -133,6 +134,7 @@ function projectModule(design, moduleId) {
         inputs.forEach(item => addEdge(item.endpoint, item.port.id, group));
         outputs.forEach(item => addEdge(item.port.id, item.endpoint, group));
     }
+    const busNodeCount = addBusConnections(nodes, edges, { maxNodes: MAX_NODES, maxEdges: MAX_EDGES, maxPorts: MAX_PORTS });
     const graphId = `graph:${module.id}`;
     const input = { id: graphId, layoutOptions: {
         'elk.algorithm': 'layered', 'elk.direction': 'RIGHT', 'elk.edgeRouting': 'ORTHOGONAL',
@@ -143,7 +145,7 @@ function projectModule(design, moduleId) {
     edges: edges.map(edge => ({ id: edge.id, sources: [edge.source], targets: [edge.target] })) };
     return { id: graphId, moduleId: module.id, name: module.name, input, nodes, edges, signals: module.signals, parameters: module.parameters,
         stats: { bitCount: nets.size, portCount: module.ports.length, cellCount: module.cells.length, nodeCount: nodes.length, edgeCount: edges.length,
-            undrivenBitCount, multiDriverBitCount, ambiguousBitCount } };
+            undrivenBitCount, multiDriverBitCount, ambiguousBitCount, busNodeCount } };
 }
 
 module.exports = { MAX_NODES, MAX_EDGES, MAX_LAYOUT_BIT_REFERENCES, projectModule };

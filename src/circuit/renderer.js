@@ -7,7 +7,7 @@
     const SVG_NS = 'http://www.w3.org/2000/svg';
     const POLARITY_RADIUS = 4;
     const PORT_KINDS = new Set(['input', 'output', 'inout']);
-    const KINDS = new Set(['input', 'output', 'inout', 'constant', 'register', 'mux', 'arithmetic', 'logic', 'memory', 'instance', 'unknown', 'junction']);
+    const KINDS = new Set(['input', 'output', 'inout', 'constant', 'register', 'mux', 'arithmetic', 'logic', 'memory', 'instance', 'unknown', 'junction', 'bus']);
     const SYMBOLS = { register: 'REG', mux: 'MUX', arithmetic: 'ƒ', logic: 'LOGIC', memory: 'MEM', instance: '↗', constant: '#', unknown: '?' };
     const OPERATORS = { $add: '+', $sub: '−', $mul: '×', $mult: '×', $div: '÷', $mod: '%', $neg: '−',
         $and: '&', $or: 'OR', $xor: 'XOR', $xnor: 'XNOR', $not: 'NOT', $logic_not: '!', $logic_and: '&&', $logic_or: '||',
@@ -41,6 +41,12 @@
     }
 
     function nodeBody(document, node, width, height) {
+        if (node.kind === 'bus') {
+            const body = element(document, 'g');
+            body.appendChild(element(document, 'rect', { width, height, class: 'busHit' }));
+            body.appendChild(element(document, 'path', { d: `M ${width / 2} 10 L ${width / 2} ${height - 10}`, class: 'cellBody busSpine' }));
+            return body;
+        }
         if (node.kind === 'mux') return element(document, 'polygon', { points: `0,0 ${width},12 ${width},${Math.max(12, height - 12)} 0,${height}`, class: 'cellBody' });
         if (node.kind === 'input' || node.kind === 'output' || node.kind === 'inout') {
             const tip = Math.min(12, width / 5);
@@ -49,7 +55,7 @@
         return element(document, 'rect', { width, height, rx: node.kind === 'junction' ? Math.min(width, height) / 2 : 6, class: 'cellBody' });
     }
 
-    function appendPin(document, group, port, width, height) {
+    function appendPin(document, group, port, width, height, isBundle = false) {
         const x = finite(port.x) + finite(port.width) / 2, y = finite(port.y) + finite(port.height) / 2;
         const left = x < width / 2, boundary = left ? 0 : width, inward = left ? 1 : -1;
         const endpoint = finite(port.x) + (left ? 0 : finite(port.width));
@@ -63,11 +69,14 @@
         pin.appendChild(element(document, 'path', { d: `M ${endpoint} ${y} L ${boundary - (isLow ? 2 * POLARITY_RADIUS * inward : 0)} ${y}`, class: isLow ? 'pinStem' : 'pinDot' }));
         if (isLow) pin.appendChild(element(document, 'circle', { cx: boundary - POLARITY_RADIUS * inward, cy: y, r: POLARITY_RADIUS, class: 'polarityBubble' }));
         if (isClock) pin.appendChild(element(document, 'path', { d: `M ${boundary} ${y - 5} L ${boundary + 7 * inward} ${y} L ${boundary} ${y + 5}`, class: 'clockMark' }));
+        if (isBundle) {
+            pin.appendChild(element(document, 'path', { d: `M ${boundary} ${y} L ${width / 2} ${y}`, class: `busTap${port.bits.length > 1 ? ' bus' : ''}` }));
+        }
         if (port.label && height >= 70 && width >= 110) {
             const unknownPolarity = ['clock', 'control'].includes(port.role) && ![0, 1].includes(port.polarity);
-            const label = port.label + (unknownPolarity ? '?' : '');
+            const label = isBundle ? port.wireLabel || port.label : port.label + (unknownPolarity ? '?' : '') + (port.bits?.length > 1 ? ` · ${port.bits.length}b` : '');
             const start = boundary + (isClock ? 14 : 10) * inward;
-            pin.appendChild(element(document, 'text', { x: start, y: y + 4, 'text-anchor': left ? 'start' : 'end', class: 'pinLabel' }, shorten(label, Math.max(24, (width - 65) / 2))));
+            pin.appendChild(element(document, 'text', { x: start, y: y + (isBundle ? -6 : 4), 'text-anchor': left ? 'start' : 'end', class: isBundle ? 'pinLabel mappingLabel' : 'pinLabel' }, shorten(label, Math.max(24, isBundle ? width / 2 - 16 : (width - 65) / 2))));
         }
         group.appendChild(pin); return pin;
     }
@@ -79,7 +88,9 @@
         const group = element(document, 'g', { class: `cell kind-${kind}${bitCount > 1 ? ' busPort' : ''}`, transform: `translate(${finite(node.x)} ${finite(node.y)})`, 'data-node-id': node.id, role: 'button', tabindex: '0', 'aria-label': `${node.label || node.id}${node.moduleId ? '，模块实例，可进入' : ''}` });
         group.appendChild(element(document, 'title', {}, [node.label || node.id, node.toolName, node.detail, node.description].filter(Boolean).join('\n')));
         group.appendChild(nodeBody(document, node, width, height));
-        if (height >= 50 && width >= 85 && SYMBOLS[kind]) {
+        if (kind === 'bus') {
+            group.appendChild(element(document, 'text', { x: 0, y: -10, class: 'cellLabel' }, shorten(node.label, width)));
+        } else if (height >= 50 && width >= 85 && SYMBOLS[kind]) {
             const operator = String(node.detail || '').replace(/^RTL_/, '$').toLowerCase();
             const symbol = ['logic', 'arithmetic'].includes(kind) && Object.hasOwn(OPERATORS, operator) ? OPERATORS[operator] : node.symbol || SYMBOLS[kind];
             group.appendChild(element(document, 'text', { x: width / 2, y: height / 2 + 4, 'text-anchor': 'middle', class: 'cellSymbol' }, symbol));
@@ -89,7 +100,7 @@
             if (bitCount > 1) group.appendChild(element(document, 'text', { x: 10, y: height / 2 + 12, class: 'portWidth' }, `${bitCount} bit`));
         }
         for (const port of node.ports || []) {
-            const portGroup = appendPin(document, group, port, width, height);
+            const portGroup = appendPin(document, group, port, width, height, kind === 'bus');
             ports.set(String(port.id), { element: portGroup, port, node });
         }
         layer.appendChild(group); nodes.set(String(node.id), { element: group, node });

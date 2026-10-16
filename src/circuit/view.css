@@ -66,7 +66,7 @@ main { min-height: 0; flex: 1; display: flex; }
 .kind-input, .kind-output, .kind-inout { --cellAccent: var(--wire); }
 .cellBody { fill: var(--cellBg); stroke: var(--cellAccent); stroke-width: 1.4; vector-effect: non-scaling-stroke; }
 .cellSymbol { fill: var(--cellAccent); font-size: 12px; font-weight: 600; pointer-events: none; }
-.cellLabel { fill: var(--fg); font-size: 13px; pointer-events: none; }
+.cellLabel { fill: var(--fg); font-size: 13px; pointer-events: none; paint-order: stroke; stroke: var(--bg); stroke-width: 3; stroke-linejoin: round; }
 .cellDetail, .pinLabel { fill: var(--muted); font-size: 11px; pointer-events: none; }
 .clockMark { fill: none; stroke: var(--cellAccent); stroke-width: 1.2; vector-effect: non-scaling-stroke; }
 .cell:hover .cellBody, .cell.connected .cellBody { stroke: var(--accent); }
@@ -129,3 +129,14 @@ footer { min-height: 29px; border-top: 1px solid var(--border); display: flex; a
 .graphLayer[data-detail="overview"] .clockMark,
 .graphLayer[data-detail="overview"] .pin { display: none; }
 .panning .wireHit, .panning .pinHit { pointer-events: none; }
+
+/* 总线连接条只表达拼接/拆分，分支粗细仍按各自真实位数。 */
+.kind-bus { --cellAccent: var(--wire); }
+.busHit { fill: transparent; stroke: none; }
+.busSpine { fill: none; stroke-width: 2.8; vector-effect: non-scaling-stroke; }
+.busTap { fill: none; stroke: var(--wire); stroke-width: 1.3; vector-effect: non-scaling-stroke; }
+.busTap.bus { stroke-width: 2.8; }
+.mappingLabel { paint-order: stroke; stroke: var(--bg); stroke-width: 3; stroke-linejoin: round; }
+.graphLayer[data-detail="compact"] .mappingLabel { display: block; }
+.kind-bus.selected .busSpine { stroke-width: 4.2; }
+.pin:hover .busTap, .pin.selected .busTap { stroke: var(--accent); }

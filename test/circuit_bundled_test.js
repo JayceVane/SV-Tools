@@ -90,3 +90,48 @@ test('真实Slang拒绝不可见类型、字符串枚举及缺子模块，正确
     assert.equal(report.truthTableRows, 8); assert.equal(report.sourceUnchanged, true);
     assert.equal(Object.keys(report.failures).length, 3); assert.equal(report.enumVariants.length, 2);
 });
+
+
+test('真实CDC源码生成两位主干、单比特反馈分支及重复复位常量', { timeout: 30000 }, async t => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'svtools-cdc-'));
+    assert.equal(path.dirname(root), path.resolve(os.tmpdir()));
+    assert.ok(path.basename(root).startsWith('svtools-cdc-'));
+    const original = path.join(root, 'cdc_1bit.sv'), outputBase = path.join(root, 'tasks');
+    const text = `module cdc_1bit #(parameter LEVEL = 2) (
+    input i_clk, input i_rst_n, input i_bit, output o_bit
+);
+    reg [LEVEL-1:0] r_bit;
+    always @(posedge i_clk or negedge i_rst_n) begin
+        if (!i_rst_n) r_bit <= ~{LEVEL{1'b0}};
+        else r_bit <= {r_bit[LEVEL-2:0], i_bit};
+    end
+    assign o_bit = r_bit[LEVEL-1];
+endmodule
+`;
+    await fs.writeFile(original, text);
+    const manager = createToolTaskManager(), task = manager.start('cdc-test'), session = new CircuitSession();
+    t.after(async () => {
+        session.dispose(); task.cancel(); await task.finish({ keepArtifacts: true });
+        await manager.dispose(); await fs.rm(root, { recursive: true, force: true });
+    });
+    const request = await prepareSourceRequest({ task, root, top: 'cdc_1bit', config: {}, outputBase,
+        document: { uri: { fsPath: original }, isDirty: false } });
+    const generated = await runYosysCircuit({ ...request, task, outputBase });
+    const raw = JSON.parse(await fs.readFile(generated.filePath, 'utf8')).modules.cdc_1bit;
+    const cell = Object.values(raw.cells).find(cell => cell.type === '$aldff');
+    assert.deepEqual(cell.connections.D, [raw.ports.i_bit.bits[0], cell.connections.Q[0]]);
+    assert.deepEqual(raw.ports.o_bit.bits, [cell.connections.Q[1]]);
+    assert.deepEqual(cell.connections.AD, ['1', '1']);
+    const descriptor = await session.request('load', { ...generated, top: 'cdc_1bit', stage: 'rtl' });
+    const graph = await session.request('layout', { moduleId: descriptor.top });
+    const join = graph.nodes.find(node => node.kind === 'bus' && node.originalPort.label === 'D');
+    const split = graph.nodes.find(node => node.kind === 'bus' && node.originalPort.label === 'Q');
+    assert.ok(join); assert.ok(split);
+    const inputBit = 'n:' + raw.ports.i_bit.bits[0], feedback = 'n:' + cell.connections.Q[0];
+    assert.deepEqual(join.ports.find(port => port.bitPositions && port.bits.includes(inputBit)).bitPositions, [[0]]);
+    assert.deepEqual(join.ports.find(port => port.bitPositions && port.bits.includes(feedback)).bitPositions, [[1]]);
+    assert.deepEqual(split.ports.find(port => port.bitPositions && port.bits.includes(feedback)).bitPositions, [[0]]);
+    assert.equal(graph.edges.filter(edge => edge.bundleNode).length, 3);
+    assert.ok(graph.edges.filter(edge => edge.bundleNode).every(edge => edge.bits.length === 2));
+    assert.equal(await fs.readFile(original, 'utf8'), text);
+});
