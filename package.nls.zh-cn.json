@@ -111,7 +111,7 @@
   "cmd.circuit.fromVivado.title": "查看工程 Top 电路（Vivado）",
   "cmd.circuit.stop.title": "停止电路生成",
   "cfg.circuit.yosysPath": "默认 bundled 使用插件内置 Yosys，无需 Python 或额外安装；也可指定外部 Yosys 可执行文件路径。",
-  "cfg.circuit.frontend": "verilog 使用 read_verilog -sv；slang 要求所选 Yosys 提供支持 --keep-hierarchy 的 read_slang。",
+  "cfg.circuit.frontend": "auto：内置Yosys默认使用Slang解析SystemVerilog，外部工具沿用read_verilog -sv。slang/verilog显式覆盖；外部slang需工具提供read_slang。",
   "cfg.circuit.sources": "按读取顺序列出的 RTL 路径，可相对工作区或使用绝对路径。当前文件未列出时追加。",
   "cfg.circuit.includeDirs": "HDL include 目录，可相对工作区或使用绝对路径。",
   "cfg.circuit.defines": "预处理宏，例如 SYNTHESIS 或 WIDTH=8。",

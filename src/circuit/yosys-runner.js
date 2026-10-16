@@ -8,6 +8,7 @@ const MAX_INCLUDE_SNAPSHOT_BYTES = 64 * 1024 * 1024;
 const MAX_INCLUDE_SNAPSHOT_FILES = 4096;
 const MAX_INCLUDE_SNAPSHOT_ENTRIES = 16384;
 const MAX_WRAPPER_BYTES = 4 * 1024 * 1024;
+const MAX_ERROR_CHARS = 2000;
 
 /** @param {string} value Yosys 命令中的单个词。@returns {string} 带引用的词；拒绝换行与 NUL。 */
 function yosysQuote(value) {
@@ -105,29 +106,35 @@ async function runYosysCircuit(options) {
     }
     if (options.timeoutMs !== undefined && (!Number.isFinite(options.timeoutMs) || options.timeoutMs <= 0)) throw new Error('Yosys 超时必须为正数');
     const isBundled = executable === 'bundled';
+    const requestedFrontend = options.frontend || 'auto';
+    const frontend = requestedFrontend === 'auto' ? (isBundled ? 'slang' : 'verilog') : requestedFrontend;
     let command = /[\\/]/.test(executable) ? path.resolve(sourceRoot, executable) : executable;
     const directory = await task.directory(outputBase, 'yosys');
     const filePath = path.join(directory, 'circuit.json');
     const scriptPath = path.join(directory, 'circuit.ys');
     let wrapperPath = path.join(directory, 'sources.sv');
-    if (!isBundled && options.frontend === 'slang' && !/^[A-Za-z0-9_./:\-]+$/.test(path.relative(sourceRoot, wrapperPath).replace(/\\/g, '/'))) {
+    if (!isBundled && frontend === 'slang' && !/^[A-Za-z0-9_./:\-]+$/.test(path.relative(sourceRoot, wrapperPath).replace(/\\/g, '/'))) {
         wrapperPath = path.join(await task.directory(path.join(sourceRoot, '.svtools', 'circuit'), 'input'), 'sources.sv');
     }
     const bundled = isBundled ? await require('./yosys-bundled').prepareBundledYosys({ ...options, directory }) : null;
-    const wrapperSources = bundled ? bundled.sources : options.frontend === 'slang'
+    const wrapperSources = bundled ? bundled.sources : frontend === 'slang'
         ? sources.map(file => path.relative(path.dirname(wrapperPath), path.resolve(sourceRoot, file))) : sources;
     await fs.writeFile(wrapperPath, buildSourceWrapper({ ...options, sources: wrapperSources }), 'utf8');
     const aliases = bundled ? { directories: bundled.includeDirs, sourceDirectories: bundled.sourceDirectories } : await includeAliases(options);
-    const inputPath = bundled ? bundled.inputPath : options.frontend === 'slang' ? path.relative(sourceRoot, wrapperPath).replace(/\\/g, '/') : wrapperPath;
-    await fs.writeFile(scriptPath, buildYosysScript({ ...options, sources: [inputPath], includeDirs: aliases.directories,
+    const inputPath = bundled ? bundled.inputPath : frontend === 'slang' ? path.relative(sourceRoot, wrapperPath).replace(/\\/g, '/') : wrapperPath;
+    await fs.writeFile(scriptPath, buildYosysScript({ ...options, frontend, sources: [inputPath], includeDirs: aliases.directories,
         outputPath: bundled ? bundled.outputPath : filePath }), 'utf8');
     task.throwIfCancelled();
-    let reportedError = false;
+    let firstError;
     if (bundled) command = bundled.command;
     const result = await task.run(command, bundled ? bundled.args : ['-Q', '-T', '-s', scriptPath.replace(/\\/g, '/')], {
         cwd: sourceRoot, env: bundled ? { ...process.env, ...env, ELECTRON_RUN_AS_NODE: '1' } : env,
         stage: 'yosys', timeoutMs: options.timeoutMs || DEFAULT_TIMEOUT_MS,
-        onStdout: onOutput, onStderr: onOutput, onLine(line) { if (/^\s*ERROR:/i.test(line)) reportedError = true; }
+        onStdout: onOutput, onStderr: onOutput, onLine(line) {
+            if (!firstError && /^\s*(?:ERROR:|.+:\d+(?::\d+)?:\s*(?:fatal )?error:|内置 Yosys：)/i.test(line)) {
+                firstError = line.slice(0, MAX_ERROR_CHARS);
+            }
+        }
     });
     task.throwIfCancelled();
     if (/\bENOENT\b/.test(result.errorMessage || '')) {
@@ -135,9 +142,11 @@ async function runYosysCircuit(options) {
             + '。请将 svtools.circuit.yosysPath 设置为已安装的 yosys 或 yowasp-yosys 的可执行文件路径。'
             + '\n完整日志：' + result.logPath), { code: 'YOSYS_NOT_FOUND' });
     }
-    if (!processSucceeded(result) || reportedError) {
-        throw new Error('Yosys 电路生成失败：' + (result.errorMessage || result.logError || result.output?.slice(-2000)
-            || `exit ${result.code}`) + '\n完整日志：' + result.logPath);
+    if (!processSucceeded(result) || firstError) {
+        const detail = result.errorMessage || result.logError || firstError || result.output?.slice(-MAX_ERROR_CHARS) || `exit ${result.code}`;
+        const hint = frontend === 'verilog' && /syntax error|unexpected TOK_|Unsupported SystemVerilog/i.test(detail)
+            ? '\n当前为 Yosys 旧 Verilog 前端；SystemVerilog 可使用内置 auto 或支持 read_slang 的 slang 前端。' : '';
+        throw new Error('Yosys 电路生成失败：' + detail + hint + '\n完整日志：' + result.logPath);
     }
     const stat = await fs.stat(filePath).catch(error => { throw new Error('Yosys 未生成电路 JSON：' + error.message); });
     if (!stat.isFile() || !stat.size) throw new Error('Yosys 生成了空电路 JSON');

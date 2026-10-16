@@ -2,6 +2,14 @@
 
 All notable changes to the SystemVerilog VSCode Extension will be documented in this file.
 
+## [4.1.0-alpha4] - 2026-10-16
+
+**变更内容：** Yosys前端默认改为auto，内置工具使用Slang，外部工具兼容旧前端。修复标准SystemVerilog的编译单元/模块内timeunit与timeprecision被默认入口拒绝；保留源码及未保存正文。失败摘要优先具体源码错误，完整日志保留WASI运行时提示。
+
+**为什么：** `read_verilog -sv`只支持部分SystemVerilog，内置包虽已有Slang但默认未使用。现在根据明确的后端能力选择一次，不删除语法、不在失败后换前端重试。显式slang/verilog配置仍生效。
+
+**影响面：** 新增auto枚举与中英文说明；外部Yosys默认仍用旧前端，显式slang需工具支持。真实回归核对时序声明、上升沿/低有效异步复位、电路连接和源位置。交付与清单见`docs/V4_1_ALPHA4.md`。
+
 ## [4.1.0-alpha3] - 2026-10-16
 
 **变更内容：** 编辑器右上角默认使用内置Yosys，RTL右键提供当前文件Vivado，工程面板继续使用工程top。修复工程中已加入、却未被旧top引用的模块出现`Synth 8-439 module not found`；错误提示优先显示具体工具诊断。

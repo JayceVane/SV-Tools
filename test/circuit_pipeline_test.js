@@ -127,3 +127,35 @@ test('源码定位拒绝相邻前缀目录与上级路径', () => {
     assert.equal(insideRoots(path.resolve(root, '..', 'workspace-other', 'top.sv'), [root]), false);
     assert.equal(insideRoots(path.resolve(root, '..', 'top.sv'), [root]), false);
 });
+
+for (const executable of ['bundled','yosys']) for (const requested of [undefined,'auto','slang','verilog']) {
+    test(`前端选择 ${executable}/${requested || 'default'} 保留显式配置与外部兼容`, async t => {
+        const { root, task } = await fixture(t);
+        task.run = async () => {
+            await fs.writeFile(path.join(await task.directory(root, 'yosys'), 'circuit.json'), '{}');
+            return { code: 0 };
+        };
+        const generated = await runYosysCircuit({ task, executable, frontend: requested, sources: [path.join(root, 'top.sv')], top: 'top', outputBase: root, sourceRoot: root });
+        const script = await fs.readFile(path.join(path.dirname(generated.filePath), 'circuit.ys'), 'utf8');
+        const useSlang = requested === 'slang' || ((!requested || requested === 'auto') && executable === 'bundled');
+        assert.match(script, useSlang ? /^read_slang / : /^read_verilog -sv /);
+    });
+}
+
+test('源位置前缀ERROR使任务失败，摘要保留真实语法错误而不是WASI警告', async t => {
+    for (const code of [0, 1]) {
+        const { root, task } = await fixture(t);
+        task.run = async (_, args, options) => {
+            options.onLine('(node:123) ExperimentalWarning: WASI is an experimental feature');
+            options.onLine('/source0/top.sv:16: ERROR: syntax error, unexpected TOK_ID');
+            return { code, output: '(node:123) ExperimentalWarning: WASI', logPath: 'syntax.log' };
+        };
+        await assert.rejects(runYosysCircuit({ task, executable: 'yosys', sources: ['top.sv'], top: 'top', outputBase: root, sourceRoot: root }), error => {
+            assert.match(error.message, /top.sv:16: ERROR: syntax error/);
+            assert.match(error.message, /SystemVerilog.*slang/);
+            assert.match(error.message, /完整日志：syntax.log/);
+            assert.doesNotMatch(error.message, /ExperimentalWarning/);
+            return true;
+        });
+    }
+});

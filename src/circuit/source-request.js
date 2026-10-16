@@ -38,7 +38,7 @@ async function prepareSourceRequest({ document, root, top, config, task, outputB
         for (let index = 0; index < sources.length; index++) if (key(sources[index]) === key(filePath)) sources[index] = snapshot;
         sourceMap[snapshot] = filePath;
     }
-    return { sources, includeDirs, defines: config.defines || [], frontend: config.frontend || 'verilog',
+    return { sources, includeDirs, defines: config.defines || [], frontend: config.frontend || 'auto',
         top, sourceRoot: root, title: path.basename(filePath), sourceMap };
 }
 module.exports = { topCandidates, prepareSourceRequest };

@@ -111,7 +111,7 @@
   "cmd.circuit.fromVivado.title": "View Project Top Circuit (Vivado)",
   "cmd.circuit.stop.title": "Stop Circuit Generation",
   "cfg.circuit.yosysPath": "Use bundled for the included offline Yosys WASM engine; no Python or separate tool installation is required. Alternatively specify a local Yosys executable.",
-  "cfg.circuit.frontend": "verilog uses read_verilog -sv. slang requires read_slang with --keep-hierarchy support in the selected Yosys build.",
+  "cfg.circuit.frontend": "auto uses Slang with bundled Yosys and read_verilog -sv with external tools. slang/verilog explicitly override the choice; external slang requires read_slang support.",
   "cfg.circuit.sources": "Ordered RTL source paths, relative to the workspace folder or absolute. The active file is appended if absent.",
   "cfg.circuit.includeDirs": "Local HDL include directories, relative to the workspace folder or absolute.",
   "cfg.circuit.defines": "Preprocessor definitions such as SYNTHESIS or WIDTH=8.",

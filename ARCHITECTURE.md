@@ -71,7 +71,7 @@ UTF-16，孤立代理项返回原始JS字符串，避免在守卫之前被UTF-8�
 
 ## 4.1 电路数据与交互
 
-alpha2 默认使用固定版本内置 Yosys WASM。`yosys-bundled.js` 仅构建源目录/include/任务目录的 guest 路径映射；`yosys-wasi.js` 在独立 Node 子进程校验并运行原始 WASI 模块。编译进程继承共享工具任务的超时、日志和取消，不占用扩展宿主线程，也不在运行时下载工具。资源及完整许可由构建脚本从锁定 npm 包复制/展开；不分发该包的 JS runtime、Python 或其它 WASM adapter。Node WASI 用于接口与进程隔离，不宣称安全沙箱。
+alpha2 默认使用固定版本内置 Yosys WASM。alpha4将前端选择集中在runner：auto在内置后端解析为Slang，在外部后端解析为旧Verilog前端；显式配置始终保留，不按关键字改写输入或失败后重试。源位置前缀的ERROR也使任务失败，摘要优先具体错误，完整日志保留运行时警告。`yosys-bundled.js` 仅构建源目录/include/任务目录的 guest 路径映射；`yosys-wasi.js` 在独立 Node 子进程校验并运行原始 WASI 模块。编译进程继承共享工具任务的超时、日志和取消，不占用扩展宿主线程，也不在运行时下载工具。资源及完整许可由构建脚本从锁定 npm 包复制/展开；不分发该包的 JS runtime、Python 或其它 WASM adapter。Node WASI 用于接口与进程隔离，不宣称安全沙箱。
 
 内置 Slang 的 `src` 可能省略开头斜杠，适配时先按 guest 根解析，再经目录映射与快照映射两步还原真实文件。编辑器标题栏默认Yosys；RTL右键选择当前文件Vivado top，工程面板沿用工程top。alpha3修正原先仅传`-top`的缺口：工程旧层级会AutoDisabled无关源，只读原工程无法重算。当前文件入口先在任务目录`save_project_as -exclude_run_results`，确认当前项目已切到副本后仅在副本设置top并`update_compile_order`。原工程及源码不变；工程外或脏正文仍明确提示改用内置Yosys。Tcl导出器显式按UTF-8加载，错误汇总优先具体Vivado诊断而非Tcl收尾。
 

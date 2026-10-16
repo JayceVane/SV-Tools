@@ -31,7 +31,7 @@ VSIX 内置固定 YoWASP/Yosys 0.68.1207 的 WASM 和 share，首次使用也可
 ```json
 {
   "svtools.circuit.yosysPath": "bundled",
-  "svtools.circuit.frontend": "verilog",
+  "svtools.circuit.frontend": "auto",
   "svtools.circuit.top": "my_top",
   "svtools.circuit.sources": ["rtl/package.sv", "rtl/child.sv", "rtl/top.sv"],
   "svtools.circuit.includeDirs": ["rtl/include"],
@@ -42,7 +42,7 @@ VSIX 内置固定 YoWASP/Yosys 0.68.1207 的 WASM 和 share，首次使用也可
 
 路径相对当前文件所属工作区根目录解析，绝对路径也可用；`sources` 是有序文件列表，当前文件若未包含则追加，不展开 glob。未设置 top 时从当前文件列出模块供选择。生成入口只接受普通 ASCII HDL 模块名；带转义名称的设计可以外部生成 JSON 后导入。
 
-`verilog` 使用 `read_verilog -sv`，适用范围由 Yosys 内建前端决定。需要更完整 SystemVerilog 时选择 `slang`，要求工具提供 `read_slang` 插件；本机未装插件时会报告工具错误，不会静默换前端。生成采用 `prep`，保留层级和已收集存储器；导入含未降低 process/memory 的原始中间 JSON 会明确提示先运行 `proc` / `memory_collect` 或 `prep`。
+`auto`为默认：内置Yosys固定提供Slang，自动使用`read_slang`；外部Yosys沿用`read_verilog -sv`以兼容未安装Slang的工具。可显式选择`slang`或`verilog`，不会在编译失败后静默重试其它前端。`slang`支持编译单元及模块内的`timeunit`/`timeprecision`；显式选择`verilog`时仍受旧前端语法范围限制，报错会提示更换前端。外部`slang`要求工具提供`read_slang`。生成采用 `prep`，保留层级和已收集存储器；导入含未降低 process/memory 的原始中间 JSON 会明确提示先运行 `proc` / `memory_collect` 或 `prep`。
 
 宏以 `NAME` 或 `NAME=正文` 形式配置，保留正文中的空格及引号，不支持换行宏。生成器用独立 HDL 包装文件传递宏和有序 include，避免不同前端的命令行引号差异。内置引擎直接映射明确配置的源目录/include 与任务目录，支持空格、中文路径及工作区相对 readmem 文件。外部原生 Yosys 的空格 include 使用目录链接，识别出的 `yowasp-yosys` exe/cmd/bat 则使用有预算的目录快照；外部 YoWASP 快照遇到符号链接或超预算会报错。
 

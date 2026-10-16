@@ -137,6 +137,7 @@ test('标题栏默认Yosys，RTL右键提供文件Vivado，工程面板保留工
     assert.ok(contributes.menus['view/item/context'].some(item => item.command === 'svtools.circuit.fromVivado' && /topModule/.test(item.when)));
     assert.equal(contributes.commands.find(item => item.command === 'svtools.circuit.fromVivadoFile').icon, '$(circuit-board)');
     assert.equal(contributes.configuration.properties['svtools.circuit.yosysPath'].default, 'bundled');
+    assert.equal(contributes.configuration.properties['svtools.circuit.frontend'].default, 'auto');
 });
 
 test('编辑器 Vivado 使用文件同名模块，工程入口保留工程 top，均走真实 Worker 与 ELK', async t => {
