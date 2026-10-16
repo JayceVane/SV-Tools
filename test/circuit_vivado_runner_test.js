@@ -72,3 +72,33 @@ test('Vivado runner rejects invalid or absent source/top before starting a proce
     }
     assert.equal(f.calls.filter(call => typeof call === 'object').length, 0);
 });
+
+test('Vivado runner prioritizes actionable synthesis diagnostics over generic Tcl elaboration failure', async t => {
+    const f = await fixture(t);
+    f.task.run = async (command, args, options) => {
+        for (const line of ["ERROR: [Synth 8-439] module 'unreferenced' not found",
+            'ERROR: [Vivado_Tcl 4-5] Elaboration failed - please see the console for details',
+            'SVTOOLS_CIRCUIT_ERROR ERROR: [Vivado_Tcl 4-5] Elaboration failed - please see the console for details']) {
+            options.onLine(line, true, {});
+        }
+        return { code: 1, output: '', logPath: '/task/vivado.log' };
+    };
+    await assert.rejects(runVivadoCircuit(f.options), error => {
+        assert.match(error.message, /Synth 8-439.*module 'unreferenced' not found/);
+        assert.match(error.message, /完整日志：\/task\/vivado.log/);
+        assert.doesNotMatch(error.message, /please see the console/);
+        return true;
+    });
+});
+
+test('Vivado runner decodes Chinese Tcl errors independently of Windows output code page', async t => {
+    const f = await fixture(t), message = '当前文件不是工程综合源：C:/源码/独立 module.sv';
+    f.task.run = async (command, args, options) => {
+        options.onLine('SVTOOLS_CIRCUIT_ERROR_UTF8 ' + Buffer.from(message, 'utf8').toString('hex'), true, {});
+        options.onLine('SVTOOLS_CIRCUIT_ERROR ???', true, {});
+        return { code: 1, output: '', logPath: '/task/vivado.log' };
+    };
+    await assert.rejects(runVivadoCircuit(f.options), error => {
+        assert.ok(error.message.includes(message)); assert.ok(error.message.includes('/task/vivado.log')); return true;
+    });
+});

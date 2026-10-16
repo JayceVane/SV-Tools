@@ -1,3 +1,7 @@
+# 4.1 alpha3 开发交接
+
+2026-10-16：标题栏默认Yosys，RTL右键当前文件Vivado，工程面板工程top。用户报告的Synth8-439来自旧top的AutoDisabled/编译顺序；文件入口只读打开原工程，在任务目录另存排除run结果的副本，确认切换后重建副本top与顺序。具体ERROR优先于Tcl收尾，脚本路径和中文错误固定UTF-8。alpha2首次验收只覆盖同层级leaf，alpha3补上未引用模块及中文路径。实测公开Vivado未引用/中文路径与工程外拒绝通过，用户实际报错模块2单元/3端口、原XPR/源码SHA256不变；电路99/99、既有Node511通过1可选跳过、Golden38/38、Rust121/121。包435文件/419逐字节一致，实际Code.exe Node模式内置编译通过，UI宿主更新锁仍在。版本/完整清单见docs/V4_1_ALPHA3.md。4.1继续独立worktree和Draft PR11，原master保持4.0 preview；不自动合并或发Release。
+
 # 4.1 开发交接
 
 2026-10-16 alpha2：已修复 RTL 右键 URI 被当作 JSON、缺少 Yosys 的默认体验；新增固定 @yowasp/yosys 0.68.1207 的离线 WASM 后端。默认 `yosysPath=bundled`，可覆盖为外部路径；打包包含 WASM/share/许可，不包含 Python 或 npm runtime。编辑器标题栏 `fromVivadoFile` 选择当前文件模块 top，工程面板 `fromVivado` 保留工程 top。当前文件 Vivado 要求已保存的工程综合源，只用 `synth_design -rtl -top`，不保存或更改 XPR。

@@ -71,6 +71,24 @@ namespace eval svtools_circuit {
         }
     }
 
+    # 工程旧top会自动禁用无关源文件；-top本身不会重算这一编译列表。
+    # 只在任务副本中更改TOP并更新顺序，保留原工程的文件类型、宏、include与IP上下文。
+    proc prepareSelectedTop {requestedTop outputPath} {
+        set originalDirectory [file normalize [get_property DIRECTORY [current_project]]]
+        set snapshotDirectory [file normalize [file join [file dirname $outputPath] project]]
+        if {[string equal -nocase $originalDirectory $snapshotDirectory]} {
+            error {电路任务副本目录不能与原工程相同}
+        }
+        save_project_as -exclude_run_results svtools_circuit_snapshot $snapshotDirectory
+        if {![string equal -nocase [file normalize [get_property DIRECTORY [current_project]]] $snapshotDirectory]} {
+            error {无法切换到电路任务副本，已停止详细化}
+        }
+        set sourceSet [current_fileset]
+        set_property TOP_AUTO_SET 0 $sourceSet
+        set_property TOP $requestedTop $sourceSet
+        update_compile_order -fileset $sourceSet
+    }
+
     proc exportProject {projectPath outputPath {requestedTop {}} {sourcePath {}}} {
         variable MAX_CELLS
         variable MAX_NETS
@@ -83,7 +101,7 @@ namespace eval svtools_circuit {
         set top [get_property TOP [current_fileset]]
         set synthesisArgs [list -rtl -name svtools_circuit_rtl]
         if {$requestedTop ne {}} {
-            # -top 仅影响本次详细化，保持工程 TOP、文件集和 compile order 不变。
+            prepareSelectedTop $requestedTop $outputPath
             lappend synthesisArgs -top $requestedTop
             set top $requestedTop
         }

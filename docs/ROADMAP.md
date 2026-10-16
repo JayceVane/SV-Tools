@@ -4,7 +4,7 @@
 
 ## 当前优先级
 
-4.0.0-preview.1 已发布并通过 PR 合入原工程。用户已授权按“Yosys JSON → netlistsvg 验证 → 独立模型 → ELK.js + SVG；Vivado 共用模型”路线开发下一版本。4.1.0-alpha2 已实现模块级电路视图、离线内置 Yosys，以及当前文件/工程 top 两种 Vivado 入口。当前优先完成真实 UI 宿主验收、处理使用反馈并保持旧功能回归；边界和进度见 `CIRCUIT.md`、`V4_1_ALPHA2.md`。
+4.0.0-preview.1 已发布并通过 PR 合入原工程。用户已授权按“Yosys JSON → netlistsvg 验证 → 独立模型 → ELK.js + SVG；Vivado 共用模型”路线开发下一版本。4.1.0-alpha3 已实现模块级电路视图、离线内置 Yosys，以及当前文件/工程 top 两种 Vivado 入口。alpha3修复未引用模块的Vivado编译顺序，并将标题栏默认改回Yosys。当前优先完成真实 UI 宿主验收、处理使用反馈并保持旧功能回归；边界和进度见 `CIRCUIT.md`、`V4_1_ALPHA3.md`。
 
 电路后续候选：局部逻辑锥、按模块缓存与增量布局、大设计按需加载、Vivado 层级保留。它们尚未实现，不以提高当前硬预算冒充大设计支持。
 

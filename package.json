@@ -2,7 +2,7 @@
   "name": "svtools",
   "displayName": "SystemVerilog Tools",
   "description": "Verilog/SystemVerilog formatter, module instantiation, testbench generation, and productivity tools (Rust native backend)",
-  "version": "4.1.0-alpha2",
+  "version": "4.1.0-alpha3",
   "publisher": "JayceVane",
   "author": {
     "name": "JayceVane",
@@ -500,7 +500,7 @@
           "when": "resourceExtname == .tcl"
         },
         {
-          "command": "svtools.circuit.fromVivadoFile",
+          "command": "svtools.circuit.fromSource",
           "when": "resourceScheme == file && (editorLangId == verilog || editorLangId == systemverilog || editorLangId == system-verilog)",
           "group": "navigation@4"
         }
@@ -689,8 +689,9 @@
           "group": "5_circuit"
         },
         {
-          "command": "svtools.circuit.fromVivado",
-          "group": "5_circuit"
+          "command": "svtools.circuit.fromVivadoFile",
+          "group": "5_circuit",
+          "when": "resourceScheme == file && resourceExtname =~ /\\.(sv|v)$/i"
         },
         {
           "command": "svtools.circuit.stop",

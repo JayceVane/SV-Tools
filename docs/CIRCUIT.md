@@ -1,6 +1,6 @@
 # 电路结构查看器（4.1 alpha）
 
-4.1 alpha2要求VS Code 1.106或更新版本；内置固定WASM需要新版V8类型支持。纯Node开发验收基线为22.20.0，CI覆盖22/24。不支持的宿主会提示升级或配置外部Yosys，4.0 preview仍可用于旧版VS Code。
+4.1 alpha2及更新版本要求VS Code 1.106或更新版本；内置固定WASM需要新版V8类型支持。纯Node开发验收基线为22.20.0，CI覆盖22/24。不支持的宿主会提示升级或配置外部Yosys，4.0 preview仍可用于旧版VS Code。
 
 ## 目标与数据来源
 
@@ -17,10 +17,10 @@
 | `svtools.circuit.fromSource` | 当前 `.v` / `.sv` 默认调用内置 Yosys 生成并显示 |
 | `svtools.circuit.open` | 导入已有 Yosys JSON 或本插件 Vivado 导出 JSON |
 | `svtools.circuit.fromVivado` | 读取当前选中 XPR，执行只读 RTL 详细化并显示 |
-| `svtools.circuit.fromVivadoFile` | 编辑器标题栏查看当前文件，临时使用该文件模块作为 Vivado top |
+| `svtools.circuit.fromVivadoFile` | RTL 右键查看当前文件，在任务副本中使用该文件模块作为 Vivado top |
 | `svtools.circuit.stop` | 停止电路生成及顶层扫描 |
 
-RTL 编辑器右键也有入口。Vivado 入口复用现有面板的工程选择与 `svtools.vivado.path`，不修改用户的工程配置。生成物和日志放在工作区 `.svtools/circuit/` 的独立任务目录，工程/补全索引会忽略这些目录。
+编辑器右上角默认调用内置 Yosys；RTL 右键子菜单提供 Yosys 与当前文件 Vivado 入口。Vivado 入口复用现有面板的工程选择与 `svtools.vivado.path`，不修改用户的工程配置。生成物和日志放在工作区 `.svtools/circuit/` 的独立任务目录，工程/补全索引会忽略这些目录。
 
 Yosys 入口对当前未保存正文生成任务快照，不保存、格式化或替换磁盘文件；工具返回的快照位置回映射到原文件。其他源文件从磁盘读取。Vivado 当前文件入口要求先保存，不自动修改编辑器正文。源码定位只接受模型中已有位置，并在宿主核对真实路径范围。JSON 导入只出现在 JSON 编辑器上下文与命令面板；旧绑定传入 RTL URI 时也会转入生成流程。
 
@@ -50,9 +50,9 @@ VSIX 内置固定 YoWASP/Yosys 0.68.1207 的 WASM 和 share，首次使用也可
 
 本版调用 `open_project -read_only` 与 `synth_design -rtl`，输出标明 `vivado / elaborated-rtl / flat`。单元使用完整实例路径，但不提供可下钻的 Vivado 模块树。跨层级网络使用真实 segments 与 canonical net 归一，避免同名局部网络误连。
 
-编辑器右上角“查看当前文件电路（Vivado）”优先选择与文件名相同的模块，或文件内唯一模块；有多个候选时供用户选择。只用 `synth_design -rtl -top` 覆盖本次查看，忽略 Yosys top 设置，不写入 XPR。工程管理面板标题和 top 节点入口均保留工程 top。两个入口复用所选 XPR，互不改变对方的 top。
+RTL 右键“查看当前文件电路（Vivado）”优先选择与文件名相同的模块，或文件内唯一模块；有多个候选时供用户选择。原工程只读打开，在独立任务目录保存排除run结果的工程副本，再设置副本top并更新编译顺序，最后执行`-rtl`详细化。这样旧top未引用、被AutoDisabled的源文件也可查看；宏、include、文件类型和IP上下文沿用工程。工程管理面板标题和top节点入口均使用原工程top。右上角按钮始终调用Yosys，遵守`svtools.circuit.*`设置。
 
-当前文件必须是所选工程的已保存综合源。Vivado 2022.1.2 的只读模式不允许临时增删文件或改项目属性，因此工程外/未保存文件会明确提示先加入并保存，或改用内置 Yosys；不会自动保存、加入文件、改工程 top 或读磁盘旧版冒充未保存正文。
+当前文件必须是所选工程的已保存综合源。工程外/未保存文件会明确提示先加入并保存，或改用内置 Yosys。当前文件的top和编译顺序只写入任务副本；原工程、源文件和编辑器正文保持原样。Vivado错误提示优先显示具体的模块、语法或端口错误，同时提供完整日志。
 
 升序、降序、非零/负起点总线按真实 BUS 元数据还原。黑盒保留为未知实例；稀疏内部总线不补造缺失位。可显示寄存器、算术、逻辑、常量和存储器类单元，但不是门级时序、布局布线或时序报告视图。真实验收使用 Vivado 2022.1.2；其他版本需复验 Tcl 对象属性与导出格式。
 

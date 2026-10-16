@@ -128,9 +128,11 @@ test('JSON 导入入口不混入 RTL 子菜单，JSON 编辑器有独立入口',
     assert.match(item.when, /resourceExtname.*json/);
 });
 
-test('标题栏明确查看当前文件，工程入口保留项目 top 策略，默认不依赖系统 Yosys', () => {
+test('标题栏默认Yosys，RTL右键提供文件Vivado，工程面板保留工程top', () => {
     const { contributes } = require('../package.json');
-    assert.ok(contributes.menus['editor/title'].some(item => item.command === 'svtools.circuit.fromVivadoFile'));
+    assert.ok(contributes.menus['editor/title'].some(item => item.command === 'svtools.circuit.fromSource'));
+    assert.ok(!contributes.menus['editor/title'].some(item => item.command === 'svtools.circuit.fromVivadoFile'));
+    assert.ok(contributes.menus['svtools.submenu'].some(item => item.command === 'svtools.circuit.fromVivadoFile' && /sv\|v/.test(item.when)));
     assert.ok(contributes.menus['view/title'].some(item => item.command === 'svtools.circuit.fromVivado'));
     assert.ok(contributes.menus['view/item/context'].some(item => item.command === 'svtools.circuit.fromVivado' && /topModule/.test(item.when)));
     assert.equal(contributes.commands.find(item => item.command === 'svtools.circuit.fromVivadoFile').icon, '$(circuit-board)');

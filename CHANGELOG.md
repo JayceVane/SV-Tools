@@ -2,6 +2,14 @@
 
 All notable changes to the SystemVerilog VSCode Extension will be documented in this file.
 
+## [4.1.0-alpha3] - 2026-10-16
+
+**变更内容：** 编辑器右上角默认使用内置Yosys，RTL右键提供当前文件Vivado，工程面板继续使用工程top。修复工程中已加入、却未被旧top引用的模块出现`Synth 8-439 module not found`；错误提示优先显示具体工具诊断。
+
+**为什么：** `synth_design -rtl -top`只覆盖详细化入口，不会重新启用旧层级自动禁用的源文件。当前文件查看改用任务工程副本重设top与编译顺序，保留原工程的宏、include、文件类型及IP上下文。
+
+**影响面：** 原工程仍只读，副本保存在电路任务目录并排除run结果，不保存用户正文。Tcl导出器显式UTF-8加载。完整验证与文件清单见`docs/V4_1_ALPHA3.md`。
+
 ## [4.1.0-alpha2] - 2026-10-16
 
 **变更内容：** 默认集成固定版本 Yosys WASM 与完整工具资源，离线生成无需 Python、系统 PATH 或运行时下载。新增编辑器标题栏 Vivado 入口，按当前文件同名模块、唯一模块或用户选择确定本次 top；工程面板和 top 节点入口继续使用工程 top。修复 RTL 右键 URI 误走 JSON 导入，导入菜单与错误提示明确区分源文件和网表，外部工具缺失给出配置项及日志位置。

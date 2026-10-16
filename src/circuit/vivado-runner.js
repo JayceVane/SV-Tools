@@ -6,6 +6,14 @@ const { buildVivadoExportScript } = require('./vivado-export');
 const DEFAULT_TIMEOUT_MS = 120000;
 const MAX_EXPORT_BYTES = 64 * 1024 * 1024;
 
+/** @param {string} output @returns {string|undefined} 读取ASCII错误协议，兼容旧版明文标记。 */
+function readTclError(output) {
+    const encoded = /^SVTOOLS_CIRCUIT_ERROR_UTF8 ((?:[0-9a-f]{2})+)$/im.exec(output);
+    if (!encoded) return /^SVTOOLS_CIRCUIT_ERROR (.+)$/m.exec(output)?.[1];
+    try { return new TextDecoder('utf-8', { fatal: true }).decode(Buffer.from(encoded[1], 'hex')); }
+    catch (error) { return 'Vivado错误消息的UTF-8编码无效：' + error.message; }
+}
+
 /**
  * 在独立任务目录执行 Vivado RTL 详细化；sourcePath 必须是工程综合源，top 只覆盖本次运行。
  * @param {{task:object,executable:string,projectPath:string,outputBase:string,top?:string,sourcePath?:string,timeoutMs?:number,onOutput?:Function}} options
@@ -38,7 +46,9 @@ async function runVivadoCircuit({ task, executable, projectPath, outputBase, top
         cwd: directory, scriptPath, timeoutMs, onOutput });
     task.throwIfCancelled();
     if (!result.ok) {
-        const detail = /^SVTOOLS_CIRCUIT_ERROR (.+)$/m.exec(result.stdout)?.[1];
+        // Tcl收尾的“Elaboration failed”会掩盖前面的模块、语法或端口错误。
+        const concrete = result.issues.find(issue => issue.level === 'ERROR' && !/^\[Vivado_Tcl 4-5\]/.test(issue.text));
+        const detail = concrete?.text || readTclError(result.stdout);
         throw new Error('Vivado 电路详细化失败：' + (detail || result.message) + (result.logPath ? '\n完整日志：' + result.logPath : ''));
     }
     let stat;

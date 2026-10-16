@@ -73,7 +73,7 @@ UTF-16，孤立代理项返回原始JS字符串，避免在守卫之前被UTF-8�
 
 alpha2 默认使用固定版本内置 Yosys WASM。`yosys-bundled.js` 仅构建源目录/include/任务目录的 guest 路径映射；`yosys-wasi.js` 在独立 Node 子进程校验并运行原始 WASI 模块。编译进程继承共享工具任务的超时、日志和取消，不占用扩展宿主线程，也不在运行时下载工具。资源及完整许可由构建脚本从锁定 npm 包复制/展开；不分发该包的 JS runtime、Python 或其它 WASM adapter。Node WASI 用于接口与进程隔离，不宣称安全沙箱。
 
-内置 Slang 的 `src` 可能省略开头斜杠，适配时先按 guest 根解析，再经目录映射与快照映射两步还原真实文件；不能先把 guest 相对路径锚定到 Windows 工作区。编辑器标题栏从当前文件选择本次 Vivado top，工程面板不传覆盖值，沿用工程 top。只读 Vivado 只允许对已保存综合源使用 `synth_design -rtl -top`，不调用项目变更命令；工程外或脏正文明确提示改用内置 Yosys，避免静默保存或显示旧内容。
+内置 Slang 的 `src` 可能省略开头斜杠，适配时先按 guest 根解析，再经目录映射与快照映射两步还原真实文件。编辑器标题栏默认Yosys；RTL右键选择当前文件Vivado top，工程面板沿用工程top。alpha3修正原先仅传`-top`的缺口：工程旧层级会AutoDisabled无关源，只读原工程无法重算。当前文件入口先在任务目录`save_project_as -exclude_run_results`，确认当前项目已切到副本后仅在副本设置top并`update_compile_order`。原工程及源码不变；工程外或脏正文仍明确提示改用内置Yosys。Tcl导出器显式按UTF-8加载，错误汇总优先具体Vivado诊断而非Tcl收尾。
 
 技术方向是先验证工具实际输出，再建立独立模型，最终使用 ELK.js + SVG 提供交互。netlistsvg 只用于开发验证，正式页面不依赖其输出或内部对象。实现愿景是同一模型接入不同工具并支持局部逻辑浏览；当前交付模块级视图，逻辑锥和增量布局留作后续。
 
