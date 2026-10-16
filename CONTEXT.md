@@ -4,7 +4,7 @@
 
 真实Slang/Yosys生成1/8/24/32位电路10节点/12连线，解包后实际Qoder Node24.15/Electron42.2编译/Worker/ELK及Native ABI通过；Edge155正式页面浅深主题、数字点击、无标记遮挡、紧凑/总览检查通过。电路154/154（新增7）、既有Node515通过1可选跳过、Golden40/40（20例）、Rust125/125，JS152文件；Node22.20修改相关46项通过。VSIX442文件、426运行文件逐字节一致。
 
-同机2000节点/5994条32位线：首次绘制129.7→252.9ms，活动DOM1539→1743（68个可见总线标记）；拖拽/缩放帧中位仍16.7ms/P95约16.8ms，选中处理0.3ms。新增装饰有初始化成本，不作为新的性能提升或任意宿主60fps承诺。命令scripts/benchmark-circuit-interaction.js增加--bus-width 1..64，默认仍1。
+同机2000节点/5994条32位线，各版本两次：alpha8首次绘制129.7/142.7ms，alpha9最终包252.9/224.3ms；活动DOM1539→1743（68个可见总线标记）。拖拽/缩放帧中位16.7ms/P95约16.8ms，选中处理中位alpha8为0.3/0.4ms，alpha9为0.4/0.4ms；两版仍有偶发长帧，见交付文档。新增装饰有初始化成本与运行波动，不作为新的性能提升或任意宿主60fps承诺。早期开发单次180.2ms保留但不计入最终包对照。命令scripts/benchmark-circuit-interaction.js增加--bus-width 1..64，默认仍1。
 
 交付及完整22文件清单见docs/V4_1_ALPHA9.md。保持独立worktree和Draft PR11，原master为4.0 preview，不自动合并或发Release。Qoder使用Node运行时、浏览器使用正式页面，未声称完整IDE UI验收。后续继续真实IDE使用反馈和复杂设计优化。
 
