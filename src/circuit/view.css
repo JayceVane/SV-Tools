@@ -10,6 +10,7 @@
     --button: var(--vscode-button-secondaryBackground, #243646);
     --buttonFg: var(--vscode-button-secondaryForeground, #d9e7f5);
     --wire: #71899f;
+    --diagramActive: #59c9ff;
     --register: #7ccabf;
     --mux: #d3b57e;
     --logic: #8eafe1;
@@ -19,11 +20,13 @@
     --error: var(--vscode-errorForeground, #f29595);
 }
 body.vscode-light, body.vscode-high-contrast-light {
-    --wire: #758797; --register: #348579; --mux: #a27a32; --logic: #557cad; --instance: #8361a5; --cellBg: #f7fafd; --grid: #e4eaf0;
+    --diagramActive: #005fb8; --wire: #758797; --register: #348579; --mux: #a27a32; --logic: #557cad; --instance: #8361a5; --cellBg: #f7fafd; --grid: #e4eaf0;
 }
 @media (prefers-color-scheme: light) {
-    body:not(.vscode-dark):not(.vscode-high-contrast) { --bg: var(--vscode-editor-background, #f6f8fb); --fg: var(--vscode-editor-foreground, #243445); --panel: var(--vscode-sideBar-background, #fff); --muted: var(--vscode-descriptionForeground, #66788a); --border: var(--vscode-panel-border, #d7e1e9); --input: var(--vscode-input-background, #fff); --button: var(--vscode-button-secondaryBackground, #e8eff6); --buttonFg: var(--vscode-button-secondaryForeground, #294359); --accent: var(--vscode-focusBorder, #2176bb); --wire: #758797; --register: #348579; --mux: #a27a32; --logic: #557cad; --instance: #8361a5; --cellBg: #f7fafd; --grid: #e4eaf0; }
+    body:not(.vscode-dark):not(.vscode-high-contrast) { --bg: var(--vscode-editor-background, #f6f8fb); --fg: var(--vscode-editor-foreground, #243445); --panel: var(--vscode-sideBar-background, #fff); --muted: var(--vscode-descriptionForeground, #66788a); --border: var(--vscode-panel-border, #d7e1e9); --input: var(--vscode-input-background, #fff); --button: var(--vscode-button-secondaryBackground, #e8eff6); --buttonFg: var(--vscode-button-secondaryForeground, #294359); --accent: var(--vscode-focusBorder, #2176bb); --diagramActive: #005fb8; --wire: #758797; --register: #348579; --mux: #a27a32; --logic: #557cad; --instance: #8361a5; --cellBg: #f7fafd; --grid: #e4eaf0; }
 }
+/* 电路对象高亮不复用可能透明或与背景相同的IDE焦点边框。 */
+body.vscode-high-contrast { --diagramActive: #ffff00; }
 * { box-sizing: border-box; }
 html, body { height: 100%; margin: 0; overflow: hidden; }
 body { background: var(--bg); color: var(--fg); display: flex; flex-direction: column; font: 13px var(--vscode-font-family, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif); }
@@ -69,8 +72,8 @@ main { min-height: 0; flex: 1; display: flex; }
 .cellLabel { fill: var(--fg); font-size: 13px; pointer-events: none; paint-order: stroke; stroke: var(--bg); stroke-width: 3; stroke-linejoin: round; }
 .cellDetail, .pinLabel { fill: var(--muted); font-size: 11px; pointer-events: none; }
 .clockMark { fill: none; stroke: var(--cellAccent); stroke-width: 1.2; vector-effect: non-scaling-stroke; }
-.cell:hover .cellBody, .cell.connected .cellBody { stroke: var(--accent); }
-.cell.selected .cellBody { stroke: var(--accent); stroke-width: 2.5; }
+.cell:hover .cellBody, .cell.connected .cellBody { stroke: var(--diagramActive); }
+.cell.selected .cellBody { stroke: var(--diagramActive); stroke-width: 2.5; }
 .cell.searchMatch .cellBody { stroke-dasharray: 4 2; stroke-width: 2; }
 .pin { cursor: crosshair; }
 .pinHit { fill: transparent; stroke: transparent; }
@@ -79,7 +82,7 @@ main { min-height: 0; flex: 1; display: flex; }
 .pin:hover .pinDot, .pin.selected .pinDot,
 .pin:hover .pinStem, .pin.selected .pinStem,
 .pin:hover .polarityBubble, .pin.selected .polarityBubble,
-.pin:hover .clockMark, .pin.selected .clockMark { stroke: var(--accent); }
+.pin:hover .clockMark, .pin.selected .clockMark { stroke: var(--diagramActive); }
 .pin.bus .pinDot, .pin.bus .pinStem { stroke-width: 2.8; }
 .busPort .cellBody { stroke-width: 2; }
 .portWidth { fill: var(--muted); font-size: 11px; pointer-events: none; }
@@ -89,9 +92,9 @@ main { min-height: 0; flex: 1; display: flex; }
 .wireHit { fill: none; stroke: transparent; stroke-width: 12; vector-effect: non-scaling-stroke; }
 .busSlash { fill: none; stroke: var(--wire); stroke-width: 1.5; vector-effect: non-scaling-stroke; pointer-events: stroke; }
 .busWidth { fill: var(--fg); font-size: 12px; font-weight: 600; paint-order: stroke; stroke: var(--bg); stroke-width: 3; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
-.wire:hover .wireLine, .wire.selected .wireLine { stroke: var(--accent); stroke-width: var(--activeWireWidth); }
-.wire:hover .busSlash, .wire.selected .busSlash { stroke: var(--accent); }
-.wire:hover .busWidth, .wire.selected .busWidth { fill: var(--accent); }
+.wire:hover .wireLine, .wire.selected .wireLine { stroke: var(--diagramActive); stroke-width: var(--activeWireWidth); }
+.wire:hover .busSlash, .wire.selected .busSlash { stroke: var(--diagramActive); }
+.wire:hover .busWidth, .wire.selected .busWidth { fill: var(--diagramActive); }
 .wire.searchMatch:not(.selected) .wireLine { stroke: var(--mux); stroke-width: var(--activeWireWidth); }
 .wire.searchMatch:not(.selected) .busSlash { stroke: var(--mux); }
 .wire.searchMatch:not(.selected) .busWidth { fill: var(--mux); }
@@ -139,4 +142,4 @@ footer { min-height: 29px; border-top: 1px solid var(--border); display: flex; a
 .mappingLabel { paint-order: stroke; stroke: var(--bg); stroke-width: 3; stroke-linejoin: round; }
 .graphLayer[data-detail="compact"] .mappingLabel { display: block; }
 .kind-bus.selected .busSpine { stroke-width: 4.2; }
-.pin:hover .busTap, .pin.selected .busTap { stroke: var(--accent); }
+.pin:hover .busTap, .pin.selected .busTap { stroke: var(--diagramActive); }
