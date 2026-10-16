@@ -2,6 +2,14 @@
 
 All notable changes to the SystemVerilog VSCode Extension will be documented in this file.
 
+## [4.0.0-beta.5] - 2026-10-16
+
+**变更内容：** 生成目录排除策略覆盖文件发现、跨文件定义检索、已打开补全缓存、自动/手动工具入口和诊断发布。内部文档返回skipped，清理其旧诊断；正常RTL仍按原配置检查。
+
+**为什么：** 用户清单的32条xvlog错误全部来自26个.svtools/circuit临时文件。旧定义检索仅排除node_modules，会打开任务快照，继而触发lintOnOpen；重启及配置切换又会重查已打开文档。/source0是Yosys WASM虚拟路径，外部Vivado无法直接编译这些包装文件。
+
+**影响面：** 共享目录表同时生成glob及直接路径判定，兼容Windows大小写与分隔符，按完整目录段匹配。自动lint和诊断仅跳过.svtools/.Xil；显式node_modules等依赖源码仍可检查，真实错误正常显示。忽略目录不污染项目补全，但手工打开后的当前文档仍可解析；真实源码错误、任务失败状态及完整日志保留。修复记录和清单见`docs/V4_BETA5.md`。
+
 ## [4.0.0-beta.4] - 2026-10-16
 
 **变更内容：** 电路选中/悬停状态使用独立高亮色，亮色主题为深蓝，暗色为亮蓝，高对比暗色为黄色；连线、总线位宽标记、端点、连接条和关联节点统一处理。

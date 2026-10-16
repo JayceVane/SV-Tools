@@ -5,7 +5,7 @@
 
 改编自 Sublime Text [SystemVerilog](https://github.com/TheClams/SystemVerilog)（格式化）与 [Verilog-Gadget](https://github.com/poucotm/Verilog-Gadget)（生产力工具）插件。
 
-当前开发预览版本为 **4.0.0-beta.4**，修复亮色主题选中连线不可见，并包含电路拼接/拆分的位宽、分支位位置和重复驱动显示；[已发布4.0.0-beta.2](https://github.com/JayceVane/SV-Tools/releases/tag/v4.0.0-beta.2) 提供 Windows x64 VSIX 与 CLI。开发预览可通过本地VSIX安装并重载窗口，正式版目标为 **4.0.0**。源码位于 `src/`，构建产物位于 `bin/`。
+当前开发预览版本为 **4.0.0-beta.5**，修复电路临时文件被自动lint误检查，保留亮色主题高亮修复和电路拼接/拆分的位宽、分支位位置和重复驱动显示；[已发布4.0.0-beta.2](https://github.com/JayceVane/SV-Tools/releases/tag/v4.0.0-beta.2) 提供 Windows x64 VSIX 与 CLI。开发预览可通过本地VSIX安装并重载窗口，正式版目标为 **4.0.0**。源码位于 `src/`，构建产物位于 `bin/`。
 
 格式化只能改变普通空格、Tab、CR、LF；其它字符的内容、次数和顺序必须保持，即使输入
 全部乱码或语法不完整。无法安全提交的布局保留原文，详见 [格式化规范](docs/FORMAT_SPEC.md)。

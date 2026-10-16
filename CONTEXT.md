@@ -1,3 +1,9 @@
+# 4.0 beta.5 生成文件lint误报
+
+2026-10-16：用户粘贴的32条诊断全部来自26个.svtools/circuit临时文件，owner为svtools-iverilog、source为xvlog；30条include缺失，另2条为验证夹具宏/语法级联。定义检索仅排除node_modules并调用openTextDocument，触发lintOnOpen；启动与配置变化还会重查缓存文档。新增共享路径判定与glob同源，覆盖发现、已打开补全、定义检索、工具入口及发布。生成文档skipped并清理其旧诊断；正常RTL和失败状态不变。
+
+本轮4.0.0-beta.5本地交付，继续独立分支和草稿PR11，公开Release仍beta.2；用户工程、RTL和现有日志不写入。Node22相关57项通过，含启动/开/改/存/配置跳过及混合错误保留。JS154、Golden40/40、Node522通过1可选跳过、电路169/169、Rust125/125；最终包443文件/427运行文件逐字节一致。实际Qoder Node加载解包native ABI及32/32用户诊断分类通过。最终包、证据及完整24文件清单见docs/V4_BETA5.md；正式版目标4.0.0。
+
 # 4.0 beta.4 电路选中高亮
 
 2026-10-16：用户报告亮色主题选线后消失。旧beta.3解包页面注入白色/透明/背景同色focusBorder后实际点击复现，stroke为白色/透明/背景色，对比度1:1。根因是电路选中/悬停沿用IDE焦点边框变量，变量已定义时CSS fallback不生效。CSS增加独立diagramActive调色板，并同步线、端点、关联节点和总线位宽标签；保持位序、选择算法与线宽不变。

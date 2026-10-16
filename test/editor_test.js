@@ -170,3 +170,24 @@ test('自定义 headerTemplate 原样传给原生模块', async () => {
     assert.equal(harness.calls[0][0], custom);
     assert.equal(harness.insertions.length, 1);
 });
+
+
+test('跨文件定义检索排除电路临时文件，避免打开快照触发自动lint', async () => {
+    const { createLanguageProviders } = require('../src/editor/language');
+    const uri = fsPath => ({ fsPath, toString: () => fsPath });
+    const generated = uri('C:/hdl/.svtools/circuit/yosys-test/sources.sv'), source = uri('C:/hdl/rtl/target.sv');
+    const opened = [], searches = [];
+    const vscode = { Position: class { constructor(line, character) { Object.assign(this, { line, character }); } },
+        Location: class { constructor(uri, position) { Object.assign(this, { uri, position }); } },
+        workspace: { getConfiguration: () => ({ get: (_key, fallback) => fallback }),
+            findFiles: async (pattern, exclude) => { searches.push({ pattern, exclude }); return [generated, source]; },
+            openTextDocument: async uri => { opened.push(uri); return { getText: () => 'module target; endmodule', positionAt: () => ({ line: 0 }) }; } } };
+    const providers = createLanguageProviders({ vscode, loadNativeModule: () => null });
+    try {
+        const query = { getWordRangeAtPosition: () => ({ start: { character: 0 }, end: { character: 6 } }),
+            getText: () => 'target', lineAt: () => ({ text: 'target u_target();' }) };
+        const result = await providers.provideDefinition(query, { line: 0, character: 2 });
+        assert.equal(result.uri, source); assert.deepEqual(opened, [source]);
+        assert.equal(searches[0].exclude, require('../src/workspace/source-policy').SOURCE_EXCLUDE_GLOB);
+    } finally { providers.dispose(); }
+});

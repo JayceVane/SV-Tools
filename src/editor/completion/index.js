@@ -3,7 +3,7 @@
 const path = require('node:path');
 const { parseDocument } = require('./syntax');
 const SOURCE_GLOB = '**/*.{v,sv,vh,svh}';
-const { SOURCE_EXCLUDE_GLOB: EXCLUDE_GLOB } = require('../../workspace/source-policy');
+const { SOURCE_EXCLUDE_GLOB: EXCLUDE_GLOB, isExcludedSourcePath } = require('../../workspace/source-policy');
 const keyOf = uri => uri.toString();
 
 /** 工程语义缓存只读取 HDL 文本，脏文档始终优先；文件事件逐项失效。 */
@@ -21,7 +21,7 @@ function createCompletionIndex({ vscode, onError = console.warn }) {
         if (previous?.version === document.version && previous.document === document) return previous;
         const text = document.getText();
         const record = { uri: document.uri, model: parseDocument(text), document, version: document.version, bytes: Buffer.byteLength(text) };
-        records.set(key, record);
+        if (!isExcludedSourcePath(document.uri.fsPath)) records.set(key, record);
         return record;
     }
 
@@ -62,7 +62,7 @@ function createCompletionIndex({ vscode, onError = console.warn }) {
             if (token?.isCancellationRequested) { incomplete = true; break; }
             try {
                 const uris = await vscode.workspace.findFiles(pattern, EXCLUDE_GLOB, limit + 1, token);
-                for (const uri of uris) found.set(keyOf(uri), uri);
+                for (const uri of uris) if (!isExcludedSourcePath(uri.fsPath)) found.set(keyOf(uri), uri);
             } catch (error) {
                 incomplete = true;
                 onError('补全索引扫描失败：' + error.message);
@@ -82,7 +82,7 @@ function createCompletionIndex({ vscode, onError = console.warn }) {
         incomplete = discoveryIncomplete;
         const liveKeys = new Set(fileUris.map(keyOf));
         for (const document of openDocuments()) {
-            if (['verilog', 'systemverilog'].includes(document.languageId)) {
+            if (['verilog', 'systemverilog'].includes(document.languageId) && !isExcludedSourcePath(document.uri.fsPath)) {
                 update(document); liveKeys.add(keyOf(document.uri));
             }
         }
