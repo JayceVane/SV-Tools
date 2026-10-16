@@ -8,7 +8,7 @@ All notable changes to the SystemVerilog VSCode Extension will be documented in 
 
 **为什么：** full_adder引用half_adder时，旧入口没有提供子模块。另一个相邻问题是Slang可能先输出通用ERROR，再输出真正的源码错误；原摘要只保留第一条。现在优先源码行列并回映射原文件，保留完整日志；不会自动导入类型、改枚举或失败后换前端。
 
-**影响面：** 自动发现限定当前工作区文件夹和4096文件/单文件2 MiB/总量32 MiB预算，超限可显式配置sources。只收集依赖文件，不计算条件编译或generate；宏生成引用和复杂include上下文可用显式列表。字面include避免重复独立读入。源码、配置及原工程不被修改。详细验证与清单见`docs/V4_1_ALPHA6.md`。
+**影响面：** 自动发现限定当前工作区文件夹和4096文件/单文件2 MiB/总量32 MiB预算，超限可显式配置sources。只收集依赖文件，不计算条件编译或generate；宏生成引用和复杂include上下文可用显式列表。字面include避免重复独立读入。含include的脏依赖要求先保存，避免快照位置改变同名头文件解析。源码、配置及原工程不被修改。详细验证与清单见`docs/V4_1_ALPHA6.md`。
 
 ## [4.1.0-alpha5] - 2026-10-16
 

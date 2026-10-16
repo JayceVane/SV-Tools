@@ -88,3 +88,19 @@ test('接口端口类型加入自动源闭包', async t => {
         assert.deepEqual((await resolveSourceClosure(input)).map(file => path.basename(file)), ['bus.sv', 'top.sv']);
     }
 });
+
+
+test('含局部include的未保存依赖明确要求先保存，不能误读当前文件目录的同名头', async t => {
+    const input = await fixture(t, { 'top.sv': 'module top; child u(); endmodule', 'local.svh': '`define VALUE 0',
+        'lib/child.sv': '`include "local.svh"\nmodule child; endmodule', 'lib/local.svh': '`define VALUE 1' });
+    const child = path.join(input.root, 'lib/child.sv'), body = await fs.readFile(child, 'utf8');
+    const resolver = createCircuitSourceResolver({ vscode: { workspace: {
+        findFiles: async () => input.files.filter(file => file.endsWith('.sv')).map(fsPath => ({ fsPath })),
+        textDocuments: [{ uri: { scheme: 'file', fsPath: child }, isDirty: true, getText: () => body + '\n// dirty' }]
+    } } });
+    const manager = createToolTaskManager(), task = manager.start('include-context');
+    t.after(async () => { task.cancel(); await task.finish({ keepArtifacts: true }); await manager.dispose(); });
+    await assert.rejects(resolver({ ...input, current: { file: input.current, text: await fs.readFile(input.current, 'utf8'), isDirty: false },
+        sources: [], isExplicit: false, task }), /依赖文件尚未保存且包含 include/);
+    assert.equal(await fs.readFile(child, 'utf8'), body);
+});

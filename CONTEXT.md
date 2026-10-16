@@ -2,7 +2,7 @@
 
 2026-10-16：用户先报Slang通用详细化失败（impl_t未限定/未引入包且字符串赋枚举），后将参数改为字符串，继续报half_adder未定义。alpha6默认空sources时由VS Code发现当前根SV/V，Worker复用现有语义解析收集模块/接口/包闭包，依赖先行、同名定义报错、literal include去重；显式列表保留顺序。选中脏依赖按编号独立快照，当前文件/依赖同名不覆盖。source-paths集中映射；摘要优先具体源码行列而非先到通用ERROR。真实公开枚举夹具通过三类失败、自动四文件源序、层级与8组完整真值表。用户当前字符串版full_adder在实际Qoder Node24.15/Electron42.2执行解包alpha6后默认自动选择half_adder+full_adder，8节点/两个半加器、原文件哈希不变。没有写用户RTL、配置、XPR。
 
-JS150、Golden38/38、既有Node511通过1可选跳过、电路137/137、Rust121/121；VSIX441文件/425逐字节核验，包内原生ABI可加载。自动扫描4096文件/单文件2MiB/总32MiB、工作区真实路径范围；不展开宏/条件编译，不自动import或改参数。完整IDE UI未复验。保持独立worktree和Draft PR11，不自动合入或发Release。详细交付与35文件清单见docs/V4_1_ALPHA6.md；后续优先实际IDE使用反馈及复杂预处理文件表支持。
+JS150、Golden38/38、既有Node511通过1可选跳过、电路138/138、Rust121/121；VSIX441文件/425逐字节核验，包内原生ABI可加载。自动扫描4096文件/单文件2MiB/总32MiB、工作区真实路径范围；不展开宏/条件编译，不自动import或改参数。含include的脏依赖必须先保存，防止迁移后选择错误的同名头；已用真实工具证明原错误并有拒绝回归。完整IDE UI未复验。保持独立worktree和Draft PR11，不自动合入或发Release。详细交付与35文件清单见docs/V4_1_ALPHA6.md；后续优先实际IDE使用反馈及复杂预处理文件表支持。
 
 # 4.1 alpha5 开发交接
 

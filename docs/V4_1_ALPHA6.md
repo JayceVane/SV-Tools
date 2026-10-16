@@ -17,13 +17,13 @@ src/basic/half_adder.sv
 src/basic/full_adder.sv
 ```
 
-网表保留两个half_adder实例，ELK图8节点，原文件SHA256未变。没有写入用户RTL、设置或XPR。证据：`bin/circuit-alpha6-user-proof/report.json`、`circuit-alpha6-qoder-packaged.log`。
+网表保留两个half_adder实例，ELK图8节点，原文件SHA256未变。没有写入用户RTL、设置或XPR。证据：`bin/circuit-alpha6-user-proof/report.json`、`circuit-alpha6-qoder-packaged-final.log`。
 
 ## 标准与兼容边界
 
 自动收集只选择文件，不执行宏、条件编译或generate；最终语义仍由Slang判断。不会自动注入import、猜测未限定的类型归属、把字符串改为枚举或失败后换前端。包限定名、import以及参数化/generate实例能够用于依赖收集，接口和modport端口也有回归。
 
-自动候选仅`.sv/.v`，限制当前工作区根及真实文件路径，排除工具快照与依赖目录；4096文件、单文件2 MiB、总量32 MiB，Worker堆384 MiB/60秒。超限、非法UTF-8、外部链接或复杂预处理上下文使用显式sources/includeDirs。当前文件及选中脏依赖单文件快照16 MiB、总量64 MiB。旧JSON、布局、渲染与编译超时预算保持。
+自动候选仅`.sv/.v`，限制当前工作区根及真实文件路径，排除工具快照与依赖目录；4096文件、单文件2 MiB、总量32 MiB，Worker堆384 MiB/60秒。超限、非法UTF-8、外部链接或复杂预处理上下文使用显式sources/includeDirs。当前文件及选中脏依赖单文件快照16 MiB、总量64 MiB。含include的未保存依赖要求先保存，避免迁移正文后误读其他目录的同名头；当前文件继续支持原有未保存快照。旧JSON、布局、渲染与编译超时预算保持。
 
 正确枚举示例位于`test/fixtures/circuit-enum/`：参数类型为`corelib_pkg::impl_t`，默认值与比较使用`corelib_pkg::STRUCTURAL/FLAT`。已验证真实Slang会拒绝不可见类型、字符串赋枚举及缺少半加器三类情况；自动收集正确示例后保留两个独立参数化实现和结构分支的两个半加器，flatten后由Yosys eval检查全部8组输入。
 
@@ -42,12 +42,12 @@ node --test test/circuit_dependencies_test.js test/circuit_diagnostics_test.js
 | JS语法 | 150文件；`circuit-alpha6-package.log` |
 | Golden | 38/38，19用例 |
 | 既有Node | 512项：511通过，1可选目录重建跳过 |
-| 电路Node | 137/137，较alpha5新增19项 |
+| 电路Node | 138/138，较alpha5新增20项 |
 | Rust | 121/121；`circuit-alpha6-rust.log` |
 | 真实枚举与自动源闭包 | 三类失败、四文件顺序、层级、源位置及8组完整真值表通过；`circuit-alpha6-enum-auto.log` |
 | 解包后Qoder | Node24.15.0/Electron42.2.0执行自动源闭包、内置Slang、Worker/ELK和真值表；用户当前全加器只读生成通过；包内原生ABI可加载 |
-| VSIX | 441文件、18,518,179字节；425个运行文件逐字节一致；`circuit-alpha6-package-report.json` |
-| 依赖与质量 | 无循环依赖；新四模块MI为43.21/29.38/48.75/44.52，无新增模块复杂度热点 |
+| VSIX | 441文件、18,518,461字节；425个运行文件逐字节一致；`circuit-alpha6-package-report.json` |
+| 依赖与质量 | 无循环依赖；新四模块MI为40.58/29.38/48.75/44.52，无新增模块复杂度热点 |
 | 远程CI | Node22/24矩阵，最终状态见草稿PR11 |
 
 Qoder的Node运行时模式不等于完整Webview宿主验收；本轮未重跑完整IDE UI。画布及工具入口沿用alpha5，功能回归包含既有渲染交互合同。
@@ -55,7 +55,7 @@ Qoder的Node运行时模式不等于完整Webview宿主验收；本轮未重跑�
 包：`bin/svtools-4.1.0-alpha6-win32-x64.vsix`，安装后重载窗口并重新点击当前文件的电路按钮。保持默认空sources即可自动找到半加器；已有非空sources按显式列表处理。
 
 ```text
-42dc26dd0458cf267bda242cf284589473d20b99117e95454ffac10f3d1fd748
+5743c6d1a28eb1b1fa6bf0a5fafbf0b3d137cbe65e33c49df8f8a98cd6a4aa86
 ```
 
 ## 完整文件清单（相对alpha5）
