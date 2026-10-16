@@ -1,3 +1,11 @@
+# 4.1 alpha8 开发交接
+
+2026-10-16：用户Aurora示例整文件格式化漏掉支持模块的drp_clk_in对齐。真实文件局部实例可对齐、全文不行；最小复现为generate内always→assign→含if的always后接实例。过程完成判定漏掉Generate上下文，最后always状态未清理，后续实例被吞入。只为合法Generate并发上下文补齐提交条件。另修选区按首个真实代码分类，忽略分组注释；完整实例复用format_code_segment，纯端口表沿用起始括号列对齐。赋值分支移除Rust regex不支持的前瞻，以共享词法掩码和原文捕获布局。字符保全守卫未放宽。
+
+Rust125/125、Golden38/38、既有Node515通过1可选跳过、电路147/147；格式化NAPI/保全73项在Node24与22.20通过，Rustfmt三文件检查通过。用户原文件36端口左右括号各自同列，全文/完整例化/端口表选区幂等、字符守恒，注释原文与磁盘SHA256不变。Native与CLI stdout逐字节一致；解包alpha8在实际Qoder Node24.15/Electron42.2使用包内native复验通过。442文件/426运行文件逐字节校验。复制后的格式化结果在bin/formatter-alpha8-user-proof/，未写原文件。详细验证与完整17文件清单见docs/V4_1_ALPHA8.md。
+
+保持独立worktree及Draft PR11，原master仍4.0 preview；不自动合并或发Release。本轮无UI改动，Qoder使用Node运行时验收而非完整IDE UI。后续继续实际使用反馈、真实IDE宿主验收；不要用扩大字符守卫的方式规避布局问题。
+
 # 4.1 alpha7 开发交接
 
 2026-10-16：用户sync_resetn截图暴露寄存器符号错误。只读重编译证明$aldff连接正确（D=1、AD=0、CLK_POLARITY=1、ALOAD_POLARITY=0）；问题为时钟三角固定左下、空心普通端点误导、极性和原始参数未传到展示层。新增register-symbol纯展示模块，已知Yosys字级单元解释参数；三角按CLK几何定位，低有效控制/下降沿时钟带空心气泡，普通端点用直线连接，未知极性问号，LATCH/SR/FF独立符号。补齐$adlatch归类。ELK连线到端口外边缘，不是命中中心，已修正两侧短线接点。

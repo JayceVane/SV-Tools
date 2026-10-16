@@ -80,3 +80,32 @@ impl Engine {
         result
     }
 }
+
+#[cfg(test)]
+mod regression_tests {
+    use crate::{config::FormatOptions, format_with_protect_passthrough};
+
+    #[test]
+    fn instances_after_multiple_generate_processes_are_aligned() {
+        let source = "module demo;\ngenerate\nalways @(posedge clk) begin\nq<=d;\nend\nassign delay=q;\nalways @(posedge clk) begin\nq1<=q;\nif (!a && b) x<=1;\nelse if (x) x<=0;\nif(x) cnt<=cnt+1;\nend\nendgenerate\n// ports group\nchild u_child (\n.a( short_sig ), // comment (ignored),\n.long_port( longer_sig )\n);\nendmodule\n";
+        let output = format_with_protect_passthrough(source, &FormatOptions::default());
+        let columns: Vec<_> = output
+            .lines()
+            .filter(|line| line.trim_start().starts_with('.'))
+            .map(|line| line.find('(').unwrap())
+            .collect();
+        assert_eq!(columns.len(), 2);
+        assert_eq!(columns[0], columns[1], "{output}");
+        assert!(output.contains("\n    child u_child ("), "{output}");
+        assert_eq!(
+            format_with_protect_passthrough(&output, &FormatOptions::default()),
+            output
+        );
+        let significant = |text: &str| {
+            text.bytes()
+                .filter(|b| !matches!(b, b' ' | b'\t' | b'\r' | b'\n'))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(significant(source), significant(&output));
+    }
+}

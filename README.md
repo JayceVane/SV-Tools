@@ -5,7 +5,7 @@
 
 改编自 Sublime Text [SystemVerilog](https://github.com/TheClams/SystemVerilog)（格式化）与 [Verilog-Gadget](https://github.com/poucotm/Verilog-Gadget)（生产力工具）插件。
 
-当前开发版本为 **4.1.0-alpha7**，新增内嵌电路结构查看器。已发布的 [4.0.0-preview.1](https://github.com/JayceVane/SV-Tools/releases/tag/v4.0.0-preview.1) 提供 Windows x64 VSIX 与 CLI，可在 VS Code 中通过“从 VSIX 安装”使用。4.1 在独立分支开发，尚未发布为 GitHub Release。源码位于 `src/`，构建产物位于 `bin/`。
+当前开发版本为 **4.1.0-alpha8**，新增内嵌电路结构查看器。已发布的 [4.0.0-preview.1](https://github.com/JayceVane/SV-Tools/releases/tag/v4.0.0-preview.1) 提供 Windows x64 VSIX 与 CLI，可在 VS Code 中通过“从 VSIX 安装”使用。4.1 在独立分支开发，尚未发布为 GitHub Release。源码位于 `src/`，构建产物位于 `bin/`。
 
 格式化只能改变普通空格、Tab、CR、LF；其它字符的内容、次数和顺序必须保持，即使输入
 全部乱码或语法不完整。无法安全提交的布局保留原文，详见 [格式化规范](docs/FORMAT_SPEC.md)。

@@ -6,7 +6,8 @@ impl Engine {
         if matches!(self.block_state, BlockState::Always { .. })
             && (self.syntax.current() == ContextKind::Code
                 || self.syntax.current() == ContextKind::Module
-                || self.syntax.current() == ContextKind::Interface)
+                || self.syntax.current() == ContextKind::Interface
+                || self.syntax.current() == ContextKind::Generate)
         {
             let tmp = clean_comment(&(session.buffer.block.clone() + &session.buffer.line))
                 .trim()
