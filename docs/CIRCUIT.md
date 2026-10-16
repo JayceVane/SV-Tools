@@ -62,6 +62,8 @@ RTL 右键“查看当前文件电路（Vivado）”优先选择与文件名相�
 
 双击有层级的实例或点击“进入模块”下钻，返回/顶层与模块选择器切换视图。搜索单元、端口或网络，Enter 依次定位匹配。焦点在画布时，方向键平移，`F` 适配，`+` / `-` 缩放，Enter 进入实例，`Alt+←` 返回，Escape 取消拖动或选择。输入框内的编辑键不被画布截获。
 
+alpha5起，拖拽和滚轮按动画帧合并刷新；屏外图元按视口挂载，完整模型、搜索与网络高亮仍然保留。小于65%时隐藏引脚名，小于35%时隐藏文字、时钟符号与引脚，总览保留单元外形和连线，放大恢复细节。搜索屏外对象会居中显示。Tab只经过当前已挂载的单元，可用搜索或平移访问屏外对象。
+
 模型采用模块局部位 ID 和 LSB-first 数组，不按显示名称推断连接；总线绘制合并不丢弃位映射。多驱动、无驱动、未知方向用显式节点保留。输入端口在内部图上驱动逻辑，详情仍显示 HDL 声明的 input。页面跟随 VS Code 主题；nonce CSP、SVG 文本节点与 ID 消息限制不允许网表名称变成 HTML 或脚本。
 
 ## 当前容量边界
@@ -88,6 +90,7 @@ RTL 右键“查看当前文件电路（Vivado）”优先选择与文件名相�
 npm.cmd ci
 npm.cmd run test:circuit
 node scripts/verify-circuit.js
+node scripts/benchmark-circuit-interaction.js --browser <Chromium浏览器exe> --nodes 2000 --acceptance
 node scripts/verify-circuit.js --yosys bundled --frontend slang
 node scripts/verify-circuit.js --yosys <外部yosys可执行文件>
 node scripts/verify-circuit.js --yosys <带slang的yosys> --frontend slang
@@ -99,11 +102,15 @@ Yosys 验证从公开 RTL 创建独立夹具，检查宏、空格 include 路径
 
 宿主验收使用独立用户目录、扩展目录和公开夹具；`-ExtensionPath` 可指定解包后的 VSIX，核对命令注册、真实 Webview ready 消息、Worker 布局及未保存快照。浏览器预览脚本仅替代宿主消息桥，用于图形交互与主题验收；不能代替真实 VS Code 宿主测试。本轮宿主启动被本机 VS Code 更新锁阻止，尚未通过。
 
+交互基准在独立隐藏浏览器中加载正式页面，使用生成的已布局图和替代消息桥；报告包含输入处理耗时、rAF帧间隔、活动DOM数量和明暗主题截图。它不包含Yosys/ELK耗时，也不代表真实IDE宿主或所有设计都达到同一帧率。可用`--extension-root`对照旧VSIX解包目录，详细数据见[V4_1_ALPHA5.md](V4_1_ALPHA5.md)。
+
 ## 依据
 
 - [Yosys write_json 数据格式](https://yosyshq.readthedocs.io/projects/yosys/en/latest/cmd/write_json.html)
 - [Yosys prep 综合入口](https://yosyshq.readthedocs.io/projects/yosys/en/latest/cmd/prep.html)
 - [netlistsvg](https://github.com/nturley/netlistsvg)
+- [requestAnimationFrame](https://developer.mozilla.org/en-US/docs/Web/API/Window/requestAnimationFrame)
+- [SVG绘制模型](https://www.w3.org/TR/SVG/render.html)
 - [ELK.js](https://github.com/kieler/elkjs)
 - [Vivado open_project](https://docs.amd.com/r/2022.1-English/ug835-vivado-tcl-commands/open_project)
 

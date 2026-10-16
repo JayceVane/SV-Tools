@@ -1,8 +1,8 @@
 (function (root, factory) {
     'use strict';
-    if (typeof module === 'object' && module.exports) module.exports = factory();
-    else root.CircuitRenderer = factory();
-})(typeof globalThis === 'object' ? globalThis : this, function () {
+    if (typeof module === 'object' && module.exports) module.exports = factory(require('./graph-index'), require('./viewport'));
+    else root.CircuitRenderer = factory(root.CircuitGraphIndex, root.CircuitViewport);
+})(typeof globalThis === 'object' ? globalThis : this, function (graphIndex, viewport) {
     'use strict';
     const SVG_NS = 'http://www.w3.org/2000/svg';
     const KINDS = new Set(['input', 'output', 'inout', 'constant', 'register', 'mux', 'arithmetic', 'logic', 'memory', 'instance', 'unknown', 'junction']);
@@ -83,6 +83,7 @@
      * @returns {object} DOM 索引和纯展示操作；不修改传入网表。
      */
     function renderGraph(svg, graph) {
+        const index = graphIndex.createGraphIndex(graph), scene = viewport.createViewportIndex(graph);
         const document = svg.ownerDocument, nodes = new Map(), ports = new Map(), edges = new Map();
         const layer = element(document, 'g', { class: 'graphLayer' });
         const wireLayer = element(document, 'g', { class: 'wireLayer' }), nodeLayer = element(document, 'g', { class: 'nodeLayer' });
@@ -98,32 +99,50 @@
         }
         for (const node of graph.nodes || []) appendNode(document, nodeLayer, node, nodes, ports);
         svg.replaceChildren(layer);
+        let order = 0;
+        for (const entry of [...nodes.values(), ...edges.values()]) entry.order = order++;
 
-        function setSelection(selection) {
-            const selectedNode = selection?.type === 'node' ? nodes.get(String(selection.id)) : null;
-            const selectedPort = selection?.type === 'port' ? ports.get(String(selection.id)) : null;
-            const selectedEdge = selection?.type === 'edge' ? edges.get(String(selection.id))?.edge : null;
-            const netId = selectedEdge?.netId, relatedPorts = new Set(), relatedNodes = new Set();
-            for (const { element: group, edge } of edges.values()) {
-                const active = selectedEdge ? edge.netId === netId : selectedPort ? edge.source === selectedPort.port.id || edge.target === selectedPort.port.id : false;
-                group.classList.toggle('selected', active);
-                if (active) { relatedPorts.add(String(edge.source)); relatedPorts.add(String(edge.target)); }
-            }
-            for (const [id, entry] of ports) {
-                const active = relatedPorts.has(id) || entry === selectedPort;
-                entry.element.classList.toggle('selected', active);
-                if (active) relatedNodes.add(String(entry.node.id));
-            }
-            for (const [id, entry] of nodes) {
-                entry.element.classList.toggle('selected', entry === selectedNode || entry.node === selectedPort?.node);
-                entry.element.classList.toggle('connected', relatedNodes.has(id));
-            }
+        let selected = index.selection(null), searched = { nodes: new Set(), edges: new Set() };
+        let visible = new Set([...nodes.keys()].map(id => 'node:' + id).concat([...edges.keys()].map(id => 'edge:' + id))), detail = '';
+        function updateClasses(entries, name, before, after) {
+            for (const id of before) if (!after.has(id)) entries.get(id)?.element.classList.remove(name);
+            for (const id of after) if (!before.has(id)) entries.get(id)?.element.classList.add(name);
         }
-
+        function setSelection(value) {
+            const next = index.selection(value);
+            updateClasses(edges, 'selected', selected.edges, next.edges);
+            updateClasses(ports, 'selected', selected.ports, next.ports);
+            updateClasses(nodes, 'selected', selected.nodes, next.nodes);
+            updateClasses(nodes, 'connected', selected.connected, next.connected);
+            selected = next;
+        }
         function setSearch(term) {
-            const needle = String(term || '').trim().toLocaleLowerCase();
-            for (const { element: group, node } of nodes.values()) group.classList.toggle('searchMatch', !!needle && [node.label, node.toolName, node.detail, ...(node.ports || []).map(port => port.label)].some(value => String(value || '').toLocaleLowerCase().includes(needle)));
-            for (const { element: group, edge } of edges.values()) group.classList.toggle('searchMatch', !!needle && [edge.label, edge.netId].some(value => String(value || '').toLocaleLowerCase().includes(needle)));
+            const next = index.search(term);
+            updateClasses(nodes, 'searchMatch', searched.nodes, next.nodes);
+            updateClasses(edges, 'searchMatch', searched.edges, next.edges);
+            searched = next; return next.matches;
+        }
+        function setViewport(camera, width, height) {
+            const next = scene.query(camera, width, height);
+            function reconcile(entries, parent, prefix) {
+                for (const id of visible) if (id.startsWith(prefix) && !next.has(id)) {
+                    const group = entries.get(id.slice(prefix.length))?.element;
+                    if (group?.parentNode === parent) parent.removeChild(group);
+                }
+                // 只挂载新进入视口的对象，保留既有 DOM 身份、焦点和原始绘制次序。
+                const ordered = [...next].filter(id => id.startsWith(prefix)).map(id => entries.get(id.slice(prefix.length))).filter(Boolean).sort((a, b) => a.order - b.order);
+                let anchor = null;
+                for (let i = ordered.length - 1; i >= 0; i--) {
+                    const group = ordered[i].element;
+                    if (group.parentNode !== parent) parent.insertBefore(group, anchor);
+                    anchor = group;
+                }
+            }
+            if (next.size !== visible.size || [...next].some(id => !visible.has(id))) {
+                reconcile(edges, wireLayer, 'edge:'); reconcile(nodes, nodeLayer, 'node:'); visible = next;
+            }
+            const nextDetail = camera.scale < .35 ? 'overview' : camera.scale < .65 ? 'compact' : 'full';
+            if (detail !== nextDetail) { detail = nextDetail; layer.setAttribute('data-detail', detail); }
         }
 
         function hitTarget(target) {
@@ -138,7 +157,7 @@
             return null;
         }
 
-        return { layer, nodes, ports, edges, setSelection, setSearch, hitTarget };
+        return { layer, nodes, ports, edges, index, setSelection, setSearch, setViewport, hitTarget };
     }
 
     return { edgePath, renderGraph };

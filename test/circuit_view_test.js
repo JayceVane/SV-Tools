@@ -14,8 +14,11 @@ class FakeElement {
     get textContent() { return this.text + this.children.map(child => child.textContent).join(''); }
     set innerHTML(value) { throw new Error(`HTML injection: ${value}`); }
     setAttribute(name, value) { this.attributes.set(name, String(value)); }
+    removeAttribute(name) { this.attributes.delete(name); }
     getAttribute(name) { return this.attributes.has(name) ? this.attributes.get(name) : null; }
     appendChild(child) { child.parentNode = this; this.children.push(child); return child; }
+    removeChild(child) { const index = this.children.indexOf(child); if (index < 0) throw new Error('not a child'); this.children.splice(index, 1); child.parentNode = null; return child; }
+    insertBefore(child, anchor) { if (child.parentNode) child.parentNode.removeChild(child); const index = anchor === null ? this.children.length : this.children.indexOf(anchor); if (index < 0) throw new Error('not an anchor'); this.children.splice(index, 0, child); child.parentNode = this; return child; }
     replaceChildren(...children) { for (const child of this.children) child.parentNode = null; this.children = []; this.text = ''; for (const child of children) this.appendChild(child); }
     addEventListener(type, callback) { if (!this.listeners.has(type)) this.listeners.set(type, new Set()); this.listeners.get(type).add(callback); }
     removeEventListener(type, callback) { this.listeners.get(type)?.delete(callback); }
@@ -33,6 +36,10 @@ function fakePage(saved) {
     document.body = document.createElement('body'); document.events = document.createElement('events'); document.addEventListener = (...args) => document.events.addEventListener(...args); document.removeEventListener = (...args) => document.events.removeEventListener(...args);
     const timers = new Map(), window = document.createElement('window'); let timerId = 0;
     window.setTimeout = callback => { timers.set(++timerId, callback); return timerId; }; window.clearTimeout = id => timers.delete(id);
+    const frames = new Map();
+    window.requestAnimationFrame = callback => { frames.set(++timerId, callback); return timerId; }; window.cancelAnimationFrame = id => frames.delete(id);
+    window.paint = () => { const pending = [...frames.values()]; frames.clear(); for (const callback of pending) callback(); };
+    window.frameCount = () => frames.size;
     window.flush = () => { const pending = [...timers.values()]; timers.clear(); for (const callback of pending) callback(); };
     const sent = [], bridge = { postMessage(message) { sent.push(message); }, getState() { return saved; }, setState(state) { this.saved = state; } };
     const client = C.createClient(document, window, bridge, R);
@@ -87,7 +94,7 @@ test('页面不内嵌网表，CSP nonce 随页面变化且无需加载 VS Code �
     assert.doesNotMatch(first, /url\(\s*["']?https?:\/\//);
     assert.doesNotMatch(first, /innerHTML\s*=/);
     assert.notEqual(first.match(/nonce-([a-f0-9]+)/)[1], second.match(/nonce-([a-f0-9]+)/)[1]);
-    assert.equal((first.match(/<script nonce=/g) || []).length, 2);
+    assert.equal((first.match(/<script nonce=/g) || []).length, 4);
 });
 
 test('相机适配、缩放锚点及非法持久化数值保持有限', () => {
@@ -207,4 +214,86 @@ test('无效折点不会生成非法 SVG，销毁后不再响应宿主消息或�
     assert.equal(R.edgePath([{ startPoint: { x: 1, y: 2 }, endPoint: { x: 3, y: 4 } }]), 'M 1 2 L 3 4');
     const page = fakePage(); page.client.receive(graphMessage()); page.client.destroy(); page.window.dispatch('message', { data: graphMessage('b') });
     assert.equal(page.client.getState().graph.id, 'top'); assert.equal(page.window.listeners.get('message').size, 0); assert.equal(page.document.events.listeners.get('keydown').size, 0);
+});
+
+
+test('连续输入每帧只提交最新相机，滚轮热路径不读取页面布局', () => {
+    const page = fakePage(); page.client.receive(graphMessage()); page.window.paint();
+    const layer = page.ui('circuit').children[0], original = page.client.getState().camera;
+    let writes = 0;
+    const set = layer.setAttribute.bind(layer); layer.setAttribute = (name, value) => { if (name === 'transform') writes++; set(name, value); };
+    page.ui('circuit').dispatch('pointerdown', { pointerId: 1, button: 0, clientX: 10, clientY: 20 });
+    for (let i = 0; i < 100; i++) page.ui('circuit').dispatch('pointermove', { pointerId: 1, clientX: 20 + i, clientY: 20 });
+    assert.equal(writes, 0); assert.equal(page.window.frameCount(), 1);
+    page.window.paint(); assert.equal(writes, 1); assert.equal(page.client.getState().camera.x, original.x + 109);
+    page.ui('circuit').dispatch('pointerup', { pointerId: 1 });
+    page.ui('circuit').getBoundingClientRect = () => { throw new Error('滚轮不应强制重排'); };
+    const before = page.client.getState().camera, point = { x: 200, y: 150 };
+    for (let i = 0; i < 8; i++) page.ui('circuit').dispatch('wheel', { clientX: point.x, clientY: point.y, deltaY: -10 });
+    const expected = C.zoomCamera(before, Math.exp(.16), point), actual = page.client.getState().camera;
+    for (const key of ['x', 'y', 'scale']) assert.ok(Math.abs(expected[key] - actual[key]) < 1e-8);
+    assert.equal(page.window.frameCount(), 1); page.window.paint(); assert.equal(writes, 2);
+    page.client.destroy();
+});
+
+test('取消、换图、加载和销毁不会留下相机帧或拖拽捕获', () => {
+    const page = fakePage(); page.client.receive(graphMessage()); page.window.paint();
+    const original = page.client.getState().camera;
+    page.ui('circuit').dispatch('pointerdown', { pointerId: 7, button: 0, clientX: 10, clientY: 20 });
+    page.ui('circuit').dispatch('pointermove', { pointerId: 7, clientX: 200, clientY: 80 });
+    page.client.receive({ type: 'loading' }); assert.equal(page.window.frameCount(), 0);
+    assert.deepEqual(page.client.getState().camera, original); assert.equal(page.ui('circuit').captures.size, 0);
+    page.client.receive(graphMessage('another')); assert.equal(page.window.frameCount(), 1);
+    page.client.receive(graphMessage('third')); assert.equal(page.window.frameCount(), 1);
+    page.client.destroy(); assert.equal(page.window.frameCount(), 0);
+    page.window.paint(); page.window.flush(); assert.equal(page.window.frameCount(), 0);
+});
+
+test('视口虚拟化保持屏外选择、连线和绘制顺序，搜索能够找回屏外节点', () => {
+    const page = fakePage(), message = graphMessage();
+    message.graph.nodes.push({ id: 'far', label: 'far_signal', kind: 'logic', x: 10000, y: 10000, width: 120, height: 80, ports: [] });
+    const drawing = R.renderGraph(page.ui('circuit'), message.graph), original = JSON.stringify(message.graph);
+    const far = drawing.nodes.get('far').element, first = drawing.nodes.get('a').element;
+    drawing.setSelection({ type: 'node', id: 'far' });
+    drawing.setViewport({ x: 0, y: 0, scale: 1 }, 900, 600);
+    assert.equal(far.parentNode, null); assert.ok(first.parentNode);
+    drawing.setViewport({ x: -9900, y: -9900, scale: 1 }, 900, 600);
+    assert.ok(far.parentNode); assert.equal(first.parentNode, null); assert.ok(far.classList.contains('selected'));
+    drawing.setViewport({ x: 0, y: 0, scale: .2 }, 900, 600);
+    assert.equal(drawing.layer.getAttribute('data-detail'), 'overview');
+    drawing.setViewport({ x: 0, y: 0, scale: .5 }, 900, 600);
+    assert.equal(drawing.layer.getAttribute('data-detail'), 'compact');
+    drawing.setViewport({ x: 0, y: 0, scale: 1 }, 900, 600);
+    assert.equal(drawing.layer.getAttribute('data-detail'), 'full');
+    assert.deepEqual(first.parentNode.children.map(item => item.getAttribute('data-node-id')), ['a', 'b', 'c']);
+    const wire = drawing.edges.get('e1').element;
+    drawing.setSelection({ type: 'edge', id: 'e1' });
+    drawing.setViewport({ x: -9900, y: -9900, scale: 1 }, 900, 600); assert.equal(wire.parentNode, null);
+    drawing.setViewport({ x: 0, y: 0, scale: 1 }, 900, 600); assert.ok(wire.parentNode);
+    assert.ok(wire.classList.contains('selected')); assert.ok(drawing.ports.get('b-d').element.classList.contains('selected'));
+    assert.deepEqual(wire.parentNode.children.map(item => item.getAttribute('data-edge-id')), ['e1', 'e2']);
+    assert.equal(JSON.stringify(message.graph), original);
+    page.client.receive(message); page.window.paint(); assert.equal(findData(page, 'data-node-id', 'far'), undefined);
+    page.ui('search').value = 'far_signal'; page.ui('search').dispatch('input'); page.window.flush(); page.window.paint();
+    assert.ok(findData(page, 'data-node-id', 'far')); assert.equal(page.ui('selectionName').textContent, 'far_signal');
+    page.client.destroy();
+});
+
+test('选择和搜索只更新发生变化的对象，重复选择不重建详情', () => {
+    const page = fakePage(), message = graphMessage(), drawing = R.renderGraph(page.ui('circuit'), message.graph);
+    const unrelated = drawing.nodes.get('c').element;
+    unrelated.classList.toggle = () => { throw new Error('无关节点不应写 class'); };
+    drawing.setSelection({ type: 'node', id: 'a' }); drawing.setSelection({ type: 'node', id: 'b' }); drawing.setSelection(null);
+    drawing.setSearch('$dff'); drawing.setSearch('$dff'); drawing.setSearch('');
+    page.client.receive(message); const target = findData(page, 'data-node-id', 'a'); clickObject(page, target);
+    const detail = page.ui('properties').children[0]; clickObject(page, target); assert.equal(page.ui('properties').children[0], detail);
+    page.client.destroy();
+});
+
+test('手动相机在窗口改变后重新裁剪，保持平移和缩放', () => {
+    const page = fakePage(); page.client.receive(graphMessage()); page.window.paint();
+    page.ui('zoomIn').dispatch('click'); page.window.paint(); const camera = page.client.getState().camera;
+    page.ui('circuit').clientWidth = 300; page.window.dispatch('resize'); page.window.paint();
+    assert.deepEqual(page.client.getState().camera, camera); assert.equal(page.client.getState().isFit, false);
+    page.client.destroy();
 });

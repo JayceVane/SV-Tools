@@ -103,3 +103,11 @@ footer { min-height: 29px; border-top: 1px solid var(--border); display: flex; a
 @media (max-width: 900px) { #inspector { width: 230px; flex-basis: 230px; padding: 14px 12px; }.keyboardHint { display: none; }.searchBox input { width: 150px; }.previewTag { display: none; }.toolbar .grow { display: none; } }
 @media (max-width: 600px) { #inspector { width: 190px; flex-basis: 190px; }.contextBar { padding: 7px 10px; }#graphStats { display: none; }#modules { max-width: 150px; width: 125px; }.toolbar { padding: 7px; gap: 4px; }.canvasLegend { display: none; } }
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; } }
+
+/* 依据屏幕可读尺寸减少总览绘制，放大后恢复完整引脚和文字。 */
+.graphLayer[data-detail="compact"] .pinLabel,
+.graphLayer[data-detail="overview"] .cellLabel,
+.graphLayer[data-detail="overview"] .cellSymbol,
+.graphLayer[data-detail="overview"] .clockMark,
+.graphLayer[data-detail="overview"] .pin { display: none; }
+.panning .wireHit, .panning .pinHit { pointer-events: none; }

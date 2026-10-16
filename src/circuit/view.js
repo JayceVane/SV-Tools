@@ -11,7 +11,7 @@ let assets;
  */
 function createCircuitHtml({ webview, extensionUri } = {}) {
     void webview; void extensionUri;
-    assets ||= Object.fromEntries(['view.css', 'renderer.js', 'client.js'].map(name =>
+    assets ||= Object.fromEntries(['view.css', 'graph-index.js', 'viewport.js', 'renderer.js', 'client.js'].map(name =>
         [name, fs.readFileSync(path.join(__dirname, name), 'utf8')]));
     const nonce = crypto.randomBytes(18).toString('hex');
     return `<!doctype html><html lang="zh-CN"><head><meta charset="UTF-8">
@@ -31,7 +31,7 @@ function createCircuitHtml({ webview, extensionUri } = {}) {
 <div class="canvasLegend" aria-hidden="true"><span class="legendRegister">寄存器</span><span class="legendMux">选择器</span><span class="legendLogic">组合逻辑</span><span class="legendInstance">模块实例</span></div></section>
 <aside id="inspector" aria-label="电路对象详情"><div class="panelTitle">INSPECTOR</div><div id="selectionEmpty" class="selectionEmpty">点击单元、引脚或网络查看详情。<p>双击模块实例进入下一级。</p><p>拖动画布平移 · 滚轮缩放</p></div><div id="selectionDetails" hidden><div id="selectionKind" class="objectKind"></div><h2 id="selectionName"></h2><dl id="properties"></dl><div class="selectionActions"><button id="enterInstance" hidden>进入模块 ↗</button><button id="openSource" disabled title="数据源提供可靠位置时可跳转">查看源码</button></div></div><div class="inspectorNote">结构来自所选工具生成的网表。综合优化可能合并信号，或移除未使用的逻辑。</div></aside></main>
 <footer><span id="status" role="status" aria-live="polite">准备加载</span><span class="keyboardHint">F 适配 · + / − 缩放 · 方向键平移 · Esc 取消选择</span></footer>
-<script nonce="${nonce}">${assets['renderer.js']}</script><script nonce="${nonce}">${assets['client.js']}</script></body></html>`;
+<script nonce="${nonce}">${assets['graph-index.js']}</script><script nonce="${nonce}">${assets['viewport.js']}</script><script nonce="${nonce}">${assets['renderer.js']}</script><script nonce="${nonce}">${assets['client.js']}</script></body></html>`;
 }
 
 module.exports = { createCircuitHtml };

@@ -1,12 +1,12 @@
 (function (root, factory) {
     'use strict';
-    if (typeof module === 'object' && module.exports) module.exports = factory();
+    if (typeof module === 'object' && module.exports) module.exports = factory(require('./graph-index'));
     else {
-        root.CircuitClient = factory();
+        root.CircuitClient = factory(root.CircuitGraphIndex);
         const bridge = typeof acquireVsCodeApi === 'function' ? acquireVsCodeApi() : { postMessage() {}, getState() { return {}; }, setState() {} };
         root.CircuitClient.createClient(root.document, root, bridge, root.CircuitRenderer);
     }
-})(typeof globalThis === 'object' ? globalThis : this, function () {
+})(typeof globalThis === 'object' ? globalThis : this, function (graphIndex) {
     'use strict';
     const MIN_SCALE = .0001, MAX_SCALE = 8, PADDING = 40, MAX_SAVED_VIEWS = 12;
     const MAX_DETAIL_BITS = 256;
@@ -39,26 +39,17 @@
 
     /** @param {object} graph 模块图。 @param {string} query 名称片段。 @returns {object[]} 稳定排序且去重的节点/网络匹配。 */
     function searchGraph(graph, query) {
-        const needle = String(query || '').trim().toLocaleLowerCase();
-        if (!needle || !graph) return [];
-        const matches = [], nets = new Set();
-        for (const node of graph.nodes || []) if ([node.label, node.toolName, node.detail, ...(node.ports || []).map(port => port.label)].some(value => String(value || '').toLocaleLowerCase().includes(needle))) matches.push({ type: 'node', id: node.id });
-        for (const edge of graph.edges || []) {
-            if (nets.has(edge.netId) || ![edge.label, edge.netId].some(value => String(value || '').toLocaleLowerCase().includes(needle))) continue;
-            matches.push({ type: 'edge', id: edge.id }); nets.add(edge.netId);
-        }
-        return matches;
+        return graph ? graphIndex.createGraphIndex(graph).search(query).matches : [];
     }
 
-    function bitsProperties(bits, signals) {
+    function bitsProperties(bits, index) {
         const values = Array.isArray(bits) ? bits : [];
         const shown = values.slice(0, MAX_DETAIL_BITS);
         const suffix = values.length > shown.length ? ` …（仅显示前 ${MAX_DETAIL_BITS} 位，完整连接保留在网表）` : '';
         const properties = [['位宽', String(values.length)], ['位 ID（LSB → MSB）', values.length ? shown.join(', ') + suffix : '无位信息']];
         const constants = shown.map((value, index) => /^(?:c:)?(0|1|x|z)$/i.test(String(value)) ? `${index}:${String(value).replace(/^c:/i, '').toUpperCase()}` : null).filter(Boolean);
         if (constants.length) properties.push(['常量位（位置:值）', constants.join(', ')]);
-        const ids = new Set(values.filter(value => !/^(?:c:)?(0|1|x|z)$/i.test(String(value))));
-        const aliases = (Array.isArray(signals) ? signals : []).filter(signal => signal.bits?.some(bit => ids.has(bit))).slice(0, 24);
+        const aliases = index.relatedSignals(values);
         if (aliases.length) properties.push(['关联信号', aliases.map(signal => {
             const hasRange = Number.isInteger(signal.offset) && signal.bits.length > 1;
             const start = signal.offset, end = start + signal.bits.length - 1;
@@ -67,33 +58,35 @@
         return properties;
     }
 
-    /** @param {object} graph 当前模块。 @param {{type:string,id:string}|null} selection 选择标识。 @returns {object|null} 安全的文本详情和可执行宿主动作。 */
-    function describeSelection(graph, selection) {
+    /** @param {object} graph 当前模块。 @param {{type:string,id:string}|null} selection 选择标识。 @param {object} [index] 当前模块共享索引。 @returns {object|null} 安全的文本详情和可执行宿主动作。 */
+    function describeSelection(graph, selection, index) {
         if (!graph || !selection) return null;
+        index ||= graphIndex.createGraphIndex(graph);
         if (selection.type === 'node') {
-            const node = graph.nodes.find(item => item.id === selection.id);
+            const node = index.nodes.get(String(selection.id));
             if (!node) return null;
             const properties = [['类型', KINDS[node.kind] || node.kind]];
             if (node.detail) properties.push(['说明', node.detail]);
             if (node.toolName && node.toolName !== node.label) properties.push(['工具名称', node.toolName]);
             if (node.ports?.length) properties.push(['引脚', node.ports.map(port => `${port.label || port.id} · ${port.declaredDirection || port.direction || 'unknown'} · ${(port.bits || []).length} bit`).join('\n')]);
-            if (node.kind === 'constant') properties.push(...bitsProperties(node.ports?.[0]?.bits, graph.signals));
+            if (node.kind === 'constant') properties.push(...bitsProperties(node.ports?.[0]?.bits, index));
             if (node.source?.path) properties.push(['源码', `${node.source.path}:${node.source.line || 1}`]);
             return { name: node.label || node.id, kind: KINDS[node.kind] || node.kind, properties, cellId: node.cellId, moduleId: node.moduleId, source: node.source };
         }
         if (selection.type === 'port') {
-            for (const node of graph.nodes) {
-                const port = node.ports?.find(item => item.id === selection.id);
-                if (port) return { name: port.label || port.id, kind: ['input', 'output', 'inout'].includes(node.kind) ? '模块端口' : '单元引脚', properties: [['所属单元', node.label || node.id], ['方向', port.declaredDirection || port.direction || 'unknown'], ...bitsProperties(port.bits, graph.signals)], cellId: node.cellId, source: node.source };
+            const entry = index.ports.get(String(selection.id));
+            if (entry) {
+                const { node, port } = entry;
+                return { name: port.label || port.id, kind: ['input', 'output', 'inout'].includes(node.kind) ? '模块端口' : '单元引脚', properties: [['所属单元', node.label || node.id], ['方向', port.declaredDirection || port.direction || 'unknown'], ...bitsProperties(port.bits, index)], cellId: node.cellId, source: node.source };
             }
         }
         if (selection.type === 'edge') {
-            const edge = graph.edges.find(item => item.id === selection.id);
+            const edge = index.edges.get(String(selection.id));
             if (!edge) return null;
-            const portNames = new Map(graph.nodes.flatMap(node => (node.ports || []).map(port => [port.id, `${node.label || node.id}.${port.label || port.id}`])));
+            const portName = id => { const entry = index.ports.get(String(id)); return entry ? `${entry.node.label || entry.node.id}.${entry.port.label || entry.port.id}` : id; };
             const endpoints = new Set();
-            for (const item of graph.edges) if (item.netId === edge.netId) { endpoints.add(portNames.get(item.source) || item.source); endpoints.add(portNames.get(item.target) || item.target); }
-            return { name: edge.label || edge.netId, kind: '网络', properties: [...bitsProperties(edge.bits, graph.signals), ['网络 ID', edge.netId], ['连接端点', [...endpoints].join('\n')]] };
+            for (const item of index.netEdges.get(String(edge.netId)) || []) { endpoints.add(portName(item.source)); endpoints.add(portName(item.target)); }
+            return { name: edge.label || edge.netId, kind: '网络', properties: [...bitsProperties(edge.bits, index), ['网络 ID', edge.netId], ['连接端点', [...endpoints].join('\n')]] };
         }
         return null;
     }
@@ -115,10 +108,19 @@
         const ids = ['designTitle', 'provenance', 'back', 'home', 'modules', 'fit', 'zoomOut', 'zoomIn', 'zoom', 'search', 'searchCount', 'nextMatch', 'reload', 'breadcrumbs', 'graphStats', 'viewport', 'circuit', 'message', 'messageTitle', 'messageDetail', 'selectionEmpty', 'selectionDetails', 'selectionKind', 'selectionName', 'properties', 'enterInstance', 'openSource', 'status'];
         const ui = Object.fromEntries(ids.map(id => [id, document.getElementById(id)]));
         const disposers = [], saved = bridge.getState?.(), views = new Map(Array.isArray(saved?.views) ? saved.views.filter(entry => Array.isArray(entry) && typeof entry[0] === 'string').slice(-MAX_SAVED_VIEWS) : []);
-        let graph = null, design = null, currentModuleId = null, drawing = null, selection = null, selected = null, camera = cleanCamera(), stateKey = null, isFit = true, isLoading = true, drag = null, lastClickHit = null, matches = [], matchIndex = -1, searchTimer = null, saveTimer = null, isDestroyed = false;
+        let graph = null, design = null, currentModuleId = null, drawing = null, selection = undefined, selected = null, camera = cleanCamera(), stateKey = null, isFit = true, isLoading = true, drag = null, lastClickHit = null, matches = [], matchIndex = -1, searchTimer = null, saveTimer = null, cameraFrame = null, saveAfterFrame = false, viewportRect = null, isDestroyed = false;
         const listen = (target, type, callback, options) => { target.addEventListener(type, callback, options); disposers.push(() => target.removeEventListener(type, callback, options)); };
         const post = message => { if (!isDestroyed) bridge.postMessage(message); };
-        const size = () => ({ width: Math.max(1, ui.viewport.clientWidth || 800), height: Math.max(1, ui.viewport.clientHeight || 500) });
+        function measureViewport() {
+            const rect = ui.circuit.getBoundingClientRect();
+            viewportRect = { left: rect.left, top: rect.top, width: Math.max(1, rect.width || 800), height: Math.max(1, rect.height || 500) };
+            return viewportRect;
+        }
+        const size = () => viewportRect || measureViewport();
+        function resize() {
+            measureViewport();
+            if (graph && !isLoading) { if (isFit) fit(); else applyCamera(false); }
+        }
 
         function saveView() {
             if (!stateKey || !graph) return;
@@ -127,19 +129,32 @@
             bridge.setState?.({ views: [...views] });
         }
 
+        function paintCamera() {
+            cameraFrame = null;
+            if (!drawing || isDestroyed || isLoading) return;
+            const view = size();
+            drawing.setViewport(camera, view.width, view.height);
+            drawing.layer.setAttribute('transform', `translate(${camera.x} ${camera.y}) scale(${camera.scale})`);
+            const label = `${Math.round(camera.scale * 1000) / 10}%`;
+            if (ui.zoom.textContent !== label) ui.zoom.textContent = label;
+            if (saveAfterFrame) { saveAfterFrame = false; window.clearTimeout(saveTimer); saveTimer = window.setTimeout(saveView, 120); }
+        }
+        function cancelCameraFrame() {
+            if (cameraFrame !== null) window.cancelAnimationFrame(cameraFrame);
+            cameraFrame = null; saveAfterFrame = false;
+        }
         function applyCamera(shouldSave = true) {
             if (!drawing) return;
-            camera = cleanCamera(camera);
-            drawing.layer.setAttribute('transform', `translate(${camera.x} ${camera.y}) scale(${camera.scale})`);
-            ui.zoom.textContent = `${Math.round(camera.scale * 1000) / 10}%`;
-            if (shouldSave) { window.clearTimeout(saveTimer); saveTimer = window.setTimeout(saveView, 120); }
+            camera = cleanCamera(camera); saveAfterFrame ||= shouldSave;
+            if (cameraFrame === null) cameraFrame = window.requestAnimationFrame(paintCamera);
         }
 
         function fit() { if (!graph || isLoading) return; const view = size(); camera = fitCamera(graph, view.width, view.height); isFit = true; applyCamera(); }
         function zoom(factor, point) { if (!drawing || isLoading) return; const view = size(); camera = zoomCamera(camera, factor, point || { x: view.width / 2, y: view.height / 2 }); isFit = false; applyCamera(); }
 
         function inspect(value) {
-            selection = value; selected = describeSelection(graph, value); drawing?.setSelection(value);
+            if (selection !== undefined && selection?.type === value?.type && selection?.id === value?.id) return;
+            selection = value; selected = describeSelection(graph, value, drawing?.index); drawing?.setSelection(value);
             ui.selectionEmpty.hidden = !!selected; ui.selectionDetails.hidden = !selected;
             if (!selected) return;
             ui.selectionKind.textContent = selected.kind; ui.selectionName.textContent = selected.name;
@@ -156,9 +171,9 @@
         function focusMatch(value) {
             inspect(value);
             let bounds;
-            if (value.type === 'node') bounds = graph.nodes.find(node => node.id === value.id);
+            if (value.type === 'node') bounds = drawing.index.nodes.get(String(value.id));
             else {
-                const edge = graph.edges.find(item => item.id === value.id), point = edge?.sections?.[0]?.startPoint;
+                const edge = drawing.index.edges.get(String(value.id)), point = edge?.sections?.[0]?.startPoint;
                 if (point) bounds = { ...point, width: 0, height: 0 };
             }
             if (bounds) {
@@ -172,7 +187,7 @@
 
         function updateSearch(advance = false) {
             if (isLoading) return;
-            matches = searchGraph(graph, ui.search.value); drawing?.setSearch(ui.search.value);
+            matches = drawing?.setSearch(ui.search.value) || [];
             matchIndex = matches.length ? (advance ? (matchIndex + 1) % matches.length : 0) : -1;
             ui.searchCount.textContent = ui.search.value.trim() ? matches.length ? `${matchIndex + 1}/${matches.length}` : '0' : '';
             ui.nextMatch.disabled = !matches.length;
@@ -181,6 +196,7 @@
 
         function setMode(mode, message) {
             isLoading = mode !== 'graph'; document.body.dataset.mode = mode;
+            if (isLoading) cancelCameraFrame();
             ui.message.hidden = mode === 'graph'; ui.message.setAttribute('role', mode === 'error' ? 'alert' : 'status');
             if (mode !== 'graph') { ui.messageTitle.textContent = mode === 'error' ? '无法生成电路视图' : '正在生成电路'; ui.messageDetail.textContent = message || '后台读取网表并计算布局'; ui.status.textContent = message || ui.messageTitle.textContent; }
             for (const control of [ui.fit, ui.zoomOut, ui.zoomIn, ui.search]) control.disabled = mode !== 'graph';
@@ -219,24 +235,26 @@
             }
             if (message.type !== 'graph') return;
             if (!message.graph || !Array.isArray(message.graph.nodes) || !Array.isArray(message.graph.edges)) { setMode('error', '电路数据缺少节点或连接信息'); return; }
-            saveView(); graph = message.graph;
+            if (drag) finishDrag(true);
+            cancelCameraFrame(); saveView(); graph = message.graph;
             const nextDesign = message.design || design || {};
             const moduleId = graph.moduleId || (nextDesign.modules || []).find(module => module.id === graph.id || module.name === graph.name)?.id || graph.id;
             showDesign(nextDesign, moduleId); stateKey = graphStateKey(design, graph);
-            drawing = renderer.renderGraph(ui.circuit, graph); selection = null; selected = null;
+            const view = measureViewport();
+            drawing = renderer.renderGraph(ui.circuit, graph); lastClickHit = null; selection = undefined; selected = null;
             const crumbs = Array.isArray(message.breadcrumbs) && message.breadcrumbs.length ? message.breadcrumbs : [{ id: graph.id, name: graph.name }];
             showBreadcrumbs(crumbs);
             const stats = graph.stats || {};
             ui.graphStats.textContent = `${stats.cellCount ?? graph.nodes.filter(node => node.cellId).length} 单元 · ${graph.edges.length} 连接`;
             const restored = views.get(stateKey); isFit = !restored || restored.isFit !== false;
-            const view = size(); camera = isFit ? fitCamera(graph, view.width, view.height) : cleanCamera(restored.camera);
+            camera = isFit ? fitCamera(graph, view.width, view.height) : cleanCamera(restored.camera);
             setMode('graph'); inspect(null); applyCamera(false); updateSearch();
             ui.status.textContent = `${graph.name || graph.id} · ${graph.nodes.length} 节点${graph.nodes.length ? '' : ' · 当前模块没有可显示的电路单元'}`;
         }
 
         function enter() { if (!isLoading && selected?.cellId && selected.moduleId) post({ type: 'navigate', cellId: selected.cellId }); }
         function source() { if (!isLoading && selected?.source?.path) post({ type: 'source', ...(selected.cellId ? { cellId: selected.cellId } : {}) }); }
-        function eventPoint(event) { const rect = ui.circuit.getBoundingClientRect(); return { x: event.clientX - rect.left, y: event.clientY - rect.top }; }
+        function eventPoint(event) { const rect = size(); return { x: event.clientX - rect.left, y: event.clientY - rect.top }; }
         function finishDrag(cancel) {
             if (!drag) return;
             const current = drag; drag = null; ui.viewport.classList.remove('panning');
@@ -265,7 +283,8 @@
             if (!drag || event.pointerId !== drag.id) return;
             const dx = event.clientX - drag.x, dy = event.clientY - drag.y;
             if (!drag.moved && Math.hypot(dx, dy) < 4) return;
-            drag.moved = true; isFit = false; ui.viewport.classList.add('panning'); camera = { ...drag.camera, x: drag.camera.x + dx, y: drag.camera.y + dy }; applyCamera();
+            if (!drag.moved) { drag.moved = true; ui.viewport.classList.add('panning'); }
+            isFit = false; camera = { ...drag.camera, x: drag.camera.x + dx, y: drag.camera.y + dy }; applyCamera();
         });
         listen(ui.circuit, 'pointerup', event => { if (drag?.id === event.pointerId) finishDrag(false); });
         listen(ui.circuit, 'pointercancel', () => finishDrag(true)); listen(ui.circuit, 'lostpointercapture', () => { if (drag) finishDrag(true); });
@@ -283,11 +302,11 @@
             const movement = { ArrowLeft: [32, 0], ArrowRight: [-32, 0], ArrowUp: [0, 32], ArrowDown: [0, -32] }[event.key];
             if (movement && drawing) { event.preventDefault(); camera.x += movement[0] * (event.shiftKey ? 4 : 1); camera.y += movement[1] * (event.shiftKey ? 4 : 1); isFit = false; applyCamera(); }
         });
-        if (window.ResizeObserver) { const observer = new window.ResizeObserver(() => { if (isFit && graph && !isLoading) fit(); }); observer.observe(ui.viewport); disposers.push(() => observer.disconnect()); }
-        else listen(window, 'resize', () => { if (isFit && graph && !isLoading) fit(); });
+        if (window.ResizeObserver) { const observer = new window.ResizeObserver(resize); observer.observe(ui.viewport); disposers.push(() => observer.disconnect()); }
+        else listen(window, 'resize', resize);
         listen(window, 'blur', () => { if (drag) finishDrag(true); }); listen(window, 'pagehide', saveView);
         setMode('loading', '正在连接电路数据'); post({ type: 'ready' });
-        return { receive, getState: () => ({ graph, selection, camera: { ...camera }, isFit, isLoading }), destroy() { if (isDestroyed) return; saveView(); isDestroyed = true; window.clearTimeout(searchTimer); window.clearTimeout(saveTimer); for (const dispose of disposers) dispose(); } };
+        return { receive, getState: () => ({ graph, selection, camera: { ...camera }, isFit, isLoading }), destroy() { if (isDestroyed) return; if (drag) finishDrag(true); saveView(); isDestroyed = true; cancelCameraFrame(); window.clearTimeout(searchTimer); window.clearTimeout(saveTimer); for (const dispose of disposers) dispose(); } };
     }
 
     return { cleanCamera, fitCamera, zoomCamera, graphStateKey, searchGraph, describeSelection, provenanceText, createClient };
