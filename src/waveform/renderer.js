@@ -171,7 +171,9 @@
             text(ctx, label, 48 + indent, top + 18, g.names - 148 - indent, palette.fg);
             if (D.isBus(signal)) {
                 const expanded = state.selected?.some(key => state.signals?.get(key)?.parentKey === row.key);
-                text(ctx, expanded ? '▾' : '▸', 9, top + 19, 14, palette.dim);
+                ctx.save(); ctx.font = '20px Consolas, monospace';
+                text(ctx, expanded ? '▾' : '▸', 6, top + 22, 20, palette.dim);
+                ctx.restore();
             }
             const type = /real/i.test(signal.type) ? 'real' : signal.range || signal.width + 'b';
             const format = state.formats[key] || (/real/i.test(signal.type) ? 'analog' : 'hex');

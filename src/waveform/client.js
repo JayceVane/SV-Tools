@@ -23,7 +23,7 @@
         refreshRows, commitRows: rebuildRows, paint, onSelection: applySelection,
         onNameClick(point, row, event) {
             const within = point.y + tracks.scrollTop - row.y;
-            if (!D.isBus(row.signal) || point.x < 6 || point.x > 24 || within < 8 || within > 27) return false;
+            if (!D.isBus(row.signal) || point.x < 4 || point.x > 27 || within < 6 || within > 28) return false;
             selectRow(row, event); toggleBus(row.key); return true;
         },
         onPan: view => { state.view = M.clampView(view.start, view.span, state.metadata.endTime); viewportChanged(); }, commitPan: persist,

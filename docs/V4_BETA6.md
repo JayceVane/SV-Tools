@@ -2,6 +2,8 @@
 
 2026-10-17。增加六色背景标记与清除、2000行内的总线bit展开/收起，以及输入/输出/双向/内部/未知图标。操作和边界见[WAVEFORM.md](WAVEFORM.md)。延续beta.5电路临时文件过滤；不改原工程或用户RTL。开发分支codex/feat-circuit-viewer，草稿PR11；本轮仅本地VSIX，公开Release仍beta.2，正式版目标4.0.0。
 
+展开三角已由11px字形放大为独立20px字形，同时扩展命中区，保留行顶部空白拖选带；信号文字字号和38px数字行高不变。本次微调复用既有回归：66项相关检查与完整检查通过，最终解包页面明暗主题及操作通过。图标微调日志为`bin/wave-beta6-icon-package.log`、`bin/wave-beta6-icon-browser/report.json`，截图同目录；首次热区验证日志保留为`bin/wave-beta6-icon-package-first.log`，最终热区保留行顶端空白以兼容点选和拖动。
+
 ## 验证
 
 | 检查 | 结果 |
@@ -32,7 +34,7 @@ Node22相关112/112通过。`scripts/verify-waveform-signals.js`使用本机隐�
 
 单次本机测量不作加速比或任意宿主帧率承诺。边沿从压缩载荷取位；百万位测试禁止整值解码仍通过。bit密集标记保守沿用父窗口，过宽总线展开菜单明确禁用。方向不执行完整详细化，扫描不完整即保留未知。
 
-证据位于忽略的bin/：wave-beta6-node22.log、wave-beta6-browser/report.json及明暗截图、wave-beta6-large-report.json、wave-beta6-build.log。最终包核验：`bin/wave-beta6-package-report.json`、`bin/wave-beta6-qoder.log`、`bin/wave-beta6-final-browser/report.json`及明暗截图；完整回归日志`bin/wave-beta6-package.log`、`bin/wave-beta6-rust.log`。包大小18,542,705字节，SHA256：`c8beaca61aa8d2089a2f1783ebe7b6a2e4d9b9e91c348cefff6273a42adcfce4`。Rust测试包含既有N-API宿主提示，实际Qoder加载另外核验通过。
+证据位于忽略的bin/：wave-beta6-node22.log、wave-beta6-browser/report.json及明暗截图、wave-beta6-large-report.json、wave-beta6-build.log。最终包核验：`bin/wave-beta6-package-report.json`、`bin/wave-beta6-qoder.log`、`bin/wave-beta6-final-browser/report.json`及明暗截图；完整回归日志`bin/wave-beta6-package.log`、`bin/wave-beta6-rust.log`。包大小18,542,752字节，SHA256：`7e208b461087e416cb6bdf5b20c78b32905ea4f1e79ec55321b17d7c390785ee`。Rust测试包含既有N-API宿主提示，实际Qoder加载另外核验通过。
 
 ## 完整文件清单（相对beta.5）
 
