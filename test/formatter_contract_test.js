@@ -338,3 +338,59 @@ test('同一行的多个if和else if都能紧凑条件且不改重复拼接字�
     assert.ok(formatted.includes('else if (f(c, d))'), formatted);
     assert.equal(formatted.replace(/[ \t\r\n]/g, ''), source.replace(/[ \t\r\n]/g, ''));
 });
+
+
+const generatedProcessPrefix = 'generate\nalways @(posedge clk) begin\nq<=d;\nend\nassign delay=q;\n'
+    + 'always @(posedge clk) begin\nq1<=q;\nif (!a && b) x<=1;\nelse if (x) x<=0;\nif(x) cnt<=cnt+1;\nend\nendgenerate\n';
+const groupedInstance = '// ports group\nchild u_child (\n.a( short_sig ), // comment (ignored),\n.long_port( longer_sig )\n);\n';
+const significant = source => source.replace(/[ \t\r\n]/g, '');
+function bindingColumns(source) {
+    return source.split(/\r?\n/).filter(line => /^\s*\.\w+\s*\(/.test(line)).map(line => line.indexOf('('));
+}
+
+test('generate 内多个过程结束后恢复例化布局，兼容换行、TAB及仅缩进开关', () => {
+    for (const options of [{}, { useTab: true }, { indentStyle: 'gnu' }, { ignoreTick: false }, { reindentOnly: true }, { instAlignPort: false }]) {
+        for (const newline of ['\n', '\r\n']) {
+            const original = 'module demo;\n' + generatedProcessPrefix + groupedInstance + 'endmodule\n';
+            const source = (options.indentStyle === 'gnu' ? original.replace(/ begin\n/g, '\nbegin\n') : original).replace(/\n/g, newline);
+            const output = formatStable(source, options), columns = bindingColumns(output);
+            assert.equal(significant(output), significant(source));
+            assert.equal(columns.length, 2);
+            assert.equal(columns[0] === columns[1], !options.reindentOnly && options.instAlignPort !== false, output);
+            assert.ok(output.includes('// comment (ignored),'));
+        }
+    }
+});
+
+test('完整例化选区复用正文布局，参数字符串和分组注释保持原文', () => {
+    const source = '// group\nchild #(.NAME("text, (value)"), .W(calc(1, 2))) u_child (\n.a( x ),\n.long_port( f(y, z) )\n);\n';
+    for (const tabSize of [2, 4, 8]) {
+        const output = native.alignCode(source, tabSize), columns = bindingColumns(output);
+        assert.equal(significant(output), significant(source));
+        assert.equal(native.alignCode(output, tabSize), output);
+        assert.equal(columns.length, 2);
+        assert.equal(columns[0], columns[1], output);
+        assert.ok(output.startsWith('// group\n'));
+        assert.ok(output.includes('"text, (value)"'));
+    }
+});
+
+test('端口选区忽略分组注释识别类型，嵌套表达式与行尾括号保持', () => {
+    const source = '// group (not code)\n/* .fake(value) */\n    .a( f(x, y) ), // comment (ignored),\n    .long_port( {a, b} )\n';
+    const output = native.alignCode(source, 4), columns = bindingColumns(output);
+    assert.equal(columns[0], columns[1], output);
+    assert.equal(significant(output), significant(source));
+    assert.equal(native.alignCode(output, 4), output);
+    assert.ok(output.startsWith('// group (not code)\n/* .fake(value) */\n'));
+    assert.ok(output.includes('// comment (ignored),'));
+});
+
+test('选区赋值对齐不使用不支持的前瞻，注释字符串中的等号不参与计算', () => {
+    const source = 'a=1;\nlong_name += 2;\n// fake = preserved\n$display("a = b");\n';
+    const output = native.alignCode(source, 4), lines = output.split('\n');
+    assert.equal(lines[0].indexOf('='), lines[1].indexOf('+'), output);
+    assert.equal(significant(output), significant(source));
+    assert.equal(native.alignCode(output, 4), output);
+    assert.ok(output.includes('// fake = preserved'));
+    assert.ok(output.includes('$display("a = b");'));
+});

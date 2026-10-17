@@ -37,8 +37,8 @@ class VcdSession {
             catch (error) { this.pending.delete(requestId); reject(error); }
         });
     }
-    /** @param {string} filePath @returns {Promise<object>} 只允许打开一次；重试请创建新会话。 */
-    async open(filePath) {
+    /** @param {string} filePath @param {object} [sourceContext] 有界工作区源上下文。@returns {Promise<object>} 只允许打开一次；重试请创建新会话。 */
+    async open(filePath, sourceContext) {
         if (this.disposed) throw sessionError('VCD 会话已关闭', 'VCD_DISPOSED');
         if (this.opened) throw sessionError('VCD 会话已打开文件', 'VCD_ALREADY_OPEN');
         this.opened = true;
@@ -67,7 +67,7 @@ class VcdSession {
         this.worker.on('exit', code => {
             if (!this.disposed) this.rejectAll(sessionError('VCD worker 意外退出：' + code, 'VCD_WORKER_EXIT'));
         });
-        const metadata = await this.request('open', { filePath });
+        const metadata = await this.request('open', { filePath, sourceContext });
         this.ready = true;
         return metadata;
     }
@@ -79,7 +79,7 @@ class VcdSession {
     window(params) { return this.query('window', params); }
     /** @param {{ids: string[], time: number}} params @returns {Promise<object>} */
     values(params) { return this.query('values', params); }
-    /** @param {{id: string, time: number, direction: 'next'|'previous'|1|-1}} params @returns {Promise<object>} */
+    /** @param {{id: string, time: number, direction: 'next'|'previous'|1|-1, bitOffset?:number, continuation?:number}} params @returns {Promise<object>} */
     edge(params) { return this.query('edge', params); }
     /** 取消读取和全部 pending 请求；释放 worker 及其事件存储。 */
     dispose() {

@@ -2,7 +2,8 @@
 (function () {
     'use strict';
     window.createWaveRenderer = function ({ canvas, ruler, tracks, state, model }) {
-        const L = window.WaveRowLayout, C = window.WaveColumnLayout;
+        const L = window.WaveRowLayout, C = window.WaveColumnLayout, D = model.signalDisplay;
+        let projections = new Map();
         let palette;
         function colors() {
             const style = getComputedStyle(document.body);
@@ -118,7 +119,7 @@
         function analog(ctx, row, series, top) {
             const numeric = value => {
                 if (value === null || (!/real/i.test(row.signal.type) && /[xz]/i.test(value))) return NaN;
-                return /real/i.test(row.signal.type) ? Number(value) : Number(model.formatValue(value, row.signal, 'dec'));
+                return /real/i.test(row.signal.type) ? Number(value) : Number.isInteger(row.signal.bitOffset) ? Number(value) : Number(model.formatValue(value, row.signal, 'dec'));
             };
             const values = series.changes.map(change => numeric(change.value)).filter(Number.isFinite);
             const min = values.length ? Math.min(...values) : 0, max = values.length ? Math.max(...values) : 1;
@@ -143,12 +144,37 @@
                 if (right - left > 24) text(ctx, '密集', left + 3, top + row.height / 2 + 4, right - left - 5, palette.bus);
             }
         }
+        function tint(ctx, row, top, left, width) {
+            const color = D.highlightColor(state.highlights?.[row.key]);
+            if (!color) return;
+            ctx.save(); ctx.fillStyle = color; ctx.globalAlpha *= .16; ctx.fillRect(left, top, width, row.height); ctx.restore();
+        }
+        function signalIcon(ctx, signal, left, top) {
+            const info = D.roleInfo(signal);
+            ctx.save(); ctx.strokeStyle = info.role === 'unknown' ? palette.dim : palette.accent; ctx.lineWidth = 1.2;
+            for (const points of info.paths) {
+                ctx.beginPath(); points.forEach(([x, y], index) => index ? ctx.lineTo(left + x, top + y) : ctx.moveTo(left + x, top + y)); ctx.stroke();
+            }
+            if (info.role === 'unknown') text(ctx, '?', left + 4, top + 10, 8, palette.dim);
+            ctx.restore();
+        }
         function names(ctx, row, top, g) {
             const signal = row.signal, key = model.signalKey(signal), chosen = state.multi.has(key), group = state.groups[key];
             ctx.fillStyle = chosen ? palette.selection : palette.panel; ctx.fillRect(0, top, g.names, row.height);
+            tint(ctx, row, top, 0, g.names);
+            const highlight = D.highlightColor(state.highlights?.[key]);
+            if (highlight) { ctx.fillStyle = highlight; ctx.fillRect(g.names - 3, top + 2, 3, row.height - 4); }
             if (state.activeKey === key) { ctx.fillStyle = palette.accent; ctx.fillRect(0, top + 2, 3, row.height - 4); }
             const label = state.fullName ? signal.path + (signal.range || '') : signal.name;
-            text(ctx, label, 12, top + 18, g.names - 112, palette.fg);
+            const indent = Number.isInteger(signal.bitOffset) ? 12 : 0;
+            signalIcon(ctx, signal, 28 + indent, top + 7);
+            text(ctx, label, 48 + indent, top + 18, g.names - 148 - indent, palette.fg);
+            if (D.isBus(signal)) {
+                const expanded = state.selected?.some(key => state.signals?.get(key)?.parentKey === row.key);
+                ctx.save(); ctx.font = '20px Consolas, monospace';
+                text(ctx, expanded ? '▾' : '▸', 6, top + 22, 20, palette.dim);
+                ctx.restore();
+            }
             const type = /real/i.test(signal.type) ? 'real' : signal.range || signal.width + 'b';
             const format = state.formats[key] || (/real/i.test(signal.type) ? 'analog' : 'hex');
             text(ctx, `${group ? group + ' · ' : ''}${type} · ${model.formatLabel?.(format) || format}`, 12, top + 31, g.names - 112, palette.dim);
@@ -182,11 +208,18 @@
             const g = geometry(), ctx = context(canvas, g.width, g.height), axis = context(ruler, g.width, 35), marks = ticks();
             ctx.fillStyle = palette.bg; ctx.fillRect(0, 0, g.width, g.height); drawRuler(axis, g, marks);
             for (const time of marks) line(ctx, x(time), 0, x(time), g.height, palette.grid);
-            const valid = state.seriesKey === state.windowKey;
+            const valid = state.seriesKey === state.windowKey, nextProjections = new Map();
             for (const row of visibleRows()) {
-                const top = row.y - tracks.scrollTop, series = valid ? state.series.get(row.signal.id) : null;
+                const top = row.y - tracks.scrollTop, source = valid ? state.series.get(row.signal.id) : null;
+                let series = source;
+                if (source && Number.isInteger(row.signal.bitOffset)) {
+                    const cached = projections.get(row.key);
+                    series = cached?.source === source ? cached.series : D.projectSeries(source, row.signal);
+                    nextProjections.set(row.key, { source, series });
+                }
                 ctx.save();
                 if (state.rowPresentation?.dragKeys?.has(model.signalKey(row.signal))) ctx.globalAlpha = .6;
+                tint(ctx, row, top, g.names, g.plot);
                 ctx.save(); ctx.beginPath(); ctx.rect(g.names, top, g.plot, row.height); ctx.clip();
                 if (series) {
                     const format = state.formats[model.signalKey(row.signal)] || (/real/i.test(row.signal.type) ? 'analog' : 'hex');
@@ -195,6 +228,7 @@
                 } else text(ctx, state.rowPresentation?.resizeKey || state.rowPresentation?.dragKeys ? '松开后加载新增可见信号…' : valid ? '无变更数据' : '加载时间窗口…', g.names + 12, top + 22, g.plot - 20, palette.dim);
                 ctx.restore(); names(ctx, row, top, g); ctx.restore();
             }
+            projections = nextProjections;
             if (state.rowPresentation?.insertionY !== null && state.rowPresentation?.insertionY !== undefined) {
                 const y = state.rowPresentation.insertionY - tracks.scrollTop;
                 ctx.lineWidth = 2; line(ctx, 0, y, g.width, y, palette.accent); ctx.lineWidth = 1;

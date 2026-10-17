@@ -5,7 +5,7 @@
 
 改编自 Sublime Text [SystemVerilog](https://github.com/TheClams/SystemVerilog)（格式化）与 [Verilog-Gadget](https://github.com/poucotm/Verilog-Gadget)（生产力工具）插件。
 
-当前为 **4.0.0-preview.1**，在 3.5.0 基础上完成格式化器、补全、工具链与波形查看器重构。[GitHub 预发布下载](https://github.com/JayceVane/SV-Tools/releases/tag/v4.0.0-preview.1)提供 Windows x64 VSIX 与 CLI；在 VS Code 中通过“从 VSIX 安装”使用。源码位于 `src/`，构建产物位于 `bin/`。
+当前开发预览版本为 **4.0.0-beta.6**，新增波形背景色、总线逐位展开和RTL方向图标，保留电路总线展示、主题高亮与临时文件lint修复；[已发布4.0.0-beta.2](https://github.com/JayceVane/SV-Tools/releases/tag/v4.0.0-beta.2) 提供 Windows x64 VSIX 与 CLI。开发预览可通过本地VSIX安装并重载窗口，正式版目标为 **4.0.0**。源码位于 `src/`，构建产物位于 `bin/`。
 
 格式化只能改变普通空格、Tab、CR、LF；其它字符的内容、次数和顺序必须保持，即使输入
 全部乱码或语法不完整。无法安全提交的布局保留原文，详见 [格式化规范](docs/FORMAT_SPEC.md)。
@@ -14,6 +14,8 @@
 100/500 MiB VCD。操作说明、性能数据与验收范围见 [波形查看器](docs/WAVEFORM.md)。
 
 4.0 补全使用标准目录、容错语义模型和增量工程索引，支持 Verilog/SystemVerilog 版本选择、UVM 1.2/1800.2、类继承与泛型、端口/参数、数组与二维 mem 成员。配置、覆盖范围及限制见 [代码补全](docs/COMPLETION.md)。
+
+预览波形支持批量背景色、总线逐位展开和RTL方向图标；操作及边界见[波形说明](docs/WAVEFORM.md)。
 
 ## 功能总览
 
@@ -46,11 +48,24 @@
 - ▶ 仿真（Icarus / Vivado xsim 引擎选择）与 ⊕ 工程文件管理按钮
 - 工程创建向导（源文件分类、器件选型逐级筛选、顶层识别）+ 工程结构模板
 
+**电路结构查看器**（4.0 beta，可选本地工具）
+- 内置离线 Yosys，无需 Python 或额外安装；从当前 RTL 生成，或导入已有 JSON，支持源文件顺序、顶层、include 和宏
+- 默认自动收集工作区子模块与包依赖，显式 sources 保留编译顺序；错误摘要显示原文件行列
+- 独立电路模型与 ELK.js 正交布局，SVG 平移缩放、搜索、网络高亮、参数化模块下钻和源码定位
+- 编辑器右上角默认使用内置 Yosys；RTL 右键用 Vivado 查看当前文件模块，工程面板使用工程 top
+- Yosys 寄存器按明确参数显示触发沿与控制极性，锁存器独立符号；引脚详情保留原始名称、语义与工具参数
+- 单比特细线与多比特粗线区分，总线斜杠位宽标记、I/O位数与可点击标签，选中和总览保留线型差异
+- 拼接/拆分节点显示完整总线主干及分支位位置，重复常量明确标出复制次数；详情保留逐位映射
+- 相机按帧刷新、视口外 SVG 按需挂载；总览自动简化细节，选择与搜索共享拓扑索引
+- 解析和布局运行在 Worker；超预算明确提示，并保留模块选择以便查看较小子模块
+
+命令面板搜索“电路”，或在 RTL 编辑器右键用内置 Yosys 生成；`svtools.circuit.yosysPath` 默认为 `bundled`，也可指定外部工具。前端默认`auto`：内置工具使用Slang解析SystemVerilog，外部工具兼容旧前端。Vivado 右键入口要求当前文件已保存且属于所选工程综合源，在任务副本中重建 top 与编译顺序。配置、数据语义、容量边界及验证命令见 [电路查看器](docs/CIRCUIT.md)。
+
 **CLI 格式化器**：独立 `svtools.exe`，无需 VSCode。
 
 ## 系统要求
 
-- Visual Studio Code 1.74.0+
+- Visual Studio Code 1.106.0+（内置 Yosys 的 WASM 需要新版扩展宿主）
 - 无需 Python；语法检查/仿真需要 [Icarus Verilog](http://iverilog.icarus.com/)（可选），Vivado 功能需要本机 Vivado 安装
 
 ## 安装

@@ -2,6 +2,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { SOURCE_EXCLUDE_GLOB, isExcludedSourcePath } = require('./source-policy');
 
 // 同时识别模块、接口、包和程序，供编译依赖与工程树复用。
 const MODULE_DECL_RE = /^[ \t]*(?:module|macromodule|interface|package|program)\s+(?:(?:automatic|static)\s+)?([A-Za-z_][A-Za-z0-9_$]*)/gm;
@@ -58,12 +59,13 @@ function createWorkspaceSourceIndex({ workspace, readFileSync = fs.readFileSync,
                 if (scanned >= WORKSPACE_SCAN_MAX_FILES) break;
                 let uris = [];
                 try {
-                    uris = await workspace.findFiles(pattern, undefined, WORKSPACE_SCAN_MAX_FILES);
+                    uris = await workspace.findFiles(pattern, SOURCE_EXCLUDE_GLOB, WORKSPACE_SCAN_MAX_FILES);
                 } catch (err) {
                     onError('扫描工作区模式 ' + pattern + ' 失败：' + err.message);
                     continue; // 单个模式失败不影响其余
                 }
                 for (const uri of uris) {
+                    if (isExcludedSourcePath(uri.fsPath)) continue;
                     if (scanned++ >= WORKSPACE_SCAN_MAX_FILES) break;
                     dirSet.add(path.dirname(uri.fsPath));
                     try {

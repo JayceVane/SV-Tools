@@ -7,7 +7,7 @@ let assets;
 
 /** 小型静态资源只读取一次；波形事件从不进入 HTML。 */
 function readAssets() {
-    if (!assets) assets = Object.fromEntries(['view.css', 'value-format.js', 'model.js', 'memory.js', 'memory-view.js', 'interaction.js', 'menu.js', 'row-layout.js', 'row-gesture.js', 'column-layout.js', 'column-resize.js', 'renderer.js', 'client.js'].map(name =>
+    if (!assets) assets = Object.fromEntries(['view.css', 'signal-display.js', 'value-format.js', 'model.js', 'memory.js', 'memory-view.js', 'interaction.js', 'menu.js', 'row-layout.js', 'row-gesture.js', 'column-layout.js', 'column-resize.js', 'renderer.js', 'client.js'].map(name =>
         [name, fs.readFileSync(path.join(__dirname, name), 'utf8')]));
     return assets;
 }
@@ -57,6 +57,6 @@ function buildWaveformHtml(metadata, meta) {
 </section>
 <div id="loading"><div id="loadTitle">正在加载 VCD</div><progress id="progress"></progress><div id="loadDetail">后台解析，编辑器保持响应</div><div id="loadError" role="alert"></div><button id="cancel">取消加载</button></div></section></main>
 <footer><span id="status" role="status">准备加载</span><span class="hint">Ctrl + 滚轮缩放 · Shift + 滚轮平移 · 拖动波形平移 · Shift 点击放置 B</span></footer>
-<script nonce="${nonce}">const BOOT=${json};</script><script nonce="${nonce}">${content['value-format.js']}</script><script nonce="${nonce}">${content['model.js']}</script><script nonce="${nonce}">${content['memory.js']}</script><script nonce="${nonce}">${content['memory-view.js']}</script><script nonce="${nonce}">${content['interaction.js']}</script><script nonce="${nonce}">${content['menu.js']}</script><script nonce="${nonce}">${content['row-layout.js']}</script><script nonce="${nonce}">${content['row-gesture.js']}</script><script nonce="${nonce}">${content['column-layout.js']}</script><script nonce="${nonce}">${content['column-resize.js']}</script><script nonce="${nonce}">${content['renderer.js']}</script><script nonce="${nonce}">${content['client.js']}</script></body></html>`;
+<script nonce="${nonce}">const BOOT=${json};</script><script nonce="${nonce}">${content['signal-display.js']}</script><script nonce="${nonce}">${content['value-format.js']}</script><script nonce="${nonce}">${content['model.js']}</script><script nonce="${nonce}">${content['memory.js']}</script><script nonce="${nonce}">${content['memory-view.js']}</script><script nonce="${nonce}">${content['interaction.js']}</script><script nonce="${nonce}">${content['menu.js']}</script><script nonce="${nonce}">${content['row-layout.js']}</script><script nonce="${nonce}">${content['row-gesture.js']}</script><script nonce="${nonce}">${content['column-layout.js']}</script><script nonce="${nonce}">${content['column-resize.js']}</script><script nonce="${nonce}">${content['renderer.js']}</script><script nonce="${nonce}">${content['client.js']}</script></body></html>`;
 }
 module.exports = { buildWaveformHtml };

@@ -105,5 +105,17 @@
   "cfg.completion_maxFileSizeKB.desc": "补全索引读取的单个未打开 HDL 文件大小上限（KiB）。已打开文件使用当前未保存内容。",
   "cfg.completion_maxTotalSourceMB.desc": "未打开文件补全索引的 UTF-8 源码总预算（MiB）；这是源码容量预算，不是堆内存上限。",
   "cfg.completion_standard.desc": "补全关键词的语言标准。auto 根据文档语言及当前 `begin_keywords 指令选择。独立于编译器选项。",
-  "cfg.completion_maxItems.desc": "单次补全的候选项上限。宽泛请求会标记不完整，继续输入前缀可定位索引内其余声明。"
+  "cfg.completion_maxItems.desc": "单次补全的候选项上限。宽泛请求会标记不完整，继续输入前缀可定位索引内其余声明。",
+  "cmd.circuit.open.title": "打开电路网表（JSON）",
+  "cmd.circuit.fromSource.title": "查看 RTL 电路（Yosys）",
+  "cmd.circuit.fromVivado.title": "查看工程 Top 电路（Vivado）",
+  "cmd.circuit.stop.title": "停止电路生成",
+  "cfg.circuit.yosysPath": "默认 bundled 使用插件内置 Yosys，无需 Python 或额外安装；也可指定外部 Yosys 可执行文件路径。",
+  "cfg.circuit.frontend": "auto：内置Yosys默认使用Slang解析SystemVerilog，外部工具沿用read_verilog -sv。slang/verilog显式覆盖；外部slang需工具提供read_slang。",
+  "cfg.circuit.sources": "有序 RTL 源文件列表。留空时自动收集当前工作区文件夹内的模块、接口及包依赖；非空时遵守此顺序，当前文件未列出则追加，不再自动扫描。",
+  "cfg.circuit.includeDirs": "HDL include 目录，可相对工作区或使用绝对路径。",
+  "cfg.circuit.defines": "预处理宏，例如 SYNTHESIS 或 WIDTH=8。",
+  "cfg.circuit.top": "RTL 电路顶层模块；留空则从当前文件选择。",
+  "cfg.circuit.generationTimeout": "电路生成超时，单位秒。",
+  "cmd.circuit.fromVivadoFile.title": "查看当前文件电路（Vivado）"
 }

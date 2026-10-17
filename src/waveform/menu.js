@@ -5,6 +5,9 @@
     const HOVER_OPEN_MS = 90, HOVER_CLOSE_MS = 150;
     const ICON_PATHS = {
         format: 'M4 6h16M4 12h16M4 18h16M8 3v6M16 9v6M10 15v6',
+        highlight: 'M5 4h14v16H5V4Zm3 4h8v8H8V8Z',
+        expand: 'M4 6h16M4 12h16M4 18h16m-9-9 3 3-3 3',
+        collapse: 'M4 6h16M4 12h16M4 18h16m-6-9-3 3 3 3',
         height: 'M5 9V4l-3 3m3-3 3 3M5 15v5l-3-3m3 3 3-3M12 5h9M12 12h9M12 19h9',
         group: 'M3 7h7l2-3h8v15H3V7Z',
         'group-add': 'M3 7h7l2-3h8v6M3 7v12h7M17 12v8M13 16h8',
@@ -94,6 +97,8 @@
                 if (item.submenu) { button.setAttribute('aria-haspopup', 'menu'); button.setAttribute('aria-expanded', 'false'); }
                 const mark = document.createElement('span'); mark.className = 'menuMark'; mark.textContent = item.checked ? '✓' : '';
                 mark.setAttribute('aria-hidden', 'true');
+                const color = window.WaveSignalDisplay?.highlightColor(item.swatch);
+                if (color) { mark.className += ' menuSwatch'; mark.style.backgroundColor = color; }
                 const glyph = item.checked === undefined && icon(item.icon); if (glyph) mark.appendChild(glyph);
                 const label = document.createElement('span'); label.className = 'menuLabel'; label.textContent = item.label;
                 const hint = document.createElement('span'); hint.className = 'menuHint'; hint.textContent = item.detail || '';

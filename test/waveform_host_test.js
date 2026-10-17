@@ -198,3 +198,11 @@ test('真实 worker 打开过程中取消后再关闭：加载完成 promise 结
     page.receive({ type: 'close' });
     assert.equal(page.receives.size, 0); assert.equal(page.closes.size, 0);
 });
+
+test('源上下文等待期间取消，不启动迟到worker或覆盖取消错误', async () => {
+    const page=panelFixture(), context=deferred(); let opened=0;
+    const binding=bindWaveformPanel({filePath:path.join(os.tmpdir(),'capture.vcd'),panel:page.panel,
+        getSourceContext:()=>context.promise,createSession:()=>({async open(){opened++;return metadata();},dispose(){}})});
+    page.receive({type:'ready'});page.receive({type:'cancel'});await nextTurn();context.resolve({files:[]});
+    await binding.loaded;assert.equal(opened,0);assert.equal(page.sent.at(-1).type,'error');assert.match(page.sent.at(-1).error,/取消/);binding.dispose();
+});

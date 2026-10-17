@@ -1,10 +1,11 @@
 /* 纯视图规则；Node 合同测试与 webview 复用同一实现。 */
 (function (root, factory) {
     const formats = typeof module === 'object' && module.exports ? require('./value-format') : root.WaveValueFormats;
-    const api = factory(formats);
+    const display = typeof module === 'object' && module.exports ? require('./signal-display') : root.WaveSignalDisplay;
+    const api = factory(formats, display);
     if (typeof module === 'object' && module.exports) module.exports = api;
     else root.WaveModel = api;
-})(typeof globalThis === 'object' ? globalThis : this, function (floating) {
+})(typeof globalThis === 'object' ? globalThis : this, function (floating, display) {
     'use strict';
     const units = { s: 1, ms: 1e-3, us: 1e-6, ns: 1e-9, ps: 1e-12, fs: 1e-15 };
     const MAX_FORMAT_BITS = 65536;
@@ -77,6 +78,7 @@
     /** 宽总线用 BigInt，X/Z 保持可见，signed 按声明宽度二补码解释。 */
     function formatValue(value, signal, radix = 'hex') {
         if (value === null || value === undefined) return '—';
+        if (Number.isInteger(signal.bitOffset)) value = display.bitValue(value, signal.bitOffset);
         if (floating.isFloat(radix)) return floating.format(value, signal, radix);
         if (/real/i.test(signal.type)) return String(value);
         if (signal.width > MAX_FORMAT_BITS) return `${signal.width}b VCD ${String(value).slice(0, 64)}${String(value).length > 64 ? '…' : ''}`;
@@ -123,8 +125,8 @@
     function signalKey(signal) { return signal.key || signal.path; }
 
     /** 文件变化后剔除失效信号并约束恢复视口。 */
-    function restoreState(saved, metadata, fileKey) {
-        const paths = new Set(metadata.vars.map(signalKey));
+    function restoreState(saved, metadata, fileKey, signals) {
+        const paths = new Set(signals ? signals.keys() : metadata.vars.map(signalKey));
         const valid = saved && saved.fileKey === fileKey ? saved : {};
         const selected = Array.isArray(valid.selected) ? [...new Set(valid.selected.filter(path => paths.has(path)))] : [];
         return { selected, view: clampView(valid.start || 0, valid.span || Math.max(1, metadata.endTime), metadata.endTime),
@@ -132,5 +134,5 @@
             cursorB: Number.isFinite(valid.cursorB) ? Math.min(metadata.endTime, Math.max(0, valid.cursorB)) : null };
     }
     return { clampView, zoomView, formatTime, parseTime, binaryValue, formatValue, valueAt, filterSignals, prepareSignals, signalKey, restoreState,
-        FORMAT_OPTIONS, supportsFormat, formatLabel };
+        FORMAT_OPTIONS, supportsFormat, formatLabel, signalDisplay: display };
 });

@@ -38,6 +38,7 @@ test/*
 !test/*_test.js
 !test/vscode_vivado_host.js
 !test/vscode_completion_host.js
+!test/vscode_circuit_host.js
 !test/helpers/
 test/helpers/*
 !test/helpers/waveform-client-harness.js
@@ -45,6 +46,10 @@ test/helpers/*
 test/fixtures/*
 !test/fixtures/memory_dump.sv
 !test/fixtures/memory_dump.vcd
+!test/fixtures/circuit-demo.sv
+!test/fixtures/circuit-enum/
+test/fixtures/circuit-enum/*
+!test/fixtures/circuit-enum/*.sv
 
 # OS
 .DS_Store

@@ -1,4 +1,4 @@
-# SV Tools 4.0 架构
+# SV Tools 4.x 架构
 
 ## 技术方向
 
@@ -32,6 +32,8 @@ UTF-16，孤立代理项返回原始JS字符串，避免在守卫之前被UTF-8�
 `format-safety.js`在全文/选区和对齐替换之前按UTF-16复核，保护旧或错误native边界。
 模块实例、Testbench、头部和重复代码等生成命令保留其新增/改写语义。
 
+选区对齐先用共享词法掩码识别第一条真实代码，注释不决定布局类型。完整实例选区复用普通段格式化入口；端口表、声明和赋值保持各自的选区布局。Generate中的并发过程在本上下文结束时提交，不能把过程布局状态带到后续实例。
+
 ## 模块边界
 
 | 模块 | 负责 | 不负责 |
@@ -54,6 +56,15 @@ UTF-16，孤立代理项返回原始JS字符串，避免在守卫之前被UTF-8�
 | `src/toolchains/iverilog-controller.js` | 命令、事件、诊断归属和界面接线 | 进程字节流、厂商解析规则 |
 | `src/vivado/batch.js` | batch 成败、项目标记与语义错误 | 工程树、Tcl 生成 |
 | `src/workspace/sources.js` | 设计单元索引与缓存 | Lint 运行与界面接线 |
+| `src/workspace/source-policy.js` | 源码发现、定义检索、补全缓存与lint/诊断共享的目录排除规则 | 任务目录创建、语义解析 |
+| `src/circuit/model.js` 与 `adapters/*` | 工具无关领域合同、Yosys/Vivado 方言转换与验证 | 布局坐标、Webview、工具进程 |
+| `src/circuit/register-symbol.js` | 已知Yosys字级时序单元的纯展示语义与参数极性 | 改写网表、猜测未知单元/工具的引脚功能 |
+| `src/circuit/bus-routing.js` | 由端口实际位序及成员网络生成纯展示拼接/拆分、重复/重排映射 | 更改领域位序、推断RTL声明范围、添加硬件单元 |
+| `src/circuit/projection.js` 与 `layout.js` | 当前模块连接投影、有界总线合并、ELK 几何 | 领域位序改写、文件读取、编辑器状态 |
+| `src/circuit/worker.js` 与 `session.js` | UTF-8 JSON 读取、模型、布局、RPC 容量/超时/销毁 | VS Code API、外部工具启动 |
+| `src/circuit/*-runner.js` 与 `source-request.js` | 本地工具参数、任务快照、源位置回映射 | 电路推断、SVG 绘制 |
+| `src/circuit/host.js` 与 `index.js` | 页面生命周期、命令、取消和受限源码定位 | 网表方言、布局算法 |
+| `src/circuit/client.js` 与 `renderer.js` | 纯文本详情、手势、SVG 和页面状态 | 文件路径访问、启动工具、解析 RTL |
 | `src/editor/completion/catalog` 与生成数据 | 版本化规范名称、公开接口签名和来源/许可 | 用户工程解析和 VS Code API |
 | `src/editor/completion/syntax` | 容错词法、作用域、声明、类型与连接区间 | 规范目录、文件读取、完整 elaboration |
 | `src/editor/completion/index` | 文档版本缓存、工程/include 目录事件与容量预算 | 补全排序和原生格式化 |
@@ -61,6 +72,46 @@ UTF-16，孤立代理项返回原始JS字符串，避免在守卫之前被UTF-8�
 | `src/editor/completion/provider` | 编辑器配置、取消、双替换区间与 SnippetString | 重复维护标准名录和领域类型规则 |
 
 固定声明/赋值模式使用惰性缓存。新增规则优先落在负责该构造的模块，只有新的词法事实才扩展扫描器；不能把某个布局例外复制到其它阶段。
+
+## 4.1 电路数据与交互
+
+alpha2 默认使用固定版本内置 Yosys WASM。alpha4将前端选择集中在runner：auto在内置后端解析为Slang，在外部后端解析为旧Verilog前端；显式配置始终保留，不按关键字改写输入或失败后重试。源位置前缀的ERROR也使任务失败，摘要优先具体错误，完整日志保留运行时警告。`yosys-bundled.js` 仅构建源目录/include/任务目录的 guest 路径映射；`yosys-wasi.js` 在独立 Node 子进程校验并运行原始 WASI 模块。编译进程继承共享工具任务的超时、日志和取消，不占用扩展宿主线程，也不在运行时下载工具。资源及完整许可由构建脚本从锁定 npm 包复制/展开；不分发该包的 JS runtime、Python 或其它 WASM adapter。Node WASI 用于接口与进程隔离，不宣称安全沙箱。
+
+内置 Slang 的 `src` 可能省略开头斜杠，适配时先按 guest 根解析，再经目录映射与快照映射两步还原真实文件。编辑器标题栏默认Yosys；RTL右键选择当前文件Vivado top，工程面板沿用工程top。alpha3修正原先仅传`-top`的缺口：工程旧层级会AutoDisabled无关源，只读原工程无法重算。当前文件入口先在任务目录`save_project_as -exclude_run_results`，确认当前项目已切到副本后仅在副本设置top并`update_compile_order`。原工程及源码不变；工程外或脏正文仍明确提示改用内置Yosys。Tcl导出器显式按UTF-8加载，错误汇总优先具体Vivado诊断而非Tcl收尾。
+
+alpha9将总线标记位置放在viewport的纯几何层：规范化冗余共线折点，容许ELK浮点误差，以稀疏网格避让标签。renderer与裁剪索引复用同一标记Map，显示位宽只取连线或端口自身bits长度，不猜测范围、不改网络连接；平移和选择不重算标记。
+
+alpha5将页面热路径分成两个纯索引：`graph-index.js`管理模块拓扑、搜索文本与位别名，`viewport.js`管理静态包围盒树和折线相交查询。renderer只保留带过扫描边界的可见对象在活动SVG中；屏外DOM与数据仍由索引持有，重入保持原始绘制顺序、已选状态与对象身份。选择只写入前后状态的差集；搜索不重复构造文本。
+
+client只持有相机逻辑状态，requestAnimationFrame每帧提交一次最新变换。视口几何在换图和ResizeObserver中更新，滚轮不再同步读取布局。换图、加载、取消与销毁清理待提交帧；手动相机在窗口变化后重裁剪，保持缩放和平移。缩小总览逐级隐藏不可读细节，正常倍率恢复；不将裁剪推入领域模型或ELK，不提高硬预算。
+
+alpha6把当前文件的编译上下文拆为`source-context.js`（VS Code发现、取消与正文快照适配）、`source-dependencies.js`（Worker内的有界文件依赖闭包）和`source-request.js`（有序请求与私有快照）。依赖收集复用completion/syntax纯语义解析器，只选择待编译文件，不推导电路或执行预处理器。显式sources绕过发现；默认按引用收集模块、接口和包，歧义报错，最终语义仍交给Slang。字面include关系防止重复独立读入，宏上下文须显式文件表。含include的选中脏依赖要求先保存，避免搬移正文改变局部头文件搜索；当前文件继续沿用已有快照策略。
+
+`source-paths.js`集中处理精确快照和目录回映射，供Worker模型定位与`yosys-diagnostics.js`共用。诊断收集器有界保留首条源码错误及通用错误，选择前者而不依赖跨stdout/stderr的到达先后。runner保留启动/日志/取消失败和前端策略，不再自己解析逐行错误。
+
+技术方向是先验证工具实际输出，再建立独立模型，最终使用 ELK.js + SVG 提供交互。netlistsvg 只用于开发验证，正式页面不依赖其输出或内部对象。实现愿景是同一模型接入不同工具并支持局部逻辑浏览；当前交付模块级视图，逻辑锥和增量布局留作后续。
+
+```mermaid
+flowchart LR
+    Commands[VS Code 电路命令] --> Tasks[共享工具任务与取消]
+    Tasks --> Yosys[Yosys RTL 到 JSON]
+    Tasks --> Vivado[Vivado 只读 RTL 详细化]
+    Import[已有 JSON] --> Worker
+    Yosys --> Worker[Worker 读取与适配]
+    Vivado --> Worker
+    Worker --> Model[独立 Design 模型]
+    Model --> Projection[当前模块连接投影]
+    Projection --> ELK[ELK 正交布局]
+    ELK --> Host[宿主消息与请求世代]
+    Host --> SVG[SVG 页面与对象选择]
+    SVG -->|仅对象 ID| Host
+    Host -->|已验证位置| Source[编辑器源码定位]
+    Yosys -->|开发验证| Prototype[netlistsvg 对照]
+```
+
+模型中的位引用只在所属模块内有意义，数组为 LSB-first；坐标和 ELK ID 不进入领域模型。模块输入在内部连接图中是驱动端，但声明方向仍为 input，投影显式保留二者，避免布局语义污染详情。别名、常量、多驱动和未知方向保持事实，不能补造连接。
+
+每个面板独立 Worker，首次导入和导航有请求世代检查；关闭/刷新取消所属工具任务，旧布局和源码响应不能覆盖新页面。Worker 读取上限 64 MiB、堆预算 384 MiB、单请求 60 秒；单模块展示预算在投影前检查。模块目录先于布局发送，超大顶层报错后仍可选小模块。Webview 不接收可执行路径，仅发送已有对象 ID；nonce CSP、纯文本写入和宿主真实路径校验共同约束边界。完整预算及未实现范围见 `docs/CIRCUIT.md`。
 
 ## 实现愿景
 
@@ -188,3 +239,14 @@ flowchart TD
 R6 是把源码文件引用当完整模块层级、把仿真引用当文件集成员。本轮对应边界已拆分并
 以合同、真实宿主和工具验证约束。创建向导/OOC/报告集成仍位于既有组合入口，后续
 变更应沿这些边界继续分离，不能把引擎或模型内部状态重新塞回事件接线函数。
+
+总线连接投影发生在真实位网络分组之后、ELK输入之前。完整端口主干保留全部位序及重复项，分支保持原网络身份，并记录每个线位在完整端口中的位置。主干引用成员网络ID，拓扑索引按成员关系高亮，不通过主干递归扩散到无关位；普通引脚继续局部选择。连接节点计入原有展示预算，硬件cellCount不包含这些节点。
+
+源码排除策略由同一目录表生成glob及直接路径判定。文件发现的结果、已打开文档、工具入口和诊断发布分别使用该策略，避免内部程序打开快照时绕过glob并触发自动lint。跳过文档返回skipped，不伪装编译通过；工具内部为真实源创建的任务快照仍能正常编译，真实源码诊断及原始失败日志保留。
+
+索引排除范围与工具生成目录分别由同一目录表派生。自动lint和诊断仅跳过.svtools/.Xil；显式node_modules等依赖源码仍可检查，真实错误正常显示。
+
+
+beta.6的`waveform/signal-display.js`集中颜色、图标事实及派生位身份。bit行只引用父VCD id，renderer仅缓存当前可见窗口的bit投影；滚出即丢弃，memory和原始事件存储不扩容。store从2-bit值池直接读取目标位，边沿每10万事件返回续查位置，client在每轮校验请求世代，避免长期扫描占满消息循环。
+
+`waveform/source-roles.js`通过宿主发现路径和当前正文，在VCD worker中解析有界RTL。复用completion语法事实并压缩为模块、实例和符号索引；方向归属每条scope/alias，不归属共享VCD id。此路径只读fs，不调用openTextDocument，避免重现beta.5误报链。扫描不完整、条件编译及歧义保留未知；VCD加载和展示不要求安装综合工具。

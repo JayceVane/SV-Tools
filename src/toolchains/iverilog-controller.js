@@ -7,6 +7,7 @@ const { createBufferedOutput } = require('./channel');
 const { summarizeToolResult, resultFindings } = require('./result');
 const { lintWithXvlog, elaborateWithXvlog, resetXvlogCache } = require('./xvlog');
 const { scanWorkspaceSources, invalidateWorkspaceSources } = require('../workspace/sources');
+const { GENERATED_SOURCE_EXCLUDE_GLOB, isGeneratedSourcePath } = require('../workspace/source-policy');
 const LANGUAGE_IDS = ['verilog', 'systemverilog', 'system-verilog'];
 
 /** @param {object} context @param {object} deps 工具规则与可注入的编辑器边界。 @returns {object} 命令流程和释放入口。 */
@@ -23,7 +24,7 @@ function activateIverilog(context, deps) {
     const scanSources = deps.scanWorkspaceSources || scanWorkspaceSources;
     const getConfig = document => vscode.workspace.getConfiguration('svtools.iverilog', document?.uri);
     const currentEngine = document => vscode.workspace.getConfiguration('svtools.lint', document?.uri).get('engine', 'iverilog');
-    const isVerilogDocument = document => !!document && LANGUAGE_IDS.includes(document.languageId);
+    const isVerilogDocument = document => !!document && LANGUAGE_IDS.includes(document.languageId) && !isGeneratedSourcePath(document.uri?.fsPath);
     const lintKey = document => 'lint:' + document.uri.toString();
     const runner = createIcarusRunner({ workspace: vscode.workspace, getConfig, scanSources,
         getToolchain: async task => {
@@ -39,6 +40,7 @@ function activateIverilog(context, deps) {
     }
     function publishFiles(files) {
         for (const file of files) {
+            if (isGeneratedSourcePath(file)) { diagnostics.set(vscode.Uri.file(file), []); continue; }
             const entries = new Map();
             for (const owner of owners.values()) for (const finding of owner.findings) {
                 if (path.normalize(finding.file) !== file) continue;
@@ -55,7 +57,8 @@ function activateIverilog(context, deps) {
     }
     function applyDiagnostics(document, findings, source = 'iverilog') {
         const key = document.uri.toString(), previous = owners.get(key);
-        owners.set(key, { document, findings, source });
+        const sourceFindings = findings.filter(finding => !isGeneratedSourcePath(finding.file));
+        owners.set(key, { document, findings: sourceFindings, source });
         publishFiles(new Set([document.uri.fsPath, ...(previous?.findings || []).map(f => path.normalize(f.file)), ...findings.map(f => path.normalize(f.file))]));
     }
     function removeDiagnostics(document) {
@@ -72,7 +75,7 @@ function activateIverilog(context, deps) {
     async function expandFiles(patterns) {
         const files = [];
         for (const pattern of patterns || []) {
-            const uris = await vscode.workspace.findFiles(pattern, undefined, 500); files.push(...uris.map(uri => uri.fsPath));
+            const uris = await vscode.workspace.findFiles(pattern, GENERATED_SOURCE_EXCLUDE_GLOB, 500); files.push(...uris.filter(uri => !isGeneratedSourcePath(uri.fsPath)).map(uri => uri.fsPath));
         }
         return [...new Set(files)];
     }
@@ -107,6 +110,10 @@ function activateIverilog(context, deps) {
     }
     async function execute(document, kind = 'lint', options = {}) {
         const mainFile = document?.uri?.fsPath || '';
+        if (!disposed && isGeneratedSourcePath(mainFile)) {
+            clearDebounce(document); tasks.cancel(lintKey(document), '跳过工具生成目录'); removeDiagnostics(document);
+            return { ...summarizeToolResult({ mainFile, status: 'skipped' }), message: '跳过工具生成目录中的文档，请在原始RTL文件执行检查' };
+        }
         if (disposed || !isVerilogDocument(document) || document.uri.scheme !== 'file') {
             const message = '请先打开已保存的 Verilog/SystemVerilog 文档';
             if (!disposed && kind === 'simulation') vscode.window.showWarningMessage(message);
