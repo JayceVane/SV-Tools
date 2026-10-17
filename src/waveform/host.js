@@ -7,10 +7,10 @@ const QUERY_METHODS = new Set(['window', 'values', 'edge']);
 
 /**
  * 单面板数据服务：加载进度、按需查询、取消和关闭共用同一 worker 生命周期。
- * @param {{filePath:string,panel:object,channel?:object,createSession?:(options:object)=>object}} options
+ * @param {{filePath:string,panel:object,channel?:object,createSession?:(options:object)=>object,getSourceContext?:()=>Promise<object>}} options
  * @returns {{dispose:()=>void,loaded:Promise<void>}} 可独立验证，不依赖 vscode 全局。
  */
-function bindWaveformPanel({ filePath, panel, channel, createSession = options => new VcdSession(options) }) {
+function bindWaveformPanel({ filePath, panel, channel, createSession = options => new VcdSession(options), getSourceContext }) {
     let disposed = false, cancelled = false, ready = false, metadata = null, lastProgress = null, loadError = null;
     const log = text => channel?.appendLine('[VCD] ' + text);
     function send(message) {
@@ -49,10 +49,14 @@ function bindWaveformPanel({ filePath, panel, channel, createSession = options =
         Promise.resolve(session.dispose()).catch(error => log('关闭数据服务失败：' + error.message));
     }
     panel.webview.html = buildWaveformHtml(null, { fileName: path.basename(filePath), fileKey: filePath });
-    const loaded = session.open(filePath).then(result => {
+    const opening = getSourceContext ? Promise.resolve().then(() => getSourceContext()).catch(error => {
+        log('读取RTL方向上下文失败：' + error.message); return undefined;
+    }).then(sourceContext => disposed || cancelled ? null : session.open(filePath, sourceContext)) : session.open(filePath);
+    const loaded = opening.then(result => {
         if (disposed || cancelled) return;
         if (!result.vars.length) throw new Error('该 VCD 中没有信号定义。');
         metadata = { ...result, secondsPerTick: parseTimescaleSeconds(result.timescale) };
+        if (result.sourceRoleNote) log(result.sourceRoleNote);
         reportState(); log(`已加载 ${path.basename(filePath)}：${(result.fileBytes / 1048576).toFixed(1)} MiB，${result.vars.length} 条信号`);
     }).catch(async error => {
         if (disposed || cancelled) return;

@@ -1,3 +1,9 @@
+# 4.0 beta.6 波形信号标记与逐位调试
+
+2026-10-17：实现多选背景高亮、总线展开/收起和RTL角色图标。颜色六色/清除并随布局恢复，bit可独立选择/分组/排序；保持声明左右界及X/Z。派生位共用事件store，渲染缓存仅当前可见投影；精确位边沿直接读压缩载荷并自动续查。方向复用completion语法在worker有界匹配，alias逐路径分类；不打开源码文档或触发lint，未知不猜。保持独立worktree、草稿PR11和原工程，版本4.0.0-beta.6，公开Release仍beta.2。
+
+新增交互、源匹配、压缩位查询、Canvas及取消回归；Node22相关112项通过。正式页面明暗主题、真实Pointer多选、切色不重查、bit边沿40ns、重载和收起已通过。100/500MiB语料的256bit展开、精确位边沿及续查通过。最终JS158、Golden40/40、Node543通过1可选跳过、电路169/169、Rust125/125通过；包445文件/429运行文件逐字节一致。解包后实际Qoder Node native ABI、VCD worker与20ns位边沿，以及Edge明暗真实Pointer验证通过。完整34文件清单与交付记录见docs/V4_BETA6.md。正式版目标4.0.0，未合并或新建Release。
+
 # 4.0 beta.5 生成文件lint误报
 
 2026-10-16：用户粘贴的32条诊断全部来自26个.svtools/circuit临时文件，owner为svtools-iverilog、source为xvlog；30条include缺失，另2条为验证夹具宏/语法级联。定义检索仅排除node_modules并调用openTextDocument，触发lintOnOpen；启动与配置变化还会重查缓存文档。新增共享路径判定与glob同源，覆盖发现、已打开补全、定义检索、工具入口及发布。生成文档skipped并清理其旧诊断；正常RTL和失败状态不变。

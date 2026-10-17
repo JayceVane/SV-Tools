@@ -2,9 +2,11 @@
 const http = require('node:http');
 const fs = require('node:fs/promises');
 const path = require('node:path');
-const { VcdSession } = require('../src/waveform/session');
-const { buildWaveformHtml } = require('../src/waveform/view');
-const { parseTimescaleSeconds } = require('../src/waveform/parser');
+const rootIndex = process.argv.indexOf('--extension-root');
+const extensionRoot = rootIndex >= 0 ? path.resolve(process.argv[rootIndex + 1]) : path.resolve(__dirname, '..');
+const { VcdSession } = require(path.join(extensionRoot, 'src/waveform/session'));
+const { buildWaveformHtml } = require(path.join(extensionRoot, 'src/waveform/view'));
+const { parseTimescaleSeconds } = require(path.join(extensionRoot, 'src/waveform/parser'));
 
 /** 浮点、模拟量与分组的公开验收语料；位向量保留特殊值和未知状态。 */
 function fixtureVcd() {
@@ -36,15 +38,31 @@ function fixtureVcd() {
     lines.push('#700'); return lines.join('\n') + '\n';
 }
 
+
+/** 方向、非零/升序范围、内部wire/reg及同id别名的真实worker验收语料。 */
+function fixtureSignals() {
+    const lines = ['$timescale 1ns $end', '$scope module wave_tb $end',
+        '$var reg 1 ! clk $end', '$var reg 4 c ctrl [7:4] $end', '$var wire 8 s status [0:7] $end', '$var wire 1 p io $end',
+        '$scope module dut $end', '$var wire 4 c ctrl [7:4] $end', '$var reg 8 s status [0:7] $end', '$var wire 1 p io $end',
+        '$var wire 1 n internal_net $end', '$var reg 1 q internal_reg $end', '$upscope $end', '$upscope $end', '$enddefinitions $end'];
+    const controls = ['1010','1011','1010','0010','1110','x110','z110'];
+    for (let step = 0; step < controls.length; step++) lines.push('#' + step * 10, (step % 2) + '!', 'b' + controls[step] + ' c',
+        'b' + (step * 17).toString(2) + ' s', (step % 2) + 'p', (step % 2) + 'n', ((step + 1) % 2) + 'q');
+    return lines.join('\n') + '\n#70\n';
+}
+
 /** 仅绑定 loopback 的验收服务，页面运行真实 client/renderer，数据查询经过真实 VCD Worker。 */
 async function main() {
     const directory = path.resolve(__dirname, '..', 'bin', 'waveform-acceptance'); await fs.mkdir(directory, { recursive: true });
     const root = await fs.mkdtemp(path.join(directory, 'run-'));
-    const filePath = path.join(root, 'floating.vcd'); await fs.writeFile(filePath, fixtureVcd());
-    const session = new VcdSession(), metadata = await session.open(filePath);
+    const signalMode = process.argv.includes('--signals');
+    const source = path.join(root, 'wave.sv'), filePath = path.join(root, signalMode ? 'signals.vcd' : 'floating.vcd');
+    if (signalMode) await fs.writeFile(source, 'module wave_tb; reg clk; reg [7:4] ctrl; wire [0:7] status; wire io; demo dut(.ctrl(ctrl),.status(status),.io(io)); endmodule module demo(input [7:4] ctrl,output reg [0:7] status,inout io); wire internal_net; reg internal_reg; endmodule');
+    await fs.writeFile(filePath, signalMode ? fixtureSignals() : fixtureVcd());
+    const session = new VcdSession(), metadata = await session.open(filePath, signalMode ? { roots: [root], files: [source] } : undefined);
     metadata.secondsPerTick = parseTimescaleSeconds(metadata.timescale);
     const counts = { window: 0, values: 0, edge: 0 }, messages = [];
-    let saved = null;
+    let saved = signalMode ? { fileKey: filePath, selected: metadata.vars.map(signal => signal.path), cursorA: 0, cursorB: 40 } : null;
     const restoreIndex = process.argv.indexOf('--restore');
     if (restoreIndex >= 0) {
         const previous = path.resolve(process.argv[restoreIndex + 1] || '');
@@ -62,7 +80,7 @@ window.acquireVsCodeApi = () => ({
    .then(response=>response.json()).then(data=>{if(data) window.dispatchEvent(new MessageEvent('message',{data}));}).catch(console.error);
  }
 });`;
-    const html = buildWaveformHtml(metadata, { fileName: '浮点与分组验收', fileKey: filePath, nonce: 'local-waveform-acceptance' })
+    const html = buildWaveformHtml(metadata, { fileName: signalMode ? '信号标记与逐位调试验收' : '浮点与分组验收', fileKey: filePath, nonce: 'local-waveform-acceptance' })
         .replace("style-src 'nonce-local-waveform-acceptance';", "style-src 'nonce-local-waveform-acceptance'; connect-src 'self';")
         .replace('const BOOT=', bridge + '\nconst BOOT=');
     const json = (response, status, body) => { response.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' }); response.end(JSON.stringify(body)); };

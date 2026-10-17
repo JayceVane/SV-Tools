@@ -227,3 +227,21 @@ test('2000 条实际 Canvas 行仅绘制可见投影，位图仍是视口高度'
     view.state.rowPresentation = { positions: new Map([['tb.s0', 3850], ['tb.s100', 0]]) }; view.draw();
     assert.equal(view.labels().length, 11); assert.equal(view.canvas.height, 380);
 });
+
+test('背景颜色贯穿名称和波形，选择时仍保留，未修改原始波形颜色及字形', () => {
+    const view=fixture(); view.state.highlights={[view.key]:'sky'}; view.state.multi.add(view.key); view.draw();
+    const tints=view.context.calls.filter(call=>call.op==='fillRect'&&call.fill==='#1684d6'&&call.alpha===.16);
+    assert.equal(tints.length,2); assert.ok(tints.some(call=>call.args[0]===0));
+    assert.ok(tints.some(call=>call.args[0]===view.renderer.geometry().names));
+    assert.ok(view.context.calls.some(call=>call.op==='fillRect'&&call.fill===dark.bus&&call.alpha===.08));
+});
+test('派生bit实际绘制为单线，A/B提取父总线对应位，内部无伪总线数值', () => {
+    const view=fixture({signalWidth:4,changes:[{t:0,value:'1000'},{t:30,value:'1001'},{t:60,value:'0001'}]});
+    const bit=model.signalDisplay.bitSignals(view.signal)[0]; view.row.signal=bit;view.row.key=bit.key;
+    view.state.valuesA['#']='1000';view.state.valuesB['#']='0001';view.state.cursorB=100;
+    view.draw();
+    const a=view.context.calls.find(call=>call.op==='fillText'&&call.fill===dark.a&&call.args[1]===view.renderer.geometry().names-96);
+    const b=view.context.calls.find(call=>call.op==='fillText'&&call.fill===dark.b&&call.args[1]===view.renderer.geometry().names-96);
+    assert.equal(a.args[0],'1'); assert.equal(b.args[0],'0');
+    assert.equal(view.context.calls.filter(call=>call.op==='fillRect'&&call.fill===dark.bus&&call.alpha===.08).length,0);
+});

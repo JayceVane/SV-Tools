@@ -1,17 +1,17 @@
 /* Webview 控制器：有界查询、虚拟列表、交互和会话布局。 */
 (function () {
     'use strict';
-    const api = acquireVsCodeApi(), M = window.WaveModel, I = window.WaveInteractions, L = window.WaveRowLayout, C = window.WaveColumnLayout;
+    const api = acquireVsCodeApi(), M = window.WaveModel, I = window.WaveInteractions, L = window.WaveRowLayout, C = window.WaveColumnLayout, D = M.signalDisplay;
     const $ = id => document.getElementById(id);
     const canvas = $('waveCanvas'), tracks = $('tracks'), catalog = $('catalog');
-    const CATALOG_HEIGHT = 34, MAX_TRACKS = 2000, QUERY_POINT_BUDGET = 240000;
-    const state = { metadata: null, signals: new Map(), selected: [], rows: [], formats: Object.create(null), groups: Object.create(null), heights: Object.create(null), columns: {},
+    const CATALOG_HEIGHT = 34, MAX_TRACKS = D.MAX_TRACKS, QUERY_POINT_BUDGET = 240000;
+    const state = { metadata: null, signals: new Map(), selected: [], rows: [], formats: Object.create(null), groups: Object.create(null), heights: Object.create(null), columns: {}, highlights: Object.create(null), bitKeys: new Set(),
         view: { start: 0, span: 1 }, cursorA: 0, cursorB: null, activeCursor: 'A', activeKey: null,
         multi: new Set(), selectionAnchor: null, fullName: false, snap: true, secondsPerTick: null,
         series: new Map(), seriesKey: '', windowKey: '', valuesA: Object.create(null), valuesB: Object.create(null) };
     const renderer = window.createWaveRenderer({ canvas, ruler: $('ruler'), tracks, state, model: M });
     const memory = window.createMemoryInspector({ request, addSignals: keys => {
-        addSignals(keys); state.activeKey = keys[0]; state.selectionAnchor = keys[0]; state.multi = new Set(keys);
+        edgeVersion++; addSignals(keys); state.activeKey = keys[0]; state.selectionAnchor = keys[0]; state.multi = new Set(keys);
         const row = state.rows.find(item => M.signalKey(item.signal) === keys[0]);
         if (row) tracks.scrollTop = row.y;
         viewportChanged();
@@ -21,6 +21,11 @@
     let valuesBusy = false, valuesWanted = null, valuesKey = '', edgeVersion = 0, menu = null, groupDialog = null;
     const gestures = window.createWaveRowGestures({ canvas, tracks, state, model: M, renderer,
         refreshRows, commitRows: rebuildRows, paint, onSelection: applySelection,
+        onNameClick(point, row, event) {
+            const within = point.y + tracks.scrollTop - row.y;
+            if (!D.isBus(row.signal) || point.x < 6 || point.x > 24 || within < 8 || within > 27) return false;
+            selectRow(row, event); toggleBus(row.key); return true;
+        },
         onPan: view => { state.view = M.clampView(view.start, view.span, state.metadata.endTime); viewportChanged(); }, commitPan: persist,
         onPlotClick(point, event, row) {
             if (row) state.activeKey = M.signalKey(row.signal);
@@ -49,7 +54,7 @@
     function persist() {
         api.setState({ fileKey: BOOT.fileKey, selected: state.selected, start: state.view.start, span: state.view.span,
             cursorA: state.cursorA, cursorB: state.cursorB, formats: state.formats, groups: state.groups,
-            heights: state.heights, columns: state.columns, fullName: state.fullName, snap: state.snap, memory: memory.snapshot() });
+            heights: state.heights, columns: state.columns, highlights: state.highlights, fullName: state.fullName, snap: state.snap, memory: memory.snapshot() });
     }
     function setColumn(key, width) { if (width === undefined) delete state.columns[key]; else state.columns[key] = width; }
     function catalogGeometry() { return C.catalogGeometry(state.columns.catalog, window.innerWidth, $('layout').clientWidth); }
@@ -133,12 +138,24 @@
         state[cursor === 'B' ? 'cursorB' : 'cursorA'] = Math.min(state.metadata.endTime, Math.max(0, Math.round(time)));
         queueValues(); paint(); persist();
     }
+    async function queryEdge(signal, time, direction, version) {
+        const params = { id: signal.id, time, direction };
+        if (Number.isInteger(signal.bitOffset)) params.bitOffset = signal.bitOffset;
+        let edge;
+        do {
+            edge = await request('edge', params);
+            if (version !== edgeVersion) return { time: null, value: null };
+            params.continuation = edge.continuation;
+            if (Number.isInteger(edge.continuation)) status('正在查找该位的真实边沿…');
+        } while (Number.isInteger(edge.continuation));
+        return edge;
+    }
     async function placeCursor(time, cursor, signal) {
         const version = ++edgeVersion;
         if (!state.snap || !signal) { setCursor(time, cursor); return; }
         try {
-            const requests = [request('edge', { id: signal.id, time: Math.max(0, time - .25), direction: 'next' }),
-                request('edge', { id: signal.id, time: Math.min(Number.MAX_SAFE_INTEGER, time + .25), direction: 'previous' })];
+            const requests = [queryEdge(signal, Math.max(0, time - .25), 'next', version),
+                queryEdge(signal, Math.min(Number.MAX_SAFE_INTEGER, time + .25), 'previous', version)];
             const edges = (await Promise.all(requests)).filter(edge => edge.time !== null).sort((a, b) => Math.abs(a.time - time) - Math.abs(b.time - time));
             if (version !== edgeVersion) return;
             const tolerance = state.view.span / renderer.geometry().plot * 8;
@@ -150,7 +167,7 @@
         if (!signal) return;
         const version = ++edgeVersion, cursor = state.activeCursor, time = state[cursor === 'B' ? 'cursorB' : 'cursorA'] ?? state.cursorA;
         try {
-            const edge = await request('edge', { id: signal.id, time, direction });
+            const edge = await queryEdge(signal, time, direction, version);
             if (version !== edgeVersion) return;
             if (edge.time === null) { status('该方向没有更多变更'); return; }
             setCursor(edge.time, cursor);
@@ -166,6 +183,11 @@
             const signal = filtered[index], row = document.createElement('div'); row.className = 'signal' + (selected.has(M.signalKey(signal)) ? ' added' : '');
             row.style.top = index * CATALOG_HEIGHT + 'px'; row.title = `${signal.path}${signal.range || ''} · ${signal.type} · ${signal.changeCount || 0} 次变更`;
             row.tabIndex = 0; row.setAttribute('role', 'listitem');
+            const info = D.roleInfo(signal), glyph = document.createElement('span');
+            glyph.className = 'signalRole role-' + info.role; glyph.textContent = info.glyph;
+            glyph.title = info.label; glyph.setAttribute('aria-label', info.label);
+            row.title += ' · ' + info.label;
+            row.appendChild(glyph);
             for (const [className, text] of [['plus', selected.has(M.signalKey(signal)) ? '✓' : '+'], ['name', signal.name + (signal.range || '')], ['width', /real/i.test(signal.type) ? 'real' : signal.width + 'b']]) {
                 const span = document.createElement('span'); span.className = className; span.textContent = text; row.appendChild(span);
                 if (className === 'name') { const scope = document.createElement('small'); scope.textContent = signal.scopePath; span.appendChild(scope); }
@@ -191,6 +213,7 @@
         $('signalCount').textContent = `${filtered.length.toLocaleString()} 个可用 · ${state.selected.length} 个已添加 · ${state.multi.size} 个选中`;
     }
     function applySelection(selection) {
+        if (state.activeKey !== selection.activeKey) edgeVersion++;
         state.multi = new Set(selection.keys); state.selectionAnchor = selection.anchor; state.activeKey = selection.activeKey;
         updateSelectionCount(); paint();
     }
@@ -238,13 +261,46 @@
         };
         document.body.appendChild(overlay); input.focus();
     }
+    function busParents(targets) {
+        return [...new Set(targets.map(key => state.signals.get(key)?.parentKey || key))].filter(key => D.isBus(state.signals.get(key)));
+    }
+    function children(parent) { return state.selected.filter(key => state.signals.get(key)?.parentKey === parent); }
+    function expandBus(targets) {
+        const parents = busParents(targets);
+        const needed = parents.reduce((sum, key) => sum + state.signals.get(key).width - children(key).length, 0);
+        if (needed + state.selected.length > MAX_TRACKS) { status('展开将超过2000行预算，请先减少已添加信号'); return; }
+        for (const key of parents) {
+            const parent = state.signals.get(key), existing = new Set(state.selected), added = [];
+            for (const bit of D.bitSignals(parent, MAX_TRACKS)) if (!existing.has(bit.key)) {
+                state.signals.set(bit.key, bit); state.bitKeys.add(bit.key); added.push(bit.key);
+                if (state.highlights[key]) state.highlights[bit.key] = state.highlights[key];
+                if (state.groups[key]) state.groups[bit.key] = state.groups[key];
+            }
+            const at = state.selected.indexOf(key) + 1;
+            state.selected.splice(at, 0, ...added);
+        }
+        rebuildRows(); status('已展开总线；各bit可独立着色、分组和排序，密集区放大后观察');
+    }
+    function pruneBits() {
+        const keep = new Set(state.selected);
+        for (const key of state.bitKeys) if (!keep.has(key)) {
+            state.signals.delete(key); state.bitKeys.delete(key);
+            for (const map of [state.formats, state.groups, state.highlights, state.heights]) delete map[key];
+        }
+    }
+    function collapseBus(targets) {
+        const parents = new Set(busParents(targets));
+        removeSignals(state.selected.filter(key => parents.has(state.signals.get(key)?.parentKey)));
+    }
+    function toggleBus(key) { if (children(key).length) collapseBus([key]); else expandBus([key]); }
     function removeSignals(targets) {
+        edgeVersion++;
         const removing = new Set(targets);
         state.selected = state.selected.filter(path => !removing.has(path));
         state.multi = new Set(I.orderedTargets(state.selected, state.multi));
         if (removing.has(state.activeKey)) state.activeKey = state.selected[0] || null;
         if (removing.has(state.selectionAnchor)) state.selectionAnchor = state.activeKey;
-        rebuildRows(); status(`已移除 ${targets.length} 条信号`);
+        pruneBits(); rebuildRows(); status(`已移除 ${targets.length} 条信号`);
     }
     function showMenu(event, row) {
         hideMenu(false); if (!row || groupDialog) return;
@@ -270,6 +326,20 @@
                 rebuildRows(); status(`已调整 ${targets.length} 条模拟量波形行高`);
             }, { icon: 'height', disabled: signals.some(signal => !M.supportsFormat(signal, 'analog')) }),
             { separator: true, label: '分组' }, action('new-group', '新建分组…', () => showGroupDialog(targets), { icon: 'group-add' })];
+        const highlightIds = targets.map(key => state.highlights[key] || ''), oneHighlight = new Set(highlightIds).size === 1;
+        items.splice(1, 0, { id: 'signal-highlight', label: '背景高亮', icon: 'highlight',
+            detail: oneHighlight ? D.HIGHLIGHTS.find(item => item.id === highlightIds[0])?.label || '无' : '混合颜色',
+            submenu: [{ id: '', label: '清除高亮' }, ...D.HIGHLIGHTS].map(option => action('highlight-' + (option.id || 'none'), option.label, () => {
+                for (const key of targets) { if (option.id) state.highlights[key] = option.id; else delete state.highlights[key]; }
+                paint(); persist();
+            }, { checked: oneHighlight && highlightIds[0] === option.id, swatch: option.id })) });
+        const parents = busParents(targets), needed = parents.reduce((sum, key) => sum + state.signals.get(key).width - children(key).length, 0);
+        const overBudget = state.selected.length + needed > MAX_TRACKS;
+        const busItems = [];
+        if (parents.length && needed > 0) busItems.push(action('expand-bus', '展开总线为bit', () => expandBus(targets),
+            { icon: 'expand', disabled: overBudget, detail: overBudget ? '最多2000行' : '' }));
+        if (parents.some(key => children(key).length)) busItems.push(action('collapse-bus', '收起总线bit', () => collapseBus(targets), { icon: 'collapse' }));
+        items.splice(2, 0, ...busItems);
         if (groups.length) items.push({ id: 'join-group', label: '加入已有分组', icon: 'group', submenu: groups.map((name, index) =>
             action('join-group-' + index, name, () => assignGroup(targets, name), { icon: 'group' })) });
         items.push(action('ungroup', '解除分组', () => {
@@ -284,12 +354,16 @@
     function initialize(metadata) {
         metadata = { ...metadata, vars: M.prepareSignals(metadata.vars) };
         state.metadata = metadata; state.signals = new Map(metadata.vars.map(signal => [M.signalKey(signal), signal])); state.secondsPerTick = metadata.secondsPerTick || null;
-        const saved = api.getState(), restored = M.restoreState(saved, metadata, BOOT.fileKey);
+        const saved = api.getState();
+        if (saved?.fileKey === BOOT.fileKey) D.restoreBits(saved.selected, state.signals, MAX_TRACKS);
+        state.bitKeys = new Set((Array.isArray(saved?.selected) ? saved.selected : []).filter(key => Number.isInteger(state.signals.get(key)?.bitOffset)));
+        const restored = M.restoreState(saved, metadata, BOOT.fileKey, state.signals);
         Object.assign(state, { view: restored.view, cursorA: restored.cursorA, cursorB: restored.cursorB });
         if (saved?.fileKey === BOOT.fileKey) {
             state.formats = Object.assign(Object.create(null), saved.formats); state.groups = Object.assign(Object.create(null), saved.groups);
             state.heights = L.restoreHeights(saved.heights, state.signals);
             state.columns = C.restoreColumns(saved.columns);
+            state.highlights = D.restoreHighlights(saved.highlights, state.signals);
             state.fullName = !!saved.fullName; state.snap = saved.snap !== false;
         }
         const seen = new Set();
@@ -307,6 +381,7 @@
         for (const path of new Set(metadata.scopes.map(item => item.path))) {
             const option = document.createElement('option'); option.value = path; option.textContent = path; scope.appendChild(option);
         }
+        $('metadata').title = metadata.sourceRoleNote || '方向未知：VCD本身不包含端口方向，请打开匹配的RTL工作区';
         $('metadata').textContent = `${metadata.vars.length.toLocaleString()} signals · ${(metadata.fileBytes / 1048576 || 0).toFixed(1)} MiB · ${metadata.timescale || 'timescale 未声明'} · ${M.formatTime(metadata.endTime, state.secondsPerTick)}`;
         $('loading').classList.add('hidden'); $('snap').classList.toggle('active', state.snap); $('fullName').classList.toggle('active', state.fullName);
         memory.refresh(state.cursorA, state.cursorB, state.secondsPerTick);
@@ -331,7 +406,7 @@
     $('scope').onchange = $('constants').onchange = filterCatalog;
     catalog.onscroll = renderCatalog; tracks.onscroll = () => gestures.rowActive ? paint() : viewportChanged();
     $('addFiltered').onclick = () => addSignals(filtered.map(M.signalKey));
-    $('clearSignals').onclick = () => { hideMenu(false); state.selected = []; state.activeKey = null; state.selectionAnchor = null; state.multi.clear(); rebuildRows(); };
+    $('clearSignals').onclick = () => { edgeVersion++; hideMenu(false); state.selected = []; state.activeKey = null; state.selectionAnchor = null; state.multi.clear(); pruneBits(); rebuildRows(); };
     $('fit').onclick = () => state.metadata && setView({ start: 0, span: state.metadata.endTime });
     const zoom = factor => state.metadata && setView(M.zoomView(state.view, factor, .5, state.metadata.endTime));
     $('zoomIn').onclick = () => zoom(.5); $('zoomOut').onclick = () => zoom(2);
@@ -383,7 +458,8 @@
             event.preventDefault(); return;
         }
         if (event.ctrlKey || event.metaKey || event.altKey) return;
-        if (event.key === 'Escape') { state.multi.clear(); state.selectionAnchor = null; updateSelectionCount(); paint(); }
+        if (waveFocused && event.key === 'Enter' && D.isBus(state.signals.get(state.activeKey))) { toggleBus(state.activeKey); event.preventDefault(); }
+        else if (event.key === 'Escape') { state.multi.clear(); state.selectionAnchor = null; updateSelectionCount(); paint(); }
         else if (event.key === 'f' || event.key === 'F') $('fit').click();
         else if (event.key === '+' || event.key === '=') zoom(.5);
         else if (event.key === '-') zoom(2);

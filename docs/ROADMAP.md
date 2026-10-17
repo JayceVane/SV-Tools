@@ -4,7 +4,7 @@
 
 ## 当前优先级
 
-4.0.0-preview.1 已发布并通过 PR 合入原工程。用户已授权按“Yosys JSON → netlistsvg 验证 → 独立模型 → ELK.js + SVG；Vivado 共用模型”路线开发下一版本。已发布 **4.0.0-beta.2**，当前开发预览为 **4.0.0-beta.5**，正式版本目标为 **4.0.0**；此前4.1 alpha编号保留为开发历史。已实现模块级电路视图、离线内置 Yosys，以及当前文件/工程 top 两种 Vivado 入口。alpha3修复未引用模块的Vivado编译顺序，并将标题栏默认改回Yosys。alpha4默认内置Slang，修复timeunit/timeprecision解析。alpha5优化按帧输入、视口SVG挂载、总览细节和增量高亮。alpha6补齐工作区子模块/包依赖闭包及具体源码错误摘要。alpha7修正时钟位置、控制极性与时序单元说明。alpha8修复generate后例化布局及带注释的选区对齐。alpha9强化单比特/总线线型、位宽标记与标签交互。beta.3补齐总线拼接/拆分、端口位映射和重复驱动显示。beta.4修复主题焦点色导致的选中图形不可见。beta.5统一生成目录策略，修复跨文件查找触发的临时快照lint误报。当前优先完成真实 UI 宿主验收、处理使用反馈并保持旧功能回归；边界和进度见 `CIRCUIT.md`、`V4_BETA5.md`，总线详细验收见`V4_1_ALPHA9.md`。
+4.0.0-preview.1 已发布并通过 PR 合入原工程。用户已授权按“Yosys JSON → netlistsvg 验证 → 独立模型 → ELK.js + SVG；Vivado 共用模型”路线开发下一版本。已发布 **4.0.0-beta.2**，当前开发预览为 **4.0.0-beta.6**，正式版本目标为 **4.0.0**；此前4.1 alpha编号保留为开发历史。已实现模块级电路视图、离线内置 Yosys，以及当前文件/工程 top 两种 Vivado 入口。alpha3修复未引用模块的Vivado编译顺序，并将标题栏默认改回Yosys。alpha4默认内置Slang，修复timeunit/timeprecision解析。alpha5优化按帧输入、视口SVG挂载、总览细节和增量高亮。alpha6补齐工作区子模块/包依赖闭包及具体源码错误摘要。alpha7修正时钟位置、控制极性与时序单元说明。alpha8修复generate后例化布局及带注释的选区对齐。alpha9强化单比特/总线线型、位宽标记与标签交互。beta.3补齐总线拼接/拆分、端口位映射和重复驱动显示。beta.4修复主题焦点色导致的选中图形不可见。beta.5统一生成目录策略，修复跨文件查找触发的临时快照lint误报。当前优先完成真实 UI 宿主验收、处理使用反馈并保持旧功能回归；边界和进度见 `CIRCUIT.md`、`V4_BETA5.md`，总线详细验收见`V4_1_ALPHA9.md`。
 
 电路后续候选：局部逻辑锥、按模块缓存与增量布局、大设计按需加载、Vivado 层级保留。它们尚未实现，不以提高当前硬预算冒充大设计支持。
 
@@ -37,3 +37,5 @@ Vivado IP 管理列为后续功能，尚未开发、不纳入当前版本的完�
 - [generate_target：生成 IP 产物](https://docs.amd.com/r/2022.1-English/ug835-vivado-tcl-commands/generate_target)
 
 各条目是待实现计划，不表示当前插件已提供这些入口。FSDB 保持此前取消的决定。
+
+波形beta.6：批量背景高亮、总线逐位独立调试、基于只读RTL匹配的方向图标已实现，支持100/500MiB有界查询；未知角色不猜测。验收和边界见V4_BETA6.md。

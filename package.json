@@ -2,7 +2,7 @@
   "name": "svtools",
   "displayName": "SystemVerilog Tools",
   "description": "Verilog/SystemVerilog formatter, module instantiation, testbench generation, and productivity tools (Rust native backend)",
-  "version": "4.0.0-beta.5",
+  "version": "4.0.0-beta.6",
   "publisher": "JayceVane",
   "author": {
     "name": "JayceVane",
@@ -49,7 +49,7 @@
   ],
   "main": "./extension.js",
   "scripts": {
-    "test": "npm run check && node test/golden_test.js && node --test test/formatter_contract_test.js test/formatter_conservation_test.js test/toolchain_test.js test/waveform_test.js test/editor_test.js test/workspace_test.js test/waveform_stream_test.js test/waveform_ui_test.js test/waveform_host_test.js test/waveform_memory_test.js test/waveform_memory_view_test.js test/waveform_float_test.js test/waveform_interaction_test.js test/waveform_renderer_test.js test/waveform_row_layout_test.js test/waveform_row_gesture_test.js test/waveform_column_layout_test.js test/waveform_column_resize_test.js test/waveform_column_client_test.js test/process_output_test.js test/toolchain_task_test.js test/vivado_tree_test.js test/vivado_xpr_test.js test/vivado_commands_test.js test/completion_syntax_test.js test/completion_catalog_test.js test/completion_engine_test.js test/completion_index_test.js test/completion_provider_test.js && npm run test:circuit",
+    "test": "npm run check && node test/golden_test.js && node --test test/formatter_contract_test.js test/formatter_conservation_test.js test/toolchain_test.js test/waveform_test.js test/editor_test.js test/workspace_test.js test/waveform_stream_test.js test/waveform_ui_test.js test/waveform_signal_test.js test/waveform_host_test.js test/waveform_memory_test.js test/waveform_memory_view_test.js test/waveform_float_test.js test/waveform_interaction_test.js test/waveform_renderer_test.js test/waveform_row_layout_test.js test/waveform_row_gesture_test.js test/waveform_column_layout_test.js test/waveform_column_resize_test.js test/waveform_column_client_test.js test/process_output_test.js test/toolchain_task_test.js test/vivado_tree_test.js test/vivado_xpr_test.js test/vivado_commands_test.js test/completion_syntax_test.js test/completion_catalog_test.js test/completion_engine_test.js test/completion_index_test.js test/completion_provider_test.js && npm run test:circuit",
     "build:native": "node scripts/build-native.js",
     "package": "vsce package",
     "vscode:prepublish": "npm test",
