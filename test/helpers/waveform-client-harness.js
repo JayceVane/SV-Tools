@@ -41,7 +41,7 @@ function clientHarness(saved, { vars, height = 400, width = 900, reducedMotion =
         }
         return nodes.get(id);
     };
-    const window = { WaveSignalDisplay: require('../../src/waveform/signal-display'), WaveModel: model, WaveInteractions: interactions, WaveRowLayout: layout, WaveColumnLayout: columns, innerWidth: viewportWidth,
+    const window = { WaveSignalDisplay: require('../../src/waveform/signal-display'), WaveModel: model, WaveInteractions: interactions, WaveRowLayout: layout, WaveColumnLayout: columns, WaveLayoutState: require('../../src/waveform/layout-state'), innerWidth: viewportWidth,
         addEventListener(name, callback) { windowListeners[name] = callback; },
         matchMedia: () => ({ matches: reducedMotion, addEventListener(name, callback) { preferenceListener = callback; } }),
         createWaveRenderer(options) {

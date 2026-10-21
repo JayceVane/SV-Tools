@@ -33,7 +33,7 @@ function recordingContext() {
     ctx.restore = () => Object.assign(ctx, stack.pop());
     ctx.beginPath = () => { currentPath = []; };
     for (const op of ['moveTo', 'lineTo', 'rect', 'closePath']) ctx[op] = (...args) => currentPath.push({ op, args });
-    for (const op of ['fillRect', 'strokeRect', 'fillText', 'strokeText', 'stroke', 'clip', 'setTransform', 'setLineDash']) {
+    for (const op of ['fillRect', 'strokeRect', 'fillText', 'strokeText', 'stroke', 'clip', 'setTransform', 'setLineDash', 'clearRect']) {
         ctx[op] = (...args) => record(op, args);
     }
     ctx.measureText = value => ({ width: [...String(value)].reduce((width, char) => width + (/[^\x00-\x7f]/.test(char) ? 11 : 6), 0) });
@@ -41,7 +41,7 @@ function recordingContext() {
 }
 
 function fixture({ width = 1000, height = 90, rowHeight = 44, changes = [{ t: 0, value: '1' }],
-    dense = [], label, signalWidth = 64, palette = dark, modelOverrides = {} } = {}) {
+    dense = [], label, signalWidth = 64, palette = dark, modelOverrides = {}, layered = false } = {}) {
     const context = recordingContext(), axis = recordingContext();
     const canvas = { style: {}, getContext: () => context }, ruler = { style: {}, getContext: () => axis };
     const tracks = { clientWidth: width, clientHeight: height, scrollTop: 0 };
@@ -55,8 +55,10 @@ function fixture({ width = 1000, height = 90, rowHeight = 44, changes = [{ t: 0,
         getComputedStyle: () => ({ getPropertyValue: name => activePalette[name.slice(2)] || '' }) };
     vm.runInNewContext(rendererSource, sandbox, { filename: 'renderer.js' });
     const renderModel = { ...model, ...(label === undefined ? {} : { formatValue: () => label }), ...modelOverrides };
-    const renderer = sandbox.window.createWaveRenderer({ canvas, ruler, tracks, state, model: renderModel });
-    return { context, axis, canvas, ruler, tracks, signal, row, key, state, renderer,
+    const overlayContext = recordingContext(), overlayAxis = recordingContext();
+    const renderer = sandbox.window.createWaveRenderer({ canvas, ruler, tracks, state, model: renderModel,
+        ...(layered ? { overlay:{ style:{}, getContext:()=>overlayContext }, rulerOverlay:{ style:{}, getContext:()=>overlayAxis } } : {}) });
+    return { context, axis, overlayContext, overlayAxis, canvas, ruler, tracks, signal, row, key, state, renderer,
         setPalette(next) { activePalette = next; renderer.colors(); },
         draw() { context.calls.length = 0; axis.calls.length = 0; renderer.draw(); },
         labels() { return context.calls.filter(call => call.op === 'fillText' && call.args[1] > renderer.geometry().names); } };
@@ -244,4 +246,23 @@ test('派生bit实际绘制为单线，A/B提取父总线对应位，内部无�
     const b=view.context.calls.find(call=>call.op==='fillText'&&call.fill===dark.b&&call.args[1]===view.renderer.geometry().names-96);
     assert.equal(a.args[0],'1'); assert.equal(b.args[0],'0');
     assert.equal(view.context.calls.filter(call=>call.op==='fillRect'&&call.fill===dark.bus&&call.alpha===.08).length,0);
+});
+
+
+test('分层绘制中连续移动游标和更新读值不触碰静态波形，A/B仍在覆盖层可见', () => {
+    const view = fixture({ layered:true }); view.draw();
+    const staticCalls = view.context.calls.length;
+    for (let time=0;time<100;time++) { view.state.cursorA=time;view.state.valuesA={'#':'1'};view.renderer.drawOverlay(); }
+    assert.equal(view.context.calls.length,staticCalls);
+    assert.equal(view.renderer.metrics.staticDraws,1);assert.equal(view.renderer.metrics.overlayDraws,101);
+    assert.ok(view.overlayAxis.calls.some(call=>call.op==='fillText'&&call.args[0]==='A'));
+    assert.ok(view.overlayContext.calls.some(call=>call.op==='fillText'&&call.fill===dark.a));
+    view.state.view={start:20,span:40};view.draw();assert.equal(view.renderer.metrics.staticDraws,2);
+});
+test('模拟量范围按窗口对象缓存，大窗口绘制不使用Math.min展开实参', () => {
+    const view=fixture({ layered:true, changes:Array.from({length:150000},(_,i)=>({t:i/2000,value:(i%2).toString()})) });
+    view.state.formats[view.key]='analog';view.draw();view.draw();
+    assert.equal(view.renderer.metrics.analogScans,1);
+    view.state.series=new Map([['#',{changes:[{t:0,value:'10'}],dense:[]}]]);view.draw();
+    assert.equal(view.renderer.metrics.analogScans,2);
 });

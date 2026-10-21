@@ -4,7 +4,7 @@ const { createCompletionProvider } = require('./completion/provider');
 const { SOURCE_EXCLUDE_GLOB, isExcludedSourcePath } = require('../workspace/source-policy');
 
 /** @param {{vscode: object, loadNativeModule: () => object|null}} deps @returns {object} 大纲、定义、补全和Hover Provider。 */
-function createLanguageProviders({ vscode, loadNativeModule }) {
+function createLanguageProviders({ vscode, loadNativeModule, sourceCatalog }) {
     /**
      * Map analyzer SymbolKind string to vscode.SymbolKind
      */
@@ -167,7 +167,7 @@ function createLanguageProviders({ vscode, loadNativeModule }) {
     }
 
     // 补全由独立语义索引和规范目录驱动，不依赖原生模块可用性。
-    const completion = createCompletionProvider({ vscode });
+    const completion = createCompletionProvider({ vscode, sourceCatalog });
     const { provideCompletionItems } = completion;
 
     // ── Hover ─────────────────────────────────────────────────────

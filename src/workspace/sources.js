@@ -31,7 +31,7 @@ function extractDesignUnitNames(text) { return extractDesignUnits(text).map(unit
  * @param {{workspace: object, readFileSync?: typeof fs.readFileSync, now?: () => number, onError?: (message: string) => void}} deps
  * @returns {{scan: (force?: boolean) => Promise<{dirs: string[], modules: Map<string, string>}>, invalidate: () => void}}
  */
-function createWorkspaceSourceIndex({ workspace, readFileSync = fs.readFileSync, now = Date.now, onError = console.warn }) {
+function createWorkspaceSourceIndex({ workspace, readFileSync = fs.readFileSync, now = Date.now, onError = console.warn, sourceCatalog }) {
     let workspaceScanCache = { dirs: [], modules: new Map(), expiresAt: 0 };
     function invalidate() { workspaceScanCache.expiresAt = 0; }
     /**
@@ -55,11 +55,12 @@ function createWorkspaceSourceIndex({ workspace, readFileSync = fs.readFileSync,
         if (enabled && roots && roots.length > 0) {
             const dirSet = new Set();
             let scanned = 0;
-            for (const pattern of ['**/*.sv', '**/*.v', '**/*.svh', '**/*.vh']) {
+            for (const pattern of sourceCatalog ? ['shared'] : ['**/*.sv', '**/*.v', '**/*.svh', '**/*.vh']) {
                 if (scanned >= WORKSPACE_SCAN_MAX_FILES) break;
                 let uris = [];
                 try {
-                    uris = await workspace.findFiles(pattern, SOURCE_EXCLUDE_GLOB, WORKSPACE_SCAN_MAX_FILES);
+                    uris = sourceCatalog ? (await sourceCatalog.discover({ limit: WORKSPACE_SCAN_MAX_FILES })).uris
+                        : await workspace.findFiles(pattern, SOURCE_EXCLUDE_GLOB, WORKSPACE_SCAN_MAX_FILES);
                 } catch (err) {
                     onError('扫描工作区模式 ' + pattern + ' 失败：' + err.message);
                     continue; // 单个模式失败不影响其余

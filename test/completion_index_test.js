@@ -90,3 +90,15 @@ test('生成文件即使被扫描器返回或已打开，也不污染工程补�
         assert.ok(internal.records.every(record => !record.uri.fsPath.includes('/.svtools/')));
     } finally { h.index.dispose(); }
 });
+
+test('共享清单变更恰逢首次读取时，补全在稳定代次重试而不发布缺失模块的半份缓存', async()=>{
+    let changed, reads=0;
+    const uri={fsPath:'C:/hdl/leaf.sv',toString:()=> 'file:///C:/hdl/leaf.sv'};
+    const sourceCatalog={onDidChange(callback){changed=callback;return {dispose(){}};},async discover(){return {uris:[uri],truncated:false};}};
+    const vscode={workspace:{textDocuments:[],getConfiguration:()=>({get:(_name,fallback)=>fallback}),fs:{stat:async()=>({size:24}),readFile:async()=>{
+        if(++reads===1)changed({kind:'change',uri});return Buffer.from('module leaf; endmodule');
+    }}}};
+    const index=createCompletionIndex({vscode,sourceCatalog}),document={uri:{fsPath:'C:/hdl/top.sv',toString:()=> 'file:///C:/hdl/top.sv'},version:1,getText:()=> 'module top; leaf dut(); endmodule'};
+    const result=await index.snapshot(document);assert.equal(result.incomplete,false);
+    assert.ok(result.records.some(record=>record.model.symbols.some(symbol=>symbol.name==='leaf')));index.dispose();
+});

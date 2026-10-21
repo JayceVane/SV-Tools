@@ -1,9 +1,12 @@
 /* Canvas 只拥有绘制；事件查询、布局持久化和交互由 client 管理。 */
 (function () {
     'use strict';
-    window.createWaveRenderer = function ({ canvas, ruler, tracks, state, model }) {
+    window.createWaveRenderer = function ({ canvas, ruler, overlay, rulerOverlay, tracks, state, model }) {
         const L = window.WaveRowLayout, C = window.WaveColumnLayout, D = model.signalDisplay;
         let projections = new Map();
+        const analogRanges = new WeakMap();
+        const metrics = { staticDraws: 0, overlayDraws: 0, analogScans: 0 };
+        let frameGeometry = null;
         let palette;
         function colors() {
             const style = getComputedStyle(document.body);
@@ -14,7 +17,7 @@
         }
         colors();
         function geometry() {
-            return { ...C.waveGeometry(tracks.clientWidth, state.columns?.names, state.fullName), height: Math.max(1, tracks.clientHeight) };
+            return frameGeometry || { ...C.waveGeometry(tracks.clientWidth, state.columns?.names, state.fullName), height: Math.max(1, tracks.clientHeight) };
         }
         const x = time => { const g = geometry(); return g.names + (time - state.view.start) / state.view.span * g.plot; };
         function context(element, width, height) {
@@ -121,8 +124,16 @@
                 if (value === null || (!/real/i.test(row.signal.type) && /[xz]/i.test(value))) return NaN;
                 return /real/i.test(row.signal.type) ? Number(value) : Number.isInteger(row.signal.bitOffset) ? Number(value) : Number(model.formatValue(value, row.signal, 'dec'));
             };
-            const values = series.changes.map(change => numeric(change.value)).filter(Number.isFinite);
-            const min = values.length ? Math.min(...values) : 0, max = values.length ? Math.max(...values) : 1;
+            let ranges = analogRanges.get(series);
+            if (!ranges) { ranges = new Map(); analogRanges.set(series, ranges); }
+            const cacheKey = row.signal.type + ':' + (row.signal.bitOffset ?? 'vector');
+            let range = ranges.get(cacheKey);
+            if (!range) {
+                let min = Infinity, max = -Infinity; metrics.analogScans++;
+                for (const change of series.changes) { const value = numeric(change.value); if (Number.isFinite(value)) { min = Math.min(min, value); max = Math.max(max, value); } }
+                range = min === Infinity ? { min: 0, max: 1 } : { min, max }; ranges.set(cacheKey, range);
+            }
+            const { min, max } = range;
             const y = value => top + row.height - 12 - (value - min) / Math.max(1e-12, max - min) * (row.height - 25);
             segments(series, (start, end, raw, endsAtChange, nextRaw) => {
                 const value = numeric(raw);
@@ -178,9 +189,7 @@
             const type = /real/i.test(signal.type) ? 'real' : signal.range || signal.width + 'b';
             const format = state.formats[key] || (/real/i.test(signal.type) ? 'analog' : 'hex');
             text(ctx, `${group ? group + ' · ' : ''}${type} · ${model.formatLabel?.(format) || format}`, 12, top + 31, g.names - 112, palette.dim);
-            const a = state.valuesA[signal.id], b = state.valuesB[signal.id], radix = state.formats[key] || 'hex';
-            text(ctx, model.formatValue(a, signal, radix), g.names - 96, top + 17, 87, palette.a);
-            text(ctx, state.cursorB === null ? '' : model.formatValue(b, signal, radix), g.names - 96, top + 31, 87, palette.b);
+            if (!overlay) readValues(ctx, row, top, g);
             line(ctx, 0, top + row.height, g.width, top + row.height, palette.border);
             if (L.isAnalog(signal, state.formats[key])) {
                 const resizing = state.rowPresentation?.resizeKey === key || state.rowPresentation?.hoverResizeKey === key;
@@ -194,6 +203,28 @@
                 ctx.strokeStyle = palette.accent; ctx.strokeRect(2, top + 2, g.names - 4, row.height - 4);
             }
         }
+        function readValues(ctx, row, top, g) {
+            if (row.groupSummary) return;
+            const signal = row.signal, key = model.signalKey(signal);
+            const a = state.valuesA[signal.id], b = state.valuesB[signal.id], radix = state.formats[key] || 'hex';
+            text(ctx, model.formatValue(a, signal, radix), g.names - 96, top + 17, 87, palette.a);
+            text(ctx, state.cursorB === null ? '' : model.formatValue(b, signal, radix), g.names - 96, top + 31, 87, palette.b);
+        }
+        function groupSummary(ctx, row, top, g) {
+            ctx.fillStyle = palette.panel; ctx.fillRect(0, top, g.width, row.height);
+            ctx.save(); ctx.font = '20px Consolas, monospace'; text(ctx, '▸', 6, top + 23, 20, palette.accent); ctx.restore();
+            text(ctx, row.groupSummary, 32, top + 18, g.names - 45, palette.fg);
+            text(ctx, `${row.groupCount} 条信号 · 点击展开`, 32, top + 31, g.names - 45, palette.dim);
+            line(ctx, 0, top + row.height, g.width, top + row.height, palette.border);
+        }
+        function drawOverlay() {
+            if (!overlay || !rulerOverlay) return;
+            metrics.overlayDraws++;
+            const g = geometry(), ctx = context(overlay, g.width, g.height), axis = context(rulerOverlay, g.width, 35);
+            ctx.clearRect(0, 0, g.width, g.height); axis.clearRect(0, 0, g.width, 35);
+            for (const row of visibleRows()) readValues(ctx, row, row.y - tracks.scrollTop, g);
+            cursors(ctx, axis, g);
+        }
         function cursors(ctx, axis, g) {
             for (const [label, time, color] of [['A', state.cursorA, palette.a], ['B', state.cursorB, palette.b]]) {
                 if (time === null || time < state.view.start || time > state.view.start + state.view.span) continue;
@@ -205,12 +236,15 @@
             return L.visibleRows(state.rowPresentation?.targetRows || state.rows, tracks.scrollTop, tracks.clientHeight, state.rowPresentation?.positions);
         }
         function draw() {
-            const g = geometry(), ctx = context(canvas, g.width, g.height), axis = context(ruler, g.width, 35), marks = ticks();
+            metrics.staticDraws++; frameGeometry = geometry();
+            const g = frameGeometry, ctx = context(canvas, g.width, g.height), axis = context(ruler, g.width, 35), marks = ticks();
             ctx.fillStyle = palette.bg; ctx.fillRect(0, 0, g.width, g.height); drawRuler(axis, g, marks);
             for (const time of marks) line(ctx, x(time), 0, x(time), g.height, palette.grid);
             const valid = state.seriesKey === state.windowKey, nextProjections = new Map();
             for (const row of visibleRows()) {
-                const top = row.y - tracks.scrollTop, source = valid ? state.series.get(row.signal.id) : null;
+                const top = row.y - tracks.scrollTop;
+                if (row.groupSummary) { groupSummary(ctx, row, top, g); continue; }
+                const source = valid ? state.series.get(row.signal.id) : null;
                 let series = source;
                 if (source && Number.isInteger(row.signal.bitOffset)) {
                     const cached = projections.get(row.key);
@@ -234,9 +268,11 @@
                 ctx.lineWidth = 2; line(ctx, 0, y, g.width, y, palette.accent); ctx.lineWidth = 1;
                 ctx.fillStyle = palette.accent; ctx.fillRect(0, y - 3, 6, 6);
             }
-            cursors(ctx, axis, g); line(ctx, g.names, 0, g.names, g.height, palette.border);
+            if (!overlay) cursors(ctx, axis, g);
+            line(ctx, g.names, 0, g.names, g.height, palette.border);
+            frameGeometry = null; drawOverlay();
         }
-        return { draw, geometry, visibleRows, x, colors,
+        return { draw, drawOverlay, metrics, geometry, visibleRows, x, colors,
             rowAt: y => L.rowAt(state.rows, y + tracks.scrollTop) };
     };
 })();

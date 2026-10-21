@@ -250,3 +250,13 @@ R6 是把源码文件引用当完整模块层级、把仿真引用当文件集�
 beta.6的`waveform/signal-display.js`集中颜色、图标事实及派生位身份。bit行只引用父VCD id，renderer仅缓存当前可见窗口的bit投影；滚出即丢弃，memory和原始事件存储不扩容。store从2-bit值池直接读取目标位，边沿每10万事件返回续查位置，client在每轮校验请求世代，避免长期扫描占满消息循环。
 
 `waveform/source-roles.js`通过宿主发现路径和当前正文，在VCD worker中解析有界RTL。复用completion语法事实并压缩为模块、实例和符号索引；方向归属每条scope/alias，不归属共享VCD id。此路径只读fs，不调用openTextDocument，避免重现beta.5误报链。扫描不完整、条件编译及歧义保留未知；VCD加载和展示不要求安装综合工具。
+
+
+beta.7以 `workspace/source-catalog.js` 统一路径发现缓存和变更通知，`project-sources.js` 只读适配当前XPR成员。
+组合入口注入补全、lint、电路与波形；各自的语义模型、依赖闭包、正文预算及取消仍归原模块。
+通知区分路径创建/删除、内容变更与工程上下文切换；外部include watcher也传播到共享缓存。
+补全snapshot有界重试被文件事件打断的扫描，持续变化明确isIncomplete。
+
+`waveform/layout-state.js`负责布局格式、可移植声明身份和恢复报告，`layout-files.js`负责用户文件选择与有界读写。
+收起位只离开显示序列，设置仍在受限派生位集合；分组摘要由row-layout投影，不改变原始成员列表。
+renderer持有静态与覆盖画布，client区分静态失效和游标/读值更新；模拟量统计随窗口对象弱缓存。

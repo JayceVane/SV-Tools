@@ -6,7 +6,7 @@ const { SOURCE_EXCLUDE_GLOB } = require('../workspace/source-policy');
 const { MAX_SCAN_FILES, MAX_SCAN_BYTES } = require('./source-dependencies');
 
 /** @param {{vscode:object}} dependencies @returns {function} 将VS Code文件发现与可取消Worker依赖解析适配到源请求。 */
-function createCircuitSourceResolver({ vscode }) {
+function createCircuitSourceResolver({ vscode, sourceCatalog }) {
     return async ({ current, root, top, sources, isExplicit, includeDirs, task }) => {
         task.throwIfCancelled();
         const documents = (vscode.workspace.textDocuments || []).filter(document => document.isDirty && document.uri.scheme === 'file' && /\.(?:sv|v)$/i.test(document.uri.fsPath))
@@ -30,7 +30,9 @@ function createCircuitSourceResolver({ vscode }) {
         try {
             task.throwIfCancelled();
             const pattern = vscode.RelativePattern ? new vscode.RelativePattern(root, '**/*.{sv,v}') : '**/*.{sv,v}';
-            const files = await vscode.workspace.findFiles(pattern, SOURCE_EXCLUDE_GLOB, MAX_SCAN_FILES + 1, cancellation?.token);
+            const shared = sourceCatalog ? await sourceCatalog.discover({ root, file: current.file, extensions: ['sv','v'], limit: MAX_SCAN_FILES, token: cancellation?.token }) : null;
+            if (shared?.truncated) throw new Error('电路源码发现超过4096文件预算，请显式配置 sources');
+            const files = shared ? shared.uris : await vscode.workspace.findFiles(pattern, SOURCE_EXCLUDE_GLOB, MAX_SCAN_FILES + 1, cancellation?.token);
             task.throwIfCancelled();
             const resolved = await session.request('sourceClosure', { root, files: files.map(uri => uri.fsPath), current: current.file, top, includeDirs,
                 documents: scoped.map(document => ({ file: document.file, text: document.text })) });

@@ -10,7 +10,10 @@ const QUERY_METHODS = new Set(['window', 'values', 'edge']);
  * @param {{filePath:string,panel:object,channel?:object,createSession?:(options:object)=>object,getSourceContext?:()=>Promise<object>}} options
  * @returns {{dispose:()=>void,loaded:Promise<void>}} 可独立验证，不依赖 vscode 全局。
  */
-function bindWaveformPanel({ filePath, panel, channel, createSession = options => new VcdSession(options), getSourceContext }) {
+function bindWaveformPanel({ filePath, panel, channel, createSession = options => new VcdSession(options), getSourceContext, layoutFiles }) {
+    let resolveInitialized;
+    const initialized = new Promise(resolve => { resolveInitialized = resolve; });
+    const activity = { window: 0, values: 0, edge: 0 };
     let disposed = false, cancelled = false, ready = false, metadata = null, lastProgress = null, loadError = null;
     const log = text => channel?.appendLine('[VCD] ' + text);
     function send(message) {
@@ -26,15 +29,26 @@ function bindWaveformPanel({ filePath, panel, channel, createSession = options =
     async function handleMessage(message) {
         if (!message || disposed) return;
         if (message.type === 'ready') { ready = true; reportState(); return; }
+        if (message.type === 'initialized') { resolveInitialized({ signals: message.signals, rows: message.rows }); return; }
         if (message.type === 'close') { panel.dispose(); return; }
         if (message.type === 'cancel') {
+            resolveInitialized(null);
             cancelled = true; loadError = '加载已取消。重新打开文件可再次加载。';
             await session.dispose(); reportState(); return;
         }
-        if (!QUERY_METHODS.has(message.type) || !Number.isSafeInteger(message.requestId)) return;
+        if (!Number.isSafeInteger(message.requestId)) return;
+        if (message.type === 'layout-save' || message.type === 'layout-load') {
+            try {
+                if (!layoutFiles || !metadata || cancelled) throw new Error('布局服务尚未就绪');
+                const result = message.type === 'layout-save' ? await layoutFiles.save(message.params) : await layoutFiles.load();
+                send({ type: 'response', requestId: message.requestId, result });
+            } catch (error) { send({ type: 'response', requestId: message.requestId, error: error.message }); }
+            return;
+        }
+        if (!QUERY_METHODS.has(message.type)) return;
         try {
             if (cancelled || !metadata) throw new Error(cancelled ? 'VCD 加载已取消' : 'VCD 尚未完成加载');
-            const result = await session[message.type](message.params);
+            const result = await session[message.type](message.params); activity[message.type]++;
             send({ type: 'response', requestId: message.requestId, result });
         } catch (error) { send({ type: 'response', requestId: message.requestId, error: error.message }); }
     }
@@ -44,6 +58,7 @@ function bindWaveformPanel({ filePath, panel, channel, createSession = options =
     const lifetime = panel.onDidDispose(dispose);
     function dispose() {
         if (disposed) return;
+        resolveInitialized(null);
         disposed = true; metadata = null; lastProgress = null; loadError = null;
         messages.dispose(); lifetime.dispose();
         Promise.resolve(session.dispose()).catch(error => log('关闭数据服务失败：' + error.message));
@@ -58,11 +73,13 @@ function bindWaveformPanel({ filePath, panel, channel, createSession = options =
         metadata = { ...result, secondsPerTick: parseTimescaleSeconds(result.timescale) };
         if (result.sourceRoleNote) log(result.sourceRoleNote);
         reportState(); log(`已加载 ${path.basename(filePath)}：${(result.fileBytes / 1048576).toFixed(1)} MiB，${result.vars.length} 条信号`);
+        return metadata;
     }).catch(async error => {
         if (disposed || cancelled) return;
+        resolveInitialized(null);
         loadError = error.message; reportState(); log('加载失败：' + error.message);
         await session.dispose();
     });
-    return { dispose, loaded };
+    return { dispose, loaded, initialized, getStatus: () => ({ ready, loaded: !!metadata, error: loadError, activity: { ...activity } }) };
 }
 module.exports = { bindWaveformPanel };

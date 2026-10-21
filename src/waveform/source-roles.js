@@ -69,13 +69,16 @@ function classifySignals(vars, units) {
 }
 
 /** @param {object} vscode @param {string} filePath @returns {Promise<object>} 只发现路径，不打开文档，避免触发自动lint。 */
-async function collectSourceContext(vscode, filePath) {
+async function collectSourceContext(vscode, filePath, sourceCatalog, sourceFile) {
     const folder = vscode.workspace.getWorkspaceFolder(vscode.Uri.file(filePath));
     const folders = folder ? [folder] : vscode.workspace.workspaceFolders || [];
-    const files = new Set(); let truncated = false;
+    const files = new Set(), sourceRoots = new Set(folders.map(root => root.uri.fsPath)); let truncated = false;
     for (const root of folders) {
         const pattern = new vscode.RelativePattern(root, '**/*.{sv,v,svh,vh}');
-        for (const uri of await vscode.workspace.findFiles(pattern, SOURCE_EXCLUDE_GLOB, MAX_FILES + 1)) {
+        const shared = sourceCatalog ? await sourceCatalog.discover({ root: root.uri.fsPath, file: sourceFile || filePath, limit: MAX_FILES }) : null;
+        truncated ||= !!shared?.truncated;
+        for (const directory of shared?.roots || []) sourceRoots.add(directory);
+        for (const uri of shared ? shared.uris : await vscode.workspace.findFiles(pattern, SOURCE_EXCLUDE_GLOB, MAX_FILES + 1)) {
             if (isExcludedSourcePath(uri.fsPath)) continue;
             if (files.size < MAX_FILES) files.add(uri.fsPath); else if (!files.has(uri.fsPath)) truncated = true;
         }
@@ -85,7 +88,7 @@ async function collectSourceContext(vscode, filePath) {
         const text = document.getText(), size = Buffer.byteLength(text);
         if (size <= MAX_FILE_BYTES && bytes + size <= MAX_BYTES) { documents.push({ file: document.uri.fsPath, text }); bytes += size; } else truncated = true;
     }
-    return { roots: folders.map(folder => folder.uri.fsPath), files: [...files], documents, truncated };
+    return { roots: [...sourceRoots], files: [...files], documents, truncated };
 }
 const inside = (file, root) => { const relative = path.relative(root, file); return relative !== '..' && !relative.startsWith('..' + path.sep) && !path.isAbsolute(relative); };
 

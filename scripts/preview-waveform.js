@@ -6,6 +6,7 @@ const rootIndex = process.argv.indexOf('--extension-root');
 const extensionRoot = rootIndex >= 0 ? path.resolve(process.argv[rootIndex + 1]) : path.resolve(__dirname, '..');
 const { VcdSession } = require(path.join(extensionRoot, 'src/waveform/session'));
 const { buildWaveformHtml } = require(path.join(extensionRoot, 'src/waveform/view'));
+const { createLayoutFiles } = require(path.join(extensionRoot, 'src/waveform/layout-files'));
 const { parseTimescaleSeconds } = require(path.join(extensionRoot, 'src/waveform/parser'));
 
 /** 浮点、模拟量与分组的公开验收语料；位向量保留特殊值和未知状态。 */
@@ -56,11 +57,16 @@ async function main() {
     const directory = path.resolve(__dirname, '..', 'bin', 'waveform-acceptance'); await fs.mkdir(directory, { recursive: true });
     const root = await fs.mkdtemp(path.join(directory, 'run-'));
     const signalMode = process.argv.includes('--signals');
-    const source = path.join(root, 'wave.sv'), filePath = path.join(root, signalMode ? 'signals.vcd' : 'floating.vcd');
+    const fileIndex = process.argv.indexOf('--file');
+    const source = path.join(root, 'wave.sv'), filePath = fileIndex >= 0 ? path.resolve(process.argv[fileIndex + 1]) : path.join(root, signalMode ? 'signals.vcd' : 'floating.vcd');
     if (signalMode) await fs.writeFile(source, 'module wave_tb; reg clk; reg [7:4] ctrl; wire [0:7] status; wire io; demo dut(.ctrl(ctrl),.status(status),.io(io)); endmodule module demo(input [7:4] ctrl,output reg [0:7] status,inout io); wire internal_net; reg internal_reg; endmodule');
-    await fs.writeFile(filePath, signalMode ? fixtureSignals() : fixtureVcd());
+    if (fileIndex < 0) await fs.writeFile(filePath, signalMode ? fixtureSignals() : fixtureVcd());
     const session = new VcdSession(), metadata = await session.open(filePath, signalMode ? { roots: [root], files: [source] } : undefined);
     metadata.secondsPerTick = parseTimescaleSeconds(metadata.timescale);
+    const layoutUri = { scheme:'file', fsPath:path.join(root,'test.svwave.json') };
+    const layoutFiles = createLayoutFiles({ filePath, vscode:{ Uri:{ file:file=>({scheme:'file',fsPath:file}) },
+        window:{ showSaveDialog:async()=>layoutUri, showOpenDialog:async()=>[layoutUri] },
+        workspace:{ fs:{stat:uri=>fs.stat(uri.fsPath),readFile:uri=>fs.readFile(uri.fsPath),writeFile:(uri,bytes)=>fs.writeFile(uri.fsPath,bytes)} } } });
     const counts = { window: 0, values: 0, edge: 0 }, messages = [];
     let saved = signalMode ? { fileKey: filePath, selected: metadata.vars.map(signal => signal.path), cursorA: 0, cursorB: 40 } : null;
     const restoreIndex = process.argv.indexOf('--restore');
@@ -102,6 +108,11 @@ window.acquireVsCodeApi = () => ({
             }
             if (request.method === 'POST' && request.url === '/query') {
                 const message = await body(request);
+                if (message.type === 'layout-save' || message.type === 'layout-load') {
+                    try { const result = message.type === 'layout-save' ? await layoutFiles.save(message.params) : await layoutFiles.load();
+                        json(response,200,{type:'response',requestId:message.requestId,result}); }
+                    catch(error){ json(response,200,{type:'response',requestId:message.requestId,error:error.message}); } return;
+                }
                 if (!['window', 'values', 'edge'].includes(message.type)) { json(response, 200, null); return; }
                 counts[message.type]++;
                 try { json(response, 200, { type: 'response', requestId: message.requestId, result: await session[message.type](message.params) }); }

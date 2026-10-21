@@ -22,6 +22,7 @@ function activateIverilog(context, deps) {
     const engineBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 2);
     const tasks = createToolTaskManager({ startProcess: deps.startProcess, onChange() { if (!disposed) updateStatusBar(); } });
     const scanSources = deps.scanWorkspaceSources || scanWorkspaceSources;
+    const invalidateSources = deps.invalidateWorkspaceSources || invalidateWorkspaceSources;
     const getConfig = document => vscode.workspace.getConfiguration('svtools.iverilog', document?.uri);
     const currentEngine = document => vscode.workspace.getConfiguration('svtools.lint', document?.uri).get('engine', 'iverilog');
     const isVerilogDocument = document => !!document && LANGUAGE_IDS.includes(document.languageId) && !isGeneratedSourcePath(document.uri?.fsPath);
@@ -79,16 +80,16 @@ function activateIverilog(context, deps) {
         }
         return [...new Set(files)];
     }
-    async function showWaveforms(task, waves, config) {
+    async function showWaveforms(task, waves, config, sourceFile) {
         task.throwIfCancelled(); if (!waves.length) return;
         const vcd = waves.find(file => /\.vcd$/i.test(file)), viewer = String(config.get('waveViewer') || '').trim();
-        if (vcd && !viewer && config.get('autoOpenWaveform', true)) await deps.waveViewer?.openWaveform(vcd);
+        if (vcd && !viewer && config.get('autoOpenWaveform', true)) await deps.waveViewer?.openWaveform(vcd, { sourceFile });
         task.throwIfCancelled();
         const choice = vscode.window.showInformationMessage('仿真波形已生成：' + path.basename(waves[0]),
             ...(vcd && !viewer ? ['打开波形'] : []), ...(viewer ? ['外部查看器打开'] : []), '在资源管理器中显示');
         Promise.resolve(choice).then(async selected => {
             if (task.signal.aborted) return;
-            if (selected === '打开波形' && vcd) await deps.waveViewer?.openWaveform(vcd);
+            if (selected === '打开波形' && vcd) await deps.waveViewer?.openWaveform(vcd, { sourceFile });
             else if (selected === '外部查看器打开' && viewer) {
                 const child = spawn(viewer, [vcd || waves[0]], { detached: true, stdio: 'ignore', windowsHide: true });
                 child.once('error', error => vscode.window.showErrorMessage('启动波形查看器失败：' + error.message)); child.unref();
@@ -172,7 +173,7 @@ function activateIverilog(context, deps) {
             tasks.cancelAll('工具配置已变化'); deps.resetToolchain(); resetXvlogCache(); updateStatusBar();
             for (const document of vscode.workspace.textDocuments) fireLint(document);
         }),
-        subscribe('onDidCreateFiles', invalidateWorkspaceSources), subscribe('onDidDeleteFiles', invalidateWorkspaceSources), subscribe('onDidRenameFiles', invalidateWorkspaceSources),
+        subscribe('onDidCreateFiles', invalidateSources), subscribe('onDidDeleteFiles', invalidateSources), subscribe('onDidRenameFiles', invalidateSources),
         vscode.window.onDidChangeActiveTextEditor(updateStatusBar),
         vscode.commands.registerCommand('svtools.iverilog.lint', async () => { deps.resetToolchainFailure(); return reportSummary(await execute(vscode.window.activeTextEditor?.document), currentEngine(vscode.window.activeTextEditor?.document)); }),
         vscode.commands.registerCommand('svtools.iverilog.simulate', () => execute(vscode.window.activeTextEditor?.document, 'simulation')),

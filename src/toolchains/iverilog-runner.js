@@ -90,7 +90,7 @@ function createIcarusRunner(deps) {
         const summary = complete(task, document, result);
         if (!summary.ok) return summary;
         const waves = changedWaveforms(before, waveformSnapshot(prep.fileDir));
-        await deps.showWaveforms(task, waves, prep.config); task.throwIfCancelled();
+        await deps.showWaveforms(task, waves, prep.config, prep.filePath); task.throwIfCancelled();
         return { ...summary, waves, vvpFile: prep.vvpFile };
     }
     return { lint, simulate };

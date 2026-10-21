@@ -6,7 +6,7 @@ const assert = require('node:assert/strict');
 const { spawn } = require('node:child_process');
 const root = path.resolve(__dirname, '..'), args = process.argv.slice(2);
 const option = (name, fallback) => args.includes(name) ? args[args.indexOf(name) + 1] : fallback;
-const out = path.resolve(option('--out', path.join(root, 'bin/wave-beta6-browser')));
+const out = path.resolve(option('--out', path.join(root, 'bin/wave-beta7-browser')));
 const browserPath = option('--browser', 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe');
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
 async function until(predicate, label) {
@@ -15,7 +15,8 @@ async function until(predicate, label) {
 }
 async function main() {
     fs.mkdirSync(out, { recursive: true });
-    const previewArgs = [path.join(root, 'scripts/preview-waveform.js'), '--signals'];
+    const corpus = option('--file', null);
+    const previewArgs = [path.join(root, 'scripts/preview-waveform.js'), ...(corpus ? ['--file',path.resolve(corpus)] : ['--signals'])];
     if (args.includes('--extension-root')) previewArgs.push('--extension-root', option('--extension-root'));
     const preview = spawn(process.execPath, previewArgs, { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
     let serverInfo, previewOutput = '', previewError = '', browser, socket;
@@ -46,9 +47,9 @@ async function main() {
         const evaluate = async expression => { const value = await call('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true });
             if (value.exceptionDetails) throw Error(JSON.stringify(value.exceptionDetails)); return value.result.value; };
         await call('Page.enable'); await call('Runtime.enable');
-        await call('Page.addScriptToEvaluateOnNewDocument', { source: `window.__waveLabels=[];const original=CanvasRenderingContext2D.prototype.fillText;CanvasRenderingContext2D.prototype.fillText=function(text,x,y,...rest){window.__waveLabels.push({text,x,y});if(window.__waveLabels.length>5000)window.__waveLabels.splice(0,1000);return original.call(this,text,x,y,...rest);};` });
+        await call('Page.addScriptToEvaluateOnNewDocument', { source: `let rendererFactory;Object.defineProperty(window,'createWaveRenderer',{get(){return rendererFactory},set(factory){rendererFactory=options=>{const renderer=factory(options);window.__renderer=renderer;return renderer;}}});window.__waveLabels=[];const original=CanvasRenderingContext2D.prototype.fillText;CanvasRenderingContext2D.prototype.fillText=function(text,x,y,...rest){window.__waveLabels.push({text,x,y});if(window.__waveLabels.length>5000)window.__waveLabels.splice(0,1000);return original.call(this,text,x,y,...rest);};` });
         const report = async () => (await fetch(new URL('/report', serverInfo.url))).json();
-        const waitReady = async () => { await until(() => evaluate("document.getElementById('loading')?.classList.contains('hidden') && document.getElementById('status').textContent.includes('就绪')"), '页面就绪'); await pause(100); };
+        const waitReady = async () => { await until(() => evaluate("document.getElementById('loading')?.classList.contains('hidden') && /就绪|密集跳变/.test(document.getElementById('status').textContent)"), '页面就绪'); await pause(100); };
         const clickRow = async (key, { right = false, ctrl = false } = {}) => {
             const saved = (await report()).saved, index = saved.selected.indexOf(key); assert.ok(index >= 0, key);
             const box = await evaluate("(()=>{const r=document.getElementById('waveCanvas').getBoundingClientRect();return {x:r.left,y:r.top};})()");
@@ -56,6 +57,17 @@ async function main() {
             await call('Input.dispatchMouseEvent', { ...params, type: 'mousePressed' }); await call('Input.dispatchMouseEvent', { ...params, type: 'mouseReleased' }); await pause(60);
         };
         const action = async id => { assert.equal(await evaluate(`(()=>{const b=document.querySelector('.menu button[data-menu-action=${JSON.stringify(id)}]');if(!b||b.disabled)return false;b.click();return true;})()`), true, id); await pause(70); };
+        if (corpus) {
+            await call('Page.navigate',{url:serverInfo.url+'?theme=dark'});await waitReady();
+            const performanceReport=await evaluate(`(()=>{
+                const renderer=window.__renderer,measure=fn=>{const values=[];for(let i=0;i<50;i++){const start=performance.now();fn();values.push(performance.now()-start);}values.sort((a,b)=>a-b);return {medianMs:values[25],p95Ms:values[47]};};
+                const full=measure(()=>renderer.draw()),before=renderer.metrics.staticDraws,overlay=measure(()=>renderer.drawOverlay());
+                return {full,overlay,overlayStaticDraws:renderer.metrics.staticDraws-before,metrics:renderer.metrics,visibleRows:renderer.visibleRows().length,geometry:renderer.geometry(),metadata:document.getElementById('metadata').textContent};})()`);
+            assert.equal(performanceReport.overlayStaticDraws,0);assert.ok(performanceReport.overlay.medianMs<performanceReport.full.medianMs);
+            const result={browser:await call('Browser.getVersion'),file:path.resolve(corpus),...performanceReport,errors};
+            fs.writeFileSync(path.join(out,'performance.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result,null,2));
+            await call('Browser.close');return;
+        }
         const input = 'wave_tb.dut.ctrl', internal = 'wave_tb.ctrl', bit = JSON.stringify(['$bit', input, 2]);
         const results = [];
         for (const theme of ['dark', 'light']) {
@@ -84,7 +96,24 @@ async function main() {
             await clickRow(input, { right: true }); await action('collapse-bus');
             await until(async () => !(await report()).saved.selected.includes(bit), '收起保留父总线');
             assert.ok((await report()).saved.selected.includes(input));
-            results.push({ theme, roleIcons: true, batchHighlightWithoutQuery: true, expandedBits: children.length, exactBitEdge: 40, restored: true, collapsed: true });
+            assert.equal((await report()).saved.highlights[bit],'rose');
+            await call('Page.reload'); await waitReady();
+            await clickRow(input,{right:true});await action('expand-bus');
+            assert.equal((await report()).saved.highlights[bit],'rose');
+            await clickRow(bit,{right:true});await action('new-group');
+            await evaluate("(()=>{const i=document.querySelector('.waveGroupDialog input');i.value='控制位';i.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}));})()");
+            await until(async()=>(await report()).saved.groups[bit]==='控制位','新建分组');
+            await clickRow(bit,{right:true});await action('toggle-group-控制位');
+            await until(async()=>(await report()).saved.collapsedGroups.includes('控制位'),'分组收起');
+            const expected=(await report()).saved;
+            await evaluate("document.getElementById('saveLayout').click()");await until(()=>evaluate("document.getElementById('status').textContent.includes('已保存')"),'保存实际布局文件');
+            await evaluate("document.getElementById('clearSignals').click()");await until(async()=>(await report()).saved.selected.length===0,'清空布局');
+            await evaluate("document.getElementById('loadLayout').click()");await until(async()=>(await report()).saved.highlights?.[bit]==='rose','加载实际布局文件');
+            const imported=(await report()).saved;assert.deepEqual(imported.selected,expected.selected);assert.deepEqual(imported.groups,expected.groups);
+            assert.deepEqual(imported.collapsedGroups,expected.collapsedGroups);assert.equal(imported.cursorA,expected.cursorA);
+            await clickRow(bit,{right:true});await action('toggle-group-控制位');
+            await clickRow(input,{right:true});await action('collapse-bus');
+            results.push({ theme, roleIcons: true, batchHighlightWithoutQuery: true, expandedBits: children.length, exactBitEdge: 40, restored: true, collapsed: true, hiddenBitRestored:true, groupCollapsedRestored:true, layoutFileRoundTrip:true });
         }
         assert.deepEqual(errors, []);
         const result = { browser: await call('Browser.getVersion'), results, errors };

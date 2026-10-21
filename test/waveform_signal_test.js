@@ -68,7 +68,7 @@ test('实际控制器批量背景色冻结右键目标，持久化且不重新�
     const menu=h.contextMenu('tb.a'); const highlights=menu.items.find(item=>item.id==='signal-highlight');
     h.pointer('tb.c'); highlights.submenu.find(item=>item.id==='highlight-sky').action(); await h.flush();
     assert.equal(h.state.highlights['tb.a'],'sky'); assert.equal(h.state.highlights['tb.b'],'sky'); assert.equal(h.state.highlights['tb.c'],undefined);
-    assert.equal(h.persisted().highlights['tb.a'],'sky'); assert.deepEqual(h.messages.map(m=>m.type),['window','values']);
+    assert.equal(h.persisted().highlights['tb.a'],'sky'); assert.deepEqual(h.messages.filter(m=>m.requestId).map(m=>m.type),['window','values']);
 });
 
 test('实际控制器展开/收起保持父总线，可单独选择和分组，重载恢复位行和颜色', async () => {
@@ -81,6 +81,10 @@ test('实际控制器展开/收起保持父总线，可单独选择和分组，�
     assert.equal(restored.state.rows.length,5); assert.equal(restored.state.highlights[bit.key],'rose');
     restored.contextMenu('tb.ctrl').items.find(i=>i.id==='collapse-bus').action();
     assert.deepEqual([...restored.state.selected],['tb.ctrl']); assert.equal(restored.state.rows.length,1);
+    assert.equal(restored.persisted().highlights[bit.key], 'rose');
+    const collapsed = clientHarness(restored.persisted(), { vars:[{...bus(),changeCount:3}] }); await collapsed.flush();
+    collapsed.contextMenu('tb.ctrl').items.find(i=>i.id==='expand-bus').action();
+    assert.equal(collapsed.state.highlights[bit.key], 'rose');
 });
 
 test('超宽展开在分配位行前检查总行预算，标量与real禁用展开', async () => {

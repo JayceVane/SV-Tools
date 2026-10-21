@@ -19,9 +19,9 @@ function insideRoots(file, roots) {
 }
 
 /** @param {object} context @param {{vivado:object,vscode?:object}} dependencies @returns {object} 注册电路数据入口及面板生命周期。 */
-function activateCircuitViewer(context, { vivado, vscode = require('vscode') }) {
+function activateCircuitViewer(context, { vivado, sourceCatalog, vscode = require('vscode') }) {
     const manager = createToolTaskManager();
-    const resolveSources = createCircuitSourceResolver({ vscode });
+    const resolveSources = createCircuitSourceResolver({ vscode, sourceCatalog });
     const channel = vscode.window.createOutputChannel('SV Tools · Circuit');
     const output = createBufferedOutput(channel);
     const panels = new Set();

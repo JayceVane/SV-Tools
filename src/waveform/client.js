@@ -1,15 +1,15 @@
 /* Webview 控制器：有界查询、虚拟列表、交互和会话布局。 */
 (function () {
     'use strict';
-    const api = acquireVsCodeApi(), M = window.WaveModel, I = window.WaveInteractions, L = window.WaveRowLayout, C = window.WaveColumnLayout, D = M.signalDisplay;
+    const api = acquireVsCodeApi(), M = window.WaveModel, I = window.WaveInteractions, L = window.WaveRowLayout, C = window.WaveColumnLayout, D = M.signalDisplay, S = window.WaveLayoutState;
     const $ = id => document.getElementById(id);
     const canvas = $('waveCanvas'), tracks = $('tracks'), catalog = $('catalog');
     const CATALOG_HEIGHT = 34, MAX_TRACKS = D.MAX_TRACKS, QUERY_POINT_BUDGET = 240000;
-    const state = { metadata: null, signals: new Map(), selected: [], rows: [], formats: Object.create(null), groups: Object.create(null), heights: Object.create(null), columns: {}, highlights: Object.create(null), bitKeys: new Set(),
+    const state = { metadata: null, signals: new Map(), selected: [], rows: [], formats: Object.create(null), groups: Object.create(null), heights: Object.create(null), columns: {}, highlights: Object.create(null), bitKeys: new Set(), collapsedGroups: [],
         view: { start: 0, span: 1 }, cursorA: 0, cursorB: null, activeCursor: 'A', activeKey: null,
         multi: new Set(), selectionAnchor: null, fullName: false, snap: true, secondsPerTick: null,
         series: new Map(), seriesKey: '', windowKey: '', valuesA: Object.create(null), valuesB: Object.create(null) };
-    const renderer = window.createWaveRenderer({ canvas, ruler: $('ruler'), tracks, state, model: M });
+    const renderer = window.createWaveRenderer({ canvas, ruler: $('ruler'), overlay: $('waveOverlay'), rulerOverlay: $('rulerOverlay'), tracks, state, model: M });
     const memory = window.createMemoryInspector({ request, addSignals: keys => {
         edgeVersion++; addSignals(keys); state.activeKey = keys[0]; state.selectionAnchor = keys[0]; state.multi = new Set(keys);
         const row = state.rows.find(item => M.signalKey(item.signal) === keys[0]);
@@ -17,11 +17,12 @@
         viewportChanged();
     }, onChange() { viewportChanged(); persist(); } });
     const pending = new Map();
-    let requestId = 0, paintPending = false, filtered = [], windowBusy = false, windowWanted = null;
+    let requestId = 0, paintPending = false, staticDirty = true, filtered = [], windowBusy = false, windowWanted = null;
     let valuesBusy = false, valuesWanted = null, valuesKey = '', edgeVersion = 0, menu = null, groupDialog = null;
     const gestures = window.createWaveRowGestures({ canvas, tracks, state, model: M, renderer,
         refreshRows, commitRows: rebuildRows, paint, onSelection: applySelection,
         onNameClick(point, row, event) {
+            if (row.groupSummary) { toggleGroup(row.groupSummary); return true; }
             const within = point.y + tracks.scrollTop - row.y;
             if (!D.isBus(row.signal) || point.x < 4 || point.x > 27 || within < 6 || within > 28) return false;
             selectRow(row, event); toggleBus(row.key); return true;
@@ -54,6 +55,7 @@
     function persist() {
         api.setState({ fileKey: BOOT.fileKey, selected: state.selected, start: state.view.start, span: state.view.span,
             cursorA: state.cursorA, cursorB: state.cursorB, formats: state.formats, groups: state.groups,
+            bitKeys: [...state.bitKeys], collapsedGroups: state.collapsedGroups,
             heights: state.heights, columns: state.columns, highlights: state.highlights, fullName: state.fullName, snap: state.snap, memory: memory.snapshot() });
     }
     function setColumn(key, width) { if (width === undefined) delete state.columns[key]; else state.columns[key] = width; }
@@ -65,10 +67,13 @@
         $('namesResize').style.height = $('ruler').clientHeight + tracks.clientHeight + 'px';
         columns.sync();
     }
-    function paint() {
+    function paint(overlayOnly = false) {
+        staticDirty ||= overlayOnly !== true;
         if (paintPending) return;
         paintPending = true;
-        requestAnimationFrame(() => { paintPending = false; applyColumnLayout(); renderer.draw(); updateReadout(); });
+        requestAnimationFrame(() => { paintPending = false;
+            if (staticDirty) { applyColumnLayout(); renderer.draw(); } else if (renderer.drawOverlay) renderer.drawOverlay(); else renderer.draw();
+            staticDirty = false; updateReadout(); });
     }
     function updateReadout() {
         const format = time => M.formatTime(time, state.secondsPerTick);
@@ -81,7 +86,7 @@
         canvas.setAttribute('aria-label', `波形；已添加 ${state.selected.length} 条，选中 ${state.multi.size} 条。Ctrl 点击多选，Shift 点击范围选择；拖动名称排序，拖动模拟量底边调整行高，Esc 取消；右键或 Shift+F10 管理所选信号。`);
     }
     function refreshRows() {
-        state.rows = L.buildRows(state.selected, state.signals, state.formats, state.heights);
+        state.rows = L.buildRows(state.selected, state.signals, state.formats, state.heights, state.groups, state.collapsedGroups);
         $('trackSpace').style.height = Math.max(L.totalHeight(state.rows), tracks.clientHeight) + 'px';
         $('empty').hidden = !!state.rows.length;
     }
@@ -90,7 +95,7 @@
         updateSelectionCount();
         viewportChanged(); renderCatalog(); persist();
     }
-    function visibleIds() { return [...new Set(L.visibleRows(state.rows, tracks.scrollTop, tracks.clientHeight).map(row => row.signal.id))].slice(0, 256).sort(); }
+    function visibleIds() { return [...new Set(L.visibleRows(state.rows, tracks.scrollTop, tracks.clientHeight).filter(row => !row.groupSummary).map(row => row.signal.id))].slice(0, 256).sort(); }
     function viewportChanged() {
         paint();
         if (!state.metadata || columns.active) return;
@@ -128,7 +133,7 @@
             const queries = [request('values', { ids: job.params.ids, time: job.params.a })];
             if (job.params.b !== null) queries.push(request('values', { ids: job.params.ids, time: job.params.b }));
             const results = await Promise.all(queries);
-            if (job.key === valuesKey) { state.valuesA = results[0].values; state.valuesB = results[1]?.values || Object.create(null); paint(); }
+            if (job.key === valuesKey) { state.valuesA = results[0].values; state.valuesB = results[1]?.values || Object.create(null); paint(true); }
         } catch (error) { status('游标读值失败：' + error.message); }
         finally { valuesBusy = false; pumpValues(); }
     }
@@ -136,7 +141,7 @@
     function setCursor(time, cursor) {
         if (!state.metadata) return;
         state[cursor === 'B' ? 'cursorB' : 'cursorA'] = Math.min(state.metadata.endTime, Math.max(0, Math.round(time)));
-        queueValues(); paint(); persist();
+        queueValues(); paint(true); persist();
     }
     async function queryEdge(signal, time, direction, version) {
         const params = { id: signal.id, time, direction };
@@ -268,29 +273,40 @@
     function expandBus(targets) {
         const parents = busParents(targets);
         const needed = parents.reduce((sum, key) => sum + state.signals.get(key).width - children(key).length, 0);
-        if (needed + state.selected.length > MAX_TRACKS) { status('展开将超过2000行预算，请先减少已添加信号'); return; }
+        const newBits = parents.reduce((sum, key) => sum + state.signals.get(key).width - [...state.bitKeys].filter(bit => state.signals.get(bit)?.parentKey === key).length, 0);
+        if (needed + state.selected.length > MAX_TRACKS || state.bitKeys.size + newBits > MAX_TRACKS) { status('展开将超过2000行预算，请先减少已添加信号'); return; }
         for (const key of parents) {
             const parent = state.signals.get(key), existing = new Set(state.selected), added = [];
             for (const bit of D.bitSignals(parent, MAX_TRACKS)) if (!existing.has(bit.key)) {
-                state.signals.set(bit.key, bit); state.bitKeys.add(bit.key); added.push(bit.key);
-                if (state.highlights[key]) state.highlights[bit.key] = state.highlights[key];
-                if (state.groups[key]) state.groups[bit.key] = state.groups[key];
+                state.signals.set(bit.key, bit); added.push(bit.key);
+                if (!state.bitKeys.has(bit.key)) {
+                    if (state.highlights[key]) state.highlights[bit.key] = state.highlights[key];
+                    if (state.groups[key]) state.groups[bit.key] = state.groups[key];
+                }
+                state.bitKeys.add(bit.key);
             }
             const at = state.selected.indexOf(key) + 1;
             state.selected.splice(at, 0, ...added);
         }
         rebuildRows(); status('已展开总线；各bit可独立着色、分组和排序，密集区放大后观察');
     }
-    function pruneBits() {
+    function pruneBits(removing = state.bitKeys) {
         const keep = new Set(state.selected);
-        for (const key of state.bitKeys) if (!keep.has(key)) {
+        for (const key of state.bitKeys) if (!keep.has(key) && (removing.has(key) || removing.has(state.signals.get(key)?.parentKey))) {
             state.signals.delete(key); state.bitKeys.delete(key);
             for (const map of [state.formats, state.groups, state.highlights, state.heights]) delete map[key];
         }
     }
     function collapseBus(targets) {
-        const parents = new Set(busParents(targets));
-        removeSignals(state.selected.filter(key => parents.has(state.signals.get(key)?.parentKey)));
+        const parents = new Set(busParents(targets)); edgeVersion++;
+        state.selected = state.selected.filter(key => !parents.has(state.signals.get(key)?.parentKey));
+        state.multi = new Set(I.orderedTargets(state.selected, state.multi));
+        if (!state.selected.includes(state.activeKey)) state.activeKey = state.selected[0] || null;
+        state.selectionAnchor = state.activeKey; rebuildRows(); status('已收起总线；子位格式、颜色及分组将在再次展开时恢复');
+    }
+    function toggleGroup(name) {
+        const collapsed = new Set(state.collapsedGroups); if (collapsed.has(name)) collapsed.delete(name); else collapsed.add(name);
+        state.collapsedGroups = [...collapsed]; rebuildRows();
     }
     function toggleBus(key) { if (children(key).length) collapseBus([key]); else expandBus([key]); }
     function removeSignals(targets) {
@@ -300,7 +316,7 @@
         state.multi = new Set(I.orderedTargets(state.selected, state.multi));
         if (removing.has(state.activeKey)) state.activeKey = state.selected[0] || null;
         if (removing.has(state.selectionAnchor)) state.selectionAnchor = state.activeKey;
-        pruneBits(); rebuildRows(); status(`已移除 ${targets.length} 条信号`);
+        pruneBits(removing); rebuildRows(); status(`已移除 ${targets.length} 条信号`);
     }
     function showMenu(event, row) {
         hideMenu(false); if (!row || groupDialog) return;
@@ -340,6 +356,7 @@
             { icon: 'expand', disabled: overBudget, detail: overBudget ? '最多2000行' : '' }));
         if (parents.some(key => children(key).length)) busItems.push(action('collapse-bus', '收起总线bit', () => collapseBus(targets), { icon: 'collapse' }));
         items.splice(2, 0, ...busItems);
+        for (const name of [...new Set(targets.map(key => state.groups[key]).filter(Boolean))]) items.push(action('toggle-group-' + name, (state.collapsedGroups.includes(name) ? '展开分组：' : '收起分组：') + name, () => toggleGroup(name), { icon: 'group' }));
         if (groups.length) items.push({ id: 'join-group', label: '加入已有分组', icon: 'group', submenu: groups.map((name, index) =>
             action('join-group-' + index, name, () => assignGroup(targets, name), { icon: 'group' })) });
         items.push(action('ungroup', '解除分组', () => {
@@ -355,8 +372,8 @@
         metadata = { ...metadata, vars: M.prepareSignals(metadata.vars) };
         state.metadata = metadata; state.signals = new Map(metadata.vars.map(signal => [M.signalKey(signal), signal])); state.secondsPerTick = metadata.secondsPerTick || null;
         const saved = api.getState();
-        if (saved?.fileKey === BOOT.fileKey) D.restoreBits(saved.selected, state.signals, MAX_TRACKS);
-        state.bitKeys = new Set((Array.isArray(saved?.selected) ? saved.selected : []).filter(key => Number.isInteger(state.signals.get(key)?.bitOffset)));
+        if (saved?.fileKey === BOOT.fileKey) D.restoreBits(saved.bitKeys || saved.selected, state.signals, MAX_TRACKS);
+        state.bitKeys = new Set((Array.isArray(saved?.bitKeys || saved?.selected) ? saved.bitKeys || saved.selected : []).filter(key => Number.isInteger(state.signals.get(key)?.bitOffset)));
         const restored = M.restoreState(saved, metadata, BOOT.fileKey, state.signals);
         Object.assign(state, { view: restored.view, cursorA: restored.cursorA, cursorB: restored.cursorB });
         if (saved?.fileKey === BOOT.fileKey) {
@@ -364,6 +381,7 @@
             state.heights = L.restoreHeights(saved.heights, state.signals);
             state.columns = C.restoreColumns(saved.columns);
             state.highlights = D.restoreHighlights(saved.highlights, state.signals);
+            state.collapsedGroups = Array.isArray(saved.collapsedGroups) ? saved.collapsedGroups.filter(name => typeof name === 'string').slice(0, MAX_TRACKS) : [];
             state.fullName = !!saved.fullName; state.snap = saved.snap !== false;
         }
         const seen = new Set();
@@ -387,6 +405,19 @@
         memory.refresh(state.cursorA, state.cursorB, state.secondsPerTick);
         memory.initialize(metadata.vars, saved?.fileKey === BOOT.fileKey ? saved.memory : null);
         applyColumnLayout(); filterCatalog(); rebuildRows();
+        if (!BOOT.metadata) api.postMessage({ type: 'initialized', signals: metadata.vars.length, rows: state.rows.length });
+    }
+    function applyLayout(layout) {
+        const signals = new Map([...state.signals].filter(([, signal]) => !signal.parentKey));
+        const restored = S.restore(layout, signals, state.metadata), missing = restored.missing; delete restored.missing;
+        Object.assign(state, restored, { signals }); edgeVersion++; state.multi.clear(); state.activeKey = state.selected[0] || null;
+        state.selectionAnchor = state.activeKey; state.seriesKey = ''; state.windowKey = ''; valuesKey = '';
+        $('snap').classList.toggle('active', state.snap); $('fullName').classList.toggle('active', state.fullName);
+        rebuildRows();
+        const detail = missing.length ? `；${missing.length} 条未匹配：${missing.slice(0, 8).join('、')}${missing.length > 8 ? '…' : ''}` : '';
+        status(`已加载布局：${state.selected.length} 条信号${detail}`);
+        $('layoutReport').hidden = !missing.length; $('layoutReport').textContent = `布局：${missing.length} 条未匹配 ·`;
+        $('layoutReport').title = missing.join('\n');
     }
     window.addEventListener('message', event => {
         const message = event.data;
@@ -416,6 +447,16 @@
     $('snap').onclick = () => { state.snap = !state.snap; $('snap').classList.toggle('active', state.snap); persist(); };
     $('fullName').onclick = () => { state.fullName = !state.fullName; $('fullName').classList.toggle('active', state.fullName); viewportChanged(); persist(); };
     $('memoryToggle').onclick = () => memory.toggle();
+    $('saveLayout').onclick = async () => {
+        if (!state.metadata) return;
+        try { if (await request('layout-save', S.capture(state))) status('波形布局已保存'); }
+        catch (error) { status('保存布局失败：' + error.message); }
+    };
+    $('loadLayout').onclick = async () => {
+        if (!state.metadata) return;
+        try { const layout = await request('layout-load', {}); if (layout) applyLayout(layout); }
+        catch (error) { status('加载布局失败：' + error.message); }
+    };
     const jump = () => { if (!state.metadata) return; const time = M.parseTime($('jumpTime').value, state.secondsPerTick);
         if (time === null || time > state.metadata.endTime) { status('时间无效或超出文件范围；可输入 ticks 或带单位的时间'); return; }
         ++edgeVersion; setCursor(time, state.activeCursor); setView({ start: time - state.view.span / 2, span: state.view.span }); };
@@ -458,14 +499,15 @@
             event.preventDefault(); return;
         }
         if (event.ctrlKey || event.metaKey || event.altKey) return;
-        if (waveFocused && event.key === 'Enter' && D.isBus(state.signals.get(state.activeKey))) { toggleBus(state.activeKey); event.preventDefault(); }
+        if (waveFocused && event.key === 'Enter' && state.rows.find(row => row.key === state.activeKey)?.groupSummary) { toggleGroup(state.groups[state.activeKey]); event.preventDefault(); }
+        else if (waveFocused && event.key === 'Enter' && D.isBus(state.signals.get(state.activeKey))) { toggleBus(state.activeKey); event.preventDefault(); }
         else if (event.key === 'Escape') { state.multi.clear(); state.selectionAnchor = null; updateSelectionCount(); paint(); }
         else if (event.key === 'f' || event.key === 'F') $('fit').click();
         else if (event.key === '+' || event.key === '=') zoom(.5);
         else if (event.key === '-') zoom(2);
         else if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') { event.preventDefault(); navigateEdge(event.key === 'ArrowLeft' ? 'previous' : 'next'); }
         else if (waveFocused && (event.key === 'ArrowUp' || event.key === 'ArrowDown') && state.rows.length) {
-            const current = Math.max(0, state.selected.indexOf(state.activeKey));
+            const current = Math.max(0, state.rows.findIndex(row => row.key === state.activeKey));
             const next = Math.max(0, Math.min(state.rows.length - 1, current + (event.key === 'ArrowUp' ? -1 : 1)));
             const row = state.rows[next]; selectRow(row, event);
             if (row.y < tracks.scrollTop) tracks.scrollTop = row.y;

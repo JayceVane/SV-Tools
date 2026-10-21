@@ -229,3 +229,15 @@ alpha1 本地提交869e4d1；alpha2 提交33ff207；alpha3 提交1cc5733；alpha
 3. 下一轮统一 CompilePlan：源文件、include、宏、top、工作目录和引擎能力，避免 lint/仿真参数漂移。
 4. 随后实现内容驱动的增量源码索引与有配置键的只读缓存；不要恢复共享可写 xsim.dir。
 5. 审查4.0分支后走PR和发布流程，Marketplace使用其接受的预发行版本格式。
+
+
+## 2026-10-21 beta.7
+
+用户接受六项优化，继续独立codex/feat-circuit-viewer worktree，原工程未改。
+实现隐藏位设置保留、分组收起与整体排序、.svwave.json布局复用、游标覆盖画布及模拟量统计缓存。
+共享source-catalog和XPR成员适配注入四个消费者，实际仿真入口随自动波形打开传递。
+真实Qoder补全22/22、波形3/3、电路5/5；首次扫描竞争和外部include缓存失效已修复并补联合回归。
+新增2万独立信号/4000别名/长层级/密集跳变语料；100/500MiB继续验证。
+VS Code主程序仍被vscode-updating锁阻止，不伪称通过；Qoder真实Webview与宿主已运行。
+版本统一4.0.0-beta.7，新增package:preview门禁，禁止同号产物覆盖，记录干净commit和SHA256。
+交付文档docs/V4_BETA7.md，产物与本机报告均在忽略bin中。后续继续完善4.0，经授权后再合并/发布。

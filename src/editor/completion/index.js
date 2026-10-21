@@ -7,9 +7,9 @@ const { SOURCE_EXCLUDE_GLOB: EXCLUDE_GLOB, isExcludedSourcePath } = require('../
 const keyOf = uri => uri.toString();
 
 /** 工程语义缓存只读取 HDL 文本，脏文档始终优先；文件事件逐项失效。 */
-function createCompletionIndex({ vscode, onError = console.warn }) {
+function createCompletionIndex({ vscode, onError = console.warn, sourceCatalog }) {
     const records = new Map();
-    let fileUris = [], pending = null, dirty = true, needsDiscovery = true, generation = 0, incomplete = false, discoveryIncomplete = false;
+    let fileUris = [], pending = null, dirty = true, needsDiscovery = true, generation = 0, incomplete = false, discoveryIncomplete = false, projectScoped = false;
     const subscriptions = [];
     let includeSubscriptions = [];
     const config = () => vscode.workspace.getConfiguration('svtools.completion');
@@ -35,7 +35,13 @@ function createCompletionIndex({ vscode, onError = console.warn }) {
 
     function watch(pattern, target) {
         const watcher = vscode.workspace.createFileSystemWatcher(pattern);
-        target.push(watcher.onDidCreate(uri => invalidate(uri)), watcher.onDidDelete(uri => invalidate(uri)), watcher.onDidChange(uri => invalidate(uri, false)), watcher);
+        const changed = (uri, kind) => {
+            invalidate(uri, kind !== 'change');
+            // RelativePattern 可能位于工作区外，必须同时使共享路径清单失效。
+            sourceCatalog?.invalidate({ uri, kind });
+        };
+        target.push(watcher.onDidCreate(uri => changed(uri, 'create')), watcher.onDidDelete(uri => changed(uri, 'delete')),
+            watcher.onDidChange(uri => changed(uri, 'change')), watcher);
     }
 
     function rebuildIncludeWatchers(patterns) {
@@ -44,7 +50,7 @@ function createCompletionIndex({ vscode, onError = console.warn }) {
         if (vscode.workspace.createFileSystemWatcher) for (const pattern of patterns.slice(1)) watch(pattern, includeSubscriptions);
     }
 
-    async function discover(token) {
+    async function discover(token, document) {
         const limit = bounded('maxFiles', 5000, 1, 50000);
         const patterns = [SOURCE_GLOB];
         for (const directory of config().get('includePaths', [])) {
@@ -57,11 +63,15 @@ function createCompletionIndex({ vscode, onError = console.warn }) {
         }
         rebuildIncludeWatchers(patterns);
         const found = new Map();
-        incomplete = false;
+        incomplete = false; projectScoped = false;
         for (const pattern of patterns) {
             if (token?.isCancellationRequested) { incomplete = true; break; }
             try {
-                const uris = await vscode.workspace.findFiles(pattern, EXCLUDE_GLOB, limit + 1, token);
+                const shared = sourceCatalog ? await sourceCatalog.discover({ root: typeof pattern === 'string' ? undefined : pattern.baseUri?.fsPath || pattern.base,
+                    limit, token, file: document?.uri.fsPath, preferProject: typeof pattern === 'string' }) : null;
+                if (shared?.truncated) incomplete = true;
+                if (typeof pattern === 'string') projectScoped = shared?.provenance === 'project';
+                const uris = shared ? shared.uris : await vscode.workspace.findFiles(pattern, EXCLUDE_GLOB, limit + 1, token);
                 for (const uri of uris) if (!isExcludedSourcePath(uri.fsPath)) found.set(keyOf(uri), uri);
             } catch (error) {
                 incomplete = true;
@@ -73,16 +83,16 @@ function createCompletionIndex({ vscode, onError = console.warn }) {
         return [...found.values()].slice(0, limit);
     }
 
-    async function scan(token) {
+    async function scan(token, document) {
         const revision = generation;
         if (needsDiscovery) {
-            fileUris = await discover(token);
+            fileUris = await discover(token, document);
             needsDiscovery = generation !== revision || !!token?.isCancellationRequested;
         }
         incomplete = discoveryIncomplete;
         const liveKeys = new Set(fileUris.map(keyOf));
         for (const document of openDocuments()) {
-            if (['verilog', 'systemverilog'].includes(document.languageId) && !isExcludedSourcePath(document.uri.fsPath)) {
+            if (['verilog', 'systemverilog'].includes(document.languageId) && !isExcludedSourcePath(document.uri.fsPath) && (!projectScoped || liveKeys.has(keyOf(document.uri)))) {
                 update(document); liveKeys.add(keyOf(document.uri));
             }
         }
@@ -114,8 +124,12 @@ function createCompletionIndex({ vscode, onError = console.warn }) {
 
     async function snapshot(document, token) {
         update(document);
-        if (dirty && !pending) pending = scan(token).finally(() => { pending = null; });
-        if (pending) await pending;
+        // 文件事件可能在异步读取中抵达；最多重试两次，持续编辑时仍明确返回不完整状态。
+        for (let attempt = 0; attempt < 3; attempt++) {
+            if (dirty && !pending) pending = scan(token, document).finally(() => { pending = null; });
+            if (pending) await pending;
+            if (!dirty || token?.isCancellationRequested) break;
+        }
         const current = update(document);
         return { current, records: [...records.values()], fileUris, incomplete: incomplete || dirty };
     }
@@ -136,6 +150,10 @@ function createCompletionIndex({ vscode, onError = console.warn }) {
     if (vscode.workspace.createFileSystemWatcher) {
         watch(SOURCE_GLOB, subscriptions);
     }
+    if (sourceCatalog) subscriptions.push(sourceCatalog.onDidChange(change => {
+        if (change?.uri && /\.(?:sv|v|svh|vh)$/i.test(change.uri.fsPath)) invalidate(change.uri, change.kind !== 'change');
+        else invalidate();
+    }));
     return { snapshot, update, invalidate, dispose() { subscriptions.concat(includeSubscriptions).forEach(subscription => subscription.dispose()); records.clear(); } };
 }
 

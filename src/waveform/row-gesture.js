@@ -89,7 +89,9 @@
         function startReorder() {
             const key = model.signalKey(gesture.row.signal);
             onSelection(I.selectContextTargets(state.selected, state.multi, key, state.selectionAnchor));
-            gesture.kind = 'reorder'; gesture.targets = I.orderedTargets(state.selected, state.multi);
+            const targets = new Set(state.multi);
+            for (const row of state.rows) if (row.memberKeys?.some(key => targets.has(key))) for (const key of row.memberKeys) targets.add(key);
+            gesture.kind = 'reorder'; gesture.targets = I.orderedTargets(state.selected, targets);
             gesture.order = state.selected.slice(); gesture.previewRows = state.rows;
             presentation.dragKeys = new Set(gesture.targets); canvas.style.cursor = 'grabbing';
         }
@@ -105,7 +107,7 @@
                 const order = L.insertBlock(state.selected, gesture.targets, slot);
                 if (order.some((key, index) => key !== gesture.order[index])) {
                     gesture.order = order;
-                    gesture.previewRows = L.buildRows(order, state.signals, state.formats, state.heights); animate(gesture.previewRows);
+                    gesture.previewRows = L.buildRows(order, state.signals, state.formats, state.heights, state.groups, state.collapsedGroups); animate(gesture.previewRows);
                 }
                 presentation.insertionY = gesture.previewRows.find(row => row.key === gesture.targets[0])?.y ?? 0;
                 showPreview(); paint();
