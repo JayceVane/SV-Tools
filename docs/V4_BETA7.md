@@ -56,7 +56,22 @@ Edge视口1164×706、16可见行，50次静态全绘中位148.3ms/p95 239.7ms�
 
 Windows x64 VSIX、CLI、原生模块及manifest在忽略的bin中。`npm run package:preview`在干净提交后
 运行完整prepublish检查，拒绝已有版本产物，并将源码commit、尺寸和SHA256写入独立manifest。
-包内逐文件比对与解包宿主验收完成后，补充实际hash及报告路径。
+包内449文件，433运行文件与源码/原生/vendor逐字节一致；没有打包test、docs、用户工程或本机工具依赖。
+解包后的实际内容再次通过Qoder真实波形宿主3/3和Edge亮/暗主题完整交互，页面异常为0。
+源码提交：`f88b323a94c13e475c49df02ff4db45350c7c483`；后续验证记录提交只更新文档，不改变已生成安装包。
+
+| 产物 | 字节 | SHA256 |
+|---|---:|---|
+| `svtools-4.0.0-beta.7-win32-x64.vsix` | 18553713 | `07953b97180cc3024e2d3cd734fa654e75c2fc6e181bd65784b9cc1b6c614deb` |
+| `svtools.exe` | 24051712 | `a3031486fd0ec1ab931db57b0d12580df51353eea318894f0d4abe59b6e80e7c` |
+| `svtools.win32-x64-msvc.node` | 24201216 | `16d9ee078f8831380ddc84f3376a24525667c121d50e37c19e368c85f489a9c5` |
+
+
+本机证据位于 `bin/beta7-final-test.log`、`bin/beta7-package.log`、`bin/wave-beta7-package-report.json`、
+`bin/svtools-4.0.0-beta.7-win32-x64.manifest.json`、`bin/beta7-packaged-host.log`、
+`bin/wave-beta7-packaged-browser/report.json`、`bin/wave-beta7-corpus/report.json`、
+`bin/wave-beta7-render-performance2/performance.json`、`bin/wave-beta7-large-report.json`。
+重复运行打包检查会以1退出并提示“该预览号已存在产物”，已验证未覆盖任何文件。
 
 ## 本轮文件清单
 
