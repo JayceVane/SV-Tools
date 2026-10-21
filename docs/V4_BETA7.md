@@ -19,7 +19,7 @@
 
 | 项目 | 实际结果 |
 |---|---|
-| JS语法 | 168文件 |
+| JS语法 | 167文件 |
 | 格式化golden | 20语料、40/40断言 |
 | Node完整合同 | 558项，557通过，1项官方目录重建可选跳过 |
 | 电路合同 | 169/169 |
@@ -107,6 +107,7 @@ Windows x64 VSIX、CLI、原生模块及manifest在忽略的bin中。`npm run pa
 | `test/completion_index_test.js` | 读取途中代次变更回归 |
 | `test/helpers/waveform-client-harness.js` | 加载布局纯模型供真实client测试 |
 | `test/source_catalog_test.js` | 缓存、取消、外部include和真实XPR集成回归 |
+| `test/vscode_waveform_host.js` | 真实IDE Webview、Worker、方向与文件系统验收 |
 | `test/waveform_layout_test.js` | 跨id/时间单位、文件边界、分组折叠及排序回归 |
 | `test/waveform_renderer_test.js` | 覆盖层不触碰静态绘制及大窗口统计缓存回归 |
 | `test/waveform_signal_test.js` | 隐藏位设置跨收起、重载和再展开回归 |
