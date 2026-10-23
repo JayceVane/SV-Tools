@@ -23,12 +23,32 @@
 - Rust127/127，原生与CLI按beta.11重建。
 - 真实Qoder源树宿主4/4：普通打开默认CustomEditor、Icarus子目录重写/自动打开、文本标签关闭、
   100MiB旧文件打开期间重新仿真。其他波形保持加载，旧文件104857906字节变为新文件262字节。
-- 完整打包回归与解包后验收见后续安装包记录。
+- 全量打包回归：JS179文件，golden21语料42/42，Node586项（585通过、1项官方目录重建可选跳过），电路170/170。
+- VSIX457文件，441运行文件与源码/原生/vendor逐字节一致，包内默认编辑器与两个新模块均校验。
+- 解包后真实Qoder生命周期4/4；记录loadingAtSimulationStart=true，证明100MiB旧数据尚在加载时已开始本轮仿真流程。
+- 解包后既有波形宿主4/4，涵盖RTL角色、Webview/worker握手、布局及图片文件服务。
+- 真实Icarus另外确认未指定dumpfile时生成dump.vcd，路径推断与实际工具行为一致。
 
 本机证据：bin/beta11-before-fix.log、bin/beta11-lifecycle-contracts.log、bin/beta11-node22.log、
 bin/beta11-rust.log、bin/beta11-native-build.log、bin/beta11-source-host.log。
 实际宿主命令：scripts/verify-waveform-host.ps1 -CodePath <IDE> -TestPath test/vscode_waveform_lifecycle_host.js
 -IcarusPath <iverilog-bin> -CygwinPath <cygwin-bin>。脚本使用独立用户、扩展与夹具目录，不安装到现有IDE。
+最终证据另见bin/beta11-package.log、bin/waveform-beta11-package-report.json、
+bin/beta11-packaged-lifecycle-host.log、bin/beta11-packaged-waveform-host.log、bin/beta11-default-vcd-proof.log。
+实际宿主VS Code API1.106.3、Node24.15.0、Electron42.2.0。
+
+## 安装包
+
+源码提交`f8ed4c166016e0840a435beac8d2a059e30d8527`；后续交付记录提交仅更新文档。
+唯一版本入口生成以下产物，完整追溯见bin/svtools-4.0.0-beta.11-win32-x64.manifest.json。
+
+| 文件 | 字节 | SHA256 |
+|---|---:|---|
+| svtools-4.0.0-beta.11-win32-x64.vsix | 18571709 | `6bae5051df1a451f6726b6dfb108d79e9dffead8637ca2701a32d78497c3720b` |
+| svtools.exe | 24050176 | `682502d417644b1753136b317991227af4796de04f87f89ad3b88ecc7ba5ea25` |
+| svtools.win32-x64-msvc.node | 24199168 | `0fcc69c971a9fb30fc36e788063760730055ab8a3fe3bfc8492177a245061e70` |
+
+使用“从VSIX安装”后重载窗口。旧版本安装包保留，未安装到用户当前IDE。
 
 ## 修改清单
 

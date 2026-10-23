@@ -4,7 +4,7 @@
 host/session重复dispose返回同一退出Promise。Icarus编译成功后发现字面dumpfile/include路径，关闭对应旧波形和文本标签，
 等待worker退出才启动vvp；取消/失败/超时finally释放保护，随后按原配置载入新VCD。支持子目录产物，动态路径回退cwd和源码关联。
 重点53/53、Node22波形23/23、Rust127/127；真实Qoder4/4含默认打开、子目录重写、文本标签和100MiB旧波形打开期间重仿真。
-完整打包及逐文件清单见docs/V4_BETA11.md。保留原工程与旧VSIX，继续独立分支和草稿PR11，不自动合并或创建Release。
+全量JS179、golden42/42、Node585通过1可选跳过、电路170/170。最终包457文件/441运行文件逐字节一致；包内真实Qoder生命周期4/4、既有波形宿主4/4。100MiB开始仿真时仍在加载已记录true；Icarus默认dump.vcd另已实际验证。安装包及逐文件清单见docs/V4_BETA11.md。保留原工程与旧VSIX，继续独立分支和草稿PR11，不自动合并或创建Release。
 
 # 4.0 beta.10 多时钟域例化模板
 
