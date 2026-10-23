@@ -5,7 +5,7 @@
 
 改编自 Sublime Text [SystemVerilog](https://github.com/TheClams/SystemVerilog)（格式化）与 [Verilog-Gadget](https://github.com/poucotm/Verilog-Gadget)（生产力工具）插件。
 
-当前开发预览版本为 **4.0.0-beta.9**，修复注释后跨行参数例化漏对齐，保留波形与电路SVG/PNG图片导出、布局复用及共享源码上下文；[已发布4.0.0-beta.2](https://github.com/JayceVane/SV-Tools/releases/tag/v4.0.0-beta.2) 提供 Windows x64 VSIX 与 CLI。开发预览可通过本地VSIX安装并重载窗口，正式版目标为 **4.0.0**。源码位于 `src/`，构建产物位于 `bin/`。
+当前开发预览版本为 **4.0.0-beta.10**，修复多时钟域例化模板的时钟/复位错误连接，保留跨行例化对齐、波形与电路SVG/PNG导出及布局复用；[已发布4.0.0-beta.2](https://github.com/JayceVane/SV-Tools/releases/tag/v4.0.0-beta.2) 提供 Windows x64 VSIX 与 CLI。开发预览可通过本地VSIX安装并重载窗口，正式版目标为 **4.0.0**。源码位于 `src/`，构建产物位于 `bin/`。
 
 格式化只能改变普通空格、Tab、CR、LF；其它字符的内容、次数和顺序必须保持，即使输入
 全部乱码或语法不完整。无法安全提交的布局保留原文，详见 [格式化规范](docs/FORMAT_SPEC.md)。
@@ -35,7 +35,7 @@
 - 上下文感知补全（4 种代码场景 + 例化端口补全 + 31 个片段）
 
 **生产力工具**（源自 Verilog-Gadget）
-- 模块实例化生成（自动识别时钟/复位，可附带端口声明）
+- 模块实例化生成（逐端口同名连接，保留独立时钟/复位域，可附带端口声明）
 - 测试台生成（时钟/复位/波形 dump/init/drive 任务）
 - 代码重复编号（`{:d}`、`{0:03x}` 占位符，行列步进）
 - 代码对齐、文件头插入

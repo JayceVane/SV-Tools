@@ -21,27 +21,21 @@ pub fn generate_testbench(info: &ModuleInfo, options: &GadgetOptions) -> String 
         .chain(info.clocks.iter())
         .cloned()
         .collect();
-    let clkrstl: Vec<String> = clockl
-        .iter()
-        .chain(resetl.iter())
-        .chain(sresetl.iter())
-        .cloned()
-        .collect();
+    let arstb = resetl.first().cloned().unwrap_or_default();
+    let srstb = sresetl.first().cloned().unwrap_or_default();
+    let clock = clockl.first().cloned().unwrap_or_default();
 
     let declp = declare_param(&info.params);
-    let decls = declare_sigls(&info.ports, &clkrstl);
-    // Use build_instance_code from module_inst for aligned formatting with comments
-    // Add tab indentation to each line of the instance
+    // 只排除下方实际声明并生成激励的信号；其它域仍需独立声明。
+    let driven_controls = [clock.clone(), arstb.clone(), srstb.clone()];
+    let decls = declare_sigls(&info.ports, &driven_controls);
+    // 共享例化器保持每个端口的原名，额外域的激励由用户按设计补充。
     let minst_raw = build_instance_code(info, iprefix);
     let minst = minst_raw
         .lines()
         .map(|line| format!("\t{}", line))
         .collect::<Vec<_>>()
         .join("\n");
-
-    let arstb = resetl.first().cloned().unwrap_or_default();
-    let srstb = sresetl.first().cloned().unwrap_or_default();
-    let clock = clockl.first().cloned().unwrap_or_default();
 
     // Clock generation
     let sclks = if !clock.is_empty() {
