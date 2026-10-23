@@ -135,7 +135,14 @@ impl Engine {
                 *offset += line.len() + 1;
                 Some((start, line))
             })
-            .find_map(|(offset, line)| RE_INST_FULL.is_match(line.trim()).then_some(offset))
+            // 参数头可能跨行，必须从候选行读取完整后缀；单行检测会漏掉
+            // 注释后的 `child #( ...\n) u_child (`，使注释误入实例对齐器。
+            .find_map(|(offset, _)| {
+                RE_INST_FULL
+                    .captures(&code[offset..])
+                    .filter(Self::is_instance_header)
+                    .map(|_| offset)
+            })
             .unwrap_or(0);
         if start == 0 {
             return self.align_instance(input, level);

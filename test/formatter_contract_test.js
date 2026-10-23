@@ -394,3 +394,40 @@ test('选区赋值对齐不使用不支持的前瞻，注释字符串中的等�
     assert.ok(output.includes('// fake = preserved'));
     assert.ok(output.includes('$display("a = b");'));
 });
+
+const splitParameterInstance = `    cdc_1bit #(          .CDC_LEVEL (CDC_LEVEL)
+        ) u_cdc_req2b_a (
+        .i_clk   (i_clk  ), // input   i_clk
+        .i_rst_n (i_rst_n), // input   i_rst_n
+        .i_bit   (i_bit  ), // input   i_bit
+        .o_bit   (o_bit  )  // output  o_bit
+        );
+`;
+
+test('注释后的跨行参数实例复用完整头部定位，端口与结束括号正确对齐', () => {
+    for (const options of [{}, { useTab: true }, { instAlignPort: false }, { paramOneLine: false }, { inlineCompact: false }]) {
+        for (const newline of ['\n', '\r\n']) {
+            for (const comment of ['// Signal declarations', '/* 参数实例 (ignored); */']) {
+                const source = (`module demo;\nreg req;\n\n${comment}\n\n`
+                    + splitParameterInstance + 'endmodule\n').replace(/\n/g, newline);
+                const output = formatStable(source, options);
+                const columns = bindingColumns(output.slice(output.indexOf('u_cdc_req2b_a')));
+                assert.equal(significant(output), significant(source));
+                assert.equal(columns.length, 4, output);
+                assert.equal(columns[0] === columns[1], options.instAlignPort !== false, output);
+                const indent = options.useTab ? '\t' : '    ';
+                assert.ok(output.includes(`\n${indent});\nendmodule`), output);
+                assert.ok(output.includes(comment), output);
+            }
+        }
+    }
+});
+
+test('带分组注释的跨行参数实例选区与正文保持同样布局', () => {
+    const source = '    // Signal declarations\n\n' + splitParameterInstance;
+    const output = native.alignCode(source, 4), columns = bindingColumns(output);
+    assert.equal(significant(output), significant(source));
+    assert.equal(columns[0], columns[1], output);
+    assert.equal(native.alignCode(output, 4), output);
+    assert.match(output, /\n    \);\n$/);
+});

@@ -86,6 +86,18 @@ mod regression_tests {
     use crate::{config::FormatOptions, format_with_protect_passthrough};
 
     #[test]
+    fn split_parameter_instance_after_comment_is_aligned() {
+        let source = "module demo;\n// Signal declarations\n\nchild #( .WIDTH(8)\n) u_child (\n.a( x ),\n.long_port( y )\n    );\nendmodule\n";
+        let output = format_with_protect_passthrough(source, &FormatOptions::default());
+        assert!(output.contains(".a        (x)"), "{output}");
+        assert!(output.contains("\n    );\nendmodule"), "{output}");
+        assert_eq!(
+            format_with_protect_passthrough(&output, &FormatOptions::default()),
+            output
+        );
+    }
+
+    #[test]
     fn instances_after_multiple_generate_processes_are_aligned() {
         let source = "module demo;\ngenerate\nalways @(posedge clk) begin\nq<=d;\nend\nassign delay=q;\nalways @(posedge clk) begin\nq1<=q;\nif (!a && b) x<=1;\nelse if (x) x<=0;\nif(x) cnt<=cnt+1;\nend\nendgenerate\n// ports group\nchild u_child (\n.a( short_sig ), // comment (ignored),\n.long_port( longer_sig )\n);\nendmodule\n";
         let output = format_with_protect_passthrough(source, &FormatOptions::default());
