@@ -30,8 +30,8 @@
 |---|---|
 | JS语法 | 174文件 |
 | 格式化golden | 20语料40/40断言 |
-| Node完整合同 | 最终prepublish记录在bin/beta8-package.log |
-| 电路合同 | 最终prepublish记录在bin/beta8-package.log |
+| Node完整合同 | 564项，563通过、1项官方目录重建可选跳过 |
+| 电路合同 | 170/170 |
 | 导出与host重点合同 | 26/26，含真实VCD worker |
 | Node22.20.0重点合同 | 26/26 |
 | Rust | 125/125 |
@@ -54,7 +54,19 @@ bin/beta8-export-contracts.log、bin/beta8-node22.log、bin/beta8-rust.log。图
 ## 安装包
 
 beta8 Windows x64 VSIX通过唯一版本入口生成；源码commit和产物SHA在manifest中。
-生成后补充逐文件核对与解包验证结果。
+VSIX 455文件，439运行文件与源码/原生/vendor逐字节一致。
+解包内容再次通过波形导出8项、电路导出8项及真实Qoder宿主4项，浏览器异常为0。
+源码提交`7dae52cfc8eace49a5a35a31c7d3e566102ea4cf`；此后的交付记录提交只更新文档，不改变安装包。
+
+| 文件 | 字节 | SHA256 |
+|---|---:|---|
+| `svtools-4.0.0-beta.8-win32-x64.vsix` | 18568067 | `f29f5f291ea0f3f349e067fa0adc52cbd8badb14d6620b36d800e7e694138d57` |
+| `svtools.exe` | 24051712 | `24e78a674dcd1406ece2d2682112d3a643d802f0f59a6299654198541b322250` |
+| `svtools.win32-x64-msvc.node` | 24201216 | `46c468a9d017c74fdd95bb8c0e2376fad19579eb45d5c7cee8036a48aedd0571` |
+
+解包报告`bin/wave-beta8-package-report.json`，完整追溯`bin/svtools-4.0.0-beta.8-win32-x64.manifest.json`。
+发布内容验收在`bin/beta8-packaged-wave-export/exports.json`、`bin/beta8-packaged-circuit-export/exports.json`、
+`bin/beta8-packaged-host.log`；没有安装到用户当前IDE或改变其配置。
 
 ## 逐文件清单
 
