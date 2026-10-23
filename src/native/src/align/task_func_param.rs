@@ -96,7 +96,7 @@ pub fn align_task_func_param(
     let mut len_bw_a: Vec<usize> = Vec::new();
     for d in &decl {
         if let Some(bw) = d.name("bw") {
-            let bw_clean = Regex::new(r"\s*").unwrap().replace_all(bw.as_str(), "");
+            let bw_clean = crate::source_scan::without_code_whitespace(bw.as_str());
             for (bi, inner) in Regex::new(r"\[(.+?)\]")
                 .unwrap()
                 .find_iter(&bw_clean)
@@ -148,7 +148,7 @@ pub fn align_task_func_param(
         }
         let bw = d.name("bw").map(|x| x.as_str()).unwrap_or("");
         if !bw.is_empty() {
-            let bw_clean = Regex::new(r"\s*").unwrap().replace_all(bw, "");
+            let bw_clean = crate::source_scan::without_code_whitespace(bw);
             plen += 1 + bw_clean.len();
         } else if len_bw > 0 {
             plen += 1 + len_bw;
@@ -214,7 +214,7 @@ pub fn align_task_func_param(
                             }
                         }
                         if !bw_raw.is_empty() {
-                            let bw_clean = Regex::new(r"\s*").unwrap().replace_all(bw_raw, "");
+                            let bw_clean = crate::source_scan::without_code_whitespace(bw_raw);
                             let mut bw_s = String::new();
                             for (bi, inner) in Regex::new(r"\[(.+?)\]")
                                 .unwrap()
@@ -247,7 +247,7 @@ pub fn align_task_func_param(
                         l_new.push_str(dir);
                         let bw_raw = m_port.name("bw").map(|x| x.as_str()).unwrap_or("");
                         if !bw_raw.trim().is_empty() {
-                            let bw_clean = Regex::new(r"\s*").unwrap().replace_all(bw_raw, "");
+                            let bw_clean = crate::source_scan::without_code_whitespace(bw_raw);
                             let mut bw_s = String::new();
                             for (bi, inner) in Regex::new(r"\[(.+?)\]")
                                 .unwrap()

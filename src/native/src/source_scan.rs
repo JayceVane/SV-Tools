@@ -237,20 +237,199 @@ pub fn captures<'source, 'mask>(
     Some(SourceCaptures { source, captures })
 }
 
-/// 删除代码区空白；保护区原文不变，转义标识符至少保留一个终止空白。
+/// 布局安全检查使用最长匹配的词法 token；保护区继续复用扫描器的原文区间。
+#[derive(Debug, Clone)]
+pub struct SyntaxToken<'a> {
+    pub kind: SegmentKind,
+    pub text: &'a str,
+    pub range: Range<usize>,
+}
+
+struct SyntaxTokens<'a> {
+    source: &'a str,
+    position: usize,
+    directive_line: bool,
+}
+
+/// 仅忽略四种 ASCII 排版字符。数字、完整操作符和宏调用均保持词法边界。
+pub fn syntax_tokens(text: &str) -> impl Iterator<Item = SyntaxToken<'_>> {
+    SyntaxTokens {
+        source: text,
+        position: 0,
+        directive_line: false,
+    }
+}
+
+impl<'a> Iterator for SyntaxTokens<'a> {
+    type Item = SyntaxToken<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        while matches!(
+            self.source.as_bytes().get(self.position),
+            Some(b' ' | b'\t' | b'\r' | b'\n')
+        ) {
+            let start = self.position;
+            let newline = matches!(self.source.as_bytes()[start], b'\r' | b'\n');
+            self.position += 1;
+            if self.source.as_bytes()[start] == b'\r'
+                && self.source.as_bytes().get(self.position) == Some(&b'\n')
+            {
+                self.position += 1;
+            }
+            if newline && self.directive_line {
+                self.directive_line = false;
+                if !self.source[self.position..]
+                    .trim_matches([' ', '\t', '\r', '\n'])
+                    .is_empty()
+                {
+                    return Some(SyntaxToken {
+                        kind: SegmentKind::Directive,
+                        text: &self.source[start..self.position],
+                        range: start..self.position,
+                    });
+                }
+            }
+        }
+        let start = self.position;
+        if start == self.source.len() {
+            return None;
+        }
+        let (kind, end) = protected_region(self.source, start).unwrap_or_else(|| {
+            (
+                SegmentKind::Code,
+                start + code_token_len(&self.source[start..]),
+            )
+        });
+        self.position = end;
+        let text = &self.source[start..end];
+        if kind == SegmentKind::Code
+            && matches!(
+                text,
+                "`ifdef"
+                    | "`ifndef"
+                    | "`elsif"
+                    | "`else"
+                    | "`endif"
+                    | "`include"
+                    | "`undef"
+                    | "`timescale"
+                    | "`default_nettype"
+                    | "`resetall"
+                    | "`celldefine"
+                    | "`endcelldefine"
+                    | "`pragma"
+                    | "`line"
+                    | "`nounconnected_drive"
+                    | "`unconnected_drive"
+                    | "`begin_keywords"
+                    | "`end_keywords"
+            )
+        {
+            self.directive_line = true;
+        }
+        Some(SyntaxToken {
+            kind,
+            text,
+            range: start..end,
+        })
+    }
+}
+
+fn code_token_len(text: &str) -> usize {
+    use std::sync::LazyLock;
+    // 操作符最长者在前；based number 内标准允许的空白属于同一个数字 token。
+    static TOKEN: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(concat!(
+        r"^(?:",
+        r"(?:[0-9][0-9_]*[ \t\r\n]*)?'[ \t\r\n]*[sS]?[bBoOdDhH][ \t\r\n]*[0-9a-fA-F_xXzZ?]+|",
+        r"'[01xXzZ]|",
+        r"[0-9][0-9_]*(?:\.[0-9_]+(?:[eE][+-]?[0-9_]+)?|[eE][+-]?[0-9_]+)(?:ms|us|ns|ps|fs|s)?|",
+        r"`?[\w$]+|",
+        r"<<<=|>>>=|===|!==|==\?|!=\?|<<<|>>>|<<=|>>=|&&&|\|->|\|=>|<->|->>|#-#|#=#|",
+        r"\*\*|\+\+|--|&&|\|\||->|=>|\*>|##|<<|>>|<=|>=|==|!=|~&|~\||~\^|\^~|",
+        r"\+=|-=|\*=|/=|%=|&=|\|=|\^=|::|\.\*|:=|:/|\+:|-:|@@|``|",
+        r"(?s:.)",
+        r")"
+    )).expect("valid SystemVerilog token pattern")
+    });
+    TOKEN.find(text).expect("nonempty source has a token").end()
+}
+
+/// 比较词法事实；注释内部排版无语义，字符串/宏体/转义标识符仍需原文保真。
+pub fn same_syntax_token(left: &SyntaxToken<'_>, right: &SyntaxToken<'_>) -> bool {
+    if left.kind != right.kind {
+        return false;
+    }
+    match left.kind {
+        SegmentKind::Code => left
+            .text
+            .bytes()
+            .filter(|byte| !matches!(byte, b' ' | b'\t' | b'\r' | b'\n'))
+            .eq(right
+                .text
+                .bytes()
+                .filter(|byte| !matches!(byte, b' ' | b'\t' | b'\r' | b'\n'))),
+        SegmentKind::LineComment | SegmentKind::BlockComment => true,
+        _ => {
+            left.text == right.text
+                || normalized_line_endings(left.text) == normalized_line_endings(right.text)
+        }
+    }
+}
+
+fn normalized_line_endings(text: &str) -> String {
+    text.replace("\r\n", "\n").replace('\r', "\n")
+}
+
+/// 不分配 token 列表，避免大文件的安全检查额外放大内存占用。
+pub fn preserves_syntax(source: &str, candidate: &str) -> bool {
+    let mut before = syntax_tokens(source);
+    let mut after = syntax_tokens(candidate);
+    loop {
+        match (before.next(), after.next()) {
+            (None, None) => return true,
+            (Some(left), Some(right)) if same_syntax_token(&left, &right) => {}
+            _ => return false,
+        }
+    }
+}
+
+fn requires_separator(left: &SyntaxToken<'_>, right: &SyntaxToken<'_>) -> bool {
+    let joined = format!("{}{}", left.text, right.text);
+    let mut tokens = syntax_tokens(&joined);
+    !tokens
+        .next()
+        .is_some_and(|token| same_syntax_token(left, &token))
+        || !tokens
+            .next()
+            .is_some_and(|token| same_syntax_token(right, &token))
+        || tokens.next().is_some()
+}
+
+/// 紧凑代码区空白；保留防止 token 合并、注释吞代码和转义标识符延长所需的分隔。
 pub fn without_code_whitespace(text: &str) -> String {
     let mut output = String::with_capacity(text.len());
-    let mut after_escaped_identifier = false;
-    for segment in scan(text) {
-        if segment.kind == SegmentKind::Code {
-            if after_escaped_identifier && segment.text.starts_with(char::is_whitespace) {
-                output.push(' ');
+    let mut previous: Option<SyntaxToken<'_>> = None;
+    for token in syntax_tokens(text) {
+        if let Some(left) = &previous {
+            if left.range.end < token.range.start && requires_separator(left, &token) {
+                output.push(
+                    if left.kind == SegmentKind::LineComment || token.kind == SegmentKind::Directive
+                    {
+                        '\n'
+                    } else {
+                        ' '
+                    },
+                );
             }
-            output.extend(segment.text.chars().filter(|ch| !ch.is_whitespace()));
-        } else {
-            output.push_str(segment.text);
         }
-        after_escaped_identifier = segment.kind == SegmentKind::EscapedIdentifier;
+        output.push_str(token.text);
+        previous = Some(token);
+    }
+    if previous.is_some_and(|token| {
+        token.kind == SegmentKind::EscapedIdentifier && token.range.end < text.len()
+    }) {
+        output.push(' ');
     }
     output
 }
@@ -492,5 +671,85 @@ mod layout_capture_tests {
         assert_eq!(trim_code_end("a; // trailing  "), "a; // trailing  ");
         assert_eq!(trim_code_end(r"wire \name   "), r"wire \name   ");
         assert_eq!(trim_code_end("a;   "), "a;");
+    }
+}
+
+#[cfg(test)]
+mod syntax_safety_tests {
+    use super::*;
+
+    #[test]
+    fn syntax_tokens_keep_longest_operators_numbers_and_protected_regions() {
+        let source =
+            "a === b; x >>>= 1; 1.25e-3 8'hff 8 'h ff `MACRO \"a  b\" \\escaped.id ; // note\n";
+        let tokens: Vec<_> = syntax_tokens(source).map(|token| token.text).collect();
+        assert_eq!(
+            tokens,
+            [
+                "a",
+                "===",
+                "b",
+                ";",
+                "x",
+                ">>>=",
+                "1",
+                ";",
+                "1.25e-3",
+                "8'hff",
+                "8 'h ff",
+                "`MACRO",
+                "\"a  b\"",
+                "\\escaped.id",
+                ";",
+                "// note"
+            ]
+        );
+    }
+
+    #[test]
+    fn syntax_guard_rejects_token_merging_splitting_and_comment_capture() {
+        for (source, candidate) in [
+            ("8 + +1", "8++1"),
+            ("8 - -1", "8--1"),
+            ("a === b", "a == = b"),
+            ("a >>> b", "a >> > b"),
+            ("a & &b", "a &&b"),
+            ("a / * b", "a /* b"),
+            ("foo bar", "foobar"),
+            ("1.25e-3", "1.25e - 3"),
+            ("wire \\escaped.id ;", "wire \\escaped.id;"),
+            ("// note\nq = 1;", "// note q = 1;"),
+            ("\"a  b\"", "\"a b\""),
+            ("`define F(x) x\n", "`define F (x) x\n"),
+            ("`ifdef X\nlogic a;\n`endif", "`ifdef X logic a;\n`endif"),
+        ] {
+            assert!(
+                !preserves_syntax(source, candidate),
+                "{source:?} -> {candidate:?}"
+            );
+        }
+        assert!(preserves_syntax(
+            "logic [W - 1 : 0] a; // note  ",
+            "logic [W-1:0] a; // note"
+        ));
+        assert!(preserves_syntax("8 'h ff", "8'hff"));
+    }
+
+    #[test]
+    fn compaction_keeps_required_separators_and_still_compacts_normal_ranges() {
+        for (source, expected) in [
+            ("8 + +1 : 0", "8+ +1:0"),
+            ("8 - -1 : 0", "8- -1:0"),
+            ("W - 1 : 0", "W-1:0"),
+            ("a & & b", "a& &b"),
+            ("a / * b", "a/ *b"),
+            (" foo bar ", "foo bar"),
+            ("// note\nq = 1;", "// note\nq=1;"),
+            ("wire \\escaped.id ;", "wire\\escaped.id ;"),
+        ] {
+            let output = without_code_whitespace(source);
+            assert_eq!(output, expected);
+            assert!(preserves_syntax(source, &output));
+        }
     }
 }

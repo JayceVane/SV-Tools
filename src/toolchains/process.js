@@ -2,6 +2,7 @@
 
 const childProcess = require('child_process');
 const path = require('path');
+const { randomUUID } = require('node:crypto');
 const { ProcessOutput } = require('./output');
 const TERMINATION_GRACE_MS = 2000;
 
@@ -9,6 +10,23 @@ const TERMINATION_GRACE_MS = 2000;
 function cmdQuote(value) {
     const text = String(value);
     return /[\s"^&|<>()%!]/.test(text) ? '"' + text.replace(/"/g, '""') + '"' : text;
+}
+
+/** 启动 cmd 只解析固定变量名；第三方 BAT 内部的再次 CALL 由工具适配层处理。 */
+function batchInvocation(command, args, environment) {
+    const values = [command, ...args].map(String);
+    if (values.some(value => /["\x00-\x1f]/.test(value))) {
+        throw new TypeError('Windows 批处理路径或参数包含无法安全传递的引号或控制字符');
+    }
+    const prefix = 'SVTOOLS_BATCH_' + randomUUID().replace(/-/g, '').toUpperCase() + '_';
+    const env = { ...(environment || process.env) };
+    const words = values.map((value, index) => {
+        if (!value) return '""';
+        const name = prefix + index;
+        env[name] = value;
+        return cmdQuote('%' + name + '%');
+    });
+    return { env, args: ['/d', '/v:off', '/s', '/c', '"' + words.join(' ') + '"'] };
 }
 
 /**
@@ -147,9 +165,8 @@ class ProcessRun {
             if (signal && signal.aborted) { this.abort(); return; }
             const spawnOptions = { cwd: this.options.cwd, env: this.options.env, windowsHide: true };
             if (this.platform === 'win32' && /\.(bat|cmd)$/i.test(command)) {
-                // /s 剥掉外层引号，保留含空格的工具路径与逐参数引用。
-                const line = '"' + [command, ...args].map(cmdQuote).join(' ') + '"';
-                this.child = this.spawn('cmd.exe', ['/d', '/s', '/c', line], { ...spawnOptions, windowsVerbatimArguments: true });
+                const invocation = batchInvocation(command, args, spawnOptions.env);
+                this.child = this.spawn('cmd.exe', invocation.args, { ...spawnOptions, env: invocation.env, windowsVerbatimArguments: true });
             } else this.child = this.spawn(command, args, spawnOptions);
             this.output.bindStreams([this.child.stdout, this.child.stderr]);
             for (const [stream, isStderr] of [[this.child.stdout, false], [this.child.stderr, true]]) {

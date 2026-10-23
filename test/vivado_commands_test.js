@@ -233,3 +233,36 @@ test('停止浏览选择后，文件对话框迟到返回不会切换工程', as
     await h.commands.get('svtools.vivado.tree.stop')(); browser.resolve([uri(f.other)]); await pending;
     assert.equal(await h.api.projectSelection.current(), f.xpr);
 });
+
+
+for (const outcome of ['success', 'failed', 'cancelled', 'throw']) {
+    test(`Vivado 特殊 source/cwd 通过环境桥接且 ${outcome} 后清理`, { skip: process.platform !== 'win32' }, async t => {
+        const f = await fixture(t), cwd = path.join(f.root, 'work%VIVADO_PROBE% !literal! & (project)');
+        await fs.mkdir(cwd); const script = path.join(cwd, 'source.tcl'); await fs.writeFile(script, 'puts original\n');
+        let bridge;
+        const task = { run: async (executable, args, options) => {
+            assert.equal(executable, 'vivado.bat'); bridge = args[args.indexOf('-source') + 1];
+            assert.notEqual(bridge, script); assert.equal(path.dirname(bridge), options.cwd);
+            assert.equal(options.env.SVTOOLS_VIVADO_SOURCE_PATH, script);
+            assert.equal(options.env.SVTOOLS_VIVADO_SOURCE_CWD, cwd);
+            assert.equal(await fs.readFile(bridge, 'utf8'), 'cd $::env(SVTOOLS_VIVADO_SOURCE_CWD)\nsource -encoding utf-8 $::env(SVTOOLS_VIVADO_SOURCE_PATH)\n');
+            if (outcome === 'throw') throw Error('probe before process start');
+            return { code: outcome === 'failed' ? 2 : outcome === 'cancelled' ? null : 0,
+                aborted: outcome === 'cancelled', stopped: outcome === 'cancelled', output: '', elapsedMs: 1 };
+        } };
+        const run = () => batch.runVivadoBatchTask({ task, executable: 'vivado.bat', args: ['-mode', 'batch', '-source', script], cwd, scriptPath: script });
+        if (outcome === 'throw') await assert.rejects(run(), /probe before process start/);
+        else assert.equal((await run()).status, outcome);
+        assert.ok(bridge); await assert.rejects(fs.stat(path.dirname(bridge)), { code: 'ENOENT' });
+        assert.equal(await fs.readFile(script, 'utf8'), 'puts original\n');
+    });
+}
+
+test('Vivado 不能保真的安装路径与额外参数明确拒绝，不执行第三方 BAT', { skip: process.platform !== 'win32' }, async () => {
+    let runs = 0;
+    const task = { run: async () => { runs++; throw Error('不应执行'); } };
+    for (const [executable, extra] of [['vivado%PROBE%.bat', []], ['vivado.bat', ['-tclargs', '%PROBE%']], ['vivado.bat', ['-tclargs', '!PROBE!']]]) {
+        await assert.rejects(batch.runVivadoBatchTask({ task, executable, args: ['-source', 'source.tcl', ...extra], scriptPath: 'source.tcl' }), /厂商脚本无法安全传递/);
+    }
+    assert.equal(runs, 0);
+});

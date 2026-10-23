@@ -68,7 +68,7 @@ async function sourceFixture(t, source, extras={}) {
 
 test('磁盘源码发现字面dumpfile，忽略注释和字符串里的伪调用', async t => {
     const f=await sourceFixture(t, '// $dumpfile("fake.vcd");\ninitial begin $display("$dumpfile(fake)"); $dumpfile(/* comment */ "waves/a.vcd"); $dumpvars; end');
-    assert.deepEqual(await simulationWaveforms({files:[f.file],directory:f.directory}),{paths:[path.join(f.directory,'waves','a.vcd')],uncertain:false});
+    assert.deepEqual(await simulationWaveforms({files:[f.file],directory:f.directory}),{paths:[path.join(f.directory,'waves','a.vcd'),path.join(f.directory,'dump.vcd')],uncertain:false});
 });
 
 test('include路径与循环引用使用同一词法事实，输出路径以仿真cwd为基准', async t => {
@@ -92,3 +92,17 @@ test('路径扫描响应取消，不启动迟到的读文件工作', async () =>
     const controller=new AbortController();controller.abort();
     await assert.rejects(simulationWaveforms({files:[],directory:root,signal:controller.signal}),{name:'AbortError'});
 });
+
+
+for (const statement of ['`ifdef NAMED_DUMP\n$dumpfile("named.vcd");\n`endif', 'if (0) $dumpfile("named.vcd");']) {
+    test('条件dumpfile未执行时，默认dump.vcd仍被关闭并保护：' + statement.split('\n')[0], async t => {
+        const f = await sourceFixture(t, 'module tb; initial begin\n' + statement + '\n$dumpvars(0,tb); end endmodule');
+        const output = await simulationWaveforms({files:[f.file], directory:f.directory});
+        const fallback = path.join(f.directory,'dump.vcd');
+        assert.ok(output.paths.includes(fallback), JSON.stringify(output));
+        const registry = createWaveformRegistry(), old = entry(registry, fallback);
+        const lease = await registry.prepareForSimulation({...output,directory:f.directory,sourceFile:f.file});
+        assert.equal(old.closed,true);assert.throws(()=>registry.assertAvailable(fallback),/重新仿真/);
+        lease.dispose();await registry.dispose();
+    });
+}

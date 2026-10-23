@@ -114,8 +114,10 @@ test('Windows 批处理经 cmd 启动，并对带空格路径完整引用', asyn
     const result = await runProcess('C:\\Program Files\\Vivado\\vivado.bat', ['-source', 'C:\\work project\\run.tcl'], { platform: 'win32', spawn });
     assert.equal(result.code, 0);
     assert.equal(launches[0].command, 'cmd.exe');
-    assert.deepEqual(launches[0].args.slice(0, 3), ['/d', '/s', '/c']);
-    assert.match(launches[0].args[3], /^""C:\\Program Files\\Vivado\\vivado\.bat" -source "C:\\work project\\run\.tcl""$/);
+    assert.deepEqual(launches[0].args.slice(0, 4), ['/d', '/v:off', '/s', '/c']);
+    const names = [...launches[0].args[4].matchAll(/%([A-Z0-9_]+)%/g)].map(match => match[1]);
+    assert.equal(names.length, 3);
+    assert.deepEqual(names.map(name => launches[0].options.env[name]), ['C:\\Program Files\\Vivado\\vivado.bat', '-source', 'C:\\work project\\run.tcl']);
     assert.equal(launches[0].options.windowsHide, true);
 });
 
@@ -268,4 +270,30 @@ test('runner 停止后未收到 close 事件时有界完成，保留已有日志
     assert.equal(typeof result.errorMessage, 'string');
     assert.ok(result.errorMessage.length > 0);
     assert.ok(result.elapsedMs < 3500);
+});
+
+
+test('真实 Windows BAT 的路径和参数含百分号与元字符时逐字保留', { skip: process.platform !== 'win32' }, async t => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'svtools batch literal '));
+    t.after(() => {
+        assert.equal(path.dirname(directory), path.resolve(os.tmpdir()));
+        assert.ok(path.basename(directory).startsWith('svtools batch literal '));
+        fs.rmSync(directory, { recursive: true, force: true });
+    });
+    const batch = path.join(directory, 'tool %SVTOOLS_BATCH_PROBE% & (literal)!.cmd');
+    fs.writeFileSync(batch, '@echo off\r\nsetlocal DisableDelayedExpansion\r\necho ARG1="%~1"\r\necho ARG2="%~2"\r\necho ARG3="%~3"\r\nexit /b 7\r\n');
+    const values = ['path with space & (literal) %SVTOOLS_BATCH_PROBE% ! ^ | < >', '100% %UNKNOWN_BATCH_PROBE% !literal!', ''];
+    const result = await runProcess(batch, values, { timeoutMs: 5000, env: { ...process.env, SVTOOLS_BATCH_PROBE: 'EXPANDED' } });
+    assert.equal(result.code, 7, result.output + '\n' + result.errorMessage);
+    assert.deepEqual(result.stdout.trim().split(/\r?\n/), values.map((value, i) => `ARG${i + 1}="${value}"`));
+});
+
+test('Windows BAT 无法安全表示的引号及控制字符在启动前明确拒绝', async () => {
+    let launches = 0;
+    for (const value of ['quoted"argument', 'line\nbreak', 'carriage\rreturn', 'nul\0value']) {
+        const result = await runProcess('tool.bat', [value], { platform: 'win32', spawn() { launches++; throw Error('不应启动'); } });
+        assert.equal(result.code, -1);
+        assert.match(result.errorMessage, /批处理.*(?:引号|控制字符)/);
+    }
+    assert.equal(launches, 0);
 });

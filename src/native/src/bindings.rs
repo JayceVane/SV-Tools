@@ -34,10 +34,8 @@ fn layout_js_string(
 #[napi]
 pub fn generate_module_inst(text: String, options: GadgetOptions) -> Result<ModuleInstResult> {
     let cleaned = crate::parser::comments::clean_comment(&text);
-    let normalized = crate::codegen::align_code::normalize_for_parsing(&cleaned);
-
-    match parser::module::parse_module(&normalized, &options) {
-        Some(info) => {
+    match parser::module::parse_module_checked(&cleaned, &options) {
+        Ok(info) => {
             let port_decls = if options.include_declarations() {
                 let decls = codegen::module_inst::generate_port_declarations_only(&info);
                 if !decls.is_empty() {
@@ -59,11 +57,11 @@ pub fn generate_module_inst(text: String, options: GadgetOptions) -> Result<Modu
                 error: None,
             })
         }
-        None => Ok(ModuleInstResult {
+        Err(error) => Ok(ModuleInstResult {
             success: false,
             result: None,
             module: None,
-            error: Some("Failed to find module definition".to_string()),
+            error: Some(error),
         }),
     }
 }
@@ -72,10 +70,8 @@ pub fn generate_module_inst(text: String, options: GadgetOptions) -> Result<Modu
 #[napi]
 pub fn generate_testbench(text: String, options: GadgetOptions) -> Result<TestbenchResult> {
     let cleaned = crate::parser::comments::clean_comment(&text);
-    let normalized = crate::codegen::align_code::normalize_for_parsing(&cleaned);
-
-    match parser::module::parse_module(&normalized, &options) {
-        Some(info) => {
+    match parser::module::parse_module_checked(&cleaned, &options) {
+        Ok(info) => {
             let tb = codegen::testbench::generate_testbench(&info, &options);
             Ok(TestbenchResult {
                 success: true,
@@ -84,11 +80,11 @@ pub fn generate_testbench(text: String, options: GadgetOptions) -> Result<Testbe
                 error: None,
             })
         }
-        None => Ok(TestbenchResult {
+        Err(error) => Ok(TestbenchResult {
             success: false,
             result: None,
             module: None,
-            error: Some("Failed to find module definition".to_string()),
+            error: Some(error),
         }),
     }
 }

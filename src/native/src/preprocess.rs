@@ -445,11 +445,58 @@ fn normalize_code_fragment(s: &str) -> String {
 }
 
 fn respace_ops(s: &str) -> String {
-    let re_op = Regex::new(r"\s*(==|!=|<=|>=|<<|>>|\+=|-=|\*=|/=|%=|=|<|>)\s*").unwrap();
-    let out = re_op.replace_all(s, " $1 ");
-    let out = Regex::new(r"[ \t]+").unwrap().replace_all(&out, " ");
-    let re_sc = Regex::new(r"\s*;\s*").unwrap();
-    re_sc.replace_all(&out, "; ").into_owned()
+    let mut output = String::with_capacity(s.len());
+    let mut cursor = 0;
+    for token in source_scan::syntax_tokens(s) {
+        if !matches!(
+            token.text,
+            "==" | "!="
+                | "==="
+                | "!=="
+                | "==?"
+                | "!=?"
+                | "<="
+                | ">="
+                | "<<"
+                | ">>"
+                | "<<<"
+                | ">>>"
+                | "+="
+                | "-="
+                | "*="
+                | "/="
+                | "%="
+                | "&="
+                | "|="
+                | "^="
+                | "<<="
+                | ">>="
+                | "<<<="
+                | ">>>="
+                | "="
+                | "<"
+                | ">"
+                | ";"
+        ) {
+            continue;
+        }
+        let before = &s[cursor..token.range.start];
+        output.push_str(before.trim_end_matches([' ', '\t']));
+        if token.text != ";" && !output.ends_with(' ') {
+            output.push(' ');
+        }
+        output.push_str(token.text);
+        output.push(' ');
+        cursor = token.range.end;
+        while matches!(s.as_bytes().get(cursor), Some(b' ' | b'\t')) {
+            cursor += 1;
+        }
+    }
+    output.push_str(&s[cursor..]);
+    Regex::new(r"[ \t]+")
+        .unwrap()
+        .replace_all(&output, " ")
+        .into_owned()
 }
 
 /// property/sequence 体内多余空格归一化（spec §9.5）：
@@ -1069,5 +1116,23 @@ mod always_event_tests {
         let input = "always_ff @(posedge   get_clk(\"unclosed\"";
         assert_eq!(normalize_control_headers(input), input);
         normalize_control_headers("always @(\nalways @(posedge   clk))");
+    }
+}
+
+#[cfg(test)]
+mod complete_operator_tests {
+    use super::*;
+
+    #[test]
+    fn for_layout_uses_complete_operator_tokens() {
+        for operator in [
+            "===", "!==", "==?", "!=?", ">>>", "<<<", ">>=", "<<=", ">>>=", "<<<=",
+        ] {
+            let line = format!("for(i=0;i<1;i++) a = a {operator} 1;");
+            let output = normalize_for_line(&line);
+            assert!(output.contains(operator), "{output}");
+            assert!(output.starts_with("for(i = 0; i < 1; i++)"), "{output}");
+            assert!(source_scan::preserves_syntax(&line, &output));
+        }
     }
 }

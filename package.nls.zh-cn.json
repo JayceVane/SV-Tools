@@ -20,7 +20,7 @@
   "cfg.reset.desc": "默认的异步复位信号名列表",
   "cfg.sreset.desc": "默认的同步复位信号名列表",
   "cfg.clock.desc": "默认的时钟信号名列表",
-  "cfg.waveType.desc": "测试台生成的波形 dump 类型",
+  "cfg.waveType.desc": "测试台生成的波形格式（默认 VCD；FSDB/VPD/SHM 需要对应的仿真器支持）。",
   "cfg.taskInit.desc": "测试台中生成 init 任务",
   "cfg.taskDrive.desc": "测试台中生成 drive 任务",
   "cfg.headerTemplate.desc": "文件头模板，支持占位符：{FILE}、{DATE}、{TIME}、{YEAR}、{TABS}",

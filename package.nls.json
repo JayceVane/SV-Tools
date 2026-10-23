@@ -20,7 +20,7 @@
   "cfg.reset.desc": "Default asynchronous reset signal names",
   "cfg.sreset.desc": "Default synchronous reset signal names",
   "cfg.clock.desc": "Default clock signal names",
-  "cfg.waveType.desc": "Type of waveform dump",
+  "cfg.waveType.desc": "Waveform format for generated testbenches (VCD by default; FSDB/VPD/SHM require a compatible simulator).",
   "cfg.taskInit.desc": "Generate init task in testbench",
   "cfg.taskDrive.desc": "Generate drive task in testbench",
   "cfg.headerTemplate.desc": "Header template with placeholders: {FILE}, {DATE}, {TIME}, {YEAR}, {TABS}",

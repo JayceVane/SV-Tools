@@ -301,6 +301,14 @@ function activateProjectTree(context, deps) {
         }
         const to = await chooseFileset(parsed, type, nodeArg); if (!to) return;
         if (from === to) { vscode.window.showInformationMessage('已在 ' + to + ' 中'); return; }
+        const stat = await fs.promises.stat(node.file).catch(error => {
+            if (['ENOENT', 'ENOTDIR'].includes(error.code)) return null;
+            throw error;
+        });
+        if (!stat?.isFile()) {
+            vscode.window.showErrorMessage('移动源文件不存在或不是普通文件，原工程引用已保留：' + node.file);
+            return;
+        }
         const r = await runTcl('move_file.tcl', buildMoveFileScript({
             xprPath: xpr, file: node.file, from, to, isSv: /\.sv(h)?$/i.test(node.file)
         }), xpr, latest => hasMember(latest, from, node.file) && latest.sets.some(set => set.name === to && set.type === type));

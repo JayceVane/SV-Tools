@@ -1,10 +1,16 @@
-# 4.0 GitHub 预览版发布
+# 4.0 GitHub 发布
 
-`4.0.0-preview.1` 仅通过 GitHub Release 发布。先在功能分支同步 master，运行完整回归并打包，随后创建 PR；合入后将同版本 tag 指向合入提交。原生模块、CLI 和 VSIX 均不写入 Git 历史。
+当前发布候选为 `4.0.0-beta.12`，仍使用独立预览号。完成源码修复、完整 Node/Rust 回归、真实工具与宿主验收、依赖审计和解包核对后，才评估正式 `4.0.0`。本轮审查不自动创建正式 tag 或公开 Release。
 
-`.github/workflows/release.yml` 校验 tag 与 package.json，构建 Windows x64 原生模块及 VSIX，执行 Node/Rust 回归并上传 SHA256 清单。含 `-` 的 tag 使用 GitHub prerelease，不改变现有稳定版的 Latest 标记。若存在 `docs/releases/<tag>.md`，使用该文件作为发布说明。
+预览使用 `npm run package:preview`，要求干净源码提交、六处版本一致、原生 CLI 版本匹配；输出 VSIX 和包含 sourceCommit、大小、SHA256 的 manifest。同一版本不覆盖。构建机使用 Node 22 或更新版本，打包工具固定为 vsce 4.0.0；它不改变扩展宿主的 Node 要求。
 
-下一版本的开发代码不能补入已发布 tag。3.5.0 历史和稳定版附件继续保留。下文 Marketplace 操作为独立渠道的旧指南，此次不执行。
+正式发布时，在 PR 完成且使用者确认后，将六处版本统一为 `4.0.0`，更新发布说明、重建原生模块、重新跑验收并生成新的稳定安装包。不要将 beta 文件简单重命名为正式版。tag 必须指向已审查的源码；原生模块、CLI 和 VSIX 不进入 Git 历史。
+
+`.github/workflows/release.yml` 校验 tag 与 package.json，构建 Windows x64 原生模块及 VSIX，执行 Node/Rust 回归并上传 SHA256 清单。含 `-` 的 tag 使用 GitHub prerelease，不改变稳定版 Latest。已有同名附件时上传失败，禁止 clobber。发布说明取 `docs/releases/<tag>.md`。
+
+打包前执行根目录与 `src/native` 的 npm audit。netlistsvg 仅用于开发验证，其 JSON5/yargs 安全版本 override 需通过真实 `scripts/verify-circuit.js` 验证；生产视图使用独立模型与 ELK。不要用 `npm audit fix --force` 替代兼容性审查。
+
+3.5.0 历史和稳定版附件继续保留。下文 Marketplace 为独立渠道的旧操作指南，本轮不执行。
 
 ---
 

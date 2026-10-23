@@ -78,5 +78,5 @@ jobs:
             fi
             gh release create "$TAG" "${options[@]}"
           fi
-          gh release upload "$TAG" bin/svtools.win32-x64-msvc.node bin/svtools.exe bin/*.vsix bin/SHA256SUMS.txt --clobber
+          gh release upload "$TAG" bin/svtools.win32-x64-msvc.node bin/svtools.exe bin/*.vsix bin/SHA256SUMS.txt
         shell: bash

@@ -15,7 +15,7 @@ function literal(token) {
  */
 async function simulationWaveforms({ files, directory, includePaths = [], signal }) {
     const pending = [...files], visited = new Set(), paths = new Set();
-    let total = 0, uncertain = false, dumpfile = false, dumpvars = false;
+    let total = 0, uncertain = false, dumpvars = false;
     while (pending.length) {
         signal?.throwIfAborted();
         const file = path.resolve(pending.shift());
@@ -60,13 +60,13 @@ async function simulationWaveforms({ files, directory, includePaths = [], signal
             if (token.kind !== 'system') continue;
             if (token.value === '$dumpvars') dumpvars = true;
             if (token.value !== '$dumpfile') continue;
-            dumpfile = true;
             const name = tokens[i + 1]?.value === '(' && tokens[i + 3]?.value === ')' ? literal(tokens[i + 2]) : null;
             if (name === null || !name || name.includes(String.fromCharCode(0))) uncertain = true;
             else paths.add(path.resolve(directory, name));
         }
     }
-    if (dumpvars && !dumpfile) paths.add(path.resolve(directory, 'dump.vcd'));
+    // 源码中的dumpfile可能位于未执行分支，不能据此排除vvp的默认输出。
+    if (dumpvars) paths.add(path.resolve(directory, 'dump.vcd'));
     signal?.throwIfAborted();
     return { paths: [...paths], uncertain };
 }
