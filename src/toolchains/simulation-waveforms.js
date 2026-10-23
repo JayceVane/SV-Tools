@@ -10,10 +10,10 @@ function literal(token) {
 
 /**
  * 仿真磁盘源码的有界输出路径发现；不执行宏或表达式，动态路径明确标记为不确定。
- * @param {{files:string[],directory:string,includePaths?:string[],signal?:AbortSignal}} options
+ * @param {{files:string[],directory:string,includePaths?:string[],defaultDumpfiles?:string[],signal?:AbortSignal}} options
  * @returns {Promise<{paths:string[],uncertain:boolean}>} 绝对路径及是否需要目录回退。
  */
-async function simulationWaveforms({ files, directory, includePaths = [], signal }) {
+async function simulationWaveforms({ files, directory, includePaths = [], defaultDumpfiles = ['dump.vcd'], signal }) {
     const pending = [...files], visited = new Set(), paths = new Set();
     let total = 0, uncertain = false, dumpvars = false;
     while (pending.length) {
@@ -66,7 +66,7 @@ async function simulationWaveforms({ files, directory, includePaths = [], signal
         }
     }
     // 源码中的dumpfile可能位于未执行分支，不能据此排除vvp的默认输出。
-    if (dumpvars) paths.add(path.resolve(directory, 'dump.vcd'));
+    if (dumpvars) for (const name of defaultDumpfiles) paths.add(path.resolve(directory, name));
     signal?.throwIfAborted();
     return { paths: [...paths], uncertain };
 }

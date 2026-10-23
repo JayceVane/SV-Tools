@@ -10,6 +10,7 @@ const native = createNativeLoader({ rootDir: root }).load();
 const cases = [
     { name: 'nested', ports: ['d', 'q'], clocks: [] },
     { name: 'integer', ports: ['d', 'b', 'q'], clocks: [] },
+    { name: 'split', ports: ['d', 'q', 'r', 'qreg'], clocks: [] },
     { name: 'combinational', ports: ['d', 'q', 'pad'], clocks: [] },
     { name: 'multiclock', ports: ['launch', 'reset_main', 'capture', 'rst_n_b', 'd', 'qa', 'qb'], clocks: ['launch', 'capture'] },
     { name: 'legacy', ports: ['clk', 'rst_n', 'd', 'q'], clocks: ['clk'] },
@@ -35,7 +36,7 @@ for (const item of cases) {
         if (!item.clocks.length) assert.doesNotMatch(text, /posedge|negedge/);
         assert.doesNotMatch(text, /\$get_initial_random_seed|\b(?:unrelated_clk|unrelated_reset)\b/);
         assert.match(text, new RegExp('\\$dumpvars\\(0, tb_' + item.module + '\\);'));
-        assert.doesNotMatch(text, /\$(?:fsdbDump|vcdplus|shm_)/);
+        assert.doesNotMatch(text, /\$(?:fsdbDump|vcdplus|shm_)|\$test\$plusargs\("vcd"\)/);
     });
 }
 test('嵌套参数、字符串与继承类型在实例和TB中均完整', () => {
@@ -92,6 +93,32 @@ test('整数端口完整宽度和非ANSI同名子程序形参保持正确', () =
     assert.doesNotMatch(legacy.result, /\[[12]:0\]/);
 });
 
+for (const [name, source] of [
+    ['数组参数', "module p #(parameter integer A[0:1]='{1,2})(input d, output q); assign q=d; endmodule"],
+    ['类型参数', 'module p #(parameter type T=logic)(input d, output q); assign q=d; endmodule'],
+    ['不完整参数片段', 'module p #(parameter A=1, B)(input d, output q); assign q=d; endmodule'],
+    ['拆分数组端口', 'module p(q); output q; wire [7:0] q [0:3]; endmodule'],
+    ['拆分用户类型端口', 'module p(q); output q; pkg::type_t q; endmodule']
+]) {
+    test('声明补全不能静默省略：' + name, () => {
+        for (const method of ['generateModuleInst', 'generateTestbench']) {
+            const result = native[method](source, {});
+            assert.equal(result.success, false, JSON.stringify(result));
+            assert.ok(!result.result, result.result);
+            assert.match(result.error, /不支持|无法生成/);
+        }
+    });
+}
+test('拆分声明多名称完整补宽度和符号，局部同名声明不参与补全', () => {
+    const item = cases.find(item => item.name === 'split');
+    for (const text of [generate(item), native.generateModuleInst(item.source, {}).result]) {
+        for (const port of ['q', 'r', 'qreg']) {
+            assert.match(text, new RegExp('(?:wire|logic) signed \\[7:0\\] ' + port + ';'));
+        }
+        assert.doesNotMatch(text, /\[[12]:0\]/);
+    }
+});
+
 // 显式指定工具后，执行夹具中的DUT自检并读取真实VCD；日常合同不依赖本机安装路径。
 const iverilog = process.env.SVTOOLS_CODEGEN_IVERILOG, vvp = process.env.SVTOOLS_CODEGEN_VVP;
 for (const item of [...cases, { ...cases.find(item => item.name === 'multiclock'), name: 'multiclock_no_tasks', marker: 'multiclock', options: { taskInit: false, taskDrive: false } }]) {
@@ -107,7 +134,7 @@ for (const item of [...cases, { ...cases.find(item => item.name === 'multiclock'
         const compiled = spawnSync(iverilog, ['-g2012', '-s', 'tb_' + item.module, '-o', 'case.vvp', 'dut.sv', 'tb.sv'], options);
         fs.writeFileSync(path.join(directory, 'compile.log'), String(compiled.stdout || '') + String(compiled.stderr || '') + String(compiled.error || ''));
         assert.equal(compiled.status, 0, fs.readFileSync(path.join(directory, 'compile.log'), 'utf8'));
-        const runtime = spawnSync(vvp, ['case.vvp', '+vcd'], options);
+        const runtime = spawnSync(vvp, ['case.vvp'], options);
         fs.writeFileSync(path.join(directory, 'runtime.log'), String(runtime.stdout || '') + String(runtime.stderr || '') + String(runtime.error || ''));
         assert.equal(runtime.status, 0, fs.readFileSync(path.join(directory, 'runtime.log'), 'utf8'));
         assert.match(runtime.stdout, new RegExp('CODEGEN_PASS ' + (item.marker || item.name)));

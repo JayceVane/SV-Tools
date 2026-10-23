@@ -40,7 +40,7 @@
   "cfg.iverilog_libraryPaths.desc": "模块库目录（-y，按文件名解析模块），相对工作区根目录。文件所在目录始终会被包含。",
   "cfg.iverilog_simFiles.desc": "仿真时与当前文件一同编译的附加源文件 glob 模式（如 src/*.v、tb/*.sv）",
   "cfg.iverilog_simTop.desc": "仿真的顶层模块（-s）。留空 = 由 iverilog 自动选择根模块。",
-  "cfg.iverilog_simArgs.desc": "运行 vvp 时附加的参数（如 +trace 之类的 plusargs）",
+  "cfg.iverilog_simArgs.desc": "仿真扩展参数，置于 .vvp 输入文件后（如 +trace、+seed=73、-fst）。已知 vvp CLI 选项（带值的 -l/-M/-m 及 -h/-i/-n/-N/-q/-s/-v/-V）自动置于文件前；-- 之后的值均按扩展参数原序传递。",
   "cfg.iverilog_simTimeoutMs.desc": "仿真超时时间（毫秒）；0 = 运行到 $finish 结束（可通过命令或状态栏停止）",
   "cfg.iverilog_waveViewer.desc": "外部波形查看器可执行文件（如 GTKWave）。留空 = 使用内置 VCD 波形查看器（webview 面板；.fst 文件使用外部程序打开）",
   "cfg.iverilog_autoOpenWaveform.desc": "仿真产生新的 .vcd 文件时自动打开内置波形查看器",

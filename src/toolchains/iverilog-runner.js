@@ -23,6 +23,28 @@ function waveformSnapshot(directory, targets = []) {
 }
 function changedWaveforms(before, after) { return [...after.keys()].filter(file => after.get(file) !== before.get(file)); }
 
+/** vvp CLI 选项位于输入文件前，RTL/VPI/波形扩展参数位于其后；-- 显式结束配置中的 CLI 识别。 */
+function simulationArguments(values) {
+    if (!Array.isArray(values) || values.some(value => typeof value !== 'string')) {
+        throw new TypeError('svtools.iverilog.simArgs 必须是字符串数组');
+    }
+    const flags = [], extended = [];
+    for (let index = 0; index < values.length; index++) {
+        const value = values[index];
+        if (value === '--') { extended.push(...values.slice(index + 1)); break; }
+        // -lxt/-lxt2 是波形扩展参数，不能当作带附着文件名的 -l 日志选项。
+        const option = value !== '-' && !['-lxt', '-lxt2'].includes(value)
+            && /^-[hinNqsvV]*(?:([lMm])([\s\S]*))?$/.exec(value);
+        if (!option) { extended.push(value); continue; }
+        flags.push(value);
+        if (option[1] && !option[2]) {
+            if (index + 1 >= values.length) throw new Error('svtools.iverilog.simArgs 的 vvp 选项 ' + value + ' 缺少参数值');
+            flags.push(values[++index]);
+        }
+    }
+    return { flags, extended };
+}
+
 /**
  * Icarus 流程独立于 VS Code；外部边界提供配置、编译、诊断发布及波形打开。
  * @param {object} deps 工具和工作区适配器。 @returns {{lint:Function,simulate:Function}}
@@ -74,11 +96,12 @@ function createIcarusRunner(deps) {
         return { directory, toolchain, filePath, fileDir, config, vvpFile, args, files: [filePath, ...extra] };
     }
     function runtimeInvocation(prep) {
-        const args = [...(prep.toolchain.vvpPrefix || []), '-n', ...prep.config.get('simArgs', []), prep.vvpFile];
+        const { flags, extended } = simulationArguments(prep.config.get('simArgs', []));
+        const args = [...(prep.toolchain.vvpPrefix || []), '-n', ...flags, prep.vvpFile, ...extended];
         const stdbuf = prep.toolchain.cygwinDir && path.join(prep.toolchain.cygwinDir, 'stdbuf.exe');
         return process.platform === 'win32' && stdbuf && fs.existsSync(stdbuf)
-            ? { command: stdbuf, args: ['-oL', prep.toolchain.vvp, ...args], wrappedProcessName: 'vvp.exe' }
-            : { command: prep.toolchain.vvp, args };
+            ? { command: stdbuf, args: ['-oL', prep.toolchain.vvp, ...args], extended, wrappedProcessName: 'vvp.exe' }
+            : { command: prep.toolchain.vvp, args, extended };
     }
     async function simulate(task, document) {
         const prep = await prepareSimulation(task, document);
@@ -89,7 +112,12 @@ function createIcarusRunner(deps) {
         const compiledSummary = complete(task, document, compiled); if (!compiledSummary.ok) return compiledSummary;
         channel.appendLine('编译产物：' + prep.vvpFile);
         const includePaths = prep.args.flatMap((arg, index) => arg === '-I' ? [prep.args[index + 1]] : []);
-        const waveforms = await simulationWaveforms({ files: files || prep.files, directory: prep.fileDir, includePaths, signal: task.signal });
+        const invocation = runtimeInvocation(prep);
+        const overridden = invocation.extended.filter(value => value.startsWith('-dumpfile=')).map(value => value.slice(10)).filter(Boolean);
+        // 不同vvp/dumper可能保留原名或补后缀；条件dumpfile仍可能不执行，保守保护所有候选。
+        const defaultDumpfiles = overridden.length ? overridden.flatMap(name => path.extname(name) ? [name]
+            : [name, ...['vcd', 'fst', 'lxt', 'lxt2'].map(extension => name + '.' + extension)]) : ['dump.vcd'];
+        const waveforms = await simulationWaveforms({ files: files || prep.files, directory: prep.fileDir, includePaths, defaultDumpfiles, signal: task.signal });
         if (waveforms.uncertain) channel.appendLine('波形路径含动态表达式或未完整解析：本次仿真目录内已打开的波形将先关闭。');
         task.throwIfCancelled();
         const lease = await deps.prepareWaveforms?.({ ...waveforms, directory: prep.fileDir, sourceFile: prep.filePath });
@@ -97,7 +125,6 @@ function createIcarusRunner(deps) {
         try {
             task.throwIfCancelled();
             before = waveformSnapshot(prep.fileDir, waveforms.paths);
-            const invocation = runtimeInvocation(prep);
             result = await task.run(invocation.command, invocation.args, { cwd: prep.fileDir, env: prep.toolchain.env,
                 stage: 'running', wrappedProcessName: invocation.wrappedProcessName,
                 timeoutMs: Number(prep.config.get('simTimeoutMs') || 0), onStdout: output.append, onStderr: output.append });

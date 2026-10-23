@@ -53,7 +53,7 @@ pub fn parse_module_checked(text: &str, options: &GadgetOptions) -> Result<Modul
             return Err("模块参数列表缺少左括号".into());
         }
         let end = source_scan::find_matching(&masked, cursor).ok_or("模块参数或端口括号不完整")?;
-        parse_param(&cleaned[cursor + 1..end], "parameter", &mut params);
+        parse_param(&cleaned[cursor + 1..end], "parameter", &mut params)?;
         cursor = source_scan::next_code_offset(&cleaned, end + 1);
     }
     let mut ports = Vec::new();
@@ -73,7 +73,7 @@ pub fn parse_module_checked(text: &str, options: &GadgetOptions) -> Result<Modul
         .start()
         + body_start;
     let body = &cleaned[body_start..body_end];
-    let body_mask = mask_subprograms(&masked[body_start..body_end]);
+    let body_mask = mask_nested_scopes(&masked[body_start..body_end]);
 
     // 非ANSI端口只补全模块头已有名称；子程序形参不新增模块接口。
     for found in Regex::new(r"\b(?:input|output|inout)\b[^;]*;")
@@ -100,8 +100,9 @@ pub fn parse_module_checked(text: &str, options: &GadgetOptions) -> Result<Modul
             body[found.start()..found.end()].trim_end_matches(';'),
             "parameter",
             &mut params,
-        );
+        )?;
     }
+    complete_port_declarations(body, &body_mask, &mut ports)?;
     if let Some(port) = ports.iter().find(|port| port.direction.is_empty()) {
         return Err(format!(
             "无法生成模板：端口{}缺少可解析的input/output/inout声明；接口或modport暂不支持",
@@ -138,19 +139,27 @@ fn split_declarations(text: &str, separator: char) -> Vec<&str> {
         .collect()
 }
 
-fn parse_param(text: &str, prefix: &str, params: &mut Vec<Param>) {
+fn unsupported_param(declaration: &str) -> String {
+    let snippet: String = declaration.chars().take(160).collect();
+    format!("无法生成模板：暂不支持参数声明 `{snippet}`；不能省略数组、类型参数或不完整的参数")
+}
+
+fn parse_param(text: &str, prefix: &str, params: &mut Vec<Param>) -> Result<(), String> {
+    if text.trim().is_empty() {
+        return Ok(());
+    }
     let declaration = Regex::new(r"(?s)^\s*(?:(?P<kind>parameter|localparam)\s+)?(?P<type>.*?)(?P<name>[a-zA-Z_$][\w$]*)\s*$").unwrap();
     let mut inherited_type = String::new();
     let mut kind = prefix.to_string();
     for part in split_declarations(text, ',') {
         let parts = split_declarations(part, '=');
         if parts.len() < 2 {
-            continue;
+            return Err(unsupported_param(part));
         }
         let left = parts[0];
-        let Some(captures) = declaration.captures(left) else {
-            continue;
-        };
+        let captures = declaration
+            .captures(left)
+            .ok_or_else(|| unsupported_param(part))?;
         let ptype = captures.name("type").unwrap().as_str().trim();
         if let Some(keyword) = captures.name("kind") {
             kind = keyword.as_str().to_string();
@@ -158,13 +167,27 @@ fn parse_param(text: &str, prefix: &str, params: &mut Vec<Param>) {
         } else if !ptype.is_empty() {
             inherited_type = ptype.to_string();
         }
+        if !inherited_type.is_empty()
+            && port_size(&inherited_type).is_none()
+            && !matches!(
+                inherited_type.as_str(),
+                "string" | "real" | "realtime" | "shortreal"
+            )
+        {
+            return Err(unsupported_param(part));
+        }
+        let value = part[left.len() + 1..].trim();
+        if value.is_empty() {
+            return Err(unsupported_param(part));
+        }
         params.push(Param {
             kind: kind.clone(),
             ptype: inherited_type.clone(),
             name: captures.name("name").unwrap().as_str().to_string(),
-            value: part[left.len() + 1..].trim().to_string(),
+            value: value.to_string(),
         });
     }
+    Ok(())
 }
 
 fn unsupported_port(declaration: &str) -> String {
@@ -282,13 +305,112 @@ fn port_size(prefix: &str) -> Option<String> {
     Some(result.join(" "))
 }
 
-fn mask_subprograms(masked: &str) -> String {
-    Regex::new(r"(?s)\b(?:task\b.*?\bendtask|function\b.*?\bendfunction)\b")
-        .unwrap()
-        .replace_all(masked, |captures: &regex::Captures| {
-            " ".repeat(captures[0].len())
-        })
-        .into_owned()
+/// 只让模块层声明参与补全；过程块、生成块和子程序的局部名称不能覆盖接口。
+fn mask_nested_scopes(masked: &str) -> String {
+    let keywords = Regex::new(r"\b(?:initial|final|always|always_ff|always_comb|always_latch|if|else|for|begin|end|fork|join|join_any|join_none|task|endtask|function|endfunction|generate|endgenerate|case|casex|casez|endcase|class|endclass)\b").unwrap();
+    let label = Regex::new(r"^\s*:\s*[a-zA-Z_$][\w$]*").unwrap();
+    let mut result = masked.as_bytes().to_vec();
+    let mut stack = Vec::new();
+    let mut start = 0;
+    let mut pending = None;
+    for found in keywords.find_iter(masked) {
+        if stack.is_empty() {
+            pending = pending.filter(|start| {
+                source_scan::split_top_level(&masked[*start..found.start()], ';').len() == 1
+            });
+            if matches!(
+                found.as_str(),
+                "initial"
+                    | "final"
+                    | "always"
+                    | "always_ff"
+                    | "always_comb"
+                    | "always_latch"
+                    | "if"
+                    | "else"
+                    | "for"
+            ) {
+                pending = pending.or(Some(found.start()));
+            }
+        }
+        let closing = match found.as_str() {
+            "begin" => Some("end"),
+            "fork" => Some("join"),
+            "task" => Some("endtask"),
+            "function" => Some("endfunction"),
+            "generate" => Some("endgenerate"),
+            "case" | "casex" | "casez" => Some("endcase"),
+            "class" => Some("endclass"),
+            _ => None,
+        };
+        if let Some(closing) = closing {
+            if stack.is_empty() {
+                start = pending.take().unwrap_or(found.start());
+            }
+            stack.push(closing);
+        } else if stack.last().is_some_and(|expected| {
+            *expected == found.as_str()
+                || *expected == "join" && matches!(found.as_str(), "join_any" | "join_none")
+        }) {
+            stack.pop();
+            if stack.is_empty() {
+                let end = label
+                    .find(&masked[found.end()..])
+                    .map_or(found.end(), |label| found.end() + label.end());
+                result[start..end].fill(b' ');
+            }
+        }
+    }
+    if !stack.is_empty() {
+        result[start..].fill(b' ');
+    }
+    String::from_utf8(result).expect("ASCII掩码保持UTF-8")
+}
+
+fn complete_port_declarations(body: &str, masked: &str, ports: &mut [Port]) -> Result<(), String> {
+    let skip = Regex::new(r"^(?:input|output|inout|parameter|localparam|assign|always|always_ff|always_comb|always_latch|initial|final|for|if|typedef|import|export|defparam|assert|assume|cover)\b").unwrap();
+    let declaration = Regex::new(
+        r"(?s)^(?P<type>.*?)(?P<name>[a-zA-Z_$][\w$]*)\s*(?P<suffix>(?:\[[^\]]*\]\s*)*)$",
+    )
+    .unwrap();
+    let mut cursor = 0;
+    for statement in source_scan::split_top_level(masked, ';') {
+        let leading = statement.len() - statement.trim_start().len();
+        let source = &body[cursor + leading..cursor + statement.len()];
+        cursor += statement.len() + 1;
+        if source.trim().is_empty() || skip.is_match(statement.trim_start()) {
+            continue;
+        }
+        let mut inherited_type = String::new();
+        for part in split_declarations(source, ',') {
+            let left = split_declarations(part, '=')[0].trim();
+            let Some(capture) = declaration.captures(left) else {
+                continue;
+            };
+            let ptype = capture.name("type").unwrap().as_str().trim();
+            if !ptype.is_empty() {
+                inherited_type = ptype.to_string();
+            }
+            let name = capture.name("name").unwrap().as_str();
+            let Some(port) = ports.iter_mut().find(|port| port.name == name) else {
+                continue;
+            };
+            // 裸名称不是独立声明；模块赋值等语句也不能被当成类型信息。
+            if inherited_type.is_empty() {
+                continue;
+            }
+            if !capture.name("suffix").unwrap().as_str().trim().is_empty() {
+                return Err(unsupported_port(left));
+            }
+            let size = port_size(&inherited_type).ok_or_else(|| unsupported_port(left))?;
+            if size.contains('[') {
+                port.size = size;
+            } else if size == "signed" && !port.size.starts_with("signed") {
+                port.size = format!("signed {}", port.size).trim_end().to_string();
+            }
+        }
+    }
+    Ok(())
 }
 
 fn is_reset_name(name: &str) -> bool {
@@ -539,5 +661,44 @@ mod release_tests {
         .unwrap();
         assert_eq!(info.ports[0].size, "[`WIDTH-1:0]");
         assert_eq!(info.ports[1].size, "[1:0] [`WIDTH-1:0]");
+    }
+
+    #[test]
+    fn non_ansi_separate_net_declarations_keep_width_sign_and_multiple_names() {
+        let source = "module separated(d,q,r); input [7:0] d; output [7:0] q,r; wire signed [7:0] q,r; assign q=d; assign r=d; endmodule";
+        let info = parse_module(source, &GadgetOptions::default()).unwrap();
+        assert_eq!(
+            info.ports
+                .iter()
+                .map(|port| port.size.as_str())
+                .collect::<Vec<_>>(),
+            ["[7:0]", "signed [7:0]", "signed [7:0]"]
+        );
+    }
+
+    #[test]
+    fn module_declaration_completion_ignores_nested_local_variables() {
+        let source = "module scopes(d,q); input [7:0] d; output [7:0] q; reg [7:0] q; initial begin : local_block reg [1:0] q; q=0; end task sample; reg [2:0] q; endtask assign q=d; endmodule";
+        let info = parse_module(source, &GadgetOptions::default()).unwrap();
+        assert_eq!(info.ports[1].size, "[7:0]");
+        let after_process = "module late(d,q); input [7:0] d; output [7:0] q; initial begin : inner reg [1:0] q; q=0; end wire [7:0] q; assign q=d; endmodule";
+        let info = parse_module(after_process, &GadgetOptions::default()).unwrap();
+        assert_eq!(info.ports[1].size, "[7:0]");
+    }
+
+    #[test]
+    fn unsupported_split_port_types_and_parameters_fail_closed() {
+        for source in [
+            "module m(q); output q; wire [7:0] q [0:3]; endmodule",
+            "module m(q); output q; pkg::type_t q; endmodule",
+            "module p #(parameter integer A[0:1]='{1,2})(input d, output q); assign q=d; endmodule",
+            "module p #(parameter type T=logic)(input d, output q); assign q=d; endmodule",
+            "module p #(parameter A=1, B)(input d, output q); assign q=d; endmodule",
+        ] {
+            assert!(
+                parse_module(source, &GadgetOptions::default()).is_none(),
+                "{source}"
+            );
+        }
     }
 }

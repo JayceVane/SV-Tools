@@ -53,9 +53,6 @@ test/fixtures/codegen/*
 !test/fixtures/codegen/*.sv
 !test/fixtures/circuit-enum/
 test/fixtures/circuit-enum/*
-!test/fixtures/codegen/
-test/fixtures/codegen/*
-!test/fixtures/codegen/*.sv
 !test/fixtures/circuit-enum/*.sv
 
 # OS

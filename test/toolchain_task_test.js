@@ -28,7 +28,7 @@ if(mode==='early'){console.log('ERROR: [VRFC 1] early error ['+file+':2]');proce
 if(mode==='exit'){console.log('unrecognized tool failure');process.exit(7);}
 if(mode==='inspect')console.log('INPUT '+JSON.stringify({cwd:process.cwd(),source}));
 if(tool==='iverilog'){const index=rest.indexOf('-o');if(index>=0)fs.writeFileSync(rest[index+1],'compiled');}
-if(tool==='vvp'){fs.writeFileSync('vvp-started','yes');if(mode==='wave'||mode==='runtimefailwave')fs.writeFileSync('run.vcd','$timescale 1ns $end $var wire 1 ! clk $end $enddefinitions $end #0 0!');if(mode==='runtimefailwave')process.exitCode=3;}
+if(tool==='vvp'){if(mode==='argcheck'){const input=rest.findIndex(arg=>arg.endsWith('.vvp'));const extended=rest.slice(input+1);console.log('RUNTIME '+JSON.stringify({flags:rest.slice(0,input),input:rest[input],extended,trace:extended.includes('+trace'),seed:extended.find(arg=>arg.startsWith('+seed='))?.slice(6)}));}fs.writeFileSync('vvp-started','yes');if(mode==='wave'||mode==='runtimefailwave')fs.writeFileSync('run.vcd','$timescale 1ns $end $var wire 1 ! clk $end $enddefinitions $end #0 0!');if(mode==='runtimefailwave')process.exitCode=3;}
 if(tool==='vivado'){console.log('SVTOOLS_TEST_MARKER preserved');if(mode==='error')console.log('ERROR: real failure despite exit zero');process.stdout.write('noise '.repeat(1000)+'\\n');}
 `;
 
@@ -405,4 +405,58 @@ test('运行失败或超时都撤销波形写入保护，不自动打开部分�
         try{assert.equal((await h.api.runSimulation(h.doc)).status,'failed');assert.equal(released,true);assert.equal(opened,false);}
         finally{await h.api.dispose();}
     }
+});
+
+
+test('Icarus 实际 runner 把 plusargs 和波形 extended 参数交付给仿真程序', async t => {
+    const f = await fixture(t), values = ['+trace', '+seed=73', '-fst', '-lxt', '-lxt2', '-none', '-vcd-none', '-vcd-off', '-fst-none', '-sdf-warn', '-sdf-info', '-sdf-verbose', '-dumpfile=trace with space'];
+    const h = editorHarness(f, async () => ({ ...protocolToolchain(f, 'ok'), vvpPrefix: [f.driver, 'vvp', 'argcheck'] }), { config: { simArgs: values } });
+    try {
+        const result = await h.api.runSimulation(h.doc); assert.equal(result.ok, true);
+        const output = await fs.readFile(result.logPath, 'utf8'), runtime = JSON.parse(output.match(/^RUNTIME (.+)$/m)[1]);
+        assert.equal(runtime.trace, true); assert.equal(runtime.seed, '73');
+        assert.deepEqual(runtime.flags, ['-n']); assert.deepEqual(runtime.extended, values);
+        assert.equal(runtime.input, result.vvpFile); assert.equal(await fs.readFile(result.vvpFile, 'utf8'), 'compiled');
+    } finally { await h.api.dispose(); }
+});
+
+test('Icarus 实际 runner 兼容 CLI 分离/附着/组合选项，-- 后按原顺序传 extended 参数', async t => {
+    const f = await fixture(t), log = path.join(f.root, 'runtime with space.log');
+    const values = ['+trace', '-i', '-l', log, '+seed=73', '-M', '-', '-msystem', '-vlattached.log', '-Mmodule path', '-Nq', '--', '-lcustom', 'literal'];
+    const h = editorHarness(f, async () => ({ ...protocolToolchain(f, 'ok'), vvpPrefix: [f.driver, 'vvp', 'argcheck'] }), { config: { simArgs: values } });
+    try {
+        const result = await h.api.runSimulation(h.doc); assert.equal(result.ok, true);
+        const runtime = JSON.parse((await fs.readFile(result.logPath, 'utf8')).match(/^RUNTIME (.+)$/m)[1]);
+        assert.deepEqual(runtime.flags, ['-n', '-i', '-l', log, '-M', '-', '-msystem', '-vlattached.log', '-Mmodule path', '-Nq']);
+        assert.deepEqual(runtime.extended, ['+trace', '+seed=73', '-lcustom', 'literal']);
+        assert.equal(runtime.trace, true); assert.equal(runtime.seed, '73');
+    } finally { await h.api.dispose(); }
+});
+
+test('Icarus 运行参数缺少 CLI 值时不启动 vvp，也不先关闭现有波形', async t => {
+    const f = await fixture(t); let releases = 0;
+    const h = editorHarness(f, async () => protocolToolchain(f, 'ok'), { config: { simArgs: ['-l'] },
+        waveViewer: { async prepareForSimulation() { return { async dispose() { releases++; } }; }, openWaveform() {} } });
+    try {
+        const result = await h.api.runSimulation(h.doc); assert.equal(result.status, 'failed');
+        assert.ok(h.messages.some(line => typeof line === 'string' && line.includes('simArgs') && line.includes('-l')));
+        await assert.rejects(fs.stat(path.join(f.root, 'vvp-started')), { code: 'ENOENT' });
+        assert.equal(releases, 0);
+    } finally { await h.api.dispose(); }
+});
+
+
+test('vvp 默认dumpfile覆盖参与真实runner的关闭屏障及输出发现', async t => {
+    const f = await fixture(t), capture = path.join(f.root, 'custom wave.vcd'); let prepared;
+    await fs.writeFile(f.file, 'module main; initial begin $dumpvars(0,main); #1; $finish; end endmodule\n');
+    const h = editorHarness(f, async () => ({ ...protocolToolchain(f, 'ok'), vvpPrefix: [f.driver, 'vvp', 'argcheck'] }), {
+        config: { simArgs: ['-dumpfile=' + capture] }, waveViewer: {
+            async prepareForSimulation(options) { prepared = options; return { dispose() {} }; }, openWaveform() {}
+        }
+    });
+    try {
+        assert.equal((await h.api.runSimulation(h.doc)).ok, true);
+        assert.ok(prepared.paths.includes(capture), JSON.stringify(prepared));
+        assert.ok(!prepared.paths.includes(path.join(f.root, 'dump.vcd')));
+    } finally { await h.api.dispose(); }
 });

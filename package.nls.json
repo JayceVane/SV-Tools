@@ -40,7 +40,7 @@
   "cfg.iverilog_libraryPaths.desc": "Library directories (-y) for module-by-filename resolution, relative to the workspace root. The file's own directory is always included.",
   "cfg.iverilog_simFiles.desc": "Glob patterns of extra source files compiled together with the active file during simulation (e.g. src/*.v, tb/*.sv)",
   "cfg.iverilog_simTop.desc": "Top module for simulation (-s). Empty = let iverilog pick the root module",
-  "cfg.iverilog_simArgs.desc": "Extra arguments passed to vvp at runtime (e.g. plusargs like +trace)",
+  "cfg.iverilog_simArgs.desc": "Simulation extended arguments after the .vvp input file (e.g. +trace, +seed=73, -fst). Known vvp CLI options (-l/-M/-m with values and -h/-i/-n/-N/-q/-s/-v/-V) remain before the file; use -- to pass subsequent values as extended arguments.",
   "cfg.iverilog_simTimeoutMs.desc": "Simulation timeout in milliseconds; 0 = run until $finish (stop via command or status bar)",
   "cfg.iverilog_waveViewer.desc": "External waveform viewer executable (e.g. GTKWave). Empty = use the built-in VCD waveform viewer (webview panel; external program is used for .fst files)",
   "cfg.iverilog_autoOpenWaveform.desc": "Automatically open the built-in waveform viewer when a simulation produces a new .vcd file",

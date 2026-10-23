@@ -106,3 +106,17 @@ for (const statement of ['`ifdef NAMED_DUMP\n$dumpfile("named.vcd");\n`endif', '
         lease.dispose();await registry.dispose();
     });
 }
+
+
+test('运行时默认dumpfile和条件RTL字面路径同时进入关闭屏障', async t => {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'svtools-dump-override-'));
+    t.after(() => fs.rm(directory, { recursive: true, force: true }));
+    const file = path.join(directory, 'tb.sv'), custom = path.join(directory, 'custom wave.vcd');
+    await fs.writeFile(file, 'module tb; initial begin if(0) $dumpfile("named.vcd"); $dumpvars(0,tb); end endmodule');
+    const discovery = await simulationWaveforms({ files: [file], directory, defaultDumpfiles: [custom] });
+    assert.deepEqual(new Set(discovery.paths), new Set([custom, path.join(directory, 'named.vcd')]));
+    const registry = createWaveformRegistry(), target = entry(registry, custom);
+    const lease = await registry.prepareForSimulation({ ...discovery, directory });
+    assert.equal(target.closed, true); assert.throws(() => registry.assertAvailable(custom), /重新仿真/);
+    lease.dispose(); await registry.dispose();
+});

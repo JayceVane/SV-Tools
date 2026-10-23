@@ -134,7 +134,7 @@ fn task_drive(clock: Option<&str>) -> String {
 
 fn wave_dump(module: &str, kind: &str) -> String {
     match kind {
-        "vcd" => format!("\t\tif ($test$plusargs(\"vcd\")) begin\n\t\t\t$dumpfile(\"tb_{module}.vcd\");\n\t\t\t$dumpvars(0, tb_{module});\n\t\tend\n"),
+        "vcd" => format!("\t\t$dumpfile(\"tb_{module}.vcd\");\n\t\t$dumpvars(0, tb_{module});\n"),
         "fsdb" => format!("\t\tif ($test$plusargs(\"fsdb\")) begin\n\t\t\t$fsdbDumpfile(\"tb_{module}.fsdb\");\n\t\t\t$fsdbDumpvars(0, \"tb_{module}\", \"+mda\", \"+functions\");\n\t\tend\n"),
         "vpd" => format!("\t\t$vcdplusfile(\"tb_{module}.vpd\");\n\t\t$vcdpluson(0, \"tb_{module}\");\n"),
         "shm" => format!("\t\t$shm_open(\"tb_{module}.shm\");\n\t\t$shm_probe();\n"),
@@ -228,5 +228,6 @@ mod release_tests {
         assert!(text.contains("wire pad;"), "{text}");
         assert!(!text.contains("pad ="), "{text}");
         assert!(!text.contains("$fsdbDump"), "{text}");
+        assert!(!text.contains("$test$plusargs(\"vcd\")"), "{text}");
     }
 }
