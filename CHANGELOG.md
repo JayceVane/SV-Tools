@@ -2,6 +2,14 @@
 
 All notable changes to the SystemVerilog VSCode Extension will be documented in this file.
 
+## [4.0.0-beta.14] - 2026-10-24
+
+**变更内容：** 修复Windows批处理从PATH按名称调用时的脚本自身目录定位，确保干净CI环境可构建原生模块。
+
+**为什么：** beta.13的本地构建和宿主验收通过，但远程CI揭示npm.cmd在环境中转边界下把兄弟npm脚本定位到工程目录，原生构建直接失败。
+
+**影响面：** 批处理保留特殊字符传参规则，补PATH-only调用与兄弟文件定位的真实回归；以独立beta.14重建并再次进行CI验收，保留旧候选产物。
+
 ## [4.0.0-beta.13] - 2026-10-24
 
 **变更内容：** 发布前复核继续修复非ANSI端口在独立net/reg声明中的位宽和符号，不能完整解析的数组/type参数明确拒绝，避免成功结果静默省略参数。默认VCD模板直接记录波形；vvp配置中的plusargs按运行参数阶段传递；运行时dumpfile覆盖纳入旧波形关闭与产物发现。
