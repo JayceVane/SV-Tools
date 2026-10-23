@@ -90,4 +90,3 @@ VSIX共457文件，441个运行文件与源码/原生/vendor逐字节一致；�
 远程Windows Node22/24检查可从[草稿PR11](https://github.com/JayceVane/SV-Tools/pull/11)复查。
 
 在本轮明确覆盖的Windows x64和工具版本范围内，未发现仍阻断正式发布的已确认P0/P1；建议将beta.13作为封版基线。正式4.0.0仍须独立版本化、重建与发布，不重命名或覆盖候选包。
-
