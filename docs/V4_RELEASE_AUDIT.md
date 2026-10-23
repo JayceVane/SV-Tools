@@ -73,4 +73,21 @@ Vivado证据位于`bin/release-audit-circuit`，依赖兼容验证位于`bin/rel
 运行`npm test`与`cargo test --offline --manifest-path src/native/Cargo.toml`。
 真实Icarus通过`SVTOOLS_CODEGEN_IVERILOG`、`SVTOOLS_CODEGEN_VVP`、`SVTOOLS_CODEGEN_CYGWIN`显式指定工具，再运行formatter_semantics_test/codegen_release_test。
 真实编辑器：`scripts/verify-waveform-host.ps1 -CodePath <IDE> -TestPath test/vscode_release_host.js`；生命周期同脚本选择`test/vscode_waveform_lifecycle_host.js`并提供IcarusPath/CygwinPath。
-打包与解包后的最终追溯记录将在完成后补入本报告。
+## 候选安装包与最终验收
+
+beta.13从干净源码提交 `f550a3b843af2ce121da1b560c91e9712c1afa4b` 构建；后续交付提交仅更新文档。未创建正式tag或Release，旧beta.11/.12产物保留。
+VSIX共457文件，441个运行文件与源码/原生/vendor逐字节一致；开发依赖、测试、脚本和私有工程均未入包。默认VCD配置、平台和manifest全部核对。
+
+| 产物 | 字节 | SHA256 |
+|---|---:|---|
+| svtools-4.0.0-beta.13-win32-x64.vsix | 18565683 | `fc32d252af9da2f84d0cb5fe9ad17832cdb265dcd3fb61ea3a50371f1bcb1363` |
+| svtools.exe | 24017920 | `b717d2f97bbb4baa6d7f0789178444ec930de75ae1506a6fde202471a077c293` |
+| svtools.win32-x64-msvc.node | 24163328 | `b7e4115e4c187e4d44626384ce8aa1ccc96e3df03689dac42c80ec092afa56d1` |
+
+解包后的真实宿主验收18/18通过：官方VS Code编辑器事务5项、电路/Yosys/ELK5项、100MiB重新仿真生命周期4项，Qoder波形/布局/图片服务4项。上述host-report都记录extensionPath为解包目录及版本beta.13。
+日志：`beta13-package.log`、`beta13-package-verification.log`、`waveform-beta13-package-report.json`、
+`beta13-packaged-editor-host.log`、`beta13-packaged-circuit-host.log`、`beta13-packaged-lifecycle-host.log`、`beta13-packaged-waveform-host.log`。
+远程Windows Node22/24检查可从[草稿PR11](https://github.com/JayceVane/SV-Tools/pull/11)复查。
+
+在本轮明确覆盖的Windows x64和工具版本范围内，未发现仍阻断正式发布的已确认P0/P1；建议将beta.13作为封版基线。正式4.0.0仍须独立版本化、重建与发布，不重命名或覆盖候选包。
+
