@@ -25,10 +25,30 @@
 - Golden21语料42/42断言；新增ex19为用户完整模块，输出已人工核对。
 - CLI与NAPI golden逐字节一致，stderr为空，非布局字符序列一致。
 - 组合覆盖LF/CRLF、行/块注释、Tab、参数分行、关闭端口对齐、关闭行内紧凑。
-- 完整打包回归及解包后的真实IDE验收见后续安装包记录。
+- 打包前全量检查：JS语法174文件，Node566项（565通过，1项官方目录重建可选跳过），电路170/170。
+- 解包455文件，439运行文件与源码/原生/vendor逐字节一致。
+- 解包后真实Qoder宿主4/4：全文golden、重复执行幂等、选区格式化及对齐命令。
+  实际宿主VS Code API1.106.3、Node24.15.0、Electron42.2.0，使用独立用户/扩展/夹具目录。
+- 初次宿主验收脚本直接比较Windows文档CRLF与LF golden而失败；归一比较行尾，
+  并使用实际文档长度定位选区后，同一安装包通过复验；没有修改产物来迎合测试。
 
 本机证据：bin/beta9-formatter-contracts.log、bin/beta9-node22.log、
-bin/beta9-rust.log、bin/beta9-golden.log、bin/beta9-native-build.log。
+bin/beta9-rust.log、bin/beta9-golden.log、bin/beta9-native-build.log、
+bin/beta9-package.log、bin/formatter-beta9-package-report.json、bin/beta9-packaged-host.log。
+包内真实宿主验收通过bin/verify-beta9-formatter-host.ps1和bin/beta9-formatter-host.js执行。
+
+## 安装包
+
+源码提交`f2027246eff05b670164c9b8f732bceeacbbb263`；后续交付记录提交仅更新文档。
+唯一版本入口生成以下产物，详细追溯见bin/svtools-4.0.0-beta.9-win32-x64.manifest.json。
+
+| 文件 | 字节 | SHA256 |
+|---|---:|---|
+| svtools-4.0.0-beta.9-win32-x64.vsix | 18568622 | `83c2c8a53a50a093e6b2826f36b9f56ad4bd845c70c8959957df11c4172f7927` |
+| svtools.exe | 24052224 | `bcc6ecfc529e3f6c6f8fab0283397828a97f26d2fd6ed1279ddb99139962ded1` |
+| svtools.win32-x64-msvc.node | 24201728 | `f47734166f66506008194a614c042b13e38551b32353bcf4e2e677178162cc6c` |
+
+未安装到用户现有IDE；使用“从VSIX安装”后重载窗口即可启用修复。
 
 ## 修改清单
 
