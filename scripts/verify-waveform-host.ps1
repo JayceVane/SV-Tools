@@ -1,6 +1,9 @@
 param(
     [Parameter(Mandatory = $true)][string]$CodePath,
-    [string]$ExtensionPath
+    [string]$ExtensionPath,
+    [string]$TestPath = 'test/vscode_waveform_host.js',
+    [string]$IcarusPath,
+    [string]$CygwinPath
 )
 $ErrorActionPreference = 'Stop'
 $repoRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
@@ -10,10 +13,14 @@ $testWorkspace = Join-Path $testRoot 'workspace'
 $profilePath = Join-Path $testRoot 'profile'
 $extensionsPath = Join-Path $testRoot 'extensions'
 New-Item -ItemType Directory -Path $testWorkspace,$extensionsPath,(Join-Path $profilePath 'User') -Force | Out-Null
-Set-Content -LiteralPath (Join-Path $profilePath 'User/settings.json') -Encoding utf8 -Value '{"update.mode":"none","extensions.autoUpdate":false,"telemetry.telemetryLevel":"off","workbench.startupEditor":"none"}'
+$settings = @{ 'update.mode' = 'none'; 'extensions.autoUpdate' = $false; 'telemetry.telemetryLevel' = 'off';
+    'workbench.startupEditor' = 'none'; 'svtools.iverilog.lintOnOpen' = $false; 'svtools.iverilog.lintOnSave' = $false }
+if ($IcarusPath) { $settings['svtools.iverilog.path'] = $IcarusPath }
+if ($CygwinPath) { $settings['svtools.iverilog.cygwinPath'] = $CygwinPath }
+Set-Content -LiteralPath (Join-Path $profilePath 'User/settings.json') -Encoding utf8 -Value ($settings | ConvertTo-Json)
 $arguments = @('--new-window','--disable-extensions','--disable-workspace-trust','--skip-welcome','--skip-release-notes',
     ('--user-data-dir="' + $profilePath + '"'),('--extensions-dir="' + $extensionsPath + '"'),
-    ('--extensionDevelopmentPath="' + $ExtensionPath + '"'),('--extensionTestsPath="' + (Join-Path $repoRoot 'test/vscode_waveform_host.js') + '"'),('"' + $testWorkspace + '"'))
+    ('--extensionDevelopmentPath="' + $ExtensionPath + '"'),('--extensionTestsPath="' + (Join-Path $repoRoot $TestPath) + '"'),('"' + $testWorkspace + '"'))
 $previousNodeMode = $env:ELECTRON_RUN_AS_NODE
 try {
     $env:ELECTRON_RUN_AS_NODE = $null

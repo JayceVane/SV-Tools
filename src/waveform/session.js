@@ -20,6 +20,7 @@ class VcdSession {
         this.ready = false;
         this.disposed = false;
         this.failure = null;
+        this.closing = null;
     }
     rejectAll(error) {
         this.failure = error;
@@ -83,11 +84,12 @@ class VcdSession {
     edge(params) { return this.query('edge', params); }
     /** 取消读取和全部 pending 请求；释放 worker 及其事件存储。 */
     dispose() {
-        if (this.disposed) return;
+        if (this.disposed) return this.closing;
         this.disposed = true;
         this.ready = false;
         this.rejectAll(sessionError('VCD 会话已关闭', 'VCD_DISPOSED'));
-        if (this.worker) return this.worker.terminate();
+        this.closing = this.worker ? this.worker.terminate() : Promise.resolve();
+        return this.closing;
     }
 }
 

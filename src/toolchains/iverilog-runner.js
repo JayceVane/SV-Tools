@@ -4,14 +4,20 @@ const os = require('node:os');
 const path = require('node:path');
 const { summarizeToolResult, resultFindings } = require('./result');
 const { COMPILE_TIMEOUT_MS } = require('./compile-policy');
+const { simulationWaveforms } = require('./simulation-waveforms');
 
 /** 同目录只记录波形元数据，仿真后按实际变化识别产物，不用时间容差猜测。 */
-function waveformSnapshot(directory) {
-    const snapshot = new Map();
+function waveformSnapshot(directory, targets = []) {
+    const snapshot = new Map(), files = new Set(targets);
     for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
         if (!entry.isFile() || !/\.(vcd|fst)$/i.test(entry.name)) continue;
-        const file = path.join(directory, entry.name), stat = fs.statSync(file, { bigint: true });
-        snapshot.set(file, stat.size + ':' + stat.mtimeNs + ':' + stat.ctimeNs);
+        files.add(path.join(directory, entry.name));
+    }
+    for (const file of files) {
+        try {
+            const stat = fs.statSync(file, { bigint: true });
+            if (stat.isFile()) snapshot.set(file, stat.size + ':' + stat.mtimeNs + ':' + stat.ctimeNs);
+        } catch (error) { if (error.code !== 'ENOENT') throw error; }
     }
     return snapshot;
 }
@@ -77,19 +83,29 @@ function createIcarusRunner(deps) {
     async function simulate(task, document) {
         const prep = await prepareSimulation(task, document);
         channel.appendLine('==== 仿真：' + prep.filePath + ' ====');
-        const { result: compiled } = await compile(prep.toolchain, prep.args, prep.files, prep.fileDir, {
+        const { result: compiled, files } = await compile(prep.toolchain, prep.args, prep.files, prep.fileDir, {
             task, scanSources, timeoutMs: COMPILE_TIMEOUT_MS, onStdout: output.append, onStderr: output.append });
         task.throwIfCancelled();
         const compiledSummary = complete(task, document, compiled); if (!compiledSummary.ok) return compiledSummary;
         channel.appendLine('编译产物：' + prep.vvpFile);
-        const before = waveformSnapshot(prep.fileDir), invocation = runtimeInvocation(prep);
-        const result = await task.run(invocation.command, invocation.args, { cwd: prep.fileDir, env: prep.toolchain.env,
-            stage: 'running', wrappedProcessName: invocation.wrappedProcessName,
-            timeoutMs: Number(prep.config.get('simTimeoutMs') || 0), onStdout: output.append, onStderr: output.append });
+        const includePaths = prep.args.flatMap((arg, index) => arg === '-I' ? [prep.args[index + 1]] : []);
+        const waveforms = await simulationWaveforms({ files: files || prep.files, directory: prep.fileDir, includePaths, signal: task.signal });
+        if (waveforms.uncertain) channel.appendLine('波形路径含动态表达式或未完整解析：本次仿真目录内已打开的波形将先关闭。');
+        task.throwIfCancelled();
+        const lease = await deps.prepareWaveforms?.({ ...waveforms, directory: prep.fileDir, sourceFile: prep.filePath });
+        let before, result;
+        try {
+            task.throwIfCancelled();
+            before = waveformSnapshot(prep.fileDir, waveforms.paths);
+            const invocation = runtimeInvocation(prep);
+            result = await task.run(invocation.command, invocation.args, { cwd: prep.fileDir, env: prep.toolchain.env,
+                stage: 'running', wrappedProcessName: invocation.wrappedProcessName,
+                timeoutMs: Number(prep.config.get('simTimeoutMs') || 0), onStdout: output.append, onStderr: output.append });
+        } finally { await lease?.dispose(); }
         output.flush(); task.throwIfCancelled();
         const summary = complete(task, document, result);
         if (!summary.ok) return summary;
-        const waves = changedWaveforms(before, waveformSnapshot(prep.fileDir));
+        const waves = changedWaveforms(before, waveformSnapshot(prep.fileDir, waveforms.paths));
         await deps.showWaveforms(task, waves, prep.config, prep.filePath); task.throwIfCancelled();
         return { ...summary, waves, vvpFile: prep.vvpFile };
     }

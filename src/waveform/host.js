@@ -8,10 +8,10 @@ const QUERY_METHODS = new Set(['window', 'values', 'edge']);
 /**
  * 单面板数据服务：加载进度、按需查询、取消和关闭共用同一 worker 生命周期。
  * @param {{filePath:string,panel:object,channel?:object,createSession?:(options:object)=>object,getSourceContext?:()=>Promise<object>}} options
- * @returns {{dispose:()=>void,loaded:Promise<void>}} 可独立验证，不依赖 vscode 全局。
+ * @returns {{dispose:()=>Promise<void>,loaded:Promise<void>}} 可独立验证，不依赖 vscode 全局。
  */
 function bindWaveformPanel({ filePath, panel, channel, createSession = options => new VcdSession(options), getSourceContext, layoutFiles, imageFiles }) {
-    let resolveInitialized;
+    let resolveInitialized, closing;
     const initialized = new Promise(resolve => { resolveInitialized = resolve; });
     const activity = { window: 0, values: 0, edge: 0 };
     let disposed = false, cancelled = false, ready = false, metadata = null, lastProgress = null, loadError = null;
@@ -58,11 +58,13 @@ function bindWaveformPanel({ filePath, panel, channel, createSession = options =
     });
     const lifetime = panel.onDidDispose(dispose);
     function dispose() {
-        if (disposed) return;
+        if (disposed) return closing;
         resolveInitialized(null);
         disposed = true; metadata = null; lastProgress = null; loadError = null;
         messages.dispose(); lifetime.dispose();
-        Promise.resolve(session.dispose()).catch(error => log('关闭数据服务失败：' + error.message));
+        closing = Promise.resolve(session.dispose());
+        closing.catch(error => log('关闭数据服务失败：' + error.message));
+        return closing;
     }
     panel.webview.html = buildWaveformHtml(null, { fileName: path.basename(filePath), fileKey: filePath });
     const opening = getSourceContext ? Promise.resolve().then(() => getSourceContext()).catch(error => {

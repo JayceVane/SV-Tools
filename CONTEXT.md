@@ -1,3 +1,11 @@
+# 4.0 beta.11 VCD默认打开与仿真前关闭
+
+2026-10-23：VCD关联改default，正常打开直接进入CustomEditor。新增registry追踪面板、退出中的worker和写入租约，
+host/session重复dispose返回同一退出Promise。Icarus编译成功后发现字面dumpfile/include路径，关闭对应旧波形和文本标签，
+等待worker退出才启动vvp；取消/失败/超时finally释放保护，随后按原配置载入新VCD。支持子目录产物，动态路径回退cwd和源码关联。
+重点53/53、Node22波形23/23、Rust127/127；真实Qoder4/4含默认打开、子目录重写、文本标签和100MiB旧波形打开期间重仿真。
+完整打包及逐文件清单见docs/V4_BETA11.md。保留原工程与旧VSIX，继续独立分支和草稿PR11，不自动合并或创建Release。
+
 # 4.0 beta.10 多时钟域例化模板
 
 2026-10-23：用户cdc_hs_bits的i_clk_b/i_rst_n_b被生成器错误连接至A域。解析器域识别正确，

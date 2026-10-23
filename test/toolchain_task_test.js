@@ -198,7 +198,7 @@ function editorHarness(f, getToolchain, options = {}) {
     }
     const api = activateIverilog({ subscriptions: [] }, { vscode, resolveToolchain: getToolchain, startProcess: options.startProcess,
         xvlogTools: options.xvlogTools, resolveXvlogBinDir: options.resolveXvlogBinDir,
-        scanWorkspaceSources: async () => ({ dirs: [], modules: new Map() }), waveViewer: { openWaveform: async file => waves.push(file) } });
+        scanWorkspaceSources: async () => ({ dirs: [], modules: new Map() }), waveViewer: options.waveViewer || { openWaveform: async file => waves.push(file) } });
     return { api, doc, config, handlers, commands, messages, waves, bars, problems };
 }
 function protocolToolchain(f, mode) {
@@ -359,4 +359,50 @@ process.exitCode=1;
         const real = h.problems.get(path.join(f.root, 'node_modules', 'sv-lib', 'real.sv'));
         assert.equal(real.length, 1); assert.match(real[0].message, /actual RTL error/);
     } finally { await h.api.dispose(); }
+});
+
+
+for (const cancel of [false, true]) {
+    test(`仿真等待波形释放且写入保护在结束后撤销，等待期间取消=${cancel}`, async t => {
+        const f=await fixture(t); let release, entered=false, ended=false;
+        const gate=new Promise(resolve=>{release=resolve;});
+        const h=editorHarness(f,async()=>protocolToolchain(f,'ok'),{waveViewer:{
+            async prepareForSimulation(options){assert.equal(options.sourceFile,f.file);entered=true;await gate;return{dispose(){ended=true;}};},
+            async openWaveform(){assert.equal(ended,true);}
+        }});
+        try {
+            const running=h.api.runSimulation(h.doc);await waitFor(()=>entered);
+            await assert.rejects(fs.stat(path.join(f.root,'vvp-started')),{code:'ENOENT'});
+            if(cancel)h.api.stopSimulation();release();
+            assert.equal((await running).status,cancel?'cancelled':'success');assert.equal(ended,true);
+            if(cancel)await assert.rejects(fs.stat(path.join(f.root,'vvp-started')),{code:'ENOENT'});
+        } finally {release();await h.api.dispose();}
+    });
+}
+
+test('波形释放失败阻止vvp写入，编译失败不关闭现有波形',async t=>{
+    for(const compileMode of ['ok','exit']){
+        const f=await fixture(t);let closing=0;
+        const h=editorHarness(f,async()=>protocolToolchain(f,compileMode),{waveViewer:{
+            async prepareForSimulation(){closing++;throw new Error('wave worker still running');}
+        }});
+        try{
+            const result=await h.api.runSimulation(h.doc);assert.equal(result.status,'failed');
+            assert.equal(closing,compileMode==='ok'?1:0);
+            await assert.rejects(fs.stat(path.join(f.root,'vvp-started')),{code:'ENOENT'});
+        }finally{await h.api.dispose();}
+    }
+});
+
+
+test('运行失败或超时都撤销波形写入保护，不自动打开部分波形',async t=>{
+    for(const mode of ['runtimefailwave','slow']){
+        const f=await fixture(t);let released=false,opened=false;
+        const h=editorHarness(f,async()=>({...protocolToolchain(f,'ok'),vvpPrefix:[f.driver,'vvp',mode]}),{
+            config:{simTimeoutMs:mode==='slow'?30:0},waveViewer:{
+                async prepareForSimulation(){return{dispose(){released=true;}};},async openWaveform(){opened=true;}
+            }});
+        try{assert.equal((await h.api.runSimulation(h.doc)).status,'failed');assert.equal(released,true);assert.equal(opened,false);}
+        finally{await h.api.dispose();}
+    }
 });

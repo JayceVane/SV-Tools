@@ -77,6 +77,15 @@ ModuleInst与Testbench继续共用同一实例构造器。Testbench仅跳过已�
 
 固定声明/赋值模式使用惰性缓存。新增规则优先落在负责该构造的模块，只有新的词法事实才扩展扫描器；不能把某个布局例外复制到其它阶段。
 
+## 波形与仿真文件生命周期
+
+VCD默认文件关联和命令入口共用registry中的面板/绑定身份。host和session重复dispose返回同一释放Promise；
+registry在面板消失后仍追踪正在退出的worker。仿真runner在编译成功后通过有界simulation-waveforms发现磁盘源码的
+字面dumpfile路径，控制器转交波形服务申请写入租约，等待对应面板、文本标签及worker关闭后才启动vvp。
+路径不确定时采用历史源码关联和本次cwd目录回退，范围不扩散到其他工程目录。
+运行结束、取消和失败共用finally释放租约；新波形读取发生在释放之后。路径发现不控制编辑器，registry不启动工具，
+波形查询和导出仍由原有host/session负责，语法事实复用completion词法扫描器。
+
 ## 4.1 电路数据与交互
 
 alpha2 默认使用固定版本内置 Yosys WASM。alpha4将前端选择集中在runner：auto在内置后端解析为Slang，在外部后端解析为旧Verilog前端；显式配置始终保留，不按关键字改写输入或失败后重试。源位置前缀的ERROR也使任务失败，摘要优先具体错误，完整日志保留运行时警告。`yosys-bundled.js` 仅构建源目录/include/任务目录的 guest 路径映射；`yosys-wasi.js` 在独立 Node 子进程校验并运行原始 WASI 模块。编译进程继承共享工具任务的超时、日志和取消，不占用扩展宿主线程，也不在运行时下载工具。资源及完整许可由构建脚本从锁定 npm 包复制/展开；不分发该包的 JS runtime、Python 或其它 WASM adapter。Node WASI 用于接口与进程隔离，不宣称安全沙箱。

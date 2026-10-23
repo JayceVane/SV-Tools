@@ -221,3 +221,24 @@ test('图片保存只回复对应requestId，取消和磁盘失败不破坏已�
     }
     assert.equal(binding.getStatus().loaded,true);assert.equal(binding.getStatus().error,null);
 });
+
+
+test('关闭返回可等待且可重复取得的worker释放屏障', async () => {
+    const page = panelFixture(), released = deferred(); let releases = 0, finished = false;
+    const binding = bindWaveformPanel({ filePath: path.join(os.tmpdir(), 'capture.vcd'), panel: page.panel,
+        createSession: () => ({ async open() { return metadata(); }, dispose() { releases++; return released.promise; } }) });
+    await binding.loaded;
+    page.panel.dispose();
+    const closing = binding.dispose();
+    assert.ok(closing && typeof closing.then === 'function', '面板关闭后仍必须能够等待worker退出');
+    closing.then(() => { finished = true; }); await nextTurn();
+    assert.equal(finished, false); assert.equal(binding.dispose(), closing);
+    released.resolve(); await closing;
+    assert.equal(releases, 1); assert.equal(finished, true);
+});
+
+test('VCD默认文件关联直接进入波形编辑器', () => {
+    const editor = require('../package.json').contributes.customEditors.find(editor => editor.viewType === 'svtoolsWaveViewer');
+    assert.equal(editor.priority, 'default');
+    assert.ok(editor.selector.some(selector => selector.filenamePattern === '*.vcd'));
+});

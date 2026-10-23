@@ -33,6 +33,7 @@ function activateIverilog(context, deps) {
             catch (error) { if (!task.signal.aborted) showToolchainError(error.message); throw error; }
         }, compile: deps.compileWithModuleResolution, buildCommonArgs: deps.buildCommonArgs,
         resolvePaths, channel, output, publish: applyDiagnostics, expandFiles,
+        prepareWaveforms: options => deps.waveViewer?.prepareForSimulation?.(options),
         fileOnly: document => vscode.workspace.getConfiguration('svtools.lint', document.uri).get('currentFileOnly', true), showWaveforms });
 
     function resolvePaths(paths, fallback, uri) {
