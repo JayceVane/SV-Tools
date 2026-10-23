@@ -23,12 +23,31 @@ Testbench仍为激励骨架，额外域的频率、相位和复位时序需按�
 - Node22.20.0例化与编辑器合同20/20。
 - 实际用户文件只读生成，八端口连接正确，前后SHA256相同。
 - Icarus13真实编译无隐式网线的模板；A/B时钟/复位赋不同电平，DUT六个输入逐项比对通过。
-- 完整打包回归、解包校验及真实编辑器命令验证见后续安装包记录。
+- 完整打包回归：JS175文件，golden21语料42/42，Node572项（571通过、1项官方目录重建可选跳过），电路170/170。
+- 最终VSIX455文件，439运行文件与源码/原生/vendor逐字节一致。
+- 解包后包内native再次通过实际用户八端口匹配及Icarus编译仿真。
+- 包内真实Qoder宿主4/4：例化命令复制、声明配置生效、Testbench独立域声明、原文档不变；
+  使用独立用户/扩展/夹具目录，结束时恢复原剪贴板。宿主API1.106.3、Node24.15.0、Electron42.2.0。
 
 本机证据：bin/beta10-before-fix.log、bin/beta10-inst-contracts.log、bin/beta10-node22.log、
 bin/beta10-rust.log、bin/beta10-instantiation-proof.log、bin/beta10-native-build.log。
 最小公开夹具保留用户的端口表与双域事件控制，不作为可用CDC电路实现。
 用户完整RTL和临时生成结果不提交，也不改写原文件。
+最终证据另见bin/beta10-package.log、bin/instantiation-beta10-package-report.json、
+bin/beta10-packaged-instantiation-proof.log、bin/beta10-packaged-host.log。
+
+## 安装包
+
+源码提交`96fc9cbfb7d503196b10996243c04466ca275d3c`；后续交付记录提交仅更新文档。
+唯一版本入口生成以下产物，完整追溯见bin/svtools-4.0.0-beta.10-win32-x64.manifest.json。
+
+| 文件 | 字节 | SHA256 |
+|---|---:|---|
+| svtools-4.0.0-beta.10-win32-x64.vsix | 18567254 | `cd389c5b81adb0e1e76407dd8f22cf291246127554df26e27117085d5e4e4bc3` |
+| svtools.exe | 24050176 | `9947af76503f074648ad3b63bddadeb2fbb634b478bab0c6592374929e416d24` |
+| svtools.win32-x64-msvc.node | 24199168 | `e3198b3aa047529e50e57bef34811196ffbb853af437dd4ab70ceb6cb330dd41` |
+
+使用“从VSIX安装”后重载窗口，再重新生成例化模板。未安装到用户当前IDE，也不改写既有模板。
 
 ## 修改清单
 
