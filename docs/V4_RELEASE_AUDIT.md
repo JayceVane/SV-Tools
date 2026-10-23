@@ -100,4 +100,14 @@ PATH-only BAT的真实原始复现退出37，修复后名称/绝对/相对三种
 beta.14完整本地回归：JS182文件，golden42/42，Node650通过/1可选跳过，电路170/170，Rust153/153。
 真实Icarus、xvlog/xelab、Vivado工具链验收通过；故意语法错误及Vivado退出0的ERROR均按失败识别。
 证据：`beta14-native-build.log`、`beta14-full.log`、`beta14-rust.log`、`beta14-toolchains.log`，以及`bin/release-audit-circuit/path-batch-4hJY5n`（修复前）和`path-batch-spZgXf`（修复后）。
-候选包和远程CI的最终结果将在完成后记录。
+beta.14候选源提交 `43aff5f94b0143cb47fe352a201b8d3241eb4b3e`。VSIX457文件、441个运行文件与源码/原生/vendor逐字节一致；后续文档提交不改变包内运行代码。
+解包实际宿主18/18通过：官方VS Code编辑器5项、电路/Yosys/ELK5项、100MiB重新仿真4项，Qoder波形/布局/图片4项。
+Node22启动器专项25/25通过；完整包前回归再次通过。日志为`beta14-package.log`、`beta14-package-verification.log`、`beta14-node22.log`与`beta14-packaged-*-host.log`。
+
+| beta.14产物 | 字节 | SHA256 |
+|---|---:|---|
+| svtools-4.0.0-beta.14-win32-x64.vsix | 18566313 | `21c9555417bfbabe8a92684f24cfbd5d40fcc27fac6586765df163b3425f2aa5` |
+| svtools.exe | 24017920 | `884778452612b935212de527660c81b35d61ec46cfa543ec6e38f8c585fa3cf6` |
+| svtools.win32-x64-msvc.node | 24163328 | `9b82aa57d626c3ba18d48eef3d17299f268a4faa25c96c1efd39cd8ed6767912` |
+
+远程CI以最终推送的Windows Node22/24检查为准，入口为[PR11](https://github.com/JayceVane/SV-Tools/pull/11)。正式4.0.0尚未创建tag或Release。
