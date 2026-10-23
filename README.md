@@ -5,7 +5,7 @@
 
 改编自 Sublime Text [SystemVerilog](https://github.com/TheClams/SystemVerilog)（格式化）与 [Verilog-Gadget](https://github.com/poucotm/Verilog-Gadget)（生产力工具）插件。
 
-当前开发预览版本为 **4.0.0-beta.7**，新增可复用波形布局文件、子位设置保留和分组收起，优化游标重绘并统一工程源码发现；[已发布4.0.0-beta.2](https://github.com/JayceVane/SV-Tools/releases/tag/v4.0.0-beta.2) 提供 Windows x64 VSIX 与 CLI。开发预览可通过本地VSIX安装并重载窗口，正式版目标为 **4.0.0**。源码位于 `src/`，构建产物位于 `bin/`。
+当前开发预览版本为 **4.0.0-beta.8**，新增波形与电路图片导出，支持文档黑白线稿或当前主题的SVG/PNG，保留布局复用及共享源码上下文；[已发布4.0.0-beta.2](https://github.com/JayceVane/SV-Tools/releases/tag/v4.0.0-beta.2) 提供 Windows x64 VSIX 与 CLI。开发预览可通过本地VSIX安装并重载窗口，正式版目标为 **4.0.0**。源码位于 `src/`，构建产物位于 `bin/`。
 
 格式化只能改变普通空格、Tab、CR、LF；其它字符的内容、次数和顺序必须保持，即使输入
 全部乱码或语法不完整。无法安全提交的布局保留原文，详见 [格式化规范](docs/FORMAT_SPEC.md)。
@@ -16,6 +16,8 @@
 4.0 补全使用标准目录、容错语义模型和增量工程索引，支持 Verilog/SystemVerilog 版本选择、UVM 1.2/1800.2、类继承与泛型、端口/参数、数组与二维 mem 成员。配置、覆盖范围及限制见 [代码补全](docs/COMPLETION.md)。
 
 预览波形支持批量背景色、总线逐位展开和RTL方向图标；保存/加载 `.svwave.json` 可在重新仿真后恢复显示布局；操作及边界见[波形说明](docs/WAVEFORM.md)。
+
+波形和电路工具栏均有“导出图片”：波形按A/B区间自动调整画幅，也可导出当前时间视口；电路导出当前模块全图。可选黑白线稿/当前主题，以及SVG矢量图/高清PNG。
 
 ## 功能总览
 

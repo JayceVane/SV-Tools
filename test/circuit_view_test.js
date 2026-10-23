@@ -94,7 +94,7 @@ test('页面不内嵌网表，CSP nonce 随页面变化且无需加载 VS Code �
     assert.doesNotMatch(first, /url\(\s*["']?https?:\/\//);
     assert.doesNotMatch(first, /innerHTML\s*=/);
     assert.notEqual(first.match(/nonce-([a-f0-9]+)/)[1], second.match(/nonce-([a-f0-9]+)/)[1]);
-    assert.equal((first.match(/<script nonce=/g) || []).length, 4);
+    assert.equal((first.match(/<script nonce=/g) || []).length, 7);
 });
 
 test('相机适配、缩放锚点及非法持久化数值保持有限', () => {

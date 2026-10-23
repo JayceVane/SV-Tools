@@ -447,6 +447,21 @@
     $('snap').onclick = () => { state.snap = !state.snap; $('snap').classList.toggle('active', state.snap); persist(); };
     $('fullName').onclick = () => { state.fullName = !state.fullName; $('fullName').classList.toggle('active', state.fullName); viewportChanged(); persist(); };
     $('memoryToggle').onclick = () => memory.toggle();
+    let exportingImage = false;
+    $('exportImage').onclick = async () => {
+        if (!state.metadata || exportingImage) return;
+        hideMenu(false);
+        const options = await window.ImageExport.choose(document, { wave: true, hasAB: state.cursorB !== null && state.cursorA !== state.cursorB,
+            selectionCount: state.multi.size, returnFocus: canvas });
+        if (!options) return;
+        exportingImage = true; $('exportImage').disabled = true; status('正在生成完整波形图…');
+        try {
+            const image = await window.WaveImageExport.create({ state, options, request, window, renderer, title: BOOT.fileName });
+            const payload = await window.ImageExport.payload(image, { ...options, name: BOOT.fileName.replace(/\.vcd$/i, '') + '-waveform' }, window);
+            status(await request('image-save', payload) ? '波形图片已导出' : '已取消图片导出');
+        } catch (error) { status('波形导出失败：' + error.message); }
+        finally { exportingImage = false; $('exportImage').disabled = false; }
+    };
     $('saveLayout').onclick = async () => {
         if (!state.metadata) return;
         try { if (await request('layout-save', S.capture(state))) status('波形布局已保存'); }

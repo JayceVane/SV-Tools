@@ -26,6 +26,14 @@ async function run(){
         const uri=vscode.Uri.file(path.join(root,'host.svwave.json')),files=createLayoutFiles({vscode,filePath:file});
         assert.equal(await files.save(layout,uri),true);assert.equal((await files.load(uri)).tracks.length,2);
         checks.push('真实VS Code文件系统完成布局保存及读回，VCD保持原文件');
+        const {createImageFiles}=require(path.join(extension.extensionPath,'src/graphics/image-files'));
+        const imageFiles=createImageFiles({vscode,sourcePath:file});
+        const svgUri=vscode.Uri.file(path.join(root,'host-wave.svg'));
+        assert.equal(await imageFiles.save({format:'svg',name:'host-wave',data:'<svg xmlns="http://www.w3.org/2000/svg" width="100" height="40"><path d="M 0 20 L 40 20 L 40 0 L 100 0" stroke="black" fill="none"/></svg>'},svgUri),true);
+        const png=await fs.readFile(path.join(extension.extensionPath,'icon.png')),pngUri=vscode.Uri.file(path.join(root,'host-image.png'));
+        assert.equal(await imageFiles.save({format:'png',name:'host-image',data:png.toString('base64')},pngUri),true);
+        assert.deepEqual(await fs.readFile(pngUri.fsPath),png);
+        checks.push('真实IDE文件系统验证SVG/PNG保存；图形生成另经实际浏览器验收');
         await fs.writeFile(path.join(root,'..','host-report.json'),JSON.stringify({vscode:vscode.version,appName:vscode.env.appName,
             node:process.versions.node,electron:process.versions.electron,extensionVersion:extension.packageJSON.version,extensionPath:extension.extensionPath,
             checks,count:checks.length,status:binding.getStatus()},null,2));

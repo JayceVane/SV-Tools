@@ -260,3 +260,10 @@ beta.7以 `workspace/source-catalog.js` 统一路径发现缓存和变更通知�
 `waveform/layout-state.js`负责布局格式、可移植声明身份和恢复报告，`layout-files.js`负责用户文件选择与有界读写。
 收起位只离开显示序列，设置仍在受限派生位集合；分组摘要由row-layout投影，不改变原始成员列表。
 renderer持有静态与覆盖画布，client区分静态失效和游标/读值更新；模拟量统计随窗口对象弱缓存。
+
+
+beta.8以graphics/image-export组合风格选项、SVG封装和PNG转换，以image-files隔离宿主保存对话框和字节预算。
+waveform/image-export拥有独立AB查询与导出状态，svg-canvas仅适配当前renderer使用的1:1 Canvas命令，
+避免另写整数/浮点/位投影/模拟量绘图规则。原renderer增加显式导出几何和配色，交互画布合同不变。
+circuit/image-export从完整graph创建独立场景，解析样式为实际值，再序列化；不复制已裁剪的现场DOM，
+不重新综合或求解电路。两种host各自回复图片请求，保存失败不会进入设计加载失败状态。

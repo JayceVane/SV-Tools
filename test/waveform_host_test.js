@@ -206,3 +206,18 @@ test('源上下文等待期间取消，不启动迟到worker或覆盖取消错�
     page.receive({type:'ready'});page.receive({type:'cancel'});await nextTurn();context.resolve({files:[]});
     await binding.loaded;assert.equal(opened,0);assert.equal(page.sent.at(-1).type,'error');assert.match(page.sent.at(-1).error,/取消/);binding.dispose();
 });
+
+
+test('图片保存只回复对应requestId，取消和磁盘失败不破坏已加载波形',async t=>{
+    const page=panelFixture();let outcome=true;
+    const binding=bindWaveformPanel({filePath:path.join(os.tmpdir(),'capture.vcd'),panel:page.panel,
+        imageFiles:{async save(payload){assert.equal(payload.format,'png');if(outcome instanceof Error)throw outcome;return outcome;}},
+        createSession:()=>({async open(){return metadata();},dispose(){}})});t.after(()=>binding.dispose());
+    await binding.loaded;page.receive({type:'ready'});
+    for(const [requestId,value]of [[1,true],[2,false],[3,new Error('磁盘错误')]]){
+        outcome=value;page.receive({type:'image-save',requestId,params:{format:'png'}});await nextTurn();
+        const response=page.sent.at(-1);assert.equal(response.type,'response');assert.equal(response.requestId,requestId);
+        if(value instanceof Error)assert.match(response.error,/磁盘错误/);else assert.equal(response.result,value);
+    }
+    assert.equal(binding.getStatus().loaded,true);assert.equal(binding.getStatus().error,null);
+});

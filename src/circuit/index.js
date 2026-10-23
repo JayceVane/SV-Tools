@@ -8,6 +8,7 @@ const { prepareSourceRequest } = require('./source-request');
 const { createCircuitSourceResolver } = require('./source-context');
 const { CircuitSession } = require('./session');
 const { bindCircuitPanel } = require('./host');
+const { createImageFiles } = require('../graphics/image-files');
 const { createCircuitHtml } = require('./view');
 
 /** @param {string} file @param {string[]} roots @returns {boolean} 用户选择的设计与工作区决定源码定位范围。 */
@@ -98,7 +99,7 @@ function activateCircuitViewer(context, { vivado, sourceCatalog, vscode = requir
     function open(load, roots) {
         const panel = vscode.window.createWebviewPanel('svtoolsCircuit', '电路结构', vscode.ViewColumn.Beside,
             { enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [] });
-        const binding = bindCircuitPanel({ panel, load, onError: fail, async onSource(source) {
+        const binding = bindCircuitPanel({ panel, load, imageFiles: createImageFiles({ vscode }), onError: fail, async onSource(source) {
             const realFile = await fs.realpath(source.path);
             const realRoots = await Promise.all(roots.map(root => fs.realpath(root)));
             if (!insideRoots(realFile, realRoots)) throw new Error('源码位置不在当前设计或工作区范围内');

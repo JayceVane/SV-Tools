@@ -11,7 +11,7 @@ function graph(moduleId) {
     return { id: 'graph:' + moduleId, moduleId, name: moduleId, nodes: moduleId === descriptor.top
         ? [{ id: 'node/inst', cellId: 'cell/inst', moduleId: 'module/child', label: 'u_child' }] : [], edges: [] };
 }
-function setup({ load = async () => ({ filePath: 'input.json' }), request } = {}) {
+function setup({ load = async () => ({ filePath: 'input.json' }), request, imageFiles } = {}) {
     const sent = [], calls = [], errors = [], sources = [];
     let message, disposePanel;
     const session = { async request(command, payload) {
@@ -25,7 +25,7 @@ function setup({ load = async () => ({ filePath: 'input.json' }), request } = {}
         postMessage(value) { sent.push(value); return Promise.resolve(true); },
         onDidReceiveMessage(handler) { message = handler; return { dispose() { message = null; } }; }
     }, onDidDispose(handler) { disposePanel = handler; return { dispose() {} }; } };
-    const binding = bindCircuitPanel({ panel, session, load, onError: error => errors.push(error), onSource: source => sources.push(source) });
+    const binding = bindCircuitPanel({ panel, session, load, imageFiles, onError: error => errors.push(error), onSource: source => sources.push(source) });
     return { binding, session, sent, calls, errors, sources,
         async send(value) { message?.(value); for (let i = 0; i < 4; i++) await flush(); },
         close() { disposePanel(); } };
@@ -133,4 +133,17 @@ test('迟到的源码响应不触发离开当前导航的编辑器跳转', async
     await flush();
     assert.equal(host.sources.length, 0);
     host.close();
+});
+
+
+test('图片保存成功、取消与失败均单独回复，不覆盖电路图或触发重新布局',async()=>{
+    let outcome=true,calls=0;
+    const host=setup({imageFiles:{async save(payload){calls++;assert.equal(payload.format,'svg');if(outcome instanceof Error)throw outcome;return outcome;}}});
+    await host.send({type:'ready'});const layouts=host.calls.filter(call=>call.command==='layout').length;
+    for(const [requestId,result]of [[1,true],[2,false],[3,new Error('文件只读')]]){
+        outcome=result;await host.send({type:'image-save',requestId,params:{format:'svg'}});
+        const response=host.sent.at(-1);assert.equal(response.type,'image-result');assert.equal(response.requestId,requestId);
+        if(result instanceof Error)assert.match(response.error,/文件只读/);else assert.equal(response.result,result);
+    }
+    assert.equal(calls,3);assert.equal(host.calls.filter(call=>call.command==='layout').length,layouts);assert.equal(host.errors.length,0);host.close();
 });

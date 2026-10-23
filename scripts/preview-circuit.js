@@ -1,18 +1,26 @@
 'use strict';
+const fs = require('node:fs');
 const http = require('node:http');
 const path = require('node:path');
 const { randomUUID } = require('node:crypto');
 const { parseArgs } = require('node:util');
-const { createCircuitHtml } = require('../src/circuit/view');
-const { bindCircuitPanel } = require('../src/circuit/host');
 
 // 开发预览复用真实 Worker、模型、ELK 和页面；SSE 仅替代 VS Code 的消息桥。
-const { values } = parseArgs({ options: { json: { type: 'string' }, root: { type: 'string' }, port: { type: 'string', default: '0' } } });
+const { values } = parseArgs({ options: { json: { type: 'string' }, root: { type: 'string' }, port: { type: 'string', default: '0' }, out: { type:'string' }, 'extension-root': { type:'string' } } });
+const extensionRoot=path.resolve(values['extension-root']||path.join(__dirname,'..'));
+const {createImageFiles}=require(path.join(extensionRoot,'src/graphics/image-files'));
+const {createCircuitHtml}=require(path.join(extensionRoot,'src/circuit/view'));
+const {bindCircuitPanel}=require(path.join(extensionRoot,'src/circuit/host'));
 if (!values.json) throw new Error('用法：node scripts/preview-circuit.js --json <网表.json> [--root <源码根>] [--port 0]');
+const exportRoot=path.resolve(values.out||'bin/circuit-image-preview');fs.mkdirSync(exportRoot,{recursive:true});
+const exportedImages=[];
+const imageFiles=createImageFiles({vscode:{Uri:{file:file=>({scheme:'file',fsPath:file})},workspace:{fs:{writeFile:async(uri,bytes)=>{await fs.promises.writeFile(uri.fsPath,bytes);exportedImages.push({file:uri.fsPath,bytes:bytes.length});}}},
+    window:{showSaveDialog:async options=>({scheme:'file',fsPath:path.join(exportRoot,`export-${exportedImages.length}-`+path.basename(options.defaultUri.fsPath))})}}});
 const clients = new Map();
 const server = http.createServer(async (request, response) => {
     try {
         const url = new URL(request.url, 'http://127.0.0.1');
+        if (request.method === 'GET' && url.pathname === '/report') { response.writeHead(200,{'content-type':'application/json'});response.end(JSON.stringify({exports:exportedImages}));return; }
         if (request.method === 'GET' && url.pathname === '/') {
             const id = randomUUID(), listeners = new Set(), disposers = new Set();
             const client = { events: [], response: null, listeners };
@@ -25,7 +33,7 @@ const server = http.createServer(async (request, response) => {
                 onDidReceiveMessage(handler) { listeners.add(handler); return { dispose: () => listeners.delete(handler) }; }
             }, onDidDispose(handler) { disposers.add(handler); return { dispose: () => disposers.delete(handler) }; } };
             client.dispose = () => { for (const dispose of [...disposers]) dispose(); client.response?.end(); clients.delete(id); };
-            bindCircuitPanel({ panel, load: () => ({ filePath: path.resolve(values.json), sourceRoot: path.resolve(values.root || path.dirname(values.json)) }),
+            bindCircuitPanel({ panel, imageFiles, load: () => ({ filePath: path.resolve(values.json), sourceRoot: path.resolve(values.root || path.dirname(values.json)) }),
                 onSource: source => console.log(JSON.stringify({ source })), onError: error => console.error(error.message) });
             clients.set(id, client);
             let html = createCircuitHtml();
@@ -56,7 +64,7 @@ window.acquireVsCodeApi = () => ({postMessage(message){ if(events.readyState===1
             const client = clients.get(url.searchParams.get('client'));
             if (!client) { response.writeHead(404); response.end(); return; }
             const chunks = []; let size = 0;
-            for await (const chunk of request) { size += chunk.length; if (size > 65536) throw new Error('预览请求过大'); chunks.push(chunk); }
+            for await (const chunk of request) { size += chunk.length; if (size > 48*1024*1024) throw new Error('预览请求过大'); chunks.push(chunk); }
             const message = JSON.parse(Buffer.concat(chunks).toString('utf8'));
             for (const listener of client.listeners) listener(message);
             response.writeHead(204); response.end();

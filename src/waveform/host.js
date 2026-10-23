@@ -10,7 +10,7 @@ const QUERY_METHODS = new Set(['window', 'values', 'edge']);
  * @param {{filePath:string,panel:object,channel?:object,createSession?:(options:object)=>object,getSourceContext?:()=>Promise<object>}} options
  * @returns {{dispose:()=>void,loaded:Promise<void>}} 可独立验证，不依赖 vscode 全局。
  */
-function bindWaveformPanel({ filePath, panel, channel, createSession = options => new VcdSession(options), getSourceContext, layoutFiles }) {
+function bindWaveformPanel({ filePath, panel, channel, createSession = options => new VcdSession(options), getSourceContext, layoutFiles, imageFiles }) {
     let resolveInitialized;
     const initialized = new Promise(resolve => { resolveInitialized = resolve; });
     const activity = { window: 0, values: 0, edge: 0 };
@@ -37,10 +37,11 @@ function bindWaveformPanel({ filePath, panel, channel, createSession = options =
             await session.dispose(); reportState(); return;
         }
         if (!Number.isSafeInteger(message.requestId)) return;
-        if (message.type === 'layout-save' || message.type === 'layout-load') {
+        if (message.type === 'image-save' || message.type === 'layout-save' || message.type === 'layout-load') {
             try {
-                if (!layoutFiles || !metadata || cancelled) throw new Error('布局服务尚未就绪');
-                const result = message.type === 'layout-save' ? await layoutFiles.save(message.params) : await layoutFiles.load();
+                if (!metadata || cancelled || (message.type === 'image-save' ? !imageFiles : !layoutFiles)) throw new Error('布局服务尚未就绪');
+                const result = message.type === 'image-save' ? await imageFiles.save(message.params)
+                    : message.type === 'layout-save' ? await layoutFiles.save(message.params) : await layoutFiles.load();
                 send({ type: 'response', requestId: message.requestId, result });
             } catch (error) { send({ type: 'response', requestId: message.requestId, error: error.message }); }
             return;

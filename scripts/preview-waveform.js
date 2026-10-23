@@ -6,6 +6,7 @@ const rootIndex = process.argv.indexOf('--extension-root');
 const extensionRoot = rootIndex >= 0 ? path.resolve(process.argv[rootIndex + 1]) : path.resolve(__dirname, '..');
 const { VcdSession } = require(path.join(extensionRoot, 'src/waveform/session'));
 const { buildWaveformHtml } = require(path.join(extensionRoot, 'src/waveform/view'));
+const { createImageFiles } = require(path.join(extensionRoot, 'src/graphics/image-files'));
 const { createLayoutFiles } = require(path.join(extensionRoot, 'src/waveform/layout-files'));
 const { parseTimescaleSeconds } = require(path.join(extensionRoot, 'src/waveform/parser'));
 
@@ -67,6 +68,10 @@ async function main() {
     const layoutFiles = createLayoutFiles({ filePath, vscode:{ Uri:{ file:file=>({scheme:'file',fsPath:file}) },
         window:{ showSaveDialog:async()=>layoutUri, showOpenDialog:async()=>[layoutUri] },
         workspace:{ fs:{stat:uri=>fs.stat(uri.fsPath),readFile:uri=>fs.readFile(uri.fsPath),writeFile:(uri,bytes)=>fs.writeFile(uri.fsPath,bytes)} } } });
+    const exports = [], queries = [];
+    const imageFiles = createImageFiles({ sourcePath: filePath, vscode: { Uri:{file:file=>({scheme:'file',fsPath:file})},
+        window:{showSaveDialog:async options=>({scheme:'file',fsPath:path.join(root,`export-${exports.length}-`+path.basename(options.defaultUri.fsPath))})},
+        workspace:{fs:{writeFile:async(uri,bytes)=>{await fs.writeFile(uri.fsPath,bytes);exports.push({file:uri.fsPath,bytes:bytes.length});}}} } });
     const counts = { window: 0, values: 0, edge: 0 }, messages = [];
     let saved = signalMode ? { fileKey: filePath, selected: metadata.vars.map(signal => signal.path), cursorA: 0, cursorB: 40 } : null;
     const restoreIndex = process.argv.indexOf('--restore');
@@ -92,7 +97,7 @@ window.acquireVsCodeApi = () => ({
     const json = (response, status, body) => { response.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' }); response.end(JSON.stringify(body)); };
     async function body(request) {
         const chunks = []; let bytes = 0;
-        for await (const chunk of request) { bytes += chunk.length; if (bytes > 2 * 1024 * 1024) throw new Error('验收请求过大'); chunks.push(chunk); }
+        for await (const chunk of request) { bytes += chunk.length; if (bytes > 48 * 1024 * 1024) throw new Error('验收请求过大'); chunks.push(chunk); }
         return JSON.parse(Buffer.concat(chunks).toString('utf8'));
     }
     const server = http.createServer(async (request, response) => {
@@ -102,19 +107,23 @@ window.acquireVsCodeApi = () => ({
                 const page = html.replace('getState() { return null; }', 'getState() { return ' + stored + '; }');
                 response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }); response.end(page); return;
             }
-            if (request.method === 'GET' && request.url === '/report') { json(response, 200, { root, counts, saved, messages }); return; }
+            if (request.method === 'GET' && request.url === '/report') { json(response, 200, { root, counts, saved, messages, exports, queries }); return; }
             if (request.method === 'POST' && request.url === '/state') {
                 saved = await body(request); await fs.writeFile(path.join(root, 'state.json'), JSON.stringify(saved, null, 2)); json(response, 200, { ok: true }); return;
             }
             if (request.method === 'POST' && request.url === '/query') {
                 const message = await body(request);
+                if (message.type === 'image-save') {
+                    try { json(response,200,{type:'response',requestId:message.requestId,result:await imageFiles.save(message.params)}); }
+                    catch(error){json(response,200,{type:'response',requestId:message.requestId,error:error.message});}return;
+                }
                 if (message.type === 'layout-save' || message.type === 'layout-load') {
                     try { const result = message.type === 'layout-save' ? await layoutFiles.save(message.params) : await layoutFiles.load();
                         json(response,200,{type:'response',requestId:message.requestId,result}); }
                     catch(error){ json(response,200,{type:'response',requestId:message.requestId,error:error.message}); } return;
                 }
                 if (!['window', 'values', 'edge'].includes(message.type)) { json(response, 200, null); return; }
-                counts[message.type]++;
+                counts[message.type]++; queries.push({type:message.type,params:message.params}); if(queries.length>200)queries.shift();
                 try { json(response, 200, { type: 'response', requestId: message.requestId, result: await session[message.type](message.params) }); }
                 catch (error) { json(response, 200, { type: 'response', requestId: message.requestId, error: error.message }); }
                 return;

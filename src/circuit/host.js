@@ -6,7 +6,7 @@ const MAX_ID_LENGTH = 32768;
  * @param {{panel:object,load:Function,onSource?:Function,onError?:Function,session?:CircuitSession}} options
  * @returns {{dispose:Function,reload:Function,loaded:Promise<object>}} loaded 明确返回首轮成败，页面只提交对象 ID。
  */
-function bindCircuitPanel({ panel, load, onSource, onError = console.error, session = new CircuitSession() }) {
+function bindCircuitPanel({ panel, load, onSource, onError = console.error, imageFiles, session = new CircuitSession() }) {
     let closed = false, started = false, generation = 0, operation = 0, descriptor, currentGraph, breadcrumbs = [];
     let loadController;
     let completeLoad;
@@ -54,6 +54,14 @@ function bindCircuitPanel({ panel, load, onSource, onError = console.error, sess
     const handlers = {
         ready: async () => { if (!started) { started = true; clearTimeout(readyTimer); await reload(); } },
         reload,
+        'image-save': async message => {
+            if (!Number.isSafeInteger(message.requestId)) return;
+            try {
+                if (!currentGraph || !imageFiles) throw new Error('电路图片导出尚未就绪');
+                const result = await imageFiles.save(message.params);
+                await send({ type: 'image-result', requestId: message.requestId, result });
+            } catch (error) { await send({ type: 'image-result', requestId: message.requestId, error: error.message }); }
+        },
         home: () => descriptor && display([descriptor.modules.find(module => module.id === descriptor.top)]),
         back: () => descriptor && breadcrumbs.length > 1 && display(breadcrumbs.slice(0, -1)),
         module: message => {

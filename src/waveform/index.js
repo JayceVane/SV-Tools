@@ -2,6 +2,7 @@
 const path = require('node:path');
 const { bindWaveformPanel } = require('./host');
 const { collectSourceContext } = require('./source-roles');
+const { createImageFiles } = require('../graphics/image-files');
 const { createLayoutFiles } = require('./layout-files');
 
 /** 注册 VCD 自定义编辑器、仿真联动入口和文本/波形切换命令。 */
@@ -14,7 +15,7 @@ function activateWaveViewer(context, deps) {
         panels.set(key, panel);
         panel.webview.options = { enableScripts: true, localResourceRoots: [] };
         panel.onDidDispose(() => { if (panels.get(key) === panel) panels.delete(key); });
-        const binding = bindWaveformPanel({ filePath: key, panel, channel: deps?.channel, layoutFiles: createLayoutFiles({ vscode, filePath: key }), getSourceContext: () => collectSourceContext(vscode, key, deps?.sourceCatalog, sourceFile) });
+        const binding = bindWaveformPanel({ filePath: key, panel, channel: deps?.channel, imageFiles: createImageFiles({ vscode, sourcePath: key }), layoutFiles: createLayoutFiles({ vscode, filePath: key }), getSourceContext: () => collectSourceContext(vscode, key, deps?.sourceCatalog, sourceFile) });
         context.subscriptions.push(binding);
         return binding;
     }

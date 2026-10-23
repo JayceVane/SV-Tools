@@ -16,7 +16,7 @@ async function until(predicate, label) {
 async function main() {
     fs.mkdirSync(out, { recursive: true });
     const corpus = option('--file', null);
-    const previewArgs = [path.join(root, 'scripts/preview-waveform.js'), ...(corpus ? ['--file',path.resolve(corpus)] : ['--signals'])];
+    const previewArgs = [path.join(root, 'scripts/preview-waveform.js'), ...(corpus ? ['--file',path.resolve(corpus)] : args.includes('--floating') ? [] : ['--signals'])];
     if (args.includes('--extension-root')) previewArgs.push('--extension-root', option('--extension-root'));
     const preview = spawn(process.execPath, previewArgs, { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
     let serverInfo, previewOutput = '', previewError = '', browser, socket;
@@ -57,6 +57,35 @@ async function main() {
             await call('Input.dispatchMouseEvent', { ...params, type: 'mousePressed' }); await call('Input.dispatchMouseEvent', { ...params, type: 'mouseReleased' }); await pause(60);
         };
         const action = async id => { assert.equal(await evaluate(`(()=>{const b=document.querySelector('.menu button[data-menu-action=${JSON.stringify(id)}]');if(!b||b.disabled)return false;b.click();return true;})()`), true, id); await pause(70); };
+        if (args.includes('--exports')) {
+            const results=[];
+            for (const theme of ['dark','light']) {
+                await call('Page.navigate',{url:serverInfo.url+'?theme='+theme});await waitReady();
+                const exportEnd=args.includes('--floating')?300:40;
+                if(args.includes('--floating')){
+                    for(const [key,format]of [['float_tb.fp64','fp64'],['float_tb.fp32','fp32'],['float_tb.tf32_packed','tf32'],['float_tb.bf16','bf16'],['float_tb.fp16','fp16'],['float_tb.fp8_e3m4','fp8e3m4']]){
+                        await clickRow(key,{right:true});await action('display-format');await action('format-'+format);
+                    }
+                    await evaluate("document.getElementById('cursorMode').click();document.getElementById('jumpTime').value='300 ns';document.getElementById('jump').click()");
+                }else if(!(await report()).saved.selected.some(key=>key.startsWith('["$bit"'))){
+                    await clickRow('wave_tb.dut.ctrl',{right:true});await action('expand-bus');
+                }
+                for(const style of ['document','theme']) for(const format of ['svg','png']) {
+                    const before=await report();
+                    await evaluate("document.getElementById('exportImage').click()");
+                    await until(()=>evaluate("!!document.getElementById('imageConfirm')"),'导出选项');
+                    await evaluate(`document.getElementById('imageStyle').value=${JSON.stringify(style)};document.getElementById('imageFormat').value=${JSON.stringify(format)};document.getElementById('imageConfirm').click();`);
+                    await until(async()=>{const current=await report();const status=await evaluate("document.getElementById('status').textContent");if(status.includes('失败'))throw Error(status);return current.exports.length>before.exports.length;},'导出文件');
+                    const after=await report(),file=after.exports.at(-1).file,data=fs.readFileSync(file);
+                    assert.deepEqual(after.saved.selected,before.saved.selected);assert.equal(after.saved.cursorA,before.saved.cursorA);assert.equal(after.saved.cursorB,before.saved.cursorB);
+                    const query=after.queries.filter(q=>q.type==='window').at(-1);assert.equal(query.params.start,0);assert.equal(query.params.end,exportEnd);
+                    if(format==='svg'){assert.match(data.toString(),/0 ns/);assert.ok(data.toString().includes(exportEnd+' ns'));if(args.includes('--floating'))assert.match(data.toString(),/1\.5/);assert.doesNotMatch(data.toString(),/0xX|↕|▸/);if(style==='document')assert.doesNotMatch(data.toString(),/#52d4ac|#e5ba76/);}
+                    else {assert.equal(data.subarray(1,4).toString(),'PNG');assert.ok(data.readUInt32BE(16)>=1100);}
+                    results.push({theme,style,format,file,bytes:data.length,range:[0,exportEnd]});
+                }
+            }
+            assert.deepEqual(errors,[]);const result={results,errors};fs.writeFileSync(path.join(out,'exports.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result,null,2));await call('Browser.close');return;
+        }
         if (corpus) {
             await call('Page.navigate',{url:serverInfo.url+'?theme=dark'});await waitReady();
             const performanceReport=await evaluate(`(()=>{

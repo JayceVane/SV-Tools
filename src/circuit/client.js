@@ -126,8 +126,9 @@
      * @returns {{receive:function,destroy:function,getState:function}} 生命周期和验收入口。
      */
     function createClient(document, window, bridge, renderer) {
-        const ids = ['designTitle', 'provenance', 'back', 'home', 'modules', 'fit', 'zoomOut', 'zoomIn', 'zoom', 'search', 'searchCount', 'nextMatch', 'reload', 'breadcrumbs', 'graphStats', 'viewport', 'circuit', 'message', 'messageTitle', 'messageDetail', 'selectionEmpty', 'selectionDetails', 'selectionKind', 'selectionName', 'properties', 'enterInstance', 'openSource', 'status'];
+        const ids = ['designTitle', 'provenance', 'back', 'home', 'modules', 'fit', 'zoomOut', 'zoomIn', 'zoom', 'search', 'searchCount', 'nextMatch', 'reload', 'breadcrumbs', 'graphStats', 'viewport', 'circuit', 'message', 'messageTitle', 'messageDetail', 'selectionEmpty', 'selectionDetails', 'selectionKind', 'selectionName', 'properties', 'enterInstance', 'openSource', 'exportImage', 'status'];
         const ui = Object.fromEntries(ids.map(id => [id, document.getElementById(id)]));
+        const imageRequests = new Map(); let imageRequestId = 0, exportingImage = false;
         const disposers = [], saved = bridge.getState?.(), views = new Map(Array.isArray(saved?.views) ? saved.views.filter(entry => Array.isArray(entry) && typeof entry[0] === 'string').slice(-MAX_SAVED_VIEWS) : []);
         let graph = null, design = null, currentModuleId = null, drawing = null, selection = undefined, selected = null, camera = cleanCamera(), stateKey = null, isFit = true, isLoading = true, drag = null, lastClickHit = null, matches = [], matchIndex = -1, searchTimer = null, saveTimer = null, cameraFrame = null, saveAfterFrame = false, viewportRect = null, isDestroyed = false;
         const listen = (target, type, callback, options) => { target.addEventListener(type, callback, options); disposers.push(() => target.removeEventListener(type, callback, options)); };
@@ -220,6 +221,7 @@
             if (isLoading) cancelCameraFrame();
             ui.message.hidden = mode === 'graph'; ui.message.setAttribute('role', mode === 'error' ? 'alert' : 'status');
             if (mode !== 'graph') { ui.messageTitle.textContent = mode === 'error' ? '无法生成电路视图' : '正在生成电路'; ui.messageDetail.textContent = message || '后台读取网表并计算布局'; ui.status.textContent = message || ui.messageTitle.textContent; }
+            ui.exportImage.disabled = mode !== 'graph' || exportingImage;
             for (const control of [ui.fit, ui.zoomOut, ui.zoomIn, ui.search]) control.disabled = mode !== 'graph';
             ui.modules.disabled = mode === 'loading' || !design?.modules?.length;
             ui.back.disabled = mode === 'loading' || !ui.back.dataset.available;
@@ -246,6 +248,10 @@
 
         function receive(message) {
             if (isDestroyed || !message || typeof message !== 'object') return;
+            if (message.type === 'image-result') {
+                const pending = imageRequests.get(message.requestId); if (!pending) return; imageRequests.delete(message.requestId);
+                if (message.error) pending.reject(new Error(message.error)); else pending.resolve(message.result); return;
+            }
             if (message.type === 'design') { showDesign(message.design); return; }
             if (message.type === 'loading' || message.type === 'error') {
                 if (drag) finishDrag(true);
@@ -289,6 +295,21 @@
         listen(ui.fit, 'click', fit); listen(ui.zoomIn, 'click', () => zoom(1.25)); listen(ui.zoomOut, 'click', () => zoom(.8));
         listen(ui.back, 'click', () => { if (!ui.back.disabled) post({ type: 'back' }); }); listen(ui.home, 'click', () => { if (!ui.home.disabled) post({ type: 'home' }); });
         listen(ui.modules, 'change', () => { if (!ui.modules.disabled && ui.modules.value !== currentModuleId) post({ type: 'module', moduleId: ui.modules.value }); });
+        listen(ui.exportImage, 'click', async () => {
+            if (!graph || isLoading || exportingImage) return;
+            const options = await window.ImageExport.choose(document, { returnFocus: ui.circuit }); if (!options) return;
+            exportingImage = true; ui.exportImage.disabled = true; ui.status.textContent = '正在生成完整电路图…';
+            try {
+                await new Promise(resolve => window.requestAnimationFrame(resolve));
+                if (isLoading) throw new Error('电路正在切换，请加载完成后重新导出');
+                const image = window.CircuitImageExport.create({ graph, design, options, window, renderer });
+                const params = await window.ImageExport.payload(image, { ...options, name: (graph.name || graph.id) + '-circuit' }, window);
+                const result = await new Promise((resolve, reject) => { const requestId = ++imageRequestId;
+                    imageRequests.set(requestId, { resolve, reject }); post({ type: 'image-save', requestId, params }); });
+                ui.status.textContent = result ? '电路图片已导出' : '已取消图片导出';
+            } catch (error) { ui.status.textContent = '电路导出失败：' + error.message; }
+            finally { exportingImage = false; ui.exportImage.disabled = isLoading; }
+        });
         listen(ui.reload, 'click', () => { if (!ui.reload.disabled) post({ type: 'reload' }); }); listen(ui.enterInstance, 'click', enter); listen(ui.openSource, 'click', source);
         listen(ui.search, 'input', () => { window.clearTimeout(searchTimer); searchTimer = window.setTimeout(() => updateSearch(), 120); });
         listen(ui.search, 'keydown', event => { if (event.key === 'Enter') { event.preventDefault(); window.clearTimeout(searchTimer); updateSearch(true); } });
@@ -327,7 +348,7 @@
         else listen(window, 'resize', resize);
         listen(window, 'blur', () => { if (drag) finishDrag(true); }); listen(window, 'pagehide', saveView);
         setMode('loading', '正在连接电路数据'); post({ type: 'ready' });
-        return { receive, getState: () => ({ graph, selection, camera: { ...camera }, isFit, isLoading }), destroy() { if (isDestroyed) return; if (drag) finishDrag(true); saveView(); isDestroyed = true; cancelCameraFrame(); window.clearTimeout(searchTimer); window.clearTimeout(saveTimer); for (const dispose of disposers) dispose(); } };
+        return { receive, getState: () => ({ graph, selection, camera: { ...camera }, isFit, isLoading }), destroy() { if (isDestroyed) return; if (drag) finishDrag(true); saveView(); isDestroyed = true; for (const pending of imageRequests.values()) pending.resolve(false); imageRequests.clear(); cancelCameraFrame(); window.clearTimeout(searchTimer); window.clearTimeout(saveTimer); for (const dispose of disposers) dispose(); } };
     }
 
     return { cleanCamera, fitCamera, zoomCamera, graphStateKey, searchGraph, describeSelection, provenanceText, createClient };
