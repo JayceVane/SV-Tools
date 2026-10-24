@@ -1,3 +1,15 @@
+# 无基数常量高亮修复交接（2026-10-25）
+
+用户反馈`'0`、`'1`的单引号未着色。原TextMate语法没有无基数无位宽常量规则，只有后面的十进制数字被着色。当前分支`codex/fix-unbased-literal-highlight`沿用已完成的自用格式化及仿真修复。
+
+- 新增完整`'0/'1/'x/'X/'z/'Z`数字作用域及词法边界；宏定义数字也复用`#numbers`。保持字符串、注释、类型转换与赋值模式上下文。两个语言共用该语法，不改主题、格式化器或原生资源。
+- 新增`test/highlighting_test.js`并纳入npm test：3项独立词法合同，加1项真实TextMate/Oniguruma合同；通过`SVTOOLS_EDITOR_APP_ROOT`复用已有编辑器库，无新增依赖。无编辑器的CI只跳过真实引擎项。
+- 新包`bin/private-dist/svtools-4.0.1-local.7-win32-x64.vsix`，464文件、18574192 bytes；SHA256为`fe454433e8d55233fe1254919a49aee40dd1434517de78789f8d314ebf03271a`。最终包的语法及运行资源与源码字节一致；基于包内语法和Qoder实际引擎验证30个常量场景与5个保护上下文。
+- 回归：JS语法203文件、golden44/44、Node676通过/11可选跳过、电路170/170、私有纯合同4通过/2实际工具组可选跳过；解包最终包的真实Qoder18/18，包含格式化、生成及真实Questa。验收脚本修正“用户样本必须产生变化”的前提，已格式化文件允许保持原样，公开非规整夹具继续证明格式化实际执行。
+- 报告`bin/unbased-highlight-package-verification.json`、`bin/unbased-highlight-textmate-report.json`、`bin/unbased-highlight-acceptance-report.json`；私有源码备份见private-dist。根公开版本仍4.0.0，私有实现继续排除公开构建；只本地提交，不安装、推送、合并或发布。
+
+以下为历史交接。
+
 # 自用格式化修复交接（2026-10-25）
 
 用户反馈Qoder中axis_if.sv格式化无效。自用清单将configuration变为分组数组，旧读取器只支持对象，readOption在NAPI调用前抛出TypeError。当前分支 `codex/fix-local-formatting`，保留此前统一仿真菜单及默认VCD目录修复。

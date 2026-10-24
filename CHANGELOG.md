@@ -2,6 +2,14 @@
 
 All notable changes to the SystemVerilog VSCode Extension will be documented in this file.
 
+## [Unreleased] - 无基数常量完整高亮
+
+**变更内容：** `'0`、`'1`、`'x`、`'z`及大小写形式的单引号和值作为完整数字着色，宏定义中的数字也使用同一规则。
+
+**为什么：** 原语法只识别带进制及普通十进制数字，遗漏SystemVerilog无基数无位宽常量，导致单引号未着色。
+
+**影响面：** Verilog/SystemVerilog共用语法规则；保留原有进制常量及字符串、注释、类型转换和赋值模式的上下文。新增词法边界回归，并复用本机Qoder的TextMate/Oniguruma验证实际作用域；无编辑器环境只跳过真实引擎项。
+
 ## [Unreleased] - 分组配置兼容
 
 **变更内容：** 配置默认值同时支持单组对象和多组数组，修复自用组装包的格式化、例化和测试台选项读取。格式化配置异常也进入原有错误提示，不提交编辑。
