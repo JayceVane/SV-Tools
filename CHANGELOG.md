@@ -2,6 +2,14 @@
 
 All notable changes to the SystemVerilog VSCode Extension will be documented in this file.
 
+## [Unreleased] - 分组配置兼容
+
+**变更内容：** 配置默认值同时支持单组对象和多组数组，修复自用组装包的格式化、例化和测试台选项读取。格式化配置异常也进入原有错误提示，不提交编辑。
+
+**为什么：** 自用包追加配置分组后，旧代码仍直接读取configuration.properties，导致格式化在调用原生模块前报错。此前自用宿主只验证新增工具，遗漏了核心编辑功能。
+
+**影响面：** 保持公开清单、版本号和格式化规则；增加配置结构与异常回归，自用构建及真实宿主补充核心功能验收。根因见docs/bugs/compat-grouped-configuration-defaults.md。
+
 ## [Unreleased] - 统一仿真入口注册
 
 **变更内容：** 标签页仿真菜单改为会话级引擎注册及回调派发，公共入口仍注册Icarus与Vivado，本地自用组装可以注册额外引擎。

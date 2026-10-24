@@ -1,10 +1,42 @@
 'use strict';
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
 const path = require('node:path');
+const vm = require('node:vm');
 const { test } = require('node:test');
 const { createFormatter } = require('../src/editor/formatting');
 const { createEditorCommands } = require('../src/editor/commands');
 const defaults = require('../package.json').contributes.configuration.properties;
+
+/** 用真实配置模块验证清单形态，避免只覆盖当前公开清单的单组布局。 */
+function configurationReaders(configuration) {
+    const module = { exports: {} };
+    vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../src/configuration.js'), 'utf8'), {
+        module, require: name => {
+            assert.equal(name, '../package.json');
+            return { contributes: { configuration } };
+        }
+    });
+    return module.exports;
+}
+
+test('单组与多组配置清单提供相同的格式化、例化和测试台默认值', () => {
+    const entries = Object.entries(defaults), midpoint = Math.floor(entries.length / 2);
+    const single = configurationReaders({ properties: defaults });
+    const grouped = configurationReaders([
+        { title: '第一组', properties: Object.fromEntries(entries.slice(0, midpoint)) },
+        { title: '分类标题' },
+        { title: '第二组', properties: Object.fromEntries(entries.slice(midpoint)) }
+    ]);
+    for (const overrides of [{}, { useTab: false, tabSize: 0, instPrefix: '', waveType: '' }]) {
+        const config = { get: (name, fallback) => Object.hasOwn(overrides, name) ? overrides[name] : fallback };
+        for (const name of ['buildFormatOptions', 'buildModuleOptions', 'buildTestbenchOptions']) {
+            assert.deepEqual(JSON.parse(JSON.stringify(grouped[name](config))), JSON.parse(JSON.stringify(single[name](config))));
+        }
+        assert.equal(grouped.buildFormatOptions(config).nbSpace, overrides.tabSize ?? defaults['svtools.tabSize'].default);
+        assert.equal(grouped.buildModuleOptions(config).instPrefix, overrides.instPrefix ?? defaults['svtools.instPrefix'].default);
+    }
+});
 
 /** 模拟配置读取，保留清单默认的空字符串和显式 false。 */
 function configuration(overrides = {}) {
@@ -121,6 +153,17 @@ test('原生格式化异常转为编辑器错误提示和 null', async context =
     assert.equal(harness.errors.length, 1);
     assert.match(harness.errors[0], /native contract failure/);
     assert.equal(harness.missingCount(), 0);
+});
+
+test('配置读取异常在全文与选区格式化中明确报告，且不调用原生模块', async context => {
+    context.mock.method(console, 'error', () => {});
+    const overrides = { get tabSize() { throw new Error('configuration unavailable'); } };
+    const harness = formatterHarness({ formatText: () => assert.fail('配置失败不应调用原生模块') }, overrides);
+    for (const range of [null, { start: 0, end: 1 }]) {
+        assert.equal(await harness.formatter.formatDocument({ getText: () => 'source' }, range), null);
+    }
+    assert.equal(harness.errors.length, 2);
+    assert.ok(harness.errors.every(message => message.includes('configuration unavailable')));
 });
 
 /** 只模拟 header 命令需要的编辑器 API，所有修改均记录为插入操作。 */

@@ -15,14 +15,10 @@ function createFormatter({ vscode, loadNativeModule, reportNativeMissing }) {
             return null;
         }
 
-        const config = vscode.workspace.getConfiguration('svtools');
-
-        // Get the document text
-        const text = document.getText(range);
-
-        const options = buildFormatOptions(config);
-
         try {
+            const config = vscode.workspace.getConfiguration('svtools');
+            const text = document.getText(range);
+            const options = buildFormatOptions(config);
             const formattedText = native.formatText(text, options);
             if (!preservesCharacters(text, formattedText)) {
                 console.warn('Formatting changed non-layout characters; original text preserved.');

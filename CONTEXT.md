@@ -1,3 +1,16 @@
+# 自用格式化修复交接（2026-10-25）
+
+用户反馈Qoder中axis_if.sv格式化无效。自用清单将configuration变为分组数组，旧读取器只支持对象，readOption在NAPI调用前抛出TypeError。当前分支 `codex/fix-local-formatting`，保留此前统一仿真菜单及默认VCD目录修复。
+
+- `src/configuration.js`在入口合并单组/多组properties，格式化、例化、测试台共用同一默认值来源；`src/editor/formatting.js`将配置及文本读取纳入原异常提示。未改格式化规则、字符守卫或Rust核心。
+- 新增两个先失败再通过的回归，验证三类选项的两种清单结构、显式false/0/空值及全文/选区配置异常。私有构建增加组装后真实配置和NAPI核心门禁，私有宿主复用公开核心验收后再跑仿真。
+- 新包 `bin/private-dist/svtools-4.0.1-local.6-win32-x64.vsix`，464文件、18573918 bytes，SHA256为`1ba9fea32c851fdc698b19fb639f2eda65d0016484ddb548cd7378d90a5ffb28`。最终ZIP与staging的460个文件字节一致，README/CHANGELOG由vsce处理，LICENSE按打包规则改名；运行资源及私有三文件与当前源码一致。
+- 完整回归：JS语法202文件、golden44/44、Node672通过/11可选跳过、电路170/170；私有纯合同4通过/2实际工具组可选跳过。最终解包包在VS Code1.143与Qoder API1.106.3均18/18，覆盖核心格式化/生成、用户文件副本的全文/选区/保存格式化及真实Questa菜单、VCD、错误和停止。
+- 原文件 `D:\Workspace\FPGA\05_corelib\src\interface\axis_if.sv`仅只读，11174 bytes，SHA256前后均为`25a8ba3082c866eeb83aec9f746b4e07d5413202bde079e3aa8eb746592176bf`。未将用户样本放入公开golden或安装包。
+- 报告为 `bin/local-format-acceptance-report.json`及`bin/local-format-package-verification.json`；根因见 `docs/bugs/compat-grouped-configuration-defaults.md`。私有源码及本次修复另存private-dist备份；旧包保留。公开版本仍4.0.0，仅本地提交，不推送、合并或发布，也未自动安装到日常Qoder。
+
+4.1信号追踪计划不变。以下为历史交接。
+
 # 自用仿真菜单修复交接（2026-10-25）
 
 用户反馈自用版本统一“仿真…”入口没有ModelSim/QuestaSim。根因是只接入了独立命令/状态栏，原统一菜单仍是两项固定数组；现改为会话内可注册引擎列表和快照派发。当前分支 `codex/fix-local-simulation-menu`，沿用前面的默认VCD目录修复。
