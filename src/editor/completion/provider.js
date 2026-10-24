@@ -10,8 +10,8 @@ const KINDS = { keyword: 'Keyword', snippet: 'Snippet', module: 'Module', interf
     covergroup: 'Class', modport: 'Interface', file: 'File', constant: 'Constant' };
 
 /** 编辑器适配只负责配置、取消、SnippetString 与准确的双替换区间。 */
-function createCompletionProvider({ vscode, onError = console.warn }) {
-    const index = createCompletionIndex({ vscode, onError });
+function createCompletionProvider({ vscode, onError = console.warn, sourceCatalog }) {
+    const index = createCompletionIndex({ vscode, onError, sourceCatalog });
     async function provideCompletionItems(document, position, token) {
         if (token?.isCancellationRequested) return undefined;
         const current = index.update(document);

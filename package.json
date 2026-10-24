@@ -2,7 +2,7 @@
   "name": "svtools",
   "displayName": "SystemVerilog Tools",
   "description": "Verilog/SystemVerilog formatter, module instantiation, testbench generation, and productivity tools (Rust native backend)",
-  "version": "4.0.0-preview.1",
+  "version": "4.0.0",
   "publisher": "JayceVane",
   "author": {
     "name": "JayceVane",
@@ -23,7 +23,7 @@
   },
   "homepage": "https://github.com/JayceVane/SV-Tools",
   "engines": {
-    "vscode": "^1.74.0"
+    "vscode": "^1.106.0"
   },
   "categories": [
     "Formatters",
@@ -49,11 +49,14 @@
   ],
   "main": "./extension.js",
   "scripts": {
-    "test": "npm run check && node test/golden_test.js && node --test test/formatter_contract_test.js test/formatter_conservation_test.js test/toolchain_test.js test/waveform_test.js test/editor_test.js test/workspace_test.js test/waveform_stream_test.js test/waveform_ui_test.js test/waveform_host_test.js test/waveform_memory_test.js test/waveform_memory_view_test.js test/waveform_float_test.js test/waveform_interaction_test.js test/waveform_renderer_test.js test/waveform_row_layout_test.js test/waveform_row_gesture_test.js test/waveform_column_layout_test.js test/waveform_column_resize_test.js test/waveform_column_client_test.js test/process_output_test.js test/toolchain_task_test.js test/vivado_tree_test.js test/vivado_xpr_test.js test/vivado_commands_test.js test/completion_syntax_test.js test/completion_catalog_test.js test/completion_engine_test.js test/completion_index_test.js test/completion_provider_test.js",
+    "test": "npm run check && node test/golden_test.js && node --test test/formatter_semantics_test.js test/codegen_release_test.js test/waveform_lifecycle_test.js test/module_inst_test.js test/formatter_contract_test.js test/formatter_conservation_test.js test/toolchain_test.js test/waveform_test.js test/editor_test.js test/workspace_test.js test/source_catalog_test.js test/waveform_stream_test.js test/waveform_ui_test.js test/waveform_signal_test.js test/waveform_layout_test.js test/image_export_test.js test/waveform_host_test.js test/waveform_memory_test.js test/waveform_memory_view_test.js test/waveform_float_test.js test/waveform_interaction_test.js test/waveform_renderer_test.js test/waveform_row_layout_test.js test/waveform_row_gesture_test.js test/waveform_column_layout_test.js test/waveform_column_resize_test.js test/waveform_column_client_test.js test/process_output_test.js test/toolchain_task_test.js test/vivado_tree_test.js test/vivado_xpr_test.js test/vivado_commands_test.js test/completion_syntax_test.js test/completion_catalog_test.js test/completion_engine_test.js test/completion_index_test.js test/completion_provider_test.js && npm run test:circuit",
     "build:native": "node scripts/build-native.js",
     "package": "vsce package",
+    "package:preview": "node scripts/package-preview.js",
     "vscode:prepublish": "npm test",
-    "check": "node scripts/check-js.js"
+    "check": "node scripts/check-js.js",
+    "build:circuit": "node scripts/build-circuit-assets.js",
+    "test:circuit": "npm run build:circuit && node scripts/test-circuit.js"
   },
   "contributes": {
     "languages": [
@@ -353,6 +356,36 @@
         "title": "%cmd.vivado_tree_stop.title%",
         "category": "SystemVerilog",
         "icon": "$(debug-stop)"
+      },
+      {
+        "command": "svtools.circuit.open",
+        "title": "%cmd.circuit.open.title%",
+        "category": "SystemVerilog Tools",
+        "icon": "$(circuit-board)"
+      },
+      {
+        "command": "svtools.circuit.fromSource",
+        "title": "%cmd.circuit.fromSource.title%",
+        "category": "SystemVerilog Tools",
+        "icon": "$(circuit-board)"
+      },
+      {
+        "command": "svtools.circuit.fromVivado",
+        "title": "%cmd.circuit.fromVivado.title%",
+        "category": "SystemVerilog Tools",
+        "icon": "$(circuit-board)"
+      },
+      {
+        "command": "svtools.circuit.stop",
+        "title": "%cmd.circuit.stop.title%",
+        "category": "SystemVerilog Tools",
+        "icon": "$(circuit-board)"
+      },
+      {
+        "command": "svtools.circuit.fromVivadoFile",
+        "title": "%cmd.circuit.fromVivadoFile.title%",
+        "category": "SV Tools",
+        "icon": "$(circuit-board)"
       }
     ],
     "viewsContainers": {
@@ -381,7 +414,7 @@
             "filenamePattern": "*.vcd"
           }
         ],
-        "priority": "option"
+        "priority": "default"
       }
     ],
     "keybindings": [
@@ -466,6 +499,11 @@
           "alt": "svtools.vivado.runScript",
           "group": "navigation@0",
           "when": "resourceExtname == .tcl"
+        },
+        {
+          "command": "svtools.circuit.fromSource",
+          "when": "resourceScheme == file && (editorLangId == verilog || editorLangId == systemverilog || editorLangId == system-verilog)",
+          "group": "navigation@4"
         }
       ],
       "view/title": [
@@ -498,6 +536,11 @@
           "command": "svtools.vivado.createProject",
           "group": "navigation@4",
           "when": "view == svtools.vivado.projectTree && !svtools.vivado.hasProject && !svtools.vivado.busy"
+        },
+        {
+          "command": "svtools.circuit.fromVivado",
+          "when": "view == svtools.vivado.projectTree && svtools.vivado.hasProject && !svtools.vivado.busy",
+          "group": "navigation@3"
         }
       ],
       "view/item/context": [
@@ -575,9 +618,19 @@
           "command": "svtools.vivado.tree.addFile",
           "group": "0_manage@0",
           "when": "view == svtools.vivado.projectTree && viewItem == setRoot"
+        },
+        {
+          "command": "svtools.circuit.fromVivado",
+          "when": "view == svtools.vivado.projectTree && viewItem == topModule && !svtools.vivado.busy",
+          "group": "2_run@0"
         }
       ],
       "editor/context": [
+        {
+          "command": "svtools.circuit.open",
+          "when": "resourceScheme == file && resourceExtname =~ /\\.json$/i",
+          "group": "9_svtools"
+        },
         {
           "command": "svtools.formatDocument",
           "when": "editorLangId == verilog || editorLangId == systemverilog || editorLangId == system-verilog",
@@ -630,6 +683,20 @@
         {
           "command": "svtools.iverilog.openWaveform",
           "group": "4_simulation"
+        },
+        {
+          "command": "svtools.circuit.fromSource",
+          "when": "resourceScheme == file && resourceExtname =~ /\\.(sv|v)$/i",
+          "group": "5_circuit"
+        },
+        {
+          "command": "svtools.circuit.fromVivadoFile",
+          "group": "5_circuit",
+          "when": "resourceScheme == file && resourceExtname =~ /\\.(sv|v)$/i"
+        },
+        {
+          "command": "svtools.circuit.stop",
+          "group": "5_circuit"
         }
       ]
     },
@@ -792,7 +859,7 @@
             "shm",
             "vcd"
           ],
-          "default": "fsdb",
+          "default": "vcd",
           "description": "%cfg.waveType.desc%"
         },
         "svtools.taskInit": {
@@ -811,7 +878,16 @@
           "order": 63,
           "type": "string",
           "default": "",
+          "scope": "resource",
+          "editPresentation": "multilineText",
           "description": "%cfg.headerTemplate.desc%"
+        },
+        "svtools.headerTemplateFile": {
+          "order": 63.1,
+          "type": "string",
+          "default": "",
+          "scope": "resource",
+          "description": "%cfg.headerTemplateFile.desc%"
         },
         "svtools.lint.engine": {
           "order": 64,
@@ -1111,12 +1187,79 @@
           "maximum": 10000,
           "scope": "resource",
           "description": "%cfg.completion_maxItems.desc%"
+        },
+        "svtools.circuit.yosysPath": {
+          "type": "string",
+          "default": "bundled",
+          "description": "%cfg.circuit.yosysPath%"
+        },
+        "svtools.circuit.frontend": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "slang",
+            "verilog"
+          ],
+          "default": "auto",
+          "description": "%cfg.circuit.frontend%"
+        },
+        "svtools.circuit.sources": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "%cfg.circuit.sources%"
+        },
+        "svtools.circuit.includeDirs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "%cfg.circuit.includeDirs%"
+        },
+        "svtools.circuit.defines": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "%cfg.circuit.defines%"
+        },
+        "svtools.circuit.top": {
+          "type": "string",
+          "default": "",
+          "description": "%cfg.circuit.top%"
+        },
+        "svtools.circuit.generationTimeout": {
+          "type": "number",
+          "minimum": 5,
+          "maximum": 600,
+          "default": 120,
+          "description": "%cfg.circuit.generationTimeout%"
         }
       }
     }
   },
   "devDependencies": {
     "@types/vscode": "^1.74.0",
-    "@vscode/vsce": "^3.9.1"
+    "@vscode/vsce": "4.0.0",
+    "@yowasp/yosys": "0.68.1207",
+    "elkjs": "0.12.0",
+    "netlistsvg": "1.0.2",
+    "tar-stream": "3.1.8"
+  },
+  "overrides": {
+    "@azure/identity": {
+      ".": "4.13.0",
+      "@azure/msal-node": {
+        "uuid": "11.1.1"
+      }
+    },
+    "netlistsvg": {
+      "json5": "1.0.2",
+      "yargs": "7.1.2"
+    }
   }
 }

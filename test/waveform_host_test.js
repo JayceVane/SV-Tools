@@ -198,3 +198,47 @@ test('真实 worker 打开过程中取消后再关闭：加载完成 promise 结
     page.receive({ type: 'close' });
     assert.equal(page.receives.size, 0); assert.equal(page.closes.size, 0);
 });
+
+test('源上下文等待期间取消，不启动迟到worker或覆盖取消错误', async () => {
+    const page=panelFixture(), context=deferred(); let opened=0;
+    const binding=bindWaveformPanel({filePath:path.join(os.tmpdir(),'capture.vcd'),panel:page.panel,
+        getSourceContext:()=>context.promise,createSession:()=>({async open(){opened++;return metadata();},dispose(){}})});
+    page.receive({type:'ready'});page.receive({type:'cancel'});await nextTurn();context.resolve({files:[]});
+    await binding.loaded;assert.equal(opened,0);assert.equal(page.sent.at(-1).type,'error');assert.match(page.sent.at(-1).error,/取消/);binding.dispose();
+});
+
+
+test('图片保存只回复对应requestId，取消和磁盘失败不破坏已加载波形',async t=>{
+    const page=panelFixture();let outcome=true;
+    const binding=bindWaveformPanel({filePath:path.join(os.tmpdir(),'capture.vcd'),panel:page.panel,
+        imageFiles:{async save(payload){assert.equal(payload.format,'png');if(outcome instanceof Error)throw outcome;return outcome;}},
+        createSession:()=>({async open(){return metadata();},dispose(){}})});t.after(()=>binding.dispose());
+    await binding.loaded;page.receive({type:'ready'});
+    for(const [requestId,value]of [[1,true],[2,false],[3,new Error('磁盘错误')]]){
+        outcome=value;page.receive({type:'image-save',requestId,params:{format:'png'}});await nextTurn();
+        const response=page.sent.at(-1);assert.equal(response.type,'response');assert.equal(response.requestId,requestId);
+        if(value instanceof Error)assert.match(response.error,/磁盘错误/);else assert.equal(response.result,value);
+    }
+    assert.equal(binding.getStatus().loaded,true);assert.equal(binding.getStatus().error,null);
+});
+
+
+test('关闭返回可等待且可重复取得的worker释放屏障', async () => {
+    const page = panelFixture(), released = deferred(); let releases = 0, finished = false;
+    const binding = bindWaveformPanel({ filePath: path.join(os.tmpdir(), 'capture.vcd'), panel: page.panel,
+        createSession: () => ({ async open() { return metadata(); }, dispose() { releases++; return released.promise; } }) });
+    await binding.loaded;
+    page.panel.dispose();
+    const closing = binding.dispose();
+    assert.ok(closing && typeof closing.then === 'function', '面板关闭后仍必须能够等待worker退出');
+    closing.then(() => { finished = true; }); await nextTurn();
+    assert.equal(finished, false); assert.equal(binding.dispose(), closing);
+    released.resolve(); await closing;
+    assert.equal(releases, 1); assert.equal(finished, true);
+});
+
+test('VCD默认文件关联直接进入波形编辑器', () => {
+    const editor = require('../package.json').contributes.customEditors.find(editor => editor.viewType === 'svtoolsWaveViewer');
+    assert.equal(editor.priority, 'default');
+    assert.ok(editor.selector.some(selector => selector.filenamePattern === '*.vcd'));
+});

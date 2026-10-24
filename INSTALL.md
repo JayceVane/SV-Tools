@@ -1,6 +1,6 @@
 # 开发环境与本地安装
 
-本说明对应 4.0 开发分支。3.x 在原工程目录继续维护；4.0 使用独立 worktree、依赖与 Rust 构建缓存。
+本说明对应4.0.0源码开发与本地安装。用户安装包及图文操作见[GitHub Wiki](https://github.com/JayceVane/SV-Tools/wiki)；源码开发建议使用独立worktree、依赖与Rust构建缓存。
 
 ## 技术方向
 
@@ -12,7 +12,7 @@
 
 ## 前置条件
 
-- Node.js 18+、VS Code 1.74+
+- 开发构建使用Node.js 22.20.0+（CI覆盖22/24）、VS Code 1.106.0+；仅安装VSIX无需自行安装Node.js或Rust
 - 修改或构建 Rust 核心需要 cargo
 - Icarus 和 Vivado 为可选的外部工具，沿用 svtools.iverilog.* / svtools.vivado.* 设置
 

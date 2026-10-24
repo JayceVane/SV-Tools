@@ -5,7 +5,7 @@
 
 改编自 Sublime Text [SystemVerilog](https://github.com/TheClams/SystemVerilog)（格式化）与 [Verilog-Gadget](https://github.com/poucotm/Verilog-Gadget)（生产力工具）插件。
 
-当前为 **4.0.0-preview.1**，在 3.5.0 基础上完成格式化器、补全、工具链与波形查看器重构。[GitHub 预发布下载](https://github.com/JayceVane/SV-Tools/releases/tag/v4.0.0-preview.1)提供 Windows x64 VSIX 与 CLI；在 VS Code 中通过“从 VSIX 安装”使用。源码位于 `src/`，构建产物位于 `bin/`。
+当前正式版本为 **4.0.0**。[GitHub Wiki 使用指南](https://github.com/JayceVane/SV-Tools/wiki)提供安装、升级、配置、仿真、波形与电路操作说明及界面截图；Windows x64 VSIX 与独立 CLI 从 [GitHub Releases](https://github.com/JayceVane/SV-Tools/releases) 获取。安装后重载窗口。源码位于 `src/`，构建产物位于 `bin/`，发布验收范围见[审查记录](docs/V4_RELEASE_AUDIT.md)。
 
 格式化只能改变普通空格、Tab、CR、LF；其它字符的内容、次数和顺序必须保持，即使输入
 全部乱码或语法不完整。无法安全提交的布局保留原文，详见 [格式化规范](docs/FORMAT_SPEC.md)。
@@ -14,6 +14,10 @@
 100/500 MiB VCD。操作说明、性能数据与验收范围见 [波形查看器](docs/WAVEFORM.md)。
 
 4.0 补全使用标准目录、容错语义模型和增量工程索引，支持 Verilog/SystemVerilog 版本选择、UVM 1.2/1800.2、类继承与泛型、端口/参数、数组与二维 mem 成员。配置、覆盖范围及限制见 [代码补全](docs/COMPLETION.md)。
+
+预览波形支持批量背景色、总线逐位展开和RTL方向图标；保存/加载 `.svwave.json` 可在重新仿真后恢复显示布局；操作及边界见[波形说明](docs/WAVEFORM.md)。
+
+波形和电路工具栏均有“导出图片”：波形按A/B区间自动调整画幅，也可导出当前时间视口；电路导出当前模块全图。可选黑白线稿/当前主题，以及SVG矢量图/高清PNG。
 
 ## 功能总览
 
@@ -31,7 +35,7 @@
 - 上下文感知补全（4 种代码场景 + 例化端口补全 + 31 个片段）
 
 **生产力工具**（源自 Verilog-Gadget）
-- 模块实例化生成（自动识别时钟/复位，可附带端口声明）
+- 模块实例化生成（逐端口同名连接，保留独立时钟/复位域，可附带端口声明）
 - 测试台生成（时钟/复位/波形 dump/init/drive 任务）
 - 代码重复编号（`{:d}`、`{0:03x}` 占位符，行列步进）
 - 代码对齐、文件头插入
@@ -46,11 +50,24 @@
 - ▶ 仿真（Icarus / Vivado xsim 引擎选择）与 ⊕ 工程文件管理按钮
 - 工程创建向导（源文件分类、器件选型逐级筛选、顶层识别）+ 工程结构模板
 
+**电路结构查看器**（内置 Yosys，可选本地 Vivado）
+- 内置离线 Yosys，无需 Python 或额外安装；从当前 RTL 生成，或导入已有 JSON，支持源文件顺序、顶层、include 和宏
+- 默认自动收集工作区子模块与包依赖，显式 sources 保留编译顺序；错误摘要显示原文件行列
+- 独立电路模型与 ELK.js 正交布局，SVG 平移缩放、搜索、网络高亮、参数化模块下钻和源码定位
+- 编辑器右上角默认使用内置 Yosys；RTL 右键用 Vivado 查看当前文件模块，工程面板使用工程 top
+- Yosys 寄存器按明确参数显示触发沿与控制极性，锁存器独立符号；引脚详情保留原始名称、语义与工具参数
+- 单比特细线与多比特粗线区分，总线斜杠位宽标记、I/O位数与可点击标签，选中和总览保留线型差异
+- 拼接/拆分节点显示完整总线主干及分支位位置，重复常量明确标出复制次数；详情保留逐位映射
+- 相机按帧刷新、视口外 SVG 按需挂载；总览自动简化细节，选择与搜索共享拓扑索引
+- 解析和布局运行在 Worker；超预算明确提示，并保留模块选择以便查看较小子模块
+
+命令面板搜索“电路”，或在 RTL 编辑器右键用内置 Yosys 生成；`svtools.circuit.yosysPath` 默认为 `bundled`，也可指定外部工具。前端默认`auto`：内置工具使用Slang解析SystemVerilog，外部工具兼容旧前端。Vivado 右键入口要求当前文件已保存且属于所选工程综合源，在任务副本中重建 top 与编译顺序。配置、数据语义、容量边界及验证命令见 [电路查看器](docs/CIRCUIT.md)。
+
 **CLI 格式化器**：独立 `svtools.exe`，无需 VSCode。
 
 ## 系统要求
 
-- Visual Studio Code 1.74.0+
+- Visual Studio Code 1.106.0+（内置 Yosys 的 WASM 需要新版扩展宿主）
 - 无需 Python；语法检查/仿真需要 [Icarus Verilog](http://iverilog.icarus.com/)（可选），Vivado 功能需要本机 Vivado 安装
 
 ## 安装
@@ -83,7 +100,7 @@ npm run package        # 生成 svtools-<版本>.vsix
 | 插入文件头 | `Ctrl+Shift+Insert` / `Cmd+Shift+Insert` |
 | Icarus lint / 仿真 / Vivado 命令 | 命令面板搜索 "SystemVerilog Tools" |
 
-全部 40 个命令与 48 项配置见命令面板与设置面板（已按 缩进与空行 → 换行与对齐 → 代码生成 → Icarus Verilog → Vivado 分组）。
+全部 47 个命令与 63 项配置见命令面板与设置面板（已按 缩进与空行 → 换行与对齐 → 代码生成 → Icarus Verilog → Vivado 分组）。
 
 ### 核心格式化配置
 
@@ -98,6 +115,22 @@ npm run package        # 生成 svtools-<版本>.vsix
 | `alignComma` / `instAlignPort` | true | 逗号列 / 例化端口按列对齐 |
 
 格式化行为的完整定义见 [`docs/FORMAT_SPEC.md`](docs/FORMAT_SPEC.md)。
+
+### 文件头模板
+
+在设置中搜索 `svtools.headerTemplate`，可在多行输入框直接粘贴文本；在 `settings.json` 中仍使用 JSON 的 `\n` 表示换行。例如：
+
+```jsonc
+"svtools.headerTemplate": "// Module: {FILE}\n// Date: {DATE} {TIME}\n// Author: Your Name\n"
+```
+
+也可把模板保存为独立 UTF-8 文本文件，并设置：
+
+```jsonc
+"svtools.headerTemplateFile": "${workspaceFolder}/templates/header.txt"
+```
+
+相对路径以当前源码所属的工作区文件夹为准；也支持绝对路径。源码在工作区外时，相对路径以源码目录为准。优先顺序为**外部文件 → 内联模板 → 内置模板**；每次插入都会重新读取文件，文件不存在、为空或不是 UTF-8 时明确报错并保持源码不变。模板支持 `{FILE}`、`{DATE}`、`{TIME}`、`{YEAR}`，兼容 `{RDATE}`、`{RTIME}`；保留内部空行并补齐末尾换行。两项设置均可按工作区文件夹配置。
 
 ### CLI
 

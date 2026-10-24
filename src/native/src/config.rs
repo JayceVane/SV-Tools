@@ -126,7 +126,7 @@ impl Default for GadgetOptions {
             reset: Some(vec!["rst_n".into(), "reset_n".into()]),
             sreset: Some(vec!["sreset".into(), "srst".into()]),
             clock: Some(vec!["clk".into(), "uclk".into(), "cclk".into()]),
-            wave_type: Some("fsdb".into()),
+            wave_type: Some("vcd".into()),
             task_init: Some(true),
             task_drive: Some(true),
             include_declarations: Some(true),
@@ -148,7 +148,7 @@ impl GadgetOptions {
         self.clock.as_deref().unwrap_or(&[])
     }
     pub fn wave_type(&self) -> &str {
-        self.wave_type.as_deref().unwrap_or("fsdb")
+        self.wave_type.as_deref().unwrap_or("vcd")
     }
     pub fn task_init(&self) -> bool {
         self.task_init.unwrap_or(true)

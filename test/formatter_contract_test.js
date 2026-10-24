@@ -338,3 +338,156 @@ test('同一行的多个if和else if都能紧凑条件且不改重复拼接字�
     assert.ok(formatted.includes('else if (f(c, d))'), formatted);
     assert.equal(formatted.replace(/[ \t\r\n]/g, ''), source.replace(/[ \t\r\n]/g, ''));
 });
+
+
+const generatedProcessPrefix = 'generate\nalways @(posedge clk) begin\nq<=d;\nend\nassign delay=q;\n'
+    + 'always @(posedge clk) begin\nq1<=q;\nif (!a && b) x<=1;\nelse if (x) x<=0;\nif(x) cnt<=cnt+1;\nend\nendgenerate\n';
+const groupedInstance = '// ports group\nchild u_child (\n.a( short_sig ), // comment (ignored),\n.long_port( longer_sig )\n);\n';
+const significant = source => source.replace(/[ \t\r\n]/g, '');
+function bindingColumns(source) {
+    return source.split(/\r?\n/).filter(line => /^\s*\.\w+\s*\(/.test(line)).map(line => line.indexOf('('));
+}
+
+test('generate 内多个过程结束后恢复例化布局，兼容换行、TAB及仅缩进开关', () => {
+    for (const options of [{}, { useTab: true }, { indentStyle: 'gnu' }, { ignoreTick: false }, { reindentOnly: true }, { instAlignPort: false }]) {
+        for (const newline of ['\n', '\r\n']) {
+            const original = 'module demo;\n' + generatedProcessPrefix + groupedInstance + 'endmodule\n';
+            const source = (options.indentStyle === 'gnu' ? original.replace(/ begin\n/g, '\nbegin\n') : original).replace(/\n/g, newline);
+            const output = formatStable(source, options), columns = bindingColumns(output);
+            assert.equal(significant(output), significant(source));
+            assert.equal(columns.length, 2);
+            assert.equal(columns[0] === columns[1], !options.reindentOnly && options.instAlignPort !== false, output);
+            assert.ok(output.includes('// comment (ignored),'));
+        }
+    }
+});
+
+test('完整例化选区复用正文布局，参数字符串和分组注释保持原文', () => {
+    const source = '// group\nchild #(.NAME("text, (value)"), .W(calc(1, 2))) u_child (\n.a( x ),\n.long_port( f(y, z) )\n);\n';
+    for (const tabSize of [2, 4, 8]) {
+        const output = native.alignCode(source, tabSize), columns = bindingColumns(output);
+        assert.equal(significant(output), significant(source));
+        assert.equal(native.alignCode(output, tabSize), output);
+        assert.equal(columns.length, 2);
+        assert.equal(columns[0], columns[1], output);
+        assert.ok(output.startsWith('// group\n'));
+        assert.ok(output.includes('"text, (value)"'));
+    }
+});
+
+test('端口选区忽略分组注释识别类型，嵌套表达式与行尾括号保持', () => {
+    const source = '// group (not code)\n/* .fake(value) */\n    .a( f(x, y) ), // comment (ignored),\n    .long_port( {a, b} )\n';
+    const output = native.alignCode(source, 4), columns = bindingColumns(output);
+    assert.equal(columns[0], columns[1], output);
+    assert.equal(significant(output), significant(source));
+    assert.equal(native.alignCode(output, 4), output);
+    assert.ok(output.startsWith('// group (not code)\n/* .fake(value) */\n'));
+    assert.ok(output.includes('// comment (ignored),'));
+});
+
+test('选区赋值对齐不使用不支持的前瞻，注释字符串中的等号不参与计算', () => {
+    const source = 'a=1;\nlong_name += 2;\n// fake = preserved\n$display("a = b");\n';
+    const output = native.alignCode(source, 4), lines = output.split('\n');
+    assert.equal(lines[0].indexOf('='), lines[1].indexOf('+'), output);
+    assert.equal(significant(output), significant(source));
+    assert.equal(native.alignCode(output, 4), output);
+    assert.ok(output.includes('// fake = preserved'));
+    assert.ok(output.includes('$display("a = b");'));
+});
+
+const splitParameterInstance = `    cdc_1bit #(          .CDC_LEVEL (CDC_LEVEL)
+        ) u_cdc_req2b_a (
+        .i_clk   (i_clk  ), // input   i_clk
+        .i_rst_n (i_rst_n), // input   i_rst_n
+        .i_bit   (i_bit  ), // input   i_bit
+        .o_bit   (o_bit  )  // output  o_bit
+        );
+`;
+
+test('注释后的跨行参数实例复用完整头部定位，端口与结束括号正确对齐', () => {
+    for (const options of [{}, { useTab: true }, { instAlignPort: false }, { paramOneLine: false }, { inlineCompact: false }]) {
+        for (const newline of ['\n', '\r\n']) {
+            for (const comment of ['// Signal declarations', '/* 参数实例 (ignored); */']) {
+                const source = (`module demo;\nreg req;\n\n${comment}\n\n`
+                    + splitParameterInstance + 'endmodule\n').replace(/\n/g, newline);
+                const output = formatStable(source, options);
+                const columns = bindingColumns(output.slice(output.indexOf('u_cdc_req2b_a')));
+                assert.equal(significant(output), significant(source));
+                assert.equal(columns.length, 4, output);
+                assert.equal(columns[0] === columns[1], options.instAlignPort !== false, output);
+                const indent = options.useTab ? '\t' : '    ';
+                assert.ok(output.includes(`\n${indent});\nendmodule`), output);
+                assert.ok(output.includes(comment), output);
+            }
+        }
+    }
+});
+
+test('带分组注释的跨行参数实例选区与正文保持同样布局', () => {
+    const source = '    // Signal declarations\n\n' + splitParameterInstance;
+    const output = native.alignCode(source, 4), columns = bindingColumns(output);
+    assert.equal(significant(output), significant(source));
+    assert.equal(columns[0], columns[1], output);
+    assert.equal(native.alignCode(output, 4), output);
+    assert.match(output, /\n    \);\n$/);
+});
+
+
+const taskDefaultArguments = require('node:fs').readFileSync(path.join(__dirname, '../example/ex20_task_argument_defaults.sv'), 'utf8');
+
+for (const options of [{}, { inlineCompact: false }, { alignComma: false }, { useTab: true }, { portNameGap: 1 }, { portNameGap: 4 }]) {
+    test(`task形参默认值等号按列对齐并保持字符与幂等：${JSON.stringify(options)}`, () => {
+        const output = formatStable(taskDefaultArguments, options);
+        for (const task of output.split('endtask').slice(0, 2)) {
+            const lines = task.split('\n').filter(line => /\b(?:tkeep|tstrb|tid|tdest|tuser|twakeup)\s*=/.test(line));
+            assert.ok(lines.length >= 5, task);
+            assert.equal(new Set(lines.map(line => line.indexOf('='))).size, 1, task);
+        }
+        assert.equal(significant(output), significant(taskDefaultArguments));
+    });
+}
+
+test('function默认值对齐忽略注释字符串及括号内等号，未初始化长名称也参与列宽', () => {
+    const source = `function automatic int sample (
+input int required_argument,
+input int x = (1 == 1) ? choose(2, 3) : 0, // comment = preserved
+input string label = "a = b, )", /* 默认值 = 原样 */
+input logic [3:0] flags [2] = '{4'b0000, 4'b1111}
+);
+return x;
+endfunction
+`;
+    const output = formatStable(source), lines = output.split('\n');
+    const values = lines.filter(line => /\b(?:x|label|flags)\b.*=/.test(line));
+    assert.equal(values.length, 3, output);
+    assert.equal(new Set(values.map(line => line.indexOf('='))).size, 1, output);
+    const required = lines.find(line => line.includes('required_argument'));
+    assert.ok(values[0].indexOf('=') > required.indexOf('required_argument') + 'required_argument'.length);
+    assert.ok(output.includes('"a = b, )"'), output);
+    assert.ok(output.includes('// comment = preserved'), output);
+    assert.ok(output.includes('/* 默认值 = 原样 */'), output);
+    assert.equal(significant(output), significant(source));
+});
+
+test('单行task默认值保持单行，reindentOnly不新增默认值列对齐', () => {
+    const inline = 'task automatic t(input int short = 1, input int longer_name = 2); endtask\n';
+    const output = formatStable(inline);
+    assert.match(output, /task automatic t\(input int short = 1, input int longer_name = 2\);/);
+    const reindented = formatStable(taskDefaultArguments, { reindentOnly: true });
+    assert.match(reindented, /\btid = \{TID_W\{1'b0\}\}/);
+    assert.equal(significant(reindented), significant(taskDefaultArguments));
+});
+
+
+test('task无方向声明的标量与向量共享名称列，portNameGap对最长位宽也生效', () => {
+    for (const portNameGap of [1, 2, 4]) {
+        const output = formatStable(taskDefaultArguments, { portNameGap });
+        const task = output.slice(output.indexOf('task automatic m_send_with_wakeup'));
+        const lines = task.split('\n').filter(line => /^\s*logic\b/.test(line));
+        const columns = lines.map(line => /\b(tdata|tkeep|tstrb|tid|tdest|tuser|twakeup)\b/.exec(line).index);
+        assert.equal(lines.length, 7, task);
+        assert.equal(new Set(columns).size, 1, task);
+        const vector = lines.find(line => line.includes('tkeep'));
+        assert.equal(vector.indexOf('tkeep') - vector.indexOf(']') - 1, portNameGap, vector);
+    }
+});

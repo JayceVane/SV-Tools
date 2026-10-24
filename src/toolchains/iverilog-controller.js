@@ -7,6 +7,7 @@ const { createBufferedOutput } = require('./channel');
 const { summarizeToolResult, resultFindings } = require('./result');
 const { lintWithXvlog, elaborateWithXvlog, resetXvlogCache } = require('./xvlog');
 const { scanWorkspaceSources, invalidateWorkspaceSources } = require('../workspace/sources');
+const { GENERATED_SOURCE_EXCLUDE_GLOB, isGeneratedSourcePath } = require('../workspace/source-policy');
 const LANGUAGE_IDS = ['verilog', 'systemverilog', 'system-verilog'];
 
 /** @param {object} context @param {object} deps 工具规则与可注入的编辑器边界。 @returns {object} 命令流程和释放入口。 */
@@ -21,9 +22,10 @@ function activateIverilog(context, deps) {
     const engineBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 2);
     const tasks = createToolTaskManager({ startProcess: deps.startProcess, onChange() { if (!disposed) updateStatusBar(); } });
     const scanSources = deps.scanWorkspaceSources || scanWorkspaceSources;
+    const invalidateSources = deps.invalidateWorkspaceSources || invalidateWorkspaceSources;
     const getConfig = document => vscode.workspace.getConfiguration('svtools.iverilog', document?.uri);
     const currentEngine = document => vscode.workspace.getConfiguration('svtools.lint', document?.uri).get('engine', 'iverilog');
-    const isVerilogDocument = document => !!document && LANGUAGE_IDS.includes(document.languageId);
+    const isVerilogDocument = document => !!document && LANGUAGE_IDS.includes(document.languageId) && !isGeneratedSourcePath(document.uri?.fsPath);
     const lintKey = document => 'lint:' + document.uri.toString();
     const runner = createIcarusRunner({ workspace: vscode.workspace, getConfig, scanSources,
         getToolchain: async task => {
@@ -31,6 +33,7 @@ function activateIverilog(context, deps) {
             catch (error) { if (!task.signal.aborted) showToolchainError(error.message); throw error; }
         }, compile: deps.compileWithModuleResolution, buildCommonArgs: deps.buildCommonArgs,
         resolvePaths, channel, output, publish: applyDiagnostics, expandFiles,
+        prepareWaveforms: options => deps.waveViewer?.prepareForSimulation?.(options),
         fileOnly: document => vscode.workspace.getConfiguration('svtools.lint', document.uri).get('currentFileOnly', true), showWaveforms });
 
     function resolvePaths(paths, fallback, uri) {
@@ -39,6 +42,7 @@ function activateIverilog(context, deps) {
     }
     function publishFiles(files) {
         for (const file of files) {
+            if (isGeneratedSourcePath(file)) { diagnostics.set(vscode.Uri.file(file), []); continue; }
             const entries = new Map();
             for (const owner of owners.values()) for (const finding of owner.findings) {
                 if (path.normalize(finding.file) !== file) continue;
@@ -55,7 +59,8 @@ function activateIverilog(context, deps) {
     }
     function applyDiagnostics(document, findings, source = 'iverilog') {
         const key = document.uri.toString(), previous = owners.get(key);
-        owners.set(key, { document, findings, source });
+        const sourceFindings = findings.filter(finding => !isGeneratedSourcePath(finding.file));
+        owners.set(key, { document, findings: sourceFindings, source });
         publishFiles(new Set([document.uri.fsPath, ...(previous?.findings || []).map(f => path.normalize(f.file)), ...findings.map(f => path.normalize(f.file))]));
     }
     function removeDiagnostics(document) {
@@ -72,20 +77,20 @@ function activateIverilog(context, deps) {
     async function expandFiles(patterns) {
         const files = [];
         for (const pattern of patterns || []) {
-            const uris = await vscode.workspace.findFiles(pattern, undefined, 500); files.push(...uris.map(uri => uri.fsPath));
+            const uris = await vscode.workspace.findFiles(pattern, GENERATED_SOURCE_EXCLUDE_GLOB, 500); files.push(...uris.filter(uri => !isGeneratedSourcePath(uri.fsPath)).map(uri => uri.fsPath));
         }
         return [...new Set(files)];
     }
-    async function showWaveforms(task, waves, config) {
+    async function showWaveforms(task, waves, config, sourceFile) {
         task.throwIfCancelled(); if (!waves.length) return;
         const vcd = waves.find(file => /\.vcd$/i.test(file)), viewer = String(config.get('waveViewer') || '').trim();
-        if (vcd && !viewer && config.get('autoOpenWaveform', true)) await deps.waveViewer?.openWaveform(vcd);
+        if (vcd && !viewer && config.get('autoOpenWaveform', true)) await deps.waveViewer?.openWaveform(vcd, { sourceFile });
         task.throwIfCancelled();
         const choice = vscode.window.showInformationMessage('仿真波形已生成：' + path.basename(waves[0]),
             ...(vcd && !viewer ? ['打开波形'] : []), ...(viewer ? ['外部查看器打开'] : []), '在资源管理器中显示');
         Promise.resolve(choice).then(async selected => {
             if (task.signal.aborted) return;
-            if (selected === '打开波形' && vcd) await deps.waveViewer?.openWaveform(vcd);
+            if (selected === '打开波形' && vcd) await deps.waveViewer?.openWaveform(vcd, { sourceFile });
             else if (selected === '外部查看器打开' && viewer) {
                 const child = spawn(viewer, [vcd || waves[0]], { detached: true, stdio: 'ignore', windowsHide: true });
                 child.once('error', error => vscode.window.showErrorMessage('启动波形查看器失败：' + error.message)); child.unref();
@@ -107,6 +112,10 @@ function activateIverilog(context, deps) {
     }
     async function execute(document, kind = 'lint', options = {}) {
         const mainFile = document?.uri?.fsPath || '';
+        if (!disposed && isGeneratedSourcePath(mainFile)) {
+            clearDebounce(document); tasks.cancel(lintKey(document), '跳过工具生成目录'); removeDiagnostics(document);
+            return { ...summarizeToolResult({ mainFile, status: 'skipped' }), message: '跳过工具生成目录中的文档，请在原始RTL文件执行检查' };
+        }
         if (disposed || !isVerilogDocument(document) || document.uri.scheme !== 'file') {
             const message = '请先打开已保存的 Verilog/SystemVerilog 文档';
             if (!disposed && kind === 'simulation') vscode.window.showWarningMessage(message);
@@ -165,7 +174,7 @@ function activateIverilog(context, deps) {
             tasks.cancelAll('工具配置已变化'); deps.resetToolchain(); resetXvlogCache(); updateStatusBar();
             for (const document of vscode.workspace.textDocuments) fireLint(document);
         }),
-        subscribe('onDidCreateFiles', invalidateWorkspaceSources), subscribe('onDidDeleteFiles', invalidateWorkspaceSources), subscribe('onDidRenameFiles', invalidateWorkspaceSources),
+        subscribe('onDidCreateFiles', invalidateSources), subscribe('onDidDeleteFiles', invalidateSources), subscribe('onDidRenameFiles', invalidateSources),
         vscode.window.onDidChangeActiveTextEditor(updateStatusBar),
         vscode.commands.registerCommand('svtools.iverilog.lint', async () => { deps.resetToolchainFailure(); return reportSummary(await execute(vscode.window.activeTextEditor?.document), currentEngine(vscode.window.activeTextEditor?.document)); }),
         vscode.commands.registerCommand('svtools.iverilog.simulate', () => execute(vscode.window.activeTextEditor?.document, 'simulation')),

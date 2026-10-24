@@ -12,8 +12,12 @@ concurrency:
 
 jobs:
   golden:
-    name: Golden 格式化测试
+    name: 完整回归（Node ${{ matrix.node }}）
     # 构建当前平台产物到 bin/，验证格式化与 JS 边界合同。
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [22, 24]
     runs-on: windows-latest
     timeout-minutes: 30
     steps:
@@ -21,7 +25,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: ${{ matrix.node }}
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -33,6 +37,9 @@ jobs:
             src/native/target
           key: ${{ runner.os }}-cargo-${{ hashFiles('src/native/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-
+
+      - name: 安装扩展构建与测试依赖
+        run: npm ci
 
       - name: 安装 napi CLI
         run: npm ci --prefix src/native

@@ -1,7 +1,9 @@
 'use strict';
 
 const childProcess = require('child_process');
+const fs = require('node:fs');
 const path = require('path');
+const { randomUUID } = require('node:crypto');
 const { ProcessOutput } = require('./output');
 const TERMINATION_GRACE_MS = 2000;
 
@@ -9,6 +11,39 @@ const TERMINATION_GRACE_MS = 2000;
 function cmdQuote(value) {
     const text = String(value);
     return /[\s"^&|<>()%!]/.test(text) ? '"' + text.replace(/"/g, '""') + '"' : text;
+}
+
+/** 先固定 BAT 的绝对入口，避免 cmd 经 PATH 命中后仍按 cwd 计算脚本的 %~dp0。 */
+function resolveBatchCommand(command, cwd, environment) {
+    const root = path.resolve(cwd || process.cwd());
+    const pathKey = Object.keys(environment).sort().find(name => name.toLowerCase() === 'path');
+    const directories = /[\\/:]/.test(command) ? [root]
+        : [root, ...String(pathKey ? environment[pathKey] || '' : '').split(';')];
+    for (const directory of directories) {
+        const unquoted = directory.startsWith('"') && directory.endsWith('"') ? directory.slice(1, -1) : directory;
+        const candidate = path.resolve(root, unquoted, command);
+        try { if (fs.statSync(candidate).isFile()) return candidate; }
+        catch (error) { if (!['ENOENT', 'ENOTDIR'].includes(error.code)) throw error; }
+    }
+    throw Object.assign(new Error('ENOENT: 未找到 Windows 批处理普通文件：' + command), { code: 'ENOENT' });
+}
+
+/** 启动 cmd 只解析固定变量名；第三方 BAT 内部的再次 CALL 由工具适配层处理。 */
+function batchInvocation(command, args, environment, cwd) {
+    const values = [command, ...args].map(String);
+    if (values.some(value => /["\x00-\x1f]/.test(value))) {
+        throw new TypeError('Windows 批处理路径或参数包含无法安全传递的引号或控制字符');
+    }
+    const env = { ...(environment || process.env) };
+    values[0] = resolveBatchCommand(values[0], cwd, env);
+    const prefix = 'SVTOOLS_BATCH_' + randomUUID().replace(/-/g, '').toUpperCase() + '_';
+    const words = values.map((value, index) => {
+        if (!value) return '""';
+        const name = prefix + index;
+        env[name] = value;
+        return cmdQuote('%' + name + '%');
+    });
+    return { env, args: ['/d', '/v:off', '/s', '/c', '"' + words.join(' ') + '"'] };
 }
 
 /**
@@ -147,9 +182,8 @@ class ProcessRun {
             if (signal && signal.aborted) { this.abort(); return; }
             const spawnOptions = { cwd: this.options.cwd, env: this.options.env, windowsHide: true };
             if (this.platform === 'win32' && /\.(bat|cmd)$/i.test(command)) {
-                // /s 剥掉外层引号，保留含空格的工具路径与逐参数引用。
-                const line = '"' + [command, ...args].map(cmdQuote).join(' ') + '"';
-                this.child = this.spawn('cmd.exe', ['/d', '/s', '/c', line], { ...spawnOptions, windowsVerbatimArguments: true });
+                const invocation = batchInvocation(command, args, spawnOptions.env, spawnOptions.cwd);
+                this.child = this.spawn('cmd.exe', invocation.args, { ...spawnOptions, env: invocation.env, windowsVerbatimArguments: true });
             } else this.child = this.spawn(command, args, spawnOptions);
             this.output.bindStreams([this.child.stdout, this.child.stderr]);
             for (const [stream, isStderr] of [[this.child.stdout, false], [this.child.stderr, true]]) {

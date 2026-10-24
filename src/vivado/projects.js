@@ -11,6 +11,7 @@ const pathKey = file => process.platform === 'win32' ? path.resolve(file).toLowe
  * @returns {{discover:Function,current:Function,select:Function}} 读取失败传播，删除的选择保留恢复提示。
  */
 function createProjectSelection({ workspace, state, stat = fs.stat }) {
+    const listeners = new Set();
     let selected = state.get(SELECTION_KEY) || null, automatic = null, version = 0;
     async function exists(file) {
         try { return (await stat(file)).isFile(); }
@@ -43,8 +44,8 @@ function createProjectSelection({ workspace, state, stat = fs.stat }) {
     async function select(file) {
         if (!/\.xpr$/i.test(file) || !await exists(file)) throw new Error('无法打开工程：' + file);
         const candidate = path.resolve(file);
-        await state.update(SELECTION_KEY, candidate); selected = candidate; version++; return candidate;
+        await state.update(SELECTION_KEY, candidate); selected = candidate; version++; for (const listener of listeners) listener(); return candidate;
     }
-    return { discover, current, select };
+    return { discover, current, select, onDidChange(listener) { listeners.add(listener); return { dispose: () => listeners.delete(listener) }; } };
 }
 module.exports = { createProjectSelection };

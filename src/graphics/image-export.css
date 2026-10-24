@@ -1,0 +1,7 @@
+.imageExportOverlay { position:fixed; inset:0; z-index:1000; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,.3); }
+.imageExportDialog { width:min(420px,calc(100vw - 32px)); padding:22px; background:var(--panel); color:var(--fg); border:1px solid var(--border); border-radius:10px; box-shadow:0 18px 55px rgba(0,0,0,.22); }
+.imageExportDialog h2 { margin:0 0 20px; font:600 16px/1.4 var(--vscode-font-family, sans-serif); }
+.imageExportDialog label { display:grid; grid-template-columns:86px minmax(0,1fr); gap:10px; align-items:center; margin:12px 0; }
+.imageExportDialog select { width:100%; font:inherit; color:var(--fg); background:var(--input,var(--bg)); border:1px solid var(--border); padding:6px; border-radius:4px; }
+.imageExportDialog p { font-size:12px; line-height:1.6; color:var(--dim,var(--muted)); margin:18px 0; }
+.imageExportActions { display:flex; justify-content:flex-end; gap:8px; }

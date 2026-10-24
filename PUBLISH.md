@@ -1,10 +1,18 @@
-# 4.0 GitHub 预览版发布
+# 4.0 GitHub 发布
 
-`4.0.0-preview.1` 仅通过 GitHub Release 发布。先在功能分支同步 master，运行完整回归并打包，随后创建 PR；合入后将同版本 tag 指向合入提交。原生模块、CLI 和 VSIX 均不写入 Git 历史。
+当前正式发布版本为 `4.0.0`，用户已确认先发布GitHub Wiki使用指南，再发布GitHub Release。本轮渠道为GitHub，不执行Marketplace或Open VSX发布。
 
-`.github/workflows/release.yml` 校验 tag 与 package.json，构建 Windows x64 原生模块及 VSIX，执行 Node/Rust 回归并上传 SHA256 清单。含 `-` 的 tag 使用 GitHub prerelease，不改变现有稳定版的 Latest 标记。若存在 `docs/releases/<tag>.md`，使用该文件作为发布说明。
+Wiki源稿位于 `docs/wiki/`，包含侧栏、页脚和截图；维护方式见 `docs/WIKI.md`。首次Wiki需在GitHub创建Home，之后通过独立Wiki Git仓库同步。发布前核对内部链接、配置/命令、图片来源与公开可访问性。
 
-下一版本的开发代码不能补入已发布 tag。3.5.0 历史和稳定版附件继续保留。下文 Marketplace 操作为独立渠道的旧指南，此次不执行。
+预览使用 `npm run package:preview`，要求干净源码、六处版本一致、CLI匹配并禁止同号覆盖。正式版将六处版本统一为 `4.0.0`，重建原生模块并重新回归，不能重命名beta包替代正式构建。正式包的本地预检可用 `npm run package -- --target win32-x64 --out bin/svtools-v4.0.0-win32-x64.vsix`，先确认目标不存在。
+
+通过PR合入master后，将 `v4.0.0` tag指向合并提交；CI从该tag独立构建正式附件。保留所有历史Release和附件，同名附件禁止clobber。发布后下载实际附件，核对SHA256、package/CLI版本并执行解包宿主验收。
+
+`.github/workflows/release.yml` 校验 tag 与 package.json，构建 Windows x64 原生模块及 VSIX，执行 Node/Rust 回归并上传 SHA256 清单。含 `-` 的 tag 使用 GitHub prerelease，不改变稳定版 Latest。已有同名附件时上传失败，禁止 clobber。发布说明取 `docs/releases/<tag>.md`。
+
+打包前执行根目录与 `src/native` 的 npm audit。netlistsvg 仅用于开发验证，其 JSON5/yargs 安全版本 override 需通过真实 `scripts/verify-circuit.js` 验证；生产视图使用独立模型与 ELK。不要用 `npm audit fix --force` 替代兼容性审查。
+
+3.5.0 历史和稳定版附件继续保留。下文 Marketplace 为独立渠道的旧操作指南，本轮不执行。
 
 ---
 
@@ -248,3 +256,11 @@ vsce publish
 ```
 
 祝发布顺利！🎉
+
+
+## 4.0.0构建工具约束
+
+2026-10-24复查发现vsce4.0.0经Azure Identity4.14.0引入受GHSA-xcx6-jx8p-x3h5影响的MSAL6。
+本轮在devDependencies图中将Identity精确约束为4.13.0，使用未受该通告影响的MSAL3分支，并将该子树的uuid约束为含边界修复且仍支持CommonJS的11.1.1。
+这是显式兼容override，低于vsce声明的Identity范围；已检查其实际使用的6个Credential接口、模块导入、MSAL本地构造/缓存及uuid v4，并以真实VSIX打包验证。本轮不执行Azure/Marketplace认证，不能把本轮结果当作该认证路径验收。
+构建依赖不进入VSIX；后续vsce/Azure发布兼容修复时应优先回到上游依赖范围，再重验打包。不要用强制升级MSAL主版本或忽略audit替代验证。

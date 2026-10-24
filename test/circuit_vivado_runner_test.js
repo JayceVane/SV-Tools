@@ -1,0 +1,104 @@
+'use strict';
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs/promises');
+const path = require('node:path');
+const os = require('node:os');
+const { runVivadoCircuit } = require('../src/circuit/vivado-runner');
+
+async function fixture(t, produce = async directory => fs.writeFile(path.join(directory, 'circuit.vivado.json'), '{}')) {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'svtools-circuit-vivado-test-'));
+    t.after(() => fs.rm(root, { recursive: true, force: true }));
+    const projectPath = path.join(root, 'project.xpr'); await fs.writeFile(projectPath, '<Project/>');
+    const calls = [];
+    const task = { async waitForPrevious() { calls.push('wait'); }, throwIfCancelled() {},
+        async directory(base, kind) { assert.equal(kind, 'circuit-vivado'); const result = path.join(base, kind); await fs.mkdir(result, { recursive: true }); return result; },
+        async run(executable, args, options) {
+            calls.push({ executable, args, options }); await produce(options.cwd, options);
+            return { code: 0, output: '', stdout: '', stderr: '', elapsedMs: 1, logPath: path.join(options.cwd, 'vivado.log') };
+        }
+    };
+    return { root, projectPath, task, calls, options: { task, executable: '/tools/vivado', projectPath, outputBase: path.join(root, 'output') } };
+}
+
+test('Vivado runner isolates cwd, quotes artifact paths, forwards timeout/output and preserves XPR', async t => {
+    const f = await fixture(t); const output = () => {};
+    const result = await runVivadoCircuit({ ...f.options, timeoutMs: 12345, onOutput: output });
+    assert.equal(result.sourceRoot, f.root); assert.equal(f.calls[0], 'wait');
+    const run = f.calls[1]; assert.deepEqual(run.args.slice(0, 5), ['-mode', 'batch', '-nojournal', '-nolog', '-source']);
+    assert.equal(run.options.timeoutMs, 12345); assert.equal(run.options.onStdout, output);
+    assert.equal(path.dirname(result.filePath), run.options.cwd);
+    assert.equal(await fs.readFile(f.projectPath, 'utf8'), '<Project/>');
+    const script = await fs.readFile(run.args[5], 'utf8'); assert.ok(script.includes('svtools_circuit::exportProject'));
+});
+
+test('Vivado runner reports explicit Tcl failure and persistent log', async t => {
+    const f = await fixture(t); f.task.run = async (command, args, options) => {
+        options.onLine('SVTOOLS_CIRCUIT_ERROR missing top', true, {});
+        return { code: 1, output: 'SVTOOLS_CIRCUIT_ERROR missing top', logPath: '/task/vivado.log' };
+    };
+    await assert.rejects(runVivadoCircuit(f.options), /missing top\n完整日志：\/task\/vivado.log/);
+});
+
+test('Vivado runner rejects incomplete, empty and over-budget artifacts', async t => {
+    for (const produce of [async () => {}, async dir => fs.writeFile(path.join(dir, 'circuit.vivado.json'), ''),
+        async dir => { const handle = await fs.open(path.join(dir, 'circuit.vivado.json'), 'w'); try { await handle.truncate(64 * 1024 * 1024 + 1); } finally { await handle.close(); } }]) {
+        const f = await fixture(t, produce);
+        await assert.rejects(runVivadoCircuit(f.options), /未生成完整|超过 64 MiB/);
+    }
+});
+
+test('Vivado runner cancels before launching and validates XPR/timeout', async t => {
+    const f = await fixture(t); await assert.rejects(runVivadoCircuit({ ...f.options, timeoutMs: 0 }), /超时/);
+    const wrongPath = path.join(f.root, 'project.txt'); await fs.writeFile(wrongPath, 'x');
+    await assert.rejects(runVivadoCircuit({ ...f.options, projectPath: wrongPath }), /XPR/);
+    f.task.throwIfCancelled = () => { throw new Error('cancelled'); };
+    await assert.rejects(runVivadoCircuit(f.options), /cancelled/); assert.equal(f.calls.filter(call => typeof call === 'object').length, 0);
+});
+
+test('Vivado runner forwards file-local top and source without rewriting the project', async t => {
+    const f = await fixture(t), sourcePath = path.join(f.root, 'current.sv');
+    const source = 'module child(input a, output b); assign b=a; endmodule\n'; await fs.writeFile(sourcePath, source);
+    await runVivadoCircuit({ ...f.options, top: 'child', sourcePath });
+    const script = await fs.readFile(f.calls[1].args[5], 'utf8');
+    assert.ok(script.includes(' child ')); assert.ok(script.includes(sourcePath.replace(/\\/g, '/')));
+    assert.equal(await fs.readFile(f.projectPath, 'utf8'), '<Project/>'); assert.equal(await fs.readFile(sourcePath, 'utf8'), source);
+});
+
+test('Vivado runner rejects invalid or absent source/top before starting a process', async t => {
+    const f = await fixture(t), sourcePath = path.join(f.root, 'source.txt'); await fs.writeFile(sourcePath, 'x');
+    for (const options of [{ top: '' }, { top: 'child\nexit' }, { sourcePath }, { top: 'child', sourcePath }, { top: 'child', sourcePath: path.join(f.root, 'missing.sv') }]) {
+        await assert.rejects(runVivadoCircuit({ ...f.options, ...options }));
+    }
+    assert.equal(f.calls.filter(call => typeof call === 'object').length, 0);
+});
+
+test('Vivado runner prioritizes actionable synthesis diagnostics over generic Tcl elaboration failure', async t => {
+    const f = await fixture(t);
+    f.task.run = async (command, args, options) => {
+        for (const line of ["ERROR: [Synth 8-439] module 'unreferenced' not found",
+            'ERROR: [Vivado_Tcl 4-5] Elaboration failed - please see the console for details',
+            'SVTOOLS_CIRCUIT_ERROR ERROR: [Vivado_Tcl 4-5] Elaboration failed - please see the console for details']) {
+            options.onLine(line, true, {});
+        }
+        return { code: 1, output: '', logPath: '/task/vivado.log' };
+    };
+    await assert.rejects(runVivadoCircuit(f.options), error => {
+        assert.match(error.message, /Synth 8-439.*module 'unreferenced' not found/);
+        assert.match(error.message, /完整日志：\/task\/vivado.log/);
+        assert.doesNotMatch(error.message, /please see the console/);
+        return true;
+    });
+});
+
+test('Vivado runner decodes Chinese Tcl errors independently of Windows output code page', async t => {
+    const f = await fixture(t), message = '当前文件不是工程综合源：C:/源码/独立 module.sv';
+    f.task.run = async (command, args, options) => {
+        options.onLine('SVTOOLS_CIRCUIT_ERROR_UTF8 ' + Buffer.from(message, 'utf8').toString('hex'), true, {});
+        options.onLine('SVTOOLS_CIRCUIT_ERROR ???', true, {});
+        return { code: 1, output: '', logPath: '/task/vivado.log' };
+    };
+    await assert.rejects(runVivadoCircuit(f.options), error => {
+        assert.ok(error.message.includes(message)); assert.ok(error.message.includes('/task/vivado.log')); return true;
+    });
+});

@@ -1,4 +1,4 @@
-use crate::parser::module::{ModuleInfo, Param, Port};
+use crate::parser::module::{ModuleInfo, Param};
 
 /// Generate module instantiation code with port declarations.
 /// Replicates Python `vg_core.module_inst()` + `generate_port_declarations()`.
@@ -67,17 +67,7 @@ fn build_instance(info: &ModuleInfo, iprefix: &str) -> String {
     // Calculate max port name length for alignment
     let port_max_len = info.ports.iter().map(|p| p.name.len()).max().unwrap_or(0);
 
-    // Calculate max signal name length for alignment (inside parentheses)
-    let signal_max_len = info
-        .ports
-        .iter()
-        .map(|p| {
-            let pmap = get_port_mapping(p, &info.clocks, &info.resets);
-            pmap.len()
-        })
-        .max()
-        .unwrap_or(0);
-
+    // 例化按端口原名生成连接；时钟/复位分类不能把多个域折叠成首个信号。
     // Always use expanded multi-line format with aligned ports and comments
     let mut s = if plen > 0 {
         let mut s = format!("{} #(\n", info.name);
@@ -115,13 +105,8 @@ fn build_instance(info: &ModuleInfo, iprefix: &str) -> String {
         .unwrap_or(0);
 
     for (i, p) in info.ports.iter().enumerate() {
-        let pmap = get_port_mapping(p, &info.clocks, &info.resets);
-
         // Align port name (right-pad with spaces)
         let port_padding = port_max_len - p.name.len();
-
-        // Align signal name inside parentheses (right-pad with spaces)
-        let signal_padding = signal_max_len - pmap.len();
 
         // Build comment with aligned columns: // direction  [width]  port_name
         let dir_pad = dir_max_len - p.direction.len();
@@ -154,8 +139,8 @@ fn build_instance(info: &ModuleInfo, iprefix: &str) -> String {
                 "    .{}{} ({}{}), {}\n",
                 p.name,
                 " ".repeat(port_padding),
-                pmap,
-                " ".repeat(signal_padding),
+                p.name,
+                " ".repeat(port_padding),
                 comment
             ));
         } else {
@@ -163,8 +148,8 @@ fn build_instance(info: &ModuleInfo, iprefix: &str) -> String {
                 "    .{}{} ({}{})  {}\n",
                 p.name,
                 " ".repeat(port_padding),
-                pmap,
-                " ".repeat(signal_padding),
+                p.name,
+                " ".repeat(port_padding),
                 comment
             ));
         }
@@ -221,14 +206,27 @@ pub fn build_instance_code(info: &ModuleInfo, iprefix: &str) -> String {
     build_instance(info, iprefix)
 }
 
-fn get_port_mapping(port: &Port, clocks: &[String], resets: &[String]) -> String {
-    if port.direction == "input" {
-        if clocks.contains(&port.name) {
-            return clocks.first().cloned().unwrap_or_else(|| port.name.clone());
-        }
-        if resets.contains(&port.name) {
-            return resets.first().cloned().unwrap_or_else(|| port.name.clone());
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::GadgetOptions;
+    use crate::parser::module::parse_module;
+
+    #[test]
+    fn instance_connections_preserve_distinct_clock_reset_domains() {
+        let source = "module cdc(input clk_a, rst_n_a, clk_b, rst_n_b, data, output q);\n\
+            always @(posedge clk_a or negedge rst_n_a) q<=data;\n\
+            always @(posedge clk_b or negedge rst_n_b) q<=data;\nendmodule";
+        let info = parse_module(source, &GadgetOptions::default()).unwrap();
+        assert_eq!(info.clocks, ["clk_a", "clk_b"]);
+        assert_eq!(info.resets, ["rst_n_a", "rst_n_b"]);
+        let output = build_instance_code(&info, "u_");
+        let binding = regex::Regex::new(r"(?m)^\s*\.(\w+)\s*\(\s*(\w+)\s*\)").unwrap();
+        let bindings: Vec<_> = binding.captures_iter(&output).collect();
+        assert_eq!(bindings.len(), info.ports.len());
+        for (binding, port) in bindings.iter().zip(&info.ports) {
+            assert_eq!(&binding[1], port.name);
+            assert_eq!(&binding[2], port.name, "{output}");
         }
     }
-    port.name.clone()
 }

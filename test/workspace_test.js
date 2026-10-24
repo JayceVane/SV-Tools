@@ -4,6 +4,17 @@ const path = require('node:path');
 const { test } = require('node:test');
 const { createWorkspaceSourceIndex } = require('../src/workspace/sources');
 
+test('工具快照和依赖目录被明确排除，防止重复设计单元污染索引', async () => {
+    const calls = [];
+    const index = createWorkspaceSourceIndex({ workspace: { workspaceFolders: [{}],
+        getConfiguration: () => ({ get: () => true }),
+        findFiles: async (pattern, exclude) => { calls.push({ pattern, exclude }); return []; }
+    } });
+    await index.scan();
+    assert.equal(calls.length, 4);
+    assert.ok(calls.every(call => call.exclude === '**/{.git,node_modules,.svtools,.Xil}/**'));
+});
+
 /** 以内存源码模拟多根工作区；扫描、读文件和时钟均由外部边界注入。 */
 function workspaceHarness(sources, { enabled = true, folders = [{ uri: { fsPath: __dirname } }] } = {}) {
     const searches = [];
@@ -126,4 +137,26 @@ test('完整源码索引不把注释或字符串中的假声明作为依赖', as
     assert.equal(result.modules.has('automatic'), false);
     assert.equal(result.modules.has('phantomBlock'), false);
     assert.equal(result.modules.has('phantomString'), false);
+});
+
+
+test('共享排除策略按完整目录段匹配，兼容Windows大小写及两种分隔符', () => {
+    const { isExcludedSourcePath, isGeneratedSourcePath } = require('../src/workspace/source-policy');
+    assert.equal(isGeneratedSourcePath('D:/core/.svtools/tasks/top.sv'), true);
+    assert.equal(isGeneratedSourcePath('/core/node_modules/sv-lib/real.sv'), false);
+    assert.equal(isGeneratedSourcePath('/core/.git/work/top.sv'), false);
+    for (const file of ['D:/core/.svtools/circuit/yosys/sources.sv', 'd:\\core\\.SVTOOLS\\tasks\\snapshot.sv',
+        '/core/node_modules/pkg/top.sv', '/core/.git/work/top.v', '/core/.Xil/task/top.sv']) assert.equal(isExcludedSourcePath(file), true, file);
+    for (const file of ['/core/rtl/top.sv', '/core/rtl/.svtools_impl.sv', '/core/my_node_modules/top.sv',
+        '/core/.svtools/../rtl/top.sv']) assert.equal(isExcludedSourcePath(file), false, file);
+});
+test('工作区扫描对返回结果再次过滤，生成文件不读取、不进入设计单元索引', async () => {
+    const normal = path.join(__dirname, 'rtl', 'top.sv'), internal = path.join(__dirname, '.svtools', 'circuit', 'sources.sv');
+    const reads = [];
+    const index = createWorkspaceSourceIndex({ workspace: { workspaceFolders: [{}],
+        getConfiguration: () => ({ get: () => true }), findFiles: async () => [{ fsPath: internal }, { fsPath: normal }] },
+        readFileSync: file => { reads.push(file); return file === internal ? 'module wrong; endmodule' : 'module top; endmodule'; } });
+    const result = await index.scan();
+    assert.equal(result.modules.has('wrong'), false); assert.equal(result.modules.get('top'), normal);
+    assert.ok(reads.every(file => file === normal));
 });

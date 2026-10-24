@@ -284,3 +284,18 @@ test('多仿真集快捷详细化保留选中集，不编译另一仿真集的�
     try { await h.commands.get('svtools.vivado.tree.quickElaborate')(h.cached()[0]); assert.equal(invoked, true); }
     finally { h.dispose(); }
 });
+
+
+test('移动缺失源文件不运行 Vivado，原 XPR 引用完整保留', async t => {
+    const f = await fixture(t); let runs = 0;
+    const before = await fs.readFile(f.xpr);
+    const h = await harness(f, { runScript: async () => { runs++; return { code: 1, status: 'failed' }; } });
+    try {
+        const node = flatten(h.cached()).find(item => item.contextValue === 'file' && item.nodeData.file === f.files['child.sv']);
+        await fs.rename(f.files['child.sv'], f.files['child.sv'] + '.missing');
+        await h.commands.get('svtools.vivado.tree.moveToSim')(node);
+        assert.equal(runs, 0);
+        assert.deepEqual(await fs.readFile(f.xpr), before);
+        assert.ok(h.notifications.some(message => typeof message === 'string' && message.includes('源文件') && message.includes('保留')));
+    } finally { h.dispose(); }
+});

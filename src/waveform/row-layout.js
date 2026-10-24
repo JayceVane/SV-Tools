@@ -27,12 +27,21 @@
     }
 
     /** @param {string[]} order @param {Map<string,object>} signals @param {object} formats @param {object} heights @returns {object[]} 行坐标。 */
-    function buildRows(order, signals, formats, heights) {
+    function buildRows(order, signals, formats, heights, groups = {}, collapsedGroups = []) {
         let y = 0;
-        return order.filter(key => signals.has(key)).map(key => {
+        const collapsed = new Set(collapsedGroups), emitted = new Set(), members = new Map();
+        for (const key of order) if (signals.has(key) && groups[key]) {
+            if (!members.has(groups[key])) members.set(groups[key], []); members.get(groups[key]).push(key);
+        }
+        return order.filter(key => {
+            if (!signals.has(key)) return false;
+            const group = groups[key]; if (!collapsed.has(group)) return true;
+            if (emitted.has(group)) return false; emitted.add(group); return true;
+        }).map(key => {
             const signal = signals.get(key), analog = isAnalog(signal, formats[key]);
-            const height = analog ? analogHeight(heights[key]) : DIGITAL_HEIGHT;
-            const row = { key, signal, analog, y, height }; y += height; return row;
+            const groupSummary = collapsed.has(groups[key]) ? groups[key] : null;
+            const height = groupSummary ? DIGITAL_HEIGHT : analog ? analogHeight(heights[key]) : DIGITAL_HEIGHT;
+            const row = { key, signal, analog: analog && !groupSummary, groupSummary, groupCount: members.get(groups[key])?.length, memberKeys: groupSummary ? members.get(groups[key]) : null, y, height }; y += height; return row;
         });
     }
     /** @param {object[]} rows @returns {number} 已排布行的总高度。 */
@@ -71,7 +80,8 @@
     /** @param {object[]} previewRows @param {Iterable<string>} targets @param {number} y @returns {number} 以未移动行的中点决定插入边界。 */
     function insertionSlot(previewRows, targets, y) {
         const chosen = new Set(targets);
-        return previewRows.filter(row => !chosen.has(row.key) && row.y + row.height / 2 <= y).length;
+        return previewRows.filter(row => row.y + row.height / 2 <= y)
+            .reduce((count, row) => count + (row.memberKeys || [row.key]).filter(key => !chosen.has(key)).length, 0);
     }
 
     /** @param {Map<string,number>} from @param {Map<string,number>} to @param {number} elapsed @param {number} duration @returns {{positions:Map<string,number>,done:boolean}} 三次缓出动画。 */

@@ -151,22 +151,54 @@ function buildSetTopScript(o) {
 }
 
 /**
- * 生成"文件在文件集间移动"TCL（精确路径移除 + add + 保持 .sv 的 file_type）。
+ * 生成文件集移动事务：先加入并验证目标引用，再移除源；后续失败恢复源引用与常用属性。
  * @param {{xprPath:string, file:string, from:string, to:string, isSv:boolean}} o
  */
 function buildMoveFileScript(o) {
     return wrapProjectScript(o.xprPath, [
-        'set target [file normalize ' + tclQuote(o.file) + ']',
-        'foreach x [get_files -quiet -of [get_filesets ' + tclQuote(o.from) + ']] {',
-        '    if {[string equal -nocase [file normalize $x] $target]} { remove_files $x }',
+        'proc svtools_move_member {fileset target} {',
+        '    foreach member [get_files -quiet -of_objects $fileset] {',
+        '        if {[string equal -nocase [file normalize $member] $target]} { return $member }',
+        '    }',
+        '    return {}',
         '}',
-        'set d [get_filesets ' + tclQuote(o.to) + ']',
-        'set f ' + tclQuote(o.file),
-        'if {[llength [get_files -quiet -of $d $f]] == 0} { add_files -fileset $d $f }',
-        o.isSv ? 'catch { set_property file_type SystemVerilog [get_files -of $d $f] }' : '',
-        'update_compile_order -fileset ' + tclQuote(o.to),
-        'puts "SVTOOLS_MOVED $f"'
-    ].filter(Boolean));
+        'set target [file normalize ' + tclQuote(o.file) + ']',
+        'if {![file isfile $target]} { error "Move source is missing or not a regular file; original membership preserved: $target" }',
+        'set sourceSet [get_filesets -quiet ' + tclQuote(o.from) + ']',
+        'set destinationSet [get_filesets -quiet ' + tclQuote(o.to) + ']',
+        'if {[llength $sourceSet] != 1 || [llength $destinationSet] != 1 || $sourceSet eq $destinationSet} { error {Invalid move filesets; original membership preserved} }',
+        'set original [svtools_move_member $sourceSet $target]',
+        'if {$original eq {}} { error {Move source is no longer a member of the original fileset} }',
+        'set properties {}',
+        'set available [list_property $original]',
+        'foreach property {FILE_TYPE LIBRARY USED_IN IS_GLOBAL_INCLUDE} {',
+        '    if {[lsearch -exact $available $property] >= 0} { dict set properties $property [get_property $property $original] }',
+        '}',
+        'set destinationExisted [expr {[svtools_move_member $destinationSet $target] ne {}}]',
+        'if {[catch {',
+        '    if {!$destinationExisted} { add_files -fileset $destinationSet $target }',
+        '    set destination [svtools_move_member $destinationSet $target]',
+        '    if {$destination eq {}} { error {Destination fileset did not retain the file} }',
+        '    if {!$destinationExisted} { dict for {property value} $properties { set_property $property $value $destination } }',
+        '    update_compile_order -fileset $destinationSet',
+        '    remove_files $original',
+        '    if {[svtools_move_member $sourceSet $target] ne {}} { error {Source membership was not removed; move is incomplete} }',
+        '    update_compile_order -fileset $sourceSet',
+        '} moveError]} {',
+        '    if {[catch {',
+        '        if {[svtools_move_member $sourceSet $target] eq {}} { add_files -fileset $sourceSet $target }',
+        '        set restored [svtools_move_member $sourceSet $target]',
+        '        if {$restored eq {}} { error {Could not restore original membership} }',
+        '        dict for {property value} $properties { set_property $property $value $restored }',
+        '        if {!$destinationExisted} {',
+        '            set added [svtools_move_member $destinationSet $target]',
+        '            if {$added ne {}} { remove_files $added }',
+        '        }',
+        '    } rollbackError]} { error "Move failed: $moveError; rollback failed: $rollbackError. Check both filesets; existing references were retained where possible." }',
+        '    error "Move failed; original membership restored: $moveError"',
+        '}',
+        'puts "SVTOOLS_MOVED $target"'
+    ]);
 }
 
 /**

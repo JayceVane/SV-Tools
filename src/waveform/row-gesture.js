@@ -7,7 +7,7 @@
      * @returns {{active:boolean,rowActive:boolean,cancel:()=>boolean,finishMotion:()=>void}} 手势控制器。
      */
     window.createWaveRowGestures = function ({ canvas, tracks, state, model, renderer,
-        refreshRows, commitRows, paint, onSelection, onPan, commitPan, onPlotClick, onSettled, onStart, blocked, status }) {
+        refreshRows, commitRows, paint, onSelection, onPan, commitPan, onPlotClick, onSettled, onStart, blocked, status, onNameClick = () => false }) {
         const L = window.WaveRowLayout, I = window.WaveInteractions;
         const presentation = state.rowPresentation = { positions: null, targetRows: null, dragKeys: null, insertionY: null, resizeKey: null, hoverResizeKey: null };
         const motionPreference = window.matchMedia?.('(prefers-reduced-motion: reduce)');
@@ -89,7 +89,9 @@
         function startReorder() {
             const key = model.signalKey(gesture.row.signal);
             onSelection(I.selectContextTargets(state.selected, state.multi, key, state.selectionAnchor));
-            gesture.kind = 'reorder'; gesture.targets = I.orderedTargets(state.selected, state.multi);
+            const targets = new Set(state.multi);
+            for (const row of state.rows) if (row.memberKeys?.some(key => targets.has(key))) for (const key of row.memberKeys) targets.add(key);
+            gesture.kind = 'reorder'; gesture.targets = I.orderedTargets(state.selected, targets);
             gesture.order = state.selected.slice(); gesture.previewRows = state.rows;
             presentation.dragKeys = new Set(gesture.targets); canvas.style.cursor = 'grabbing';
         }
@@ -105,7 +107,7 @@
                 const order = L.insertBlock(state.selected, gesture.targets, slot);
                 if (order.some((key, index) => key !== gesture.order[index])) {
                     gesture.order = order;
-                    gesture.previewRows = L.buildRows(order, state.signals, state.formats, state.heights); animate(gesture.previewRows);
+                    gesture.previewRows = L.buildRows(order, state.signals, state.formats, state.heights, state.groups, state.collapsedGroups); animate(gesture.previewRows);
                 }
                 presentation.insertionY = gesture.previewRows.find(row => row.key === gesture.targets[0])?.y ?? 0;
                 showPreview(); paint();
@@ -118,7 +120,12 @@
             if (presentation.hoverResizeKey !== key) { presentation.hoverResizeKey = key; paint(); }
             canvas.style.cursor = resizing ? 'ns-resize' : local.x < renderer.geometry().names ? 'grab' : 'crosshair';
             if (resizing) canvas.setAttribute('title', `拖动底边调整模拟量行高（${L.MIN_ANALOG_HEIGHT}–${L.MAX_ANALOG_HEIGHT} px）`);
-            else canvas.removeAttribute('title');
+            else {
+                const row = L.rowAt(state.rows, local.y + tracks.scrollTop), signal = row?.signal;
+                if (signal) canvas.setAttribute('title', signal.path + (signal.range || '') + ' · ' + model.signalDisplay.roleInfo(signal).label
+                    + (Number.isInteger(signal.bitOffset) ? ' · ' + signal.bitIndexSource + '[' + signal.bitIndex + ']' : model.signalDisplay.isBus(signal) ? ' · 点击三角或Enter展开/收起' : ''));
+                else canvas.removeAttribute('title');
+            }
         }
         canvas.addEventListener('pointerdown', event => {
             if (event.button !== 0 || event.isPrimary === false || !state.metadata || blocked()) return;
@@ -153,7 +160,7 @@
             else if (current.kind === 'reorder') {
                 state.selected = current.order; commitRows(); animate(state.rows);
                 if (reducedMotion) finishMotion(); status(`已整体移动 ${current.targets.length} 条信号`);
-            } else if (current.kind === 'name' && current.row) onSelection(I.selectSignals(state.selected, state.multi, model.signalKey(current.row.signal), state.selectionAnchor, event));
+            } else if (current.kind === 'name' && current.row && !onNameClick(point(event), current.row, event)) onSelection(I.selectSignals(state.selected, state.multi, model.signalKey(current.row.signal), state.selectionAnchor, event));
             else if (current.kind === 'plot') {
                 if (current.moved) commitPan(); else onPlotClick(point(event), event, current.row);
             }

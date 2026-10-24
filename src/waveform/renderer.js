@@ -1,10 +1,15 @@
 /* Canvas 只拥有绘制；事件查询、布局持久化和交互由 client 管理。 */
 (function () {
     'use strict';
-    window.createWaveRenderer = function ({ canvas, ruler, tracks, state, model }) {
-        const L = window.WaveRowLayout, C = window.WaveColumnLayout;
+    window.createWaveRenderer = function ({ canvas, ruler, overlay, rulerOverlay, tracks, state, model, paletteOverride, exportGeometry, pixelRatio, monochrome = false, cursorLabelsBelow = false }) {
+        const L = window.WaveRowLayout, C = window.WaveColumnLayout, D = model.signalDisplay;
+        let projections = new Map();
+        const analogRanges = new WeakMap();
+        const metrics = { staticDraws: 0, overlayDraws: 0, analogScans: 0 };
+        let frameGeometry = null;
         let palette;
         function colors() {
+            if (paletteOverride) { palette = { ...paletteOverride }; return; }
             const style = getComputedStyle(document.body);
             palette = Object.fromEntries(['bg', 'panel', 'border', 'fg', 'dim', 'grid', 'accent', 'bus', 'x', 'z', 'a', 'b', 'selection', 'labelText', 'labelHalo']
                 .map(key => [key, style.getPropertyValue('--' + key).trim()]));
@@ -13,11 +18,11 @@
         }
         colors();
         function geometry() {
-            return { ...C.waveGeometry(tracks.clientWidth, state.columns?.names, state.fullName), height: Math.max(1, tracks.clientHeight) };
+            return frameGeometry || exportGeometry || { ...C.waveGeometry(tracks.clientWidth, state.columns?.names, state.fullName), height: Math.max(1, tracks.clientHeight) };
         }
         const x = time => { const g = geometry(); return g.names + (time - state.view.start) / state.view.span * g.plot; };
         function context(element, width, height) {
-            const ratio = Math.min(window.devicePixelRatio || 1, 2, 8192 / Math.max(width, height));
+            const ratio = pixelRatio || Math.min(window.devicePixelRatio || 1, 2, 8192 / Math.max(width, height));
             const w = Math.ceil(width * ratio), h = Math.ceil(height * ratio);
             if (element.width !== w || element.height !== h) { element.width = w; element.height = h; }
             element.style.width = width + 'px'; element.style.height = height + 'px';
@@ -102,7 +107,7 @@
                 } else {
                     const alpha = ctx.globalAlpha;
                     ctx.strokeStyle = color; ctx.fillStyle = color; ctx.globalAlpha = alpha * .08;
-                    ctx.fillRect(left, high, right - left, low - high); ctx.globalAlpha = alpha;
+                    if (!monochrome) ctx.fillRect(left, high, right - left, low - high); ctx.globalAlpha = alpha;
                     ctx.beginPath(); ctx.moveTo(left, middle); ctx.lineTo(left + Math.min(4, (right - left) / 2), high);
                     ctx.lineTo(right - Math.min(4, (right - left) / 2), high); ctx.lineTo(right, middle);
                     ctx.lineTo(right - Math.min(4, (right - left) / 2), low); ctx.lineTo(left + Math.min(4, (right - left) / 2), low); ctx.closePath(); ctx.stroke();
@@ -118,10 +123,18 @@
         function analog(ctx, row, series, top) {
             const numeric = value => {
                 if (value === null || (!/real/i.test(row.signal.type) && /[xz]/i.test(value))) return NaN;
-                return /real/i.test(row.signal.type) ? Number(value) : Number(model.formatValue(value, row.signal, 'dec'));
+                return /real/i.test(row.signal.type) ? Number(value) : Number.isInteger(row.signal.bitOffset) ? Number(value) : Number(model.formatValue(value, row.signal, 'dec'));
             };
-            const values = series.changes.map(change => numeric(change.value)).filter(Number.isFinite);
-            const min = values.length ? Math.min(...values) : 0, max = values.length ? Math.max(...values) : 1;
+            let ranges = analogRanges.get(series);
+            if (!ranges) { ranges = new Map(); analogRanges.set(series, ranges); }
+            const cacheKey = row.signal.type + ':' + (row.signal.bitOffset ?? 'vector');
+            let range = ranges.get(cacheKey);
+            if (!range) {
+                let min = Infinity, max = -Infinity; metrics.analogScans++;
+                for (const change of series.changes) { const value = numeric(change.value); if (Number.isFinite(value)) { min = Math.min(min, value); max = Math.max(max, value); } }
+                range = min === Infinity ? { min: 0, max: 1 } : { min, max }; ranges.set(cacheKey, range);
+            }
+            const { min, max } = range;
             const y = value => top + row.height - 12 - (value - min) / Math.max(1e-12, max - min) * (row.height - 25);
             segments(series, (start, end, raw, endsAtChange, nextRaw) => {
                 const value = numeric(raw);
@@ -139,24 +152,51 @@
                 const left = x(bucket.start), right = Math.max(left + 2, x(bucket.end));
                 ctx.fillStyle = palette.bg; ctx.fillRect(left, top + 8, right - left, row.height - 16);
                 const alpha = ctx.globalAlpha;
-                ctx.fillStyle = palette.bus; ctx.globalAlpha = alpha * .35; ctx.fillRect(left, top + 9, right - left, row.height - 18); ctx.globalAlpha = alpha;
+                if (monochrome) {
+                    ctx.save(); ctx.beginPath(); ctx.rect(left, top + 9, right - left, row.height - 18); ctx.clip();
+                    for (let offset = -row.height; offset < right - left; offset += 8) line(ctx, left + offset, top + row.height - 9, left + offset + row.height, top + 9, palette.bus);
+                    ctx.restore();
+                } else { ctx.fillStyle = palette.bus; ctx.globalAlpha = alpha * .35; ctx.fillRect(left, top + 9, right - left, row.height - 18); ctx.globalAlpha = alpha; }
                 if (right - left > 24) text(ctx, '密集', left + 3, top + row.height / 2 + 4, right - left - 5, palette.bus);
             }
+        }
+        function tint(ctx, row, top, left, width) {
+            const color = !monochrome && D.highlightColor(state.highlights?.[row.key]);
+            if (!color) return;
+            ctx.save(); ctx.fillStyle = color; ctx.globalAlpha *= .16; ctx.fillRect(left, top, width, row.height); ctx.restore();
+        }
+        function signalIcon(ctx, signal, left, top) {
+            const info = D.roleInfo(signal);
+            ctx.save(); ctx.strokeStyle = info.role === 'unknown' ? palette.dim : palette.accent; ctx.lineWidth = 1.2;
+            for (const points of info.paths) {
+                ctx.beginPath(); points.forEach(([x, y], index) => index ? ctx.lineTo(left + x, top + y) : ctx.moveTo(left + x, top + y)); ctx.stroke();
+            }
+            if (info.role === 'unknown') text(ctx, '?', left + 4, top + 10, 8, palette.dim);
+            ctx.restore();
         }
         function names(ctx, row, top, g) {
             const signal = row.signal, key = model.signalKey(signal), chosen = state.multi.has(key), group = state.groups[key];
             ctx.fillStyle = chosen ? palette.selection : palette.panel; ctx.fillRect(0, top, g.names, row.height);
+            tint(ctx, row, top, 0, g.names);
+            const highlight = !monochrome && D.highlightColor(state.highlights?.[key]);
+            if (highlight) { ctx.fillStyle = highlight; ctx.fillRect(g.names - 3, top + 2, 3, row.height - 4); }
             if (state.activeKey === key) { ctx.fillStyle = palette.accent; ctx.fillRect(0, top + 2, 3, row.height - 4); }
             const label = state.fullName ? signal.path + (signal.range || '') : signal.name;
-            text(ctx, label, 12, top + 18, g.names - 112, palette.fg);
+            const indent = Number.isInteger(signal.bitOffset) ? 12 : 0;
+            signalIcon(ctx, signal, 28 + indent, top + 7);
+            text(ctx, label, 48 + indent, top + 18, g.names - 148 - indent, palette.fg);
+            if (D.isBus(signal) && !exportGeometry) {
+                const expanded = state.selected?.some(key => state.signals?.get(key)?.parentKey === row.key);
+                ctx.save(); ctx.font = '20px Consolas, monospace';
+                text(ctx, expanded ? '▾' : '▸', 6, top + 22, 20, palette.dim);
+                ctx.restore();
+            }
             const type = /real/i.test(signal.type) ? 'real' : signal.range || signal.width + 'b';
             const format = state.formats[key] || (/real/i.test(signal.type) ? 'analog' : 'hex');
             text(ctx, `${group ? group + ' · ' : ''}${type} · ${model.formatLabel?.(format) || format}`, 12, top + 31, g.names - 112, palette.dim);
-            const a = state.valuesA[signal.id], b = state.valuesB[signal.id], radix = state.formats[key] || 'hex';
-            text(ctx, model.formatValue(a, signal, radix), g.names - 96, top + 17, 87, palette.a);
-            text(ctx, state.cursorB === null ? '' : model.formatValue(b, signal, radix), g.names - 96, top + 31, 87, palette.b);
+            if (!overlay) readValues(ctx, row, top, g);
             line(ctx, 0, top + row.height, g.width, top + row.height, palette.border);
-            if (L.isAnalog(signal, state.formats[key])) {
+            if (!exportGeometry && L.isAnalog(signal, state.formats[key])) {
                 const resizing = state.rowPresentation?.resizeKey === key || state.rowPresentation?.hoverResizeKey === key;
                 const color = resizing ? palette.accent : palette.dim, bottom = top + row.height;
                 text(ctx, `↕ ${row.height} px`, 12, bottom - 10, 85, color);
@@ -168,25 +208,57 @@
                 ctx.strokeStyle = palette.accent; ctx.strokeRect(2, top + 2, g.names - 4, row.height - 4);
             }
         }
+        function readValues(ctx, row, top, g) {
+            if (row.groupSummary) return;
+            const signal = row.signal, key = model.signalKey(signal);
+            const a = state.valuesA[signal.id], b = state.valuesB[signal.id], radix = state.formats[key] || 'hex';
+            text(ctx, model.formatValue(a, signal, radix), g.names - 96, top + 17, 87, palette.a);
+            text(ctx, state.cursorB === null ? '' : model.formatValue(b, signal, radix), g.names - 96, top + 31, 87, palette.b);
+        }
+        function groupSummary(ctx, row, top, g) {
+            ctx.fillStyle = palette.panel; ctx.fillRect(0, top, g.width, row.height);
+            ctx.save(); ctx.font = '20px Consolas, monospace'; text(ctx, '▸', 6, top + 23, 20, palette.accent); ctx.restore();
+            text(ctx, row.groupSummary, 32, top + 18, g.names - 45, palette.fg);
+            text(ctx, `${row.groupCount} 条信号 · 点击展开`, 32, top + 31, g.names - 45, palette.dim);
+            line(ctx, 0, top + row.height, g.width, top + row.height, palette.border);
+        }
+        function drawOverlay() {
+            if (!overlay || !rulerOverlay) return;
+            metrics.overlayDraws++;
+            const g = geometry(), ctx = context(overlay, g.width, g.height), axis = context(rulerOverlay, g.width, 35);
+            ctx.clearRect(0, 0, g.width, g.height); axis.clearRect(0, 0, g.width, 35);
+            for (const row of visibleRows()) readValues(ctx, row, row.y - tracks.scrollTop, g);
+            cursors(ctx, axis, g);
+        }
         function cursors(ctx, axis, g) {
             for (const [label, time, color] of [['A', state.cursorA, palette.a], ['B', state.cursorB, palette.b]]) {
                 if (time === null || time < state.view.start || time > state.view.start + state.view.span) continue;
                 line(ctx, x(time), 0, x(time), g.height, color); line(axis, x(time), 19, x(time), 35, color);
-                axis.fillStyle = color; axis.fillRect(x(time) - 7, 0, 14, 16); text(axis, label, x(time) - 3, 12, 12, palette.bg);
+                axis.fillStyle = color; axis.fillRect(x(time) - 7, cursorLabelsBelow ? 19 : 0, 14, 16); text(axis, label, x(time) - 3, cursorLabelsBelow ? 31 : 12, 12, palette.bg);
             }
         }
         function visibleRows() {
             return L.visibleRows(state.rowPresentation?.targetRows || state.rows, tracks.scrollTop, tracks.clientHeight, state.rowPresentation?.positions);
         }
         function draw() {
-            const g = geometry(), ctx = context(canvas, g.width, g.height), axis = context(ruler, g.width, 35), marks = ticks();
+            metrics.staticDraws++; frameGeometry = geometry();
+            const g = frameGeometry, ctx = context(canvas, g.width, g.height), axis = context(ruler, g.width, 35), marks = ticks();
             ctx.fillStyle = palette.bg; ctx.fillRect(0, 0, g.width, g.height); drawRuler(axis, g, marks);
             for (const time of marks) line(ctx, x(time), 0, x(time), g.height, palette.grid);
-            const valid = state.seriesKey === state.windowKey;
+            const valid = state.seriesKey === state.windowKey, nextProjections = new Map();
             for (const row of visibleRows()) {
-                const top = row.y - tracks.scrollTop, series = valid ? state.series.get(row.signal.id) : null;
+                const top = row.y - tracks.scrollTop;
+                if (row.groupSummary) { groupSummary(ctx, row, top, g); continue; }
+                const source = valid ? state.series.get(row.signal.id) : null;
+                let series = source;
+                if (source && Number.isInteger(row.signal.bitOffset)) {
+                    const cached = projections.get(row.key);
+                    series = cached?.source === source ? cached.series : D.projectSeries(source, row.signal);
+                    nextProjections.set(row.key, { source, series });
+                }
                 ctx.save();
                 if (state.rowPresentation?.dragKeys?.has(model.signalKey(row.signal))) ctx.globalAlpha = .6;
+                tint(ctx, row, top, g.names, g.plot);
                 ctx.save(); ctx.beginPath(); ctx.rect(g.names, top, g.plot, row.height); ctx.clip();
                 if (series) {
                     const format = state.formats[model.signalKey(row.signal)] || (/real/i.test(row.signal.type) ? 'analog' : 'hex');
@@ -195,14 +267,17 @@
                 } else text(ctx, state.rowPresentation?.resizeKey || state.rowPresentation?.dragKeys ? '松开后加载新增可见信号…' : valid ? '无变更数据' : '加载时间窗口…', g.names + 12, top + 22, g.plot - 20, palette.dim);
                 ctx.restore(); names(ctx, row, top, g); ctx.restore();
             }
+            projections = nextProjections;
             if (state.rowPresentation?.insertionY !== null && state.rowPresentation?.insertionY !== undefined) {
                 const y = state.rowPresentation.insertionY - tracks.scrollTop;
                 ctx.lineWidth = 2; line(ctx, 0, y, g.width, y, palette.accent); ctx.lineWidth = 1;
                 ctx.fillStyle = palette.accent; ctx.fillRect(0, y - 3, 6, 6);
             }
-            cursors(ctx, axis, g); line(ctx, g.names, 0, g.names, g.height, palette.border);
+            if (!overlay) cursors(ctx, axis, g);
+            line(ctx, g.names, 0, g.names, g.height, palette.border);
+            frameGeometry = null; drawOverlay();
         }
-        return { draw, geometry, visibleRows, x, colors,
+        return { draw, drawOverlay, metrics, getPalette: () => ({ ...palette }), geometry, visibleRows, x, colors,
             rowAt: y => L.rowAt(state.rows, y + tracks.scrollTop) };
     };
 })();

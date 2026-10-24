@@ -5,13 +5,14 @@ const { parentPort, workerData } = require('worker_threads');
 const { TextDecoder } = require('util');
 const { createVcdParser } = require('./parser');
 const { VcdStore } = require('./store');
+const { readSignalRoles } = require('./source-roles');
 
 let store = null;
 let loading = false;
 const options = workerData || {};
 const maxFileBytes = options.maxFileBytes || 2 * 1024 * 1024 * 1024;
 
-async function open(filePath) {
+async function open(filePath, sourceContext) {
     if (loading || store) throw Object.assign(new Error('VCD worker 已在使用'), { code: 'VCD_BUSY' });
     loading = true;
     const startedAt = Date.now();
@@ -39,7 +40,13 @@ async function open(filePath) {
     store = candidate;
     loading = false;
     progress('ready');
-    return { ...store.metadata(parsed, bytesRead), parseMs: Date.now() - startedAt,
+    let roles = {};
+    if (sourceContext) {
+        progress('source-roles');
+        try { roles = await readSignalRoles(parsed.vars, sourceContext); }
+        catch (error) { roles.sourceRoleNote = '方向匹配不可用：' + error.message; }
+    }
+    return { ...store.metadata({ ...parsed, ...roles }, bytesRead), parseMs: Date.now() - startedAt,
         workerHeapBytes: process.memoryUsage().heapUsed, workerArrayBufferBytes: process.memoryUsage().arrayBuffers };
 }
 
@@ -47,7 +54,7 @@ parentPort.on('message', async message => {
     const { requestId, method, params } = message;
     try {
         let result;
-        if (method === 'open') result = await open(params.filePath);
+        if (method === 'open') result = await open(params.filePath, params.sourceContext);
         else {
             if (!store || loading) throw Object.assign(new Error('VCD 尚未完成加载'), { code: 'VCD_NOT_READY' });
             if (!['window', 'values', 'edge'].includes(method)) throw new Error('未知 VCD 请求：' + method);

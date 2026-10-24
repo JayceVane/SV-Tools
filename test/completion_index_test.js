@@ -75,3 +75,30 @@ test('并发补全共享同一工程扫描，所有请求仍使用各自的活�
     assert.equal(h.calls.find, 1); assert.equal(h.calls.read, 1);
     assert.equal(one.current.model.symbols[0].name, 'a'); assert.equal(two.current.model.symbols[0].name, 'b'); h.index.dispose();
 });
+
+
+test('生成文件即使被扫描器返回或已打开，也不污染工程补全记录', async () => {
+    const h = harness({ '.svtools/circuit/sources.sv': 'module stale_copy; endmodule', 'leaf.sv': 'module leaf; endmodule' });
+    const generated = h.document('.svtools/circuit/sources.sv', 'module opened_copy; endmodule');
+    h.workspace.textDocuments.push(generated);
+    try {
+        const result = await h.index.snapshot(h.document('top.sv', 'module top; endmodule'));
+        assert.ok(result.records.every(record => !record.uri.fsPath.includes('/.svtools/')));
+        assert.equal(h.calls.read, 1);
+        const internal = await h.index.snapshot(generated);
+        assert.ok(internal.current.model.symbols.some(symbol => symbol.name === 'opened_copy'));
+        assert.ok(internal.records.every(record => !record.uri.fsPath.includes('/.svtools/')));
+    } finally { h.index.dispose(); }
+});
+
+test('共享清单变更恰逢首次读取时，补全在稳定代次重试而不发布缺失模块的半份缓存', async()=>{
+    let changed, reads=0;
+    const uri={fsPath:'C:/hdl/leaf.sv',toString:()=> 'file:///C:/hdl/leaf.sv'};
+    const sourceCatalog={onDidChange(callback){changed=callback;return {dispose(){}};},async discover(){return {uris:[uri],truncated:false};}};
+    const vscode={workspace:{textDocuments:[],getConfiguration:()=>({get:(_name,fallback)=>fallback}),fs:{stat:async()=>({size:24}),readFile:async()=>{
+        if(++reads===1)changed({kind:'change',uri});return Buffer.from('module leaf; endmodule');
+    }}}};
+    const index=createCompletionIndex({vscode,sourceCatalog}),document={uri:{fsPath:'C:/hdl/top.sv',toString:()=> 'file:///C:/hdl/top.sv'},version:1,getText:()=> 'module top; leaf dut(); endmodule'};
+    const result=await index.snapshot(document);assert.equal(result.incomplete,false);
+    assert.ok(result.records.some(record=>record.model.symbols.some(symbol=>symbol.name==='leaf')));index.dispose();
+});

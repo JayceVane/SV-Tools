@@ -46,14 +46,28 @@ test('runner 将 cwd 和环境交给子进程', async () => {
 
 test('runner 超时会完成调用，并保留已输出日志', { timeout: 5000 }, async () => {
     let timeoutCount = 0;
-    const result = await runNode('process.stdout.write("ready"); setInterval(() => {}, 1000);', [], {
-        timeoutMs: 400,
+    // Windows CI繁忙时，真实Node启动可能超过超时；这里显式保证日志先于超时到达。
+    const child = new EventEmitter();
+    child.stdout = new PassThrough();
+    child.stderr = new PassThrough();
+    child.kill = () => { queueMicrotask(() => child.emit('close', null, 'SIGKILL')); return true; };
+    const result = await runProcess('mock-tool', [], {
+        platform: 'linux',
+        spawn: () => { queueMicrotask(() => child.stdout.write('ready')); return child; },
+        timeoutMs: 20,
         onTimeout: () => { timeoutCount++; }
     });
     assert.equal(result.stdout, 'ready');
     assert.equal(result.timedOut, true);
     assert.equal(result.stopped, true);
     assert.equal(timeoutCount, 1);
+    assert.ok(result.elapsedMs < 4000);
+});
+
+test('runner 真实子进程超时包含启动阶段，不要求超时前已输出', { timeout: 5000 }, async () => {
+    const result = await runNode('setInterval(() => {}, 1000);', [], { timeoutMs: 50 });
+    assert.equal(result.timedOut, true);
+    assert.equal(result.stopped, true);
     assert.ok(result.elapsedMs < 4000);
 });
 
@@ -87,7 +101,14 @@ test('runner 同步 spawn 异常也完成 promise', async () => {
     assert.equal(result.errorMessage, 'spawn contract failure');
 });
 
-test('Windows 批处理经 cmd 启动，并对带空格路径完整引用', async () => {
+test('Windows 批处理经 cmd 启动，并对带空格路径完整引用', async t => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'svtools batch adapter '));
+    t.after(() => {
+        assert.equal(path.dirname(directory), path.resolve(os.tmpdir())); assert.ok(path.basename(directory).startsWith('svtools batch adapter '));
+        fs.rmSync(directory, { recursive: true, force: true });
+    });
+    const batch = path.join(directory, 'vivado tool.bat'), script = path.join(directory, 'work project', 'run.tcl');
+    fs.writeFileSync(batch, '@echo off\r\n');
     const launches = [];
     const spawn = (command, args, options) => {
         launches.push({ command, args, options });
@@ -97,11 +118,13 @@ test('Windows 批处理经 cmd 启动，并对带空格路径完整引用', asyn
         queueMicrotask(() => child.emit('close', 0, null));
         return child;
     };
-    const result = await runProcess('C:\\Program Files\\Vivado\\vivado.bat', ['-source', 'C:\\work project\\run.tcl'], { platform: 'win32', spawn });
+    const result = await runProcess(batch, ['-source', script], { platform: 'win32', spawn });
     assert.equal(result.code, 0);
     assert.equal(launches[0].command, 'cmd.exe');
-    assert.deepEqual(launches[0].args.slice(0, 3), ['/d', '/s', '/c']);
-    assert.match(launches[0].args[3], /^""C:\\Program Files\\Vivado\\vivado\.bat" -source "C:\\work project\\run\.tcl""$/);
+    assert.deepEqual(launches[0].args.slice(0, 4), ['/d', '/v:off', '/s', '/c']);
+    const names = [...launches[0].args[4].matchAll(/%([A-Z0-9_]+)%/g)].map(match => match[1]);
+    assert.equal(names.length, 3);
+    assert.deepEqual(names.map(name => launches[0].options.env[name]), [batch, '-source', script]);
     assert.equal(launches[0].options.windowsHide, true);
 });
 
@@ -254,4 +277,74 @@ test('runner 停止后未收到 close 事件时有界完成，保留已有日志
     assert.equal(typeof result.errorMessage, 'string');
     assert.ok(result.errorMessage.length > 0);
     assert.ok(result.elapsedMs < 3500);
+});
+
+
+test('真实 Windows BAT 的路径和参数含百分号与元字符时逐字保留', { skip: process.platform !== 'win32' }, async t => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'svtools batch literal '));
+    t.after(() => {
+        assert.equal(path.dirname(directory), path.resolve(os.tmpdir()));
+        assert.ok(path.basename(directory).startsWith('svtools batch literal '));
+        fs.rmSync(directory, { recursive: true, force: true });
+    });
+    const batch = path.join(directory, 'tool %SVTOOLS_BATCH_PROBE% & (literal)!.cmd');
+    fs.writeFileSync(batch, '@echo off\r\nsetlocal DisableDelayedExpansion\r\necho ARG1="%~1"\r\necho ARG2="%~2"\r\necho ARG3="%~3"\r\nexit /b 7\r\n');
+    const values = ['path with space & (literal) %SVTOOLS_BATCH_PROBE% ! ^ | < >', '100% %UNKNOWN_BATCH_PROBE% !literal!', ''];
+    const result = await runProcess(batch, values, { timeoutMs: 5000, env: { ...process.env, SVTOOLS_BATCH_PROBE: 'EXPANDED' } });
+    assert.equal(result.code, 7, result.output + '\n' + result.errorMessage);
+    assert.deepEqual(result.stdout.trim().split(/\r?\n/), values.map((value, i) => `ARG${i + 1}="${value}"`));
+});
+
+test('Windows BAT 无法安全表示的引号及控制字符在启动前明确拒绝', async () => {
+    let launches = 0;
+    for (const value of ['quoted"argument', 'line\nbreak', 'carriage\rreturn', 'nul\0value']) {
+        const result = await runProcess('tool.bat', [value], { platform: 'win32', spawn() { launches++; throw Error('不应启动'); } });
+        assert.equal(result.code, -1);
+        assert.match(result.errorMessage, /批处理.*(?:引号|控制字符)/);
+    }
+    assert.equal(launches, 0);
+});
+
+
+test('真实 Windows PATH 批处理的 %~dp0 指向工具目录，命令与参数特殊字符原样保留', { skip: process.platform !== 'win32' }, async t => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'svtools batch path '));
+    t.after(() => {
+        assert.equal(path.dirname(root), path.resolve(os.tmpdir())); assert.ok(path.basename(root).startsWith('svtools batch path '));
+        fs.rmSync(root, { recursive: true, force: true });
+    });
+    const tools = path.join(root, 'tool folder %SVTOOLS_PATH_PROBE% !literal!'), cwd = path.join(root, 'other cwd');
+    fs.mkdirSync(tools); fs.mkdirSync(cwd);
+    const batch = path.join(tools, 'sibling probe.cmd');
+    fs.writeFileSync(path.join(tools, 'sibling.txt'), 'SVTOOLS_SIBLING_OK\r\n');
+    fs.writeFileSync(batch, '@echo off\r\nsetlocal DisableDelayedExpansion\r\nif not exist "%~dp0sibling.txt" exit /b 37\r\ntype "%~dp0sibling.txt"\r\necho ARG1="%~1"\r\necho ARG2="%~2"\r\nexit /b 0\r\n');
+    const environment = Object.fromEntries(Object.entries(process.env).filter(([key]) => key.toLowerCase() !== 'path'));
+    environment.SVTOOLS_PATH_PROBE = 'EXPANDED';
+    const values = ['literal %SVTOOLS_PATH_PROBE% ! & (argument)', ''];
+    for (const [command, directory] of [[path.basename(batch), tools], [batch, tools], [path.relative(cwd, batch), tools], [path.basename(batch), path.relative(cwd, tools)]]) {
+        const result = await runProcess(command, values, { cwd, env: { ...environment, PaTh: '"' + directory + '";' + path.dirname(process.env.ComSpec || path.join(process.env.SystemRoot, 'System32', 'cmd.exe')) }, timeoutMs: 5000 });
+        assert.equal(result.code, 0, command + ': ' + result.output + '\n' + result.errorMessage);
+        assert.deepEqual(result.stdout.trim().split(/\r?\n/), ['SVTOOLS_SIBLING_OK', `ARG1="${values[0]}"`, 'ARG2=""']);
+    }
+});
+
+test('真实 Windows BAT 解析优先 cwd 再按调用环境 PATH 顺序查普通文件，缺失明确失败', { skip: process.platform !== 'win32' }, async t => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'svtools batch search '));
+    t.after(() => {
+        assert.equal(path.dirname(root), path.resolve(os.tmpdir())); assert.ok(path.basename(root).startsWith('svtools batch search '));
+        fs.rmSync(root, { recursive: true, force: true });
+    });
+    const cwd = path.join(root, 'cwd'), first = path.join(root, 'first'), second = path.join(root, 'second');
+    for (const [directory, name] of [[cwd, 'CWD'], [first, 'FIRST'], [second, 'SECOND']]) {
+        fs.mkdirSync(directory); fs.writeFileSync(path.join(directory, 'sibling.txt'), name + '\r\n');
+        fs.writeFileSync(path.join(directory, 'priority.cmd'), '@echo off\r\ntype "%~dp0sibling.txt"\r\nexit /b 0\r\n');
+    }
+    const environment = Object.fromEntries(Object.entries(process.env).filter(([key]) => key.toLowerCase() !== 'path'));
+    const options = { cwd, env: { ...environment, Path: first + ';' + second + ';' + path.dirname(process.env.ComSpec || path.join(process.env.SystemRoot, 'System32', 'cmd.exe')) }, timeoutMs: 5000 };
+    assert.equal((await runProcess('priority.cmd', [], options)).stdout.trim(), 'CWD');
+    fs.renameSync(path.join(cwd, 'priority.cmd'), path.join(cwd, 'original.cmd')); fs.mkdirSync(path.join(cwd, 'priority.cmd'));
+    assert.equal((await runProcess('priority.cmd', [], options)).stdout.trim(), 'FIRST');
+    const missing = await runProcess('svtools-unique-missing-batch.cmd', [], options);
+    assert.equal(missing.code, -1); assert.match(missing.errorMessage, /ENOENT.*svtools-unique-missing-batch\.cmd/);
+    const directory = await runProcess(path.join(cwd, 'priority.cmd'), [], options);
+    assert.equal(directory.code, -1); assert.match(directory.errorMessage, /ENOENT|普通文件/);
 });

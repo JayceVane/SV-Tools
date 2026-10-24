@@ -1,5 +1,6 @@
 'use strict';
 
+const { bitValue } = require('./signal-display');
 const { DEFAULT_LIMITS } = require('./parser');
 
 const EVENT_CHUNK_MAX = 65536;
@@ -96,6 +97,15 @@ class ValuePool {
         const index = handle - SCALARS.length;
         return this.descriptors[Math.floor(index / VALUE_CHUNK_SIZE)].lengths[index % VALUE_CHUNK_SIZE];
     }
+    /** @param {number} handle @param {number} offset @returns {string} 直接从2-bit载荷取位，不解码整条宽总线。 */
+    bit(handle, offset) {
+        if (handle < SCALARS.length) return bitValue(SCALARS[handle], offset);
+        const index = handle - SCALARS.length, descriptor = this.descriptors[Math.floor(index / VALUE_CHUNK_SIZE)], slot = index % VALUE_CHUNK_SIZE;
+        if (descriptor.kinds[slot] !== 0) throw queryError('该信号包含非位向量值，无法逐位导航');
+        const start = descriptor.offsets[slot], position = descriptor.lengths[slot] - 1 - offset;
+        const code = position >= 0 ? (this.byteAt(start + Math.floor(position / 4)) >> ((position % 4) * 2)) & 3 : this.byteAt(start) & 3;
+        return SCALARS[position >= 0 || code >= 2 ? code : 0];
+    }
     get(handle) {
         if (handle < SCALARS.length) return SCALARS[handle];
         const index = handle - SCALARS.length;
@@ -144,6 +154,10 @@ class SignalEvents {
         const chunk = this.chunkForIndex(index);
         const slot = index - chunk.start;
         return { t: chunk.times[slot], value: this.values.get(chunk.values[slot]) };
+    }
+    bitAt(index, offset) {
+        const chunk = this.chunkForIndex(index);
+        return this.values.bit(chunk.values[index - chunk.start], offset);
     }
     valueLengthAt(index) {
         const chunk = this.chunkForIndex(index);
@@ -208,9 +222,11 @@ class SignalEvents {
 
 /** @param {object} [options] 保留完整事件，查询时才按像素限制传输。 */
 class VcdStore {
-    constructor({ maxStoreBytes = DEFAULT_MAX_STORE_BYTES, maxResponseBytes = MAX_RESULT_BYTES } = {}) {
+    constructor({ maxStoreBytes = DEFAULT_MAX_STORE_BYTES, maxResponseBytes = MAX_RESULT_BYTES, maxBitEdgeScan = 100000 } = {}) {
         if (!Number.isSafeInteger(maxStoreBytes) || maxStoreBytes <= 0 || maxStoreBytes > 0xffffffff) throw queryError('非法 VCD 存储预算');
         if (!Number.isSafeInteger(maxResponseBytes) || maxResponseBytes < 32 || maxResponseBytes > MAX_RESULT_BYTES) throw queryError('非法 VCD 响应预算', 'VCD_RESOURCE_LIMIT');
+        if (!Number.isSafeInteger(maxBitEdgeScan) || maxBitEdgeScan < 1 || maxBitEdgeScan > 1000000) throw queryError('非法位边沿扫描预算');
+        this.maxBitEdgeScan = maxBitEdgeScan;
         this.maxResponseBytes = maxResponseBytes;
         this.budget = new StorageBudget(maxStoreBytes);
         this.valuesPool = new ValuePool(this.budget);
@@ -296,7 +312,7 @@ class VcdStore {
         }
         return { values };
     }
-    edge({ id, time, direction }) {
+    edge({ id, time, direction, bitOffset, continuation }) {
         this.checkTime(time);
         if (typeof id !== 'string') throw queryError('边沿查询需要信号 id');
         const next = direction === 'next' || direction === 'forward' || direction === 1;
@@ -308,6 +324,25 @@ class VcdStore {
         if (previous) {
             index--;
             if (index >= 0 && signal.timeAt(index) === time) index--;
+        }
+        if (bitOffset !== undefined) {
+            if (!Number.isSafeInteger(bitOffset) || bitOffset < 0 || bitOffset >= signal.width || /real|string/i.test(signal.type)) throw queryError('位边沿下标无效');
+            const bound = index;
+            if (continuation !== undefined) {
+                if (!Number.isSafeInteger(continuation) || continuation < 0 || continuation >= signal.length
+                    || (next ? continuation < bound : continuation > bound)) throw queryError('位边沿续查位置无效');
+                index = continuation;
+            }
+            const at = signal.upperBound(time) - 1;
+            const budget = new ResponseBudget(this.maxResponseBytes); budget.value(1);
+            const initial = at >= 0 ? signal.bitAt(at, bitOffset) : null;
+            for (let scanned = 0; index >= 0 && index < signal.length; scanned++, index += next ? 1 : -1) {
+                if (scanned >= this.maxBitEdgeScan) return { time: null, value: null, continuation: index };
+                const value = signal.bitAt(index, bitOffset);
+                const before = next ? initial : index ? signal.bitAt(index - 1, bitOffset) : null;
+                if (value !== before) return { time: signal.timeAt(index), value };
+            }
+            return { time: null, value: null };
         }
         if (index < 0 || index >= signal.length) return { time: null, value: null };
         const response = new ResponseBudget(this.maxResponseBytes);

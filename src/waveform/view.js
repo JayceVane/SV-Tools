@@ -7,8 +7,9 @@ let assets;
 
 /** 小型静态资源只读取一次；波形事件从不进入 HTML。 */
 function readAssets() {
-    if (!assets) assets = Object.fromEntries(['view.css', 'value-format.js', 'model.js', 'memory.js', 'memory-view.js', 'interaction.js', 'menu.js', 'row-layout.js', 'row-gesture.js', 'column-layout.js', 'column-resize.js', 'renderer.js', 'client.js'].map(name =>
+    if (!assets) assets = Object.fromEntries(['view.css', 'signal-display.js', 'value-format.js', 'model.js', 'memory.js', 'memory-view.js', 'interaction.js', 'menu.js', 'row-layout.js', 'row-gesture.js', 'column-layout.js', 'column-resize.js', 'layout-state.js', 'image-export.js', 'renderer.js', 'client.js'].map(name =>
         [name, fs.readFileSync(path.join(__dirname, name), 'utf8')]));
+    if (!assets.shared) assets.shared = Object.fromEntries(['svg-canvas.js','image-export.js','image-export.css'].map(name => [name, fs.readFileSync(path.join(__dirname, '../graphics', name), 'utf8')]));
     return assets;
 }
 
@@ -30,14 +31,15 @@ function buildWaveformHtml(metadata, meta) {
     const json = JSON.stringify(boot).replace(/</g, '\\u003c');
     return `<!doctype html><html lang="zh-CN"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'nonce-${nonce}'; style-src 'nonce-${nonce}';">
-<title>SV Tools · Waveform</title><style nonce="${nonce}">${content['view.css']}</style></head><body>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src blob:; script-src 'nonce-${nonce}'; style-src 'nonce-${nonce}';">
+<title>SV Tools · Waveform</title><style nonce="${nonce}">${content['view.css']}
+${content.shared['image-export.css']}</style></head><body>
 <header><span class="brand" aria-hidden="true">∿</span><div class="title"><h1 id="title">波形查看器</h1><div id="metadata" class="subtle">VCD · 正在读取信号定义</div></div><span class="tag">WAVEFORM</span></header>
 <div class="toolbar" role="toolbar" aria-label="时序导航">
 <button id="fit" title="适配全程 F">全程 F</button><button id="zoomIn" title="放大 +">＋</button><button id="zoomOut" title="缩小 −">−</button><button id="rangeFit" title="适配 A/B 游标区间">A ↔ B</button>
 <span class="divider"></span><button id="prevEdge" title="所选信号上一个真实边沿 ←">← 边沿</button><button id="nextEdge" title="所选信号下一个真实边沿 →">边沿 →</button>
 <span class="divider"></span><button id="cursorMode" title="切换活动游标 A/B；Shift 点击放置 B">游标 A</button><button id="snap" class="active" title="吸附所选信号的真实边沿">吸附</button>
-<input id="jumpTime" aria-label="跳转时间" placeholder="时间 / 125 ns"><button id="jump">跳转</button><span class="grow"></span><button id="memoryToggle" disabled title="查看已展开的数组单元">存储器</button><button id="fullName" title="切换完整层级名称">全名</button>
+<input id="jumpTime" aria-label="跳转时间" placeholder="时间 / 125 ns"><button id="jump">跳转</button><span class="grow"></span><button id="memoryToggle" disabled title="查看已展开的数组单元">存储器</button><button id="exportImage" title="导出A/B区间或当前视口，选择文档黑白或当前主题">导出图片</button><button id="saveLayout" title="保存可跨仿真复用的 .svwave.json 布局">保存布局</button><button id="loadLayout" title="加载布局，按声明路径匹配当前 VCD">加载布局</button><button id="fullName" title="切换完整层级名称">全名</button>
 </div>
 <div class="cursorStrip"><span class="a" id="cursorA">A —</span><span class="b" id="cursorB">B —</span><span id="delta">Δt —</span><span class="grow"></span><span id="viewRange" class="subtle"></span></div>
 <main id="layout"><aside id="catalogPane" aria-label="设计信号"><div class="sectionTitle">DESIGN SIGNALS</div><div class="catalogTools">
@@ -45,7 +47,7 @@ function buildWaveformHtml(metadata, meta) {
 <label><input id="constants" type="checkbox">显示 parameter 常量</label><span id="signalCount" class="subtle"></span></div>
 <div id="catalog" role="list" aria-label="可添加信号"><div id="catalogSpace"></div></div><div class="catalogActions"><button id="addFiltered">添加检索结果</button><button id="clearSignals">清空波形</button></div></aside>
 <div id="catalogResize" class="columnResize" role="separator" aria-orientation="vertical" aria-label="设计信号目录宽度" tabindex="0" title="拖动调整目录宽度；双击恢复默认；方向键微调，Shift 加速"></div>
-<section id="right" aria-label="时序波形"><div id="namesResize" class="columnResize" role="separator" aria-orientation="vertical" aria-label="信号名称与读值栏宽度" tabindex="0" title="拖动调整信号与读值栏宽度；双击恢复默认；方向键微调，Shift 加速"></div><canvas id="ruler"></canvas><div id="tracks"><div id="trackSpace"><canvas id="waveCanvas" tabindex="0" aria-label="波形；点击放置游标，名称栏选择和排序"></canvas></div>
+<section id="right" aria-label="时序波形"><div id="namesResize" class="columnResize" role="separator" aria-orientation="vertical" aria-label="信号名称与读值栏宽度" tabindex="0" title="拖动调整信号与读值栏宽度；双击恢复默认；方向键微调，Shift 加速"></div><div class="rulerStack"><canvas id="ruler"></canvas><canvas id="rulerOverlay" aria-hidden="true"></canvas></div><div id="tracks"><div id="trackSpace"><div id="canvasStack"><canvas id="waveCanvas" tabindex="0" aria-label="波形；点击放置游标，名称栏选择和排序"></canvas><canvas id="waveOverlay" aria-hidden="true"></canvas></div></div>
 <div id="empty">从左侧添加信号，开始分析时序<br>Ctrl / ⌘ 点击多选 · Shift 连续选择 · 拖动名称排序 · 拖动模拟量底边调整行高<br>Esc 取消拖动 · 右键显示格式与分组</div></div>
 <section id="memoryPanel" hidden aria-label="存储器查看器">
 <div class="memoryHeader"><span class="sectionTitle">MEMORY INSPECTOR</span><select id="memorySelect" aria-label="选择存储器"></select><button id="memoryClose" aria-label="关闭存储器视图">×</button></div>
@@ -56,7 +58,7 @@ function buildWaveformHtml(metadata, meta) {
 <div id="memoryGrid"><table id="memoryTable" aria-label="游标时刻的存储器值"><thead id="memoryHead"></thead><tbody id="memoryBody"></tbody></table></div>
 </section>
 <div id="loading"><div id="loadTitle">正在加载 VCD</div><progress id="progress"></progress><div id="loadDetail">后台解析，编辑器保持响应</div><div id="loadError" role="alert"></div><button id="cancel">取消加载</button></div></section></main>
-<footer><span id="status" role="status">准备加载</span><span class="hint">Ctrl + 滚轮缩放 · Shift + 滚轮平移 · 拖动波形平移 · Shift 点击放置 B</span></footer>
-<script nonce="${nonce}">const BOOT=${json};</script><script nonce="${nonce}">${content['value-format.js']}</script><script nonce="${nonce}">${content['model.js']}</script><script nonce="${nonce}">${content['memory.js']}</script><script nonce="${nonce}">${content['memory-view.js']}</script><script nonce="${nonce}">${content['interaction.js']}</script><script nonce="${nonce}">${content['menu.js']}</script><script nonce="${nonce}">${content['row-layout.js']}</script><script nonce="${nonce}">${content['row-gesture.js']}</script><script nonce="${nonce}">${content['column-layout.js']}</script><script nonce="${nonce}">${content['column-resize.js']}</script><script nonce="${nonce}">${content['renderer.js']}</script><script nonce="${nonce}">${content['client.js']}</script></body></html>`;
+<footer><span id="layoutReport" class="subtle" hidden></span><span id="status" role="status">准备加载</span><span class="hint">Ctrl + 滚轮缩放 · Shift + 滚轮平移 · 拖动波形平移 · Shift 点击放置 B</span></footer>
+<script nonce="${nonce}">const BOOT=${json};</script><script nonce="${nonce}">${content['signal-display.js']}</script><script nonce="${nonce}">${content['value-format.js']}</script><script nonce="${nonce}">${content['model.js']}</script><script nonce="${nonce}">${content['memory.js']}</script><script nonce="${nonce}">${content['memory-view.js']}</script><script nonce="${nonce}">${content['interaction.js']}</script><script nonce="${nonce}">${content['menu.js']}</script><script nonce="${nonce}">${content['row-layout.js']}</script><script nonce="${nonce}">${content['row-gesture.js']}</script><script nonce="${nonce}">${content['column-layout.js']}</script><script nonce="${nonce}">${content['column-resize.js']}</script><script nonce="${nonce}">${content['layout-state.js']}</script><script nonce="${nonce}">${content['renderer.js']}</script><script nonce="${nonce}">${content.shared['svg-canvas.js']}</script><script nonce="${nonce}">${content.shared['image-export.js']}</script><script nonce="${nonce}">${content['image-export.js']}</script><script nonce="${nonce}">${content['client.js']}</script></body></html>`;
 }
 module.exports = { buildWaveformHtml };

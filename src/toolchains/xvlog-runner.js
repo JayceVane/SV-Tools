@@ -7,6 +7,7 @@ const { createDiagnosticCapture } = require('./diagnostics');
 const { processSucceeded, summarizeToolResult, resultFindings } = require('./result');
 const { COMPILE_TIMEOUT_MS } = require('./compile-policy');
 const { firstModuleName } = require('../vivado/tclgen');
+const { isGeneratedSourcePath } = require('../workspace/source-policy');
 const rules = require('./xvlog-rules');
 const MAX_COMPILE_ROUNDS = 4, MAX_ELABORATE_ROUNDS = 6;
 let defaultTasks;
@@ -113,6 +114,10 @@ function publish(document, ctx, task, result, status) {
  */
 async function execute(document, ctx) {
     const mainFile = document?.uri?.fsPath || '';
+    if (isGeneratedSourcePath(mainFile)) {
+        ctx.applyDiagnostics?.(document, [], 'xvlog');
+        return { ...summarizeToolResult({ mainFile, status: 'skipped' }), message: '跳过工具生成目录中的文档' };
+    }
     if (!document || !ctx.isVerilogDocument(document) || document.uri.scheme !== 'file') return summarizeToolResult({ mainFile, status: 'skipped' });
     defaultTasks ||= createToolTaskManager();
     const task = ctx.task || defaultTasks.start('lint:' + document.uri.toString());
