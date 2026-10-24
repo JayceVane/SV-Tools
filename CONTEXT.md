@@ -1,3 +1,19 @@
+# 4.1信号追踪M1交接（2026-10-25）
+
+用户授权开始4.1特性，当前分支`codex/feat-v4.1-signal-tracing`，沿用全部4.0维护修复；M1位级查询与Worker接口已完成，M2界面待开发。扩展、native、CLI仍4.0.0，没有4.1安装包或远程发布。
+
+- 新增`src/circuit/topology.js`、`trace-semantics.js`、`trace.js`：模块局部位端点、真实方向、HDL范围、策略注册表、保守依赖、时序/实例/未知方向/多驱动/环路边界、有界LRU和单次查询状态。常量按端口位置隔离，不使用展示图合并结果推断电路。
+- Worker新增`traceSignals`/`trace`；同时校验designId和新revision。相同JSON重载仍拒绝旧世代，关闭销毁索引与挂起请求；完整布局超预算的3,000单元模块仍可查询选定位。对外合同与精度含义见`docs/V4_1_M1.md`。
+- 新增24项电路回归，含真实内置Slang/Yosys公开RTL；真实工具为重复实例生成专用模块，测试按实际moduleId跟踪，不按源码名称猜测。Vivado使用平坦导出合同夹具，当前未额外运行真实Vivado。公开夹具`test/fixtures/circuit-trace.sv`已明确纳入Git，目录通常被忽略。
+- 验收：JS语法210文件、golden44/44、既有Node676通过/11可选跳过，电路194/194；真实Qoder API1.106.3现有电路宿主5/5。完整回归日志`bin/circuit-trace-full-regression.log`，最终电路`bin/circuit-trace-final-circuit-tests.log`，宿主`bin/circuit-trace-qoder-host.log`。
+- 20,000独立反相器合成基准：80,000端口位引用、40,000网络位，索引45.93ms/堆增量27.60MiB，5次冷查询p95 41.59ms，100次热查询p95 0.0183ms。该测量只含同进程纯查询，不含Worker RPC、布局或SVG。预设目标全部通过；报告`bin/circuit-trace-benchmark/report.json`。
+- 新核心模块最大圈复杂度12、无依赖环。静态AI检查将空对象实参误报为空函数，7项均经源码和运行验证裁决为假阳性，原始报告保留；审查记录`bin/circuit-trace-review-audit.json`。公开打包检查461文件/106960565 bytes，私有入口继续排除。
+- M1交付、计划、架构和README已同步；源代码及验收汇总在`bin/circuit-trace-m1-delivery.json`。只保存本地提交，不推送或合并；私有ModelSim运行代码没有改动，local.8安装包和源码备份保留。
+
+下一步：M2先完成局部投影与结果边界显示，再接源码/引脚入口、逐级展开及导航状态；依赖现有真实位映射与路径检查，随后执行P0真实IDE验收。
+
+以下为历史交接。
+
 # 自用ModelSim默认运行到结束（2026-10-25）
 
 用户反馈波形默认只到1us，在完整调试器控制与默认到finish两个方案中，本轮实现默认到结束。当前分支`codex/fix-modelsim-run-until-finish`，保留此前格式化、高亮、仿真菜单及VCD目录修复；运行代码改动全部在已忽略的`src/private/modelsim`中。

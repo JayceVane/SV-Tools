@@ -7,9 +7,11 @@ const { createHash } = require('node:crypto');
 const { findModule } = require('./model');
 const { layoutModule } = require('./layout');
 const { createSourcePathMapper } = require('./source-paths');
+const { createCircuitTracer } = require('./trace');
 const MAX_JSON_BYTES = 64 * 1024 * 1024;
 const MAX_MESSAGE_BYTES = 16 * 1024 * 1024;
 let design;
+let tracer, designId;
 let loadSequence = 0;
 
 /** 只有快照文件映射回原文位置，模型坐标与原始 JSON 均不发送到扩展宿主。 */
@@ -25,6 +27,7 @@ function remapSources(model, sourceMap = {}, sourceDirectories = []) {
 async function load({ filePath, format, stage, top, title, sourceRoot, sourceMap, sourceDirectories }) {
     const version = ++loadSequence;
     design = undefined;
+    tracer?.dispose(); tracer = undefined; designId = undefined;
     const stat = await fs.stat(filePath);
     if (!stat.isFile() || stat.size > MAX_JSON_BYTES) throw new Error('电路 JSON 必须为不超过 64 MiB 的普通文件');
     const chunks = [];
@@ -53,12 +56,24 @@ async function load({ filePath, format, stage, top, title, sourceRoot, sourceMap
     remapSources(loaded, sourceMap, sourceDirectories);
     if (version !== loadSequence) throw new Error('电路加载已被取代');
     design = loaded;
-    return { id: createHash('sha256').update(bytes).update(design.top).digest('hex'), title: design.title,
+    tracer = createCircuitTracer(design);
+    designId = createHash('sha256').update(bytes).update(design.top).digest('hex');
+    return { id: designId, revision: version, title: design.title,
         top: design.top, provenance: design.provenance, modules: design.modules.map(module => ({ id: module.id, name: module.name })) };
+}
+
+function currentTrace(payload) {
+    if (!tracer || payload.designId !== designId || payload.revision !== loadSequence) throw new Error('追踪请求的设计来源已过期，请重新选择起点');
+    return tracer;
 }
 
 const commands = {
     load,
+    traceSignals: payload => ({ ...currentTrace(payload).listSignals(payload), designId, revision: loadSequence }),
+    trace: payload => {
+        const current = currentTrace(payload);
+        return { ...current.trace(payload), designId, revision: loadSequence, indexStats: current.stats() };
+    },
     sourceClosure: payload => require('./source-dependencies').resolveSourceClosure(payload),
     topCandidates: ({ text }) => {
         if (typeof text !== 'string' || Buffer.byteLength(text, 'utf8') > 16 * 1024 * 1024) {
