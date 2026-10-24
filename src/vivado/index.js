@@ -19,6 +19,7 @@
 
 const { createToolTaskManager } = require('../toolchains/job');
 const { createBufferedOutput } = require('../toolchains/channel');
+const { createSimulationEnginePicker } = require('../toolchains/simulation-engines');
 const { runVivadoBatchTask } = require('./batch');
 const { scanWorkspaceSources } = require('../workspace/sources');
 const fs = require('fs');
@@ -389,16 +390,11 @@ function activateVivado(context, deps) {
     }
 
     /** 标签页 ▶ 按钮：选择仿真引擎。 */
-    async function simulatePick() {        const engine = await vscode.window.showQuickPick(
-            [
-                { label: '$(chip) Icarus Verilog', description: 'iverilog 编译 + vvp（无需 Vivado 工程）', value: 'iverilog' },
-                { label: '$(circuit-board) Vivado xsim', description: '行为仿真，当前文件置为 sim_1 顶层（需 Vivado 工程）', value: 'vivado' }
-            ],
-            { placeHolder: '选择仿真引擎' });
-        if (!engine) return;
-        if (engine.value === 'iverilog') return vscode.commands.executeCommand('svtools.iverilog.simulate');
-        return simulateWithVivado();
-    }
+    const simulationEngines = createSimulationEnginePicker({ showQuickPick: (items, options) => vscode.window.showQuickPick(items, options) });
+    simulationEngines.register({ id: 'iverilog', label: '$(chip) Icarus Verilog', description: 'iverilog 编译 + vvp（无需 Vivado 工程）', run: () => vscode.commands.executeCommand('svtools.iverilog.simulate') });
+    simulationEngines.register({ id: 'vivado', label: '$(circuit-board) Vivado xsim', description: '行为仿真，当前文件置为 sim_1 顶层（需 Vivado 工程）', run: () => simulateWithVivado() });
+    context.subscriptions.push(simulationEngines);
+    function simulatePick() { return simulationEngines.pick(); }
 
     // ---------------- 器件选型（Vivado 向导式：系列 → 封装 → 速度 → 搜索选择） ----------------
 
@@ -696,7 +692,9 @@ function activateVivado(context, deps) {
     return {
         runScript, stopRun, createProject, simulateWithVivado,
         refreshProjectContext,
-        resolveBinDir, projectTree, projectSelection
+        resolveBinDir, projectTree, projectSelection,
+        registerSimulationEngine: engine => simulationEngines.register(engine),
+        listSimulationEngines: () => simulationEngines.list()
     };
 }
 

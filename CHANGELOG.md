@@ -2,6 +2,14 @@
 
 All notable changes to the SystemVerilog VSCode Extension will be documented in this file.
 
+## [Unreleased] - 统一仿真入口注册
+
+**变更内容：** 标签页仿真菜单改为会话级引擎注册及回调派发，公共入口仍注册Icarus与Vivado，本地自用组装可以注册额外引擎。
+
+**为什么：** 之前独立工具命令与统一菜单各自维护，导致命令可用但按钮缺少选项。固定二分派发也无法正确处理第三个引擎。
+
+**影响面：** 新增注册/注销与只读选项边界，取消或失效选择不回退启动其他工具。覆盖命令接线、注册生命周期及真实菜单操作；专用工具实现仍排除于公开构建。根因见docs/bugs/logic-simulation-engine-menu.md。
+
 ## [Unreleased] - 默认VCD集中输出
 
 **变更内容：** Icarus默认VCD改存工作区`.svtools/vcd/`，无工作区时使用源码目录；默认文件名区分源文件、Top和引擎，重复仿真保持稳定。共享路径规则供本地自用适配器复用，输出前自动建目录，并将目标纳入关闭、写入保护及产物发现。

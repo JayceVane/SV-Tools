@@ -87,6 +87,27 @@ async function harness(t, f, options = {}) {
 const add = h => h.commands.get('svtools.vivado.addToFileset')();
 const remove = h => h.commands.get('svtools.vivado.removeFromFileset')();
 
+test('仿真入口公开菜单只有两个内置引擎，取消不启动任务', async t => {
+    const f = await fixture(t), h = await harness(t, f, { noProject: true });
+    h.onPick = async () => undefined;
+    await h.commands.get('svtools.simulate.pick')();
+    assert.deepEqual(h.picks[0].choices.map(choice => choice.value), ['iverilog', 'vivado']);
+    assert.equal(h.calls.length, 0);
+});
+
+test('仿真入口展示并派发已注册引擎，注销后不残留选项', async t => {
+    const f = await fixture(t), h = await harness(t, f, { noProject: true });
+    let started = 0;
+    const registration = h.api.registerSimulationEngine({ id: 'custom', label: 'Custom simulator', run: () => { started++; return 'custom-result'; } });
+    h.onPick = async choices => choices.find(choice => choice.value === 'custom');
+    assert.equal(await h.commands.get('svtools.simulate.pick')(), 'custom-result');
+    assert.equal(started, 1); assert.equal(h.calls.length, 0);
+    assert.deepEqual(h.picks[0].choices.map(choice => choice.value), ['iverilog', 'vivado', 'custom']);
+    registration.dispose(); h.onPick = async () => undefined;
+    await h.commands.get('svtools.simulate.pick')();
+    assert.deepEqual(h.picks.at(-1).choices.map(choice => choice.value), ['iverilog', 'vivado']);
+});
+
 test('编辑器加入选择真实自定义文件集，脚本独立存储在所属工程文件夹', async t => {
     const f = await fixture(t), h = await harness(t, f);
     h.onPick = async choices => choices.find(choice => choice.value === 'sim_custom');

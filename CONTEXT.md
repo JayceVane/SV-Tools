@@ -1,3 +1,15 @@
+# 自用仿真菜单修复交接（2026-10-25）
+
+用户反馈自用版本统一“仿真…”入口没有ModelSim/QuestaSim。根因是只接入了独立命令/状态栏，原统一菜单仍是两项固定数组；现改为会话内可注册引擎列表和快照派发。当前分支 `codex/fix-local-simulation-menu`，沿用前面的默认VCD目录修复。
+
+- 公共`toolchains/simulation-engines.js`提供注册、注销、只读选项和选择派发，Vivado组合层只注册Icarus/Vivado。取消、未知或过期选项不回退执行其他引擎。
+- 自用入口注册第三项ModelSim / QuestaSim，实际按钮仍为原`svtools.simulate.pick`，通过原独立命令启动。专用实现和配置继续Git忽略及公开构建排除。
+- 最终包 `bin/private-dist/svtools-4.0.1-local.5-win32-x64.vsix`，464文件、18573366 bytes；SHA256为`bc3e0f3aa800bf64a41105208f4f85f4d7fed19e46778eaaac51b511db3c6f4b`。包内菜单与私有运行代码已与源码核对。
+- 回归：目标30/30、golden44/44、Node670通过/11可选跳过、电路170/170；解包包实际VS Code1.143与Qoder API1.106.3均9/9，从真实菜单选择第三项后运行本机Questa并加载VCD。公共入口真实宿主3/3，列表仍为两项，没有私有命令注册。
+- 根因及测试缺口见 `docs/bugs/logic-simulation-engine-menu.md`；详细记录和私有源码备份见bin下simulation-picker相关报告。旧VSIX保留，仅保存本地提交，不推送、合并或发布。
+
+4.1信号追踪计划不变。以下为历史交接。
+
 # 默认VCD目录交接（2026-10-24）
 
 用户要求Icarus及自用ModelSim的默认VCD存放到`.svtools/vcd/`。当前分支 `codex/fix-default-vcd-directory`；公共版本号仍为4.0.0，自用交付更新为 `bin/private-dist/svtools-4.0.1-local.4-win32-x64.vsix`，不覆盖旧包。
