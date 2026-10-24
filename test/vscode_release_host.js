@@ -43,7 +43,7 @@ async function run() {
     assert.equal(content(dirty.getText()), content(accepted));
     checks.push('乱码缓冲区的实际编辑器内容保持非排版字符；宿主规范化与NAPI单独核验');
 
-    const taskSource = await fs.readFile(path.join(__dirname, '..', 'example', 'ex20_task_argument_defaults.sv'), 'utf8');
+    const taskSource = (await fs.readFile(path.join(__dirname, '..', 'example', 'ex20_task_argument_defaults.sv'), 'utf8')).replace(/\r\n/g, '\n');
     const taskExpected = (await fs.readFile(path.join(__dirname, '..', 'example', 'target', 'ex20_task_argument_defaults.sv'), 'utf8')).replace(/\r\n/g, '\n');
     const task = await open('task-defaults.sv', taskSource);
     await vscode.commands.executeCommand('editor.action.formatDocument');

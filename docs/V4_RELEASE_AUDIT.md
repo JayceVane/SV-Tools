@@ -195,3 +195,5 @@ beta.16候选源码 `bb6a3281364cad4bdf879fcde0e6ffcac95fe571`，安装包458文
 | svtools.win32-x64-msvc.node | 24166400 | `1081fd2682e09f7392e9c619b6686afeb3e874d8a5520eb8acfb8d19e5313919` |
 
 最终远程检查以PR11当前提交为准；本轮仅更新既有开发分支和草稿PR，正式4.0.0尚未tag或Release。
+
+补充：编辑器golden验收在写入隔离文档前统一夹具行尾，避免干净Windows检出的CRLF使比较与目标LF不一致。此测试源调整不改变VSIX运行内容。
