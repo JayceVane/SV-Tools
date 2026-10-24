@@ -2,6 +2,14 @@
 
 All notable changes to the SystemVerilog VSCode Extension will be documented in this file.
 
+## [Unreleased] - 自用构建与公开发布隔离
+
+**变更内容：** 公开包显式排除私有源目录、旧src-rust缓存及根目录旧原生模块；新增打包前文件数/未压缩体积检查及最终VSIX的清单、配置、命令和JS入口检查，发布CI上传前再次验证。
+
+**为什么：** 本机长期使用的工程目录可能残留Git忽略但打包工具仍会收集的缓存；自用构建需要在隔离staging加入扩展功能，确保公开版本不夹带本地模块或入口。
+
+**影响面：** 修改构建和发布检查，不增加公开运行功能或变更4.0.0版本号。自用源代码不提交，正常原生模块与固定电路资源继续从bin分发；相关根因与边界见docs/bugs/compat-package-legacy-native-cache.md。
+
 ## [4.0.0] - 2026-10-24
 
 **变更内容：** 发布4.0首个正式版本，提供GitHub Wiki图文使用指南及Windows x64 VSIX/CLI。包含字符与词法保全格式化器、task/function默认值及标量列对齐、独立UTF-8文件头、标准目录与上下文补全、Icarus/Vivado任务和工程管理、流式VCD/二维mem/浮点/总线展开/布局复用，以及内置Yosys与Vivado电路视图和两种视图的SVG/PNG导出。

@@ -77,3 +77,6 @@ ENVIRONMENT.md
 
 # 编译产物集中在 bin；源代码留在 src
 bin/*
+
+# 自用功能源代码，仅供本地构建叠加，不推送到公开仓库
+src/private/

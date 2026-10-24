@@ -1,3 +1,15 @@
+# 自用构建与发布隔离交接（2026-10-24）
+
+用户要求增加仅供自用的ModelSim工具链，公开发布不包含此支持。专用源码位于Git忽略的 `src/private/modelsim/`，不进入公开入口或清单；自用构建在隔离staging叠加命令/配置和包装入口。当前分支 `codex/feat-local-toolchain`，公开版本仍为4.0.0，4.1信号追踪仍按下文计划推进。
+
+- 自用交付：`bin/private-dist/svtools-4.0.1-local.2-win32-x64.vsix`，稳定核心4.0.0；支持vlog检查、批处理仿真、停止、诊断、VCD联动、显式sources/fileList、include/宏和ini复制。路径与用法见私有目录README；本机Questa2024.1已发现。
+- 自用包462文件；公开验证包458文件，仍为47命令/63配置，专用命令及私有文件均为0。两种包的454个公共文件逐字节一致（清单/README为有意不同）。源码备份在private-dist，具体SHA和本机验收记录在bin下的local-modelsim相关报告。
+- 验收：golden44/44、Node661通过/11可选跳过、电路170/170、发布隔离5项合同；10个真实Questa场景，以及解包自用包实际VS Code的6项完整操作通过。新增文件发现失效竞争已增加有界重试合同。未改Rust运行代码。
+- 本机旧src-rust缓存曾被vsce文件表收集，已停止失败构建并仅清理本任务复制目录；原缓存保留。现在显式排除旧目录与根旧二进制，并在复制/压缩前及最终归档限制4096文件/256 MiB，根因见 `docs/bugs/compat-package-legacy-native-cache.md`。
+- Git只保存公开构建隔离和交接文档；自用实现被忽略并另行备份。未推送、合并或上传安装包，现有4.0 Release及原worktree保留。
+
+下一步：在日常RTL工程使用自用VSIX收集反馈；若启动4.1，先按 `docs/V4_1_PLAN.md` 完成M1的真实位级追踪查询。
+
 # 4.1 开发计划交接（2026-10-24）
 
 用户确认下一版本为4.1，主线是信号追踪：局部逻辑锥，并逐步打通源码、电路与波形。详细范围和验收见 `docs/V4_1_PLAN.md`，入口见 `docs/ROADMAP.md` 和 README。

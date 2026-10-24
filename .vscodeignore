@@ -1,5 +1,8 @@
 # 原生源代码、依赖和中间产物不进入 VSIX；发布原生模块及固定 ELK 资源
 src/native/**
+src/private/**
+src-rust/**
+svtools.*.node
 src/circuit/licenses/**
 bin/**
 !bin/*.node
