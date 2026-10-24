@@ -133,7 +133,9 @@ pub fn align_task_func_param(
     for d in &decl {
         let dir = d.name("dir").unwrap().as_str();
         if !PORT_DIRS.contains(&dir) {
-            max_prefix_len = max_prefix_len.max(dir.len());
+            // 省略input的类型形参同样占用整组位宽列；标量以空白补齐，名称不能左移。
+            let packed_column = if len_bw > 0 { 1 + len_bw } else { 0 };
+            max_prefix_len = max_prefix_len.max(dir.len() + packed_column);
             continue;
         }
         let tp = d.name("type").map(|x| x.as_str().trim()).unwrap_or("");
@@ -176,6 +178,8 @@ pub fn align_task_func_param(
     // Build output
     let mut txt_new = format!("{} (\n", header);
     let lines: Vec<&str> = txt_port.split('\n').collect();
+    let mut argument_lines = Vec::new();
+    let mut declaration_lines = Vec::new();
 
     for (i, orig_line) in lines.iter().enumerate() {
         let l = orig_line.trim();
@@ -184,7 +188,7 @@ pub fn align_task_func_param(
         {
             if let Some(m_port) = re_port.captures(l) {
                 if options.reindent_only() {
-                    txt_new.push_str(&format!("{}{}\n", indent.repeat(ilvl + 1), l));
+                    argument_lines.push(format!("{}{}", indent.repeat(ilvl + 1), l));
                 } else {
                     let mut l_new = format!("{}", indent.repeat(ilvl + 1));
                     let dir = m_port.name("dir").unwrap().as_str();
@@ -314,19 +318,77 @@ pub fn align_task_func_param(
                     if !comment.is_empty() {
                         l_new.push_str(&format!(" {}", comment));
                     }
-                    txt_new.push_str(&format!(
-                        "{}\n",
-                        l_new.trim_end_matches(|c| c == ' ' || c == '\t')
-                    ));
+                    declaration_lines.push(argument_lines.len());
+                    argument_lines.push(l_new.trim_end_matches([' ', '\t']).to_string());
                 }
             } else {
-                txt_new.push_str(&format!("{}{}\n", indent.repeat(ilvl + 1), l));
+                argument_lines.push(format!("{}{}", indent.repeat(ilvl + 1), l));
             }
         }
     }
 
+    align_default_values(&mut argument_lines, &declaration_lines);
+    for line in argument_lines {
+        txt_new.push_str(&line);
+        txt_new.push('\n');
+    }
     txt_new.push_str(&format!("{})", indent.repeat(ilvl)));
     (format!("{};\n", txt_new), remaining)
+}
+
+/// 仅在已识别的形参声明间对齐顶层默认值；无默认值的声明也参与左侧列宽。
+fn align_default_values(lines: &mut [String], declarations: &[usize]) {
+    let columns: Vec<_> = declarations
+        .iter()
+        .filter_map(|&index| {
+            argument_default_column(&lines[index]).map(|(left_end, equal)| {
+                (
+                    index,
+                    left_end,
+                    equal,
+                    lines[index][..left_end].chars().count(),
+                )
+            })
+        })
+        .collect();
+    let width = columns.iter().map(|column| column.3).max().unwrap_or(0);
+    for (index, left_end, equal, left_width) in columns {
+        if let Some(equal) = equal {
+            let line = &mut lines[index];
+            let value = line[equal + 1..].trim_start_matches([' ', '\t']);
+            let gap = if value.is_empty() { "" } else { " " };
+            *line = format!(
+                "{}{}={}{}",
+                &line[..left_end],
+                " ".repeat(width - left_width + 1),
+                gap,
+                value
+            );
+        }
+    }
+}
+
+/// 扫描默认值前的完整左侧（含unpacked维度）；字符串、注释及嵌套比较不算列分隔符。
+fn argument_default_column(line: &str) -> Option<(usize, Option<usize>)> {
+    let mut depth = 0usize;
+    for token in source_scan::syntax_tokens(line) {
+        let is_line_comment = token.kind == source_scan::SegmentKind::LineComment;
+        if token.kind != source_scan::SegmentKind::Code && !is_line_comment {
+            continue;
+        }
+        if depth == 0 && (is_line_comment || matches!(token.text, "=" | ",")) {
+            let left_end = line[..token.range.start]
+                .trim_end_matches([' ', '\t'])
+                .len();
+            return Some((left_end, (token.text == "=").then_some(token.range.start)));
+        }
+        match token.text {
+            "(" | "[" | "{" => depth += 1,
+            ")" | "]" | "}" => depth = depth.checked_sub(1)?,
+            _ => {}
+        }
+    }
+    (depth == 0).then_some((line.trim_end_matches([' ', '\t']).len(), None))
 }
 
 /// Find the opening parenthesis for the parameter/argument list.
@@ -430,5 +492,46 @@ mod argument_comment_tests {
             "{}",
             output
         );
+    }
+}
+
+#[cfg(test)]
+mod default_value_tests {
+    use super::*;
+
+    #[test]
+    fn scalar_and_vector_arguments_share_name_and_default_columns() {
+        let source = "task automatic send (\nlogic [7:0] tdata,\nlogic [7:0] tuser = 8'hff,\nlogic twakeup =1'b1\n);";
+        let output = align_task_func_param(source, 0, &FormatOptions::default(), "    ").0;
+        let columns: Vec<_> = output
+            .lines()
+            .filter_map(|line| {
+                ["tdata", "tuser", "twakeup"]
+                    .iter()
+                    .find_map(|name| line.find(name))
+            })
+            .collect();
+        assert_eq!(columns.len(), 3, "{}", output);
+        assert!(
+            columns.iter().all(|column| *column == columns[0]),
+            "{}",
+            output
+        );
+        let defaults: Vec<_> = output.lines().filter_map(|line| line.find('=')).collect();
+        assert_eq!(defaults.len(), 2);
+        assert_eq!(defaults[0], defaults[1], "{}", output);
+        assert!(output.contains("twakeup = 1'b1"), "{}", output);
+    }
+
+    #[test]
+    fn only_top_level_assignment_separates_default_column() {
+        let line = "input logic [W == 2 ? 3 : 0] data [N] = func(\"x=y\", a == b), // =";
+        let (end, equal) = argument_default_column(line).unwrap();
+        assert_eq!(&line[..end], "input logic [W == 2 ? 3 : 0] data [N]");
+        assert!(line[equal.unwrap()..].starts_with("= func"));
+        let line = "input int required_argument, // comment = ignored";
+        let (end, equal) = argument_default_column(line).unwrap();
+        assert_eq!(&line[..end], "input int required_argument");
+        assert_eq!(equal, None);
     }
 }

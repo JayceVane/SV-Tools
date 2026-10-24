@@ -1,4 +1,4 @@
-# 4.0正式发布前审查 — beta.15
+# 4.0正式发布前审查 — beta.16
 
 审查日期：2026-10-23至24日。基线 `e7eba3b` / `4.0.0-beta.11`，独立分支 `codex/feat-circuit-viewer`。
 只在4.0 worktree修复和构建，未改用户维护的3.x目录或corelib RTL。
@@ -7,7 +7,7 @@
 
 基线完整测试虽通过，仍复现了源码词法损坏、错误模板和工程引用丢失。本轮必须先修复这些问题，不能直接以beta.11发布4.0。
 修复后，以下明确复现的问题及其回归均已解决；在本轮覆盖范围内未发现尚未修复的P0/P1。
-beta.15补齐用户报告的文件头配置问题，作为新的可追溯发布候选；beta.14及更早产物保留。后续正式版仍需独立4.0.0版本、重建和发布验收。本轮不自动合并、创建正式tag或公开Release。
+beta.16补齐task/function形参默认值及标量/向量名称列对齐，继承beta.15文件头修复，作为新的可追溯发布候选；此前产物保留。后续正式版仍需独立4.0.0版本、重建和发布验收。本轮不自动合并、创建正式tag或公开Release。
 beta.12内部打包后复核又发现独立net/reg符号信息补全不完整、数组参数静默略过，故未放行；继续实测也发现simArgs中的plusargs放在vvp输入文件之前会被当成文件名，默认VCD模板又需要未提供的+vcd。beta.13补齐这些问题，旧产物保留。
 远程CI复核补充：beta.13的Node22/24均在原生构建入口失败，npm.cmd的兄弟脚本路径落入工程目录；本地宿主通过并不能证明干净环境可重建。故继续修复此构建阻断并改用独立beta.14，不覆盖beta.13。
 这是一轮有边界的工程审查，不是无缺陷或所有SV/UVM语法完全支持的保证。
@@ -155,3 +155,29 @@ beta.15候选源提交 `3ce9ae66fd70577367cc558fa36f9d6df8f084a1`；VSIX 458文�
 | svtools.win32-x64-msvc.node | 24163328 | `018e28372088f633b0acfa15a2de3052c0aa37da6517a9b158530c265feb22f8` |
 
 最终远程CI以PR11当前提交的Windows Node22/24检查为准；本轮仅推送既有开发分支与更新草稿PR，不创建正式tag或Release。
+
+
+## beta.16形参默认值与标量列对齐
+
+用户的m_send默认值等号无法对齐，新增标量twakeup后又暴露名称落入位宽列。
+旧对齐器把默认值当作普通尾部文本，且隐式input类型分支没有将共享位宽计入前缀宽度。
+现使用共享词法token定位声明顶层等号，完整左侧（包括unpacked维度及无默认值形参）参与列宽；
+标量为空位宽列预留空间，遵循portNameGap，保留单行/reindentOnly行为。
+
+两种用户样例已加入人工golden，覆盖整个扩展同款格式化管线；配置组合还覆盖Tab、列间距、alignComma及inlineCompact。
+完整保留字符顺序与表达式/字符串/注释，比较符和嵌套括号内等号不作为默认值列。
+修复过程见[调试笔记](bugs/logic-task-argument-columns.md)，布局合同见格式化规范§8.4。
+
+变更文件清单：
+
+- `src/native/src/align/task_func_param.rs`：补默认值列和标量位宽占位，附原生回归。
+- `example/ex20_task_argument_defaults.sv`、`example/target/ex20_task_argument_defaults.sv`：两种用户写法与人工期望。
+- `test/formatter_contract_test.js`：完整管线等号/名称列、配置、保全、幂等回归。
+- `test/vscode_release_host.js`：真实编辑器命令与golden对照。
+- `docs/FORMAT_SPEC.md`、`docs/bugs/logic-task-argument-columns.md`、本报告：布局合同、成因和验收证据。
+- `README.md`、`CHANGELOG.md`：当前候选说明。
+- `package.json`、`package-lock.json`、`src/native/package.json`、`src/native/package-lock.json`、`src/native/Cargo.toml`、`src/native/Cargo.lock`：统一beta.16候选版本，旧包保留。
+
+本轮完整回归：JS184文件，golden44/44（22文件，新增文件含两种用户写法），Node666通过/1项可选跳过，电路170/170，Rust155/155。
+格式化合同64/64，新增9项在Node22下9/9；真实VS Code编辑器验收6/6。
+证据：`bin/beta16-native-build.log`、`beta16-golden.log`、`beta16-contract.log`、`beta16-full.log`、`beta16-rust.log`、`beta16-node22.log`、`beta16-source-editor-host.log`。

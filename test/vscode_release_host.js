@@ -43,6 +43,15 @@ async function run() {
     assert.equal(content(dirty.getText()), content(accepted));
     checks.push('乱码缓冲区的实际编辑器内容保持非排版字符；宿主规范化与NAPI单独核验');
 
+    const taskSource = await fs.readFile(path.join(__dirname, '..', 'example', 'ex20_task_argument_defaults.sv'), 'utf8');
+    const taskExpected = (await fs.readFile(path.join(__dirname, '..', 'example', 'target', 'ex20_task_argument_defaults.sv'), 'utf8')).replace(/\r\n/g, '\n');
+    const task = await open('task-defaults.sv', taskSource);
+    await vscode.commands.executeCommand('editor.action.formatDocument');
+    assert.equal(task.document.getText(), taskExpected);
+    await vscode.commands.executeCommand('editor.action.formatDocument');
+    assert.equal(task.document.getText(), taskExpected);
+    checks.push('真实格式化命令将twakeup标量与向量共用名称列，形参默认值等号对齐且幂等');
+
     const literal = 'module literal #(parameter LABEL="https://example.invalid/a;  b)")(input int d, output int q); assign q=d; endmodule\n';
     const generated = await open('literal.sv', literal);
     await vscode.commands.executeCommand('svtools.generateTestbench');

@@ -431,3 +431,63 @@ test('带分组注释的跨行参数实例选区与正文保持同样布局', ()
     assert.equal(native.alignCode(output, 4), output);
     assert.match(output, /\n    \);\n$/);
 });
+
+
+const taskDefaultArguments = require('node:fs').readFileSync(path.join(__dirname, '../example/ex20_task_argument_defaults.sv'), 'utf8');
+
+for (const options of [{}, { inlineCompact: false }, { alignComma: false }, { useTab: true }, { portNameGap: 1 }, { portNameGap: 4 }]) {
+    test(`task形参默认值等号按列对齐并保持字符与幂等：${JSON.stringify(options)}`, () => {
+        const output = formatStable(taskDefaultArguments, options);
+        for (const task of output.split('endtask').slice(0, 2)) {
+            const lines = task.split('\n').filter(line => /\b(?:tkeep|tstrb|tid|tdest|tuser|twakeup)\s*=/.test(line));
+            assert.ok(lines.length >= 5, task);
+            assert.equal(new Set(lines.map(line => line.indexOf('='))).size, 1, task);
+        }
+        assert.equal(significant(output), significant(taskDefaultArguments));
+    });
+}
+
+test('function默认值对齐忽略注释字符串及括号内等号，未初始化长名称也参与列宽', () => {
+    const source = `function automatic int sample (
+input int required_argument,
+input int x = (1 == 1) ? choose(2, 3) : 0, // comment = preserved
+input string label = "a = b, )", /* 默认值 = 原样 */
+input logic [3:0] flags [2] = '{4'b0000, 4'b1111}
+);
+return x;
+endfunction
+`;
+    const output = formatStable(source), lines = output.split('\n');
+    const values = lines.filter(line => /\b(?:x|label|flags)\b.*=/.test(line));
+    assert.equal(values.length, 3, output);
+    assert.equal(new Set(values.map(line => line.indexOf('='))).size, 1, output);
+    const required = lines.find(line => line.includes('required_argument'));
+    assert.ok(values[0].indexOf('=') > required.indexOf('required_argument') + 'required_argument'.length);
+    assert.ok(output.includes('"a = b, )"'), output);
+    assert.ok(output.includes('// comment = preserved'), output);
+    assert.ok(output.includes('/* 默认值 = 原样 */'), output);
+    assert.equal(significant(output), significant(source));
+});
+
+test('单行task默认值保持单行，reindentOnly不新增默认值列对齐', () => {
+    const inline = 'task automatic t(input int short = 1, input int longer_name = 2); endtask\n';
+    const output = formatStable(inline);
+    assert.match(output, /task automatic t\(input int short = 1, input int longer_name = 2\);/);
+    const reindented = formatStable(taskDefaultArguments, { reindentOnly: true });
+    assert.match(reindented, /\btid = \{TID_W\{1'b0\}\}/);
+    assert.equal(significant(reindented), significant(taskDefaultArguments));
+});
+
+
+test('task无方向声明的标量与向量共享名称列，portNameGap对最长位宽也生效', () => {
+    for (const portNameGap of [1, 2, 4]) {
+        const output = formatStable(taskDefaultArguments, { portNameGap });
+        const task = output.slice(output.indexOf('task automatic m_send_with_wakeup'));
+        const lines = task.split('\n').filter(line => /^\s*logic\b/.test(line));
+        const columns = lines.map(line => /\b(tdata|tkeep|tstrb|tid|tdest|tuser|twakeup)\b/.exec(line).index);
+        assert.equal(lines.length, 7, task);
+        assert.equal(new Set(columns).size, 1, task);
+        const vector = lines.find(line => line.includes('tkeep'));
+        assert.equal(vector.indexOf('tkeep') - vector.indexOf(']') - 1, portNameGap, vector);
+    }
+});

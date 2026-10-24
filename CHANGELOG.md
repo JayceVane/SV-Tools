@@ -2,6 +2,14 @@
 
 All notable changes to the SystemVerilog VSCode Extension will be documented in this file.
 
+## [4.0.0-beta.16] - 2026-10-24
+
+**变更内容：** 多行task/function形参的默认值等号按列对齐；省略方向词的标量形参预留整组位宽列，twakeup等名称与向量参数对齐，遵循portNameGap。
+
+**为什么：** 原实现将默认值视为普通尾部文本，只对齐带逗号的参数名；隐式input类型分支又没有把位宽列计入最大前缀，标量名称会左移。
+
+**影响面：** 复用共享词法扫描，仅识别声明顶层的默认值等号，保留表达式、字符串、注释和非布局字符顺序；单行参数保持单行，reindentOnly不新增列对齐。用户的原始m_send及追加twakeup两种形态均加入golden。
+
 ## [4.0.0-beta.15] - 2026-10-24
 
 **变更内容：** 文件头模板设置改用多行输入框，新增 `svtools.headerTemplateFile` 读取独立UTF-8文本；支持绝对路径、当前文件所属工作区相对路径和 `${workspaceFolder}`。保留空行与字面转义，补齐末尾换行，模板修改下次插入立即生效。
