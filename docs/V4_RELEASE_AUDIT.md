@@ -181,3 +181,17 @@ beta.15候选源提交 `3ce9ae66fd70577367cc558fa36f9d6df8f084a1`；VSIX 458文�
 本轮完整回归：JS184文件，golden44/44（22文件，新增文件含两种用户写法），Node666通过/1项可选跳过，电路170/170，Rust155/155。
 格式化合同64/64，新增9项在Node22下9/9；真实VS Code编辑器验收6/6。
 证据：`bin/beta16-native-build.log`、`beta16-golden.log`、`beta16-contract.log`、`beta16-full.log`、`beta16-rust.log`、`beta16-node22.log`、`beta16-source-editor-host.log`。
+
+
+beta.16候选源码 `bb6a3281364cad4bdf879fcde0e6ffcac95fe571`，安装包458文件，443个运行/模板文件逐字节核对一致。
+包前完整回归仍为Node666通过/1项可选跳过、电路170/170；解包后VS Code与Qoder编辑器各6/6（合计12/12），包括新增task golden。
+独立CLI的两种task形态也与人工期望全文一致。日志：`beta16-package.log`、`beta16-package-verification.log`、
+`beta16-packaged-vscode-editor.log`、`beta16-packaged-qoder-editor.log`。
+
+| beta.16产物 | 字节 | SHA256 |
+|---|---:|---|
+| svtools-4.0.0-beta.16-win32-x64.vsix | 18571120 | `2d06cc700b7da5e90a2a5b070878466f486c9a68fabbd576fbf10161c21c3b34` |
+| svtools.exe | 24020992 | `34f78af9c8b697d876d4129b2b498c03d535084a3d5de5b04ed04f672d60e141` |
+| svtools.win32-x64-msvc.node | 24166400 | `1081fd2682e09f7392e9c619b6686afeb3e874d8a5520eb8acfb8d19e5313919` |
+
+最终远程检查以PR11当前提交为准；本轮仅更新既有开发分支和草稿PR，正式4.0.0尚未tag或Release。
