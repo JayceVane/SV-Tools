@@ -428,8 +428,28 @@ test('Icarus 实际 runner 兼容 CLI 分离/附着/组合选项，-- 后按原�
         const result = await h.api.runSimulation(h.doc); assert.equal(result.ok, true);
         const runtime = JSON.parse((await fs.readFile(result.logPath, 'utf8')).match(/^RUNTIME (.+)$/m)[1]);
         assert.deepEqual(runtime.flags, ['-n', '-i', '-l', log, '-M', '-', '-msystem', '-vlattached.log', '-Mmodule path', '-Nq']);
-        assert.deepEqual(runtime.extended, ['+trace', '+seed=73', '-lcustom', 'literal']);
+        assert.deepEqual(runtime.extended.slice(0, -1), ['+trace', '+seed=73', '-lcustom', 'literal']);
+        assert.equal(path.dirname(runtime.extended.at(-1).slice('-dumpfile='.length)), path.join(f.root, '.svtools', 'vcd'));
         assert.equal(runtime.trace, true); assert.equal(runtime.seed, '73');
+    } finally { await h.api.dispose(); }
+});
+
+test('Icarus默认VCD在工作区.svtools/vcd，源码子目录仍是运行cwd，目标进入写入屏障', async t => {
+    const f = await fixture(t); let prepared;
+    const sourceDir = path.join(f.root, 'sim'); await fs.mkdir(sourceDir);
+    f.file = path.join(sourceDir, 'main.sv');
+    await fs.writeFile(f.file, 'module main; initial begin $dumpvars(0,main); #1; $finish; end endmodule\n');
+    const h = editorHarness(f, async () => ({ ...protocolToolchain(f, 'ok'), vvpPrefix: [f.driver, 'vvp', 'argcheck'] }), {
+        waveViewer: { async prepareForSimulation(options) { prepared = options; return { dispose() {} }; }, openWaveform() {} }
+    });
+    try {
+        const result = await h.api.runSimulation(h.doc); assert.equal(result.ok, true);
+        const runtime = JSON.parse((await fs.readFile(result.logPath, 'utf8')).match(/^RUNTIME (.+)$/m)[1]);
+        const target = runtime.extended.find(value => value.startsWith('-dumpfile=')).slice(10);
+        assert.equal(path.dirname(target), path.join(f.root, '.svtools', 'vcd')); assert.equal(path.extname(target), '.vcd');
+        assert.ok(prepared.paths.includes(target)); assert.ok((await fs.stat(path.dirname(target))).isDirectory());
+        assert.equal(await fs.readFile(path.join(sourceDir, 'vvp-started'), 'utf8'), 'yes');
+        assert.equal(await fs.readFile(f.file, 'utf8'), 'module main; initial begin $dumpvars(0,main); #1; $finish; end endmodule\n');
     } finally { await h.api.dispose(); }
 });
 

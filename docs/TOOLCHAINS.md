@@ -66,3 +66,10 @@ node scripts/verify-toolchains.js --iverilog <iverilog可执行文件> --vvp <vv
 本轮尚未统一三种引擎的源文件/宏/top 编译计划，也未实现内容驱动的增量源码索引。
 独立 xvlog 目录只在一次任务内使用 --incr，首次与跨任务编译可能比旧共享缓存更慢。
 恢复跨任务缓存必须带源码、工具版本和配置键，避免重引入共享可写目录。
+# 默认VCD目录
+
+以下路径策略自本次开发构建起生效。
+
+Icarus默认VCD集中在工作区`.svtools/vcd/`，无工作区时使用源码目录下的同一路径。默认文件名区分源文件、Top和引擎，避免不同目录的同名测试台覆盖；重复仿真保持稳定，写入前关闭并等待对应波形读取者退出。
+
+实现使用vvp的默认dumpfile扩展参数，保持源码目录cwd和相对readmem语义，不修改RTL。显式`$dumpfile`及用户`simArgs`中的`-dumpfile=`继续优先，FST/LXT等非VCD格式沿用其原有规则。VCD仍需RTL执行`$dumpvars`，默认路径配置不等于自动启用记录。参数优先级见[Icarus官方说明](https://steveicarus.github.io/iverilog/usage/vvp_flags.html)。

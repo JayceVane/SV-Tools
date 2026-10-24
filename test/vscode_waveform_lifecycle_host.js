@@ -52,6 +52,24 @@ async function run(){
     assert.ok((await fs.stat(file)).size<4096);assert.equal(untouched.getStatus().loaded,true);
     const after=await api.waveViewer.openWaveform(file);assert.equal((await after.loaded).endTime,20000);
     checks.push('打开100MiB旧波形期间重新仿真，旧会话终止，磁盘被新VCD覆盖并重新加载');
+    const simRoot = path.join(root,'sim subdir'); await fs.mkdir(simRoot);
+    const defaultTb = path.join(simRoot,'tb_default.sv'), memory = path.join(simRoot,'data.hex');
+    const defaultSource = '`timescale 1ns/1ps\nmodule tb_default; reg [7:0] mem[0:0]; reg [7:0] value; initial begin $readmemh("data.hex",mem); value=mem[0]; $dumpvars(0,tb_default); #4; if(value!==8\'hA5) $fatal(1,"wrong cwd"); $finish; end endmodule\n';
+    await fs.writeFile(memory,'A5\n'); await fs.writeFile(defaultTb,defaultSource);
+    const defaultDocument = await vscode.workspace.openTextDocument(defaultTb); await vscode.window.showTextDocument(defaultDocument);
+    const defaultResult = await vscode.commands.executeCommand('svtools.iverilog.simulate'); assert.equal(defaultResult.status,'success',defaultResult.message);
+    assert.equal(defaultResult.waves.length,1);
+    const defaultFile = defaultResult.waves[0]; assert.equal(path.dirname(defaultFile),path.join(root,'.svtools','vcd'));
+    await assert.rejects(fs.stat(path.join(simRoot,'dump.vcd')),{code:'ENOENT'});
+    await assert.rejects(fs.stat(path.join(root,'dump.vcd')),{code:'ENOENT'});
+    assert.equal(await fs.readFile(defaultTb,'utf8'),defaultSource);
+    const defaultOld = await api.waveViewer.openWaveform(defaultFile); assert.equal((await defaultOld.loaded).endTime,4000);
+    checks.push('默认VCD落在工作区.svtools/vcd，源码子目录的相对readmemh继续有效，RTL不改写');
+    await vscode.window.showTextDocument(defaultDocument);
+    const repeated = await vscode.commands.executeCommand('svtools.iverilog.simulate'); assert.equal(repeated.status,'success',repeated.message);
+    assert.deepEqual(repeated.waves,[defaultFile]); assert.equal(defaultOld.getStatus().loaded,false);
+    assert.equal(untouched.getStatus().loaded,true);
+    checks.push('默认路径重复仿真保持稳定，写入前释放旧读取者且不关闭无关波形');
     await fs.writeFile(path.join(root,'..','host-report.json'),JSON.stringify({vscode:vscode.version,node:process.versions.node,electron:process.versions.electron,
         extensionVersion:extension.packageJSON.version,extensionPath:extension.extensionPath,checks,count:checks.length,oldBytes,loadingAtSimulationStart,newBytes:(await fs.stat(file)).size},null,2));
 }

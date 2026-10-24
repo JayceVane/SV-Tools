@@ -7,6 +7,7 @@ const os = require('node:os');
 const { setImmediate: nextTurn } = require('node:timers/promises');
 const { createWaveformRegistry } = require('../src/waveform/registry');
 const { simulationWaveforms } = require('../src/toolchains/simulation-waveforms');
+const { defaultVcdPath } = require('../src/toolchains/waveform-paths');
 function deferred() { let resolve, reject; const promise = new Promise((yes,no) => { resolve=yes; reject=no; }); return {promise,resolve,reject}; }
 function entry(registry, file, released = Promise.resolve(), sourceFile) {
     const listeners = new Set(); let closed = false, disposed = 0;
@@ -17,6 +18,16 @@ function entry(registry, file, released = Promise.resolve(), sourceFile) {
     return { panel, get closed() {return closed;}, get disposed() {return disposed;} };
 }
 const root = path.join(os.tmpdir(), 'svtools-wave-lifecycle');
+
+test('默认波形路径在工作区内，跨同名源码、顶层和引擎不覆盖，重复仿真路径稳定', () => {
+    const options = { root, sourceFile: path.join(root, 'sim/a/tb.sv'), engine: 'engine-a' };
+    const first = defaultVcdPath(options);
+    assert.equal(path.dirname(first), path.join(root, '.svtools', 'vcd')); assert.equal(first, defaultVcdPath(options));
+    assert.notEqual(first, defaultVcdPath({ ...options, sourceFile: path.join(root, 'sim/b/tb.sv') }));
+    assert.notEqual(first, defaultVcdPath({ ...options, top: 'other_top' }));
+    assert.notEqual(first, defaultVcdPath({ ...options, engine: 'engine-b' }));
+    const escaped = defaultVcdPath({ ...options, top: '../escape:name' }); assert.equal(path.dirname(escaped), path.join(root, '.svtools', 'vcd'));
+});
 
 test('仿真释放精确波形并等待worker，保护写入直到租约结束，其它波形保持打开', async () => {
     const registry=createWaveformRegistry(), release=deferred(), file=path.join(root,'a.vcd');

@@ -1,3 +1,15 @@
+# 默认VCD目录交接（2026-10-24）
+
+用户要求Icarus及自用ModelSim的默认VCD存放到`.svtools/vcd/`。当前分支 `codex/fix-default-vcd-directory`；公共版本号仍为4.0.0，自用交付更新为 `bin/private-dist/svtools-4.0.1-local.4-win32-x64.vsix`，不覆盖旧包。
+
+- 公共`src/toolchains/waveform-paths.js`集中生成工作区根下的默认路径，无工作区时回退源码目录；源文件、Top和引擎共同区分，重复仿真保持稳定。
+- Icarus使用vvp默认dumpfile参数，自动建目录，将固定目标纳入关闭/写入保护/发现；保留源码cwd和相对readmem。显式RTL `$dumpfile`及用户`-dumpfile=`优先，FST/LXT沿用原规则，不改写旧测试台。
+- 自用适配器复用默认路径，任务工作库/WLF/日志仍在原独立目录。固定VCD开始覆盖时撤销旧成功记录，失败后的部分文件不会冒充上次成功波形；编译失败保留未覆盖的旧成功结果。实现继续Git忽略，公开包无专用入口。
+- 已通过目标合同47/47、golden44/44、Node663通过/11可选跳过、电路170/170、自用15/15；实际VS Code中Icarus6项和解包自用包ModelSim7项通过，覆盖子目录readmem、100MiB旧波形、重复覆盖、错误与停止。
+- 最终自用包463文件，SHA256为`2f9d5f4dc7df3b144e4ae238425736bd1b137082b428fc4212368305bdc66ea7`；包内默认路径及私有运行文件与当前源码一致。详细记录及源码备份见bin下vcd-path相关报告。
+
+4.1信号追踪计划不变；未推送、合并或发布GitHub附件。以下为历史交接。
+
 # 自用构建与发布隔离交接（2026-10-24）
 
 用户要求增加仅供自用的ModelSim工具链，公开发布不包含此支持。专用源码位于Git忽略的 `src/private/modelsim/`，不进入公开入口或清单；自用构建在隔离staging叠加命令/配置和包装入口。当前分支 `codex/feat-local-toolchain`，公开版本仍为4.0.0，4.1信号追踪仍按下文计划推进。

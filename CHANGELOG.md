@@ -2,6 +2,14 @@
 
 All notable changes to the SystemVerilog VSCode Extension will be documented in this file.
 
+## [Unreleased] - 默认VCD集中输出
+
+**变更内容：** Icarus默认VCD改存工作区`.svtools/vcd/`，无工作区时使用源码目录；默认文件名区分源文件、Top和引擎，重复仿真保持稳定。共享路径规则供本地自用适配器复用，输出前自动建目录，并将目标纳入关闭、写入保护及产物发现。
+
+**为什么：** 波形分散在源码目录和任务目录不便查找；直接切换仿真cwd又会影响相对readmem及显式dumpfile。运行参数只指定默认文件，保留现有RTL与执行目录。
+
+**影响面：** 显式`$dumpfile`和用户`simArgs`的`-dumpfile=`保持优先，非VCD格式沿用原规则，不自动改写已有测试台。新增同名源码/Top/引擎隔离、子目录cwd和真实重仿真验收，原有100MiB旧波形释放回归保留；不增加公开工具入口。
+
 ## [Unreleased] - 自用构建与公开发布隔离
 
 **变更内容：** 公开包显式排除私有源目录、旧src-rust缓存及根目录旧原生模块；新增打包前文件数/未压缩体积检查及最终VSIX的清单、配置、命令和JS入口检查，发布CI上传前再次验证。
