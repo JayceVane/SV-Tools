@@ -1,7 +1,6 @@
 'use strict';
 
-const fs = require('fs');
-const path = require('path');
+const { loadHeaderTemplate } = require('./header-template');
 const { buildModuleOptions, buildTestbenchOptions } = require('../configuration');
 const { preservesCharacters } = require('./format-safety');
 
@@ -200,13 +199,11 @@ function createEditorCommands({ vscode, loadNativeModule, reportNativeMissing })
             return;
         }
 
-        const config = vscode.workspace.getConfiguration('svtools');
         const document = editor.document;
-
-        const tabSize = vscode.workspace.getConfiguration('editor', {}).get('tabSize', 4);
+        const tabSize = vscode.workspace.getConfiguration('editor', document.uri).get('tabSize', 4);
 
         try {
-            const headerTemplate = config.get('headerTemplate', '') || getDefaultHeaderTemplate();
+            const headerTemplate = await loadHeaderTemplate(vscode, document);
             const result = native.generateHeader(headerTemplate, document.fileName, tabSize);
             // Insert at the beginning of the document
             await editor.edit(editBuilder => {
@@ -217,13 +214,6 @@ function createEditorCommands({ vscode, loadNativeModule, reportNativeMissing })
         }
     }
 
-    /**
-     * Get default header template
-     */
-    function getDefaultHeaderTemplate() {
-        const templatePath = path.resolve(__dirname, '..', '..', 'templates', 'header_template.txt');
-        return fs.readFileSync(templatePath, 'utf8').replace(/\r\n/g, '\n').replace(/\n+$/, '\n');
-    }
     return { generateModuleInstance, generateTestbench, repeatCodeWithNumbers, alignSelectedCode, insertHeaderTemplate };
 }
 

@@ -3,7 +3,8 @@ param(
     [string]$ExtensionPath,
     [string]$TestPath = 'test/vscode_waveform_host.js',
     [string]$IcarusPath,
-    [string]$CygwinPath
+    [string]$CygwinPath,
+    [switch]$MultiRoot
 )
 $ErrorActionPreference = 'Stop'
 $repoRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
@@ -21,6 +22,14 @@ Set-Content -LiteralPath (Join-Path $profilePath 'User/settings.json') -Encoding
 $arguments = @('--new-window','--disable-extensions','--disable-workspace-trust','--skip-welcome','--skip-release-notes',
     ('--user-data-dir="' + $profilePath + '"'),('--extensions-dir="' + $extensionsPath + '"'),
     ('--extensionDevelopmentPath="' + $ExtensionPath + '"'),('--extensionTestsPath="' + (Join-Path $repoRoot $TestPath) + '"'),('"' + $testWorkspace + '"'))
+if ($MultiRoot) {
+    $secondWorkspace = Join-Path $testRoot 'workspace-b'
+    New-Item -ItemType Directory -Path $secondWorkspace -Force | Out-Null
+    $workspaceFile = Join-Path $testRoot 'validation.code-workspace'
+    @{ folders = @(@{ path = 'workspace' }, @{ path = 'workspace-b' }) } | ConvertTo-Json -Depth 4 |
+        Set-Content -LiteralPath $workspaceFile -Encoding utf8
+    $arguments[-1] = ('"' + $workspaceFile + '"')
+}
 $previousNodeMode = $env:ELECTRON_RUN_AS_NODE
 try {
     $env:ELECTRON_RUN_AS_NODE = $null

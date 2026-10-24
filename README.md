@@ -5,7 +5,7 @@
 
 改编自 Sublime Text [SystemVerilog](https://github.com/TheClams/SystemVerilog)（格式化）与 [Verilog-Gadget](https://github.com/poucotm/Verilog-Gadget)（生产力工具）插件。
 
-当前开发预览版本为 **4.0.0-beta.14**，集中修复发布审查发现的格式化词法、模板端口/位宽、Vivado文件集事务和特殊路径问题；默认生成VCD测试台。参见[4.0发布审查](docs/V4_RELEASE_AUDIT.md)。[已发布4.0.0-beta.2](https://github.com/JayceVane/SV-Tools/releases/tag/v4.0.0-beta.2) 提供 Windows x64 VSIX 与 CLI。开发候选可通过本地VSIX安装并重载窗口，正式版目标为 **4.0.0**。源码位于 `src/`，构建产物位于 `bin/`。
+当前开发预览版本为 **4.0.0-beta.15**，补齐独立文件头模板与多行设置；继承发布审查的格式化词法、模板端口/位宽、Vivado文件集事务和特殊路径修复，默认生成VCD测试台。参见[4.0发布审查](docs/V4_RELEASE_AUDIT.md)。[已发布4.0.0-beta.2](https://github.com/JayceVane/SV-Tools/releases/tag/v4.0.0-beta.2) 提供 Windows x64 VSIX 与 CLI。开发候选可通过本地VSIX安装并重载窗口，正式版目标为 **4.0.0**。源码位于 `src/`，构建产物位于 `bin/`。
 
 格式化只能改变普通空格、Tab、CR、LF；其它字符的内容、次数和顺序必须保持，即使输入
 全部乱码或语法不完整。无法安全提交的布局保留原文，详见 [格式化规范](docs/FORMAT_SPEC.md)。
@@ -115,6 +115,22 @@ npm run package        # 生成 svtools-<版本>.vsix
 | `alignComma` / `instAlignPort` | true | 逗号列 / 例化端口按列对齐 |
 
 格式化行为的完整定义见 [`docs/FORMAT_SPEC.md`](docs/FORMAT_SPEC.md)。
+
+### 文件头模板
+
+在设置中搜索 `svtools.headerTemplate`，可在多行输入框直接粘贴文本；在 `settings.json` 中仍使用 JSON 的 `\n` 表示换行。例如：
+
+```jsonc
+"svtools.headerTemplate": "// Module: {FILE}\n// Date: {DATE} {TIME}\n// Author: Your Name\n"
+```
+
+也可把模板保存为独立 UTF-8 文本文件，并设置：
+
+```jsonc
+"svtools.headerTemplateFile": "${workspaceFolder}/templates/header.txt"
+```
+
+相对路径以当前源码所属的工作区文件夹为准；也支持绝对路径。源码在工作区外时，相对路径以源码目录为准。优先顺序为**外部文件 → 内联模板 → 内置模板**；每次插入都会重新读取文件，文件不存在、为空或不是 UTF-8 时明确报错并保持源码不变。模板支持 `{FILE}`、`{DATE}`、`{TIME}`、`{YEAR}`，兼容 `{RDATE}`、`{RTIME}`；保留内部空行并补齐末尾换行。两项设置均可按工作区文件夹配置。
 
 ### CLI
 

@@ -1,4 +1,4 @@
-# 4.0正式发布前审查 — beta.14
+# 4.0正式发布前审查 — beta.15
 
 审查日期：2026-10-23至24日。基线 `e7eba3b` / `4.0.0-beta.11`，独立分支 `codex/feat-circuit-viewer`。
 只在4.0 worktree修复和构建，未改用户维护的3.x目录或corelib RTL。
@@ -7,7 +7,7 @@
 
 基线完整测试虽通过，仍复现了源码词法损坏、错误模板和工程引用丢失。本轮必须先修复这些问题，不能直接以beta.11发布4.0。
 修复后，以下明确复现的问题及其回归均已解决；在本轮覆盖范围内未发现尚未修复的P0/P1。
-beta.14作为新的可追溯发布候选，后续正式版仍需独立4.0.0版本、重建和发布验收。本轮不自动合并、创建正式tag或公开Release。
+beta.15补齐用户报告的文件头配置问题，作为新的可追溯发布候选；beta.14及更早产物保留。后续正式版仍需独立4.0.0版本、重建和发布验收。本轮不自动合并、创建正式tag或公开Release。
 beta.12内部打包后复核又发现独立net/reg符号信息补全不完整、数组参数静默略过，故未放行；继续实测也发现simArgs中的plusargs放在vvp输入文件之前会被当成文件名，默认VCD模板又需要未提供的+vcd。beta.13补齐这些问题，旧产物保留。
 远程CI复核补充：beta.13的Node22/24均在原生构建入口失败，npm.cmd的兄弟脚本路径落入工程目录；本地宿主通过并不能证明干净环境可重建。故继续修复此构建阻断并改用独立beta.14，不覆盖beta.13。
 这是一轮有边界的工程审查，不是无缺陷或所有SV/UVM语法完全支持的保证。
@@ -25,6 +25,7 @@ beta.12内部打包后复核又发现独立net/reg符号信息补全不完整、
 | P2 | 条件`$dumpfile`不执行时实际生成默认dump.vcd，静态扫描漏掉旧默认波形 | 只要出现dumpvars同时考虑默认dump.vcd，沿用关闭屏障和写入租约 |
 | P2 | simArgs中的`+trace`被当成vvp输入文件，默认VCD模板又受未提供的+vcd门控 | 区分vvp CLI选项和extended/plusargs，按正确阶段传参；选择VCD就直接记录，真实runner与无+vcd模板验收 |
 | P1（构建阻断） | PATH-only BAT执行后自身%~dp0错指cwd，npm.cmd在干净CI查找错误兄弟脚本 | 先用调用cwd/Path解析绝对普通文件，再安全中转；真实兄弟文件回归及干净构建验收 |
+| P2 | 文件头设置的单行控件丢失粘贴换行，无外部文件模板入口；末尾行注释可能粘连源码 | 多行控件与资源作用域UTF-8文件配置；保留空行、补齐末尾换行，文件错误拒绝插入；真实双根宿主验收 |
 | 构建风险 | npm审计21项（16 high / 5 moderate），来自开发/打包依赖 | vsce 4.0.0、兼容安全补丁及netlistsvg JSON5/yargs override；完整依赖树审计清零，真实验证链通过 |
 
 根因笔记：
@@ -91,7 +92,7 @@ VSIX共457文件，441个运行文件与源码/原生/vendor逐字节一致；�
 `beta13-packaged-editor-host.log`、`beta13-packaged-circuit-host.log`、`beta13-packaged-lifecycle-host.log`、`beta13-packaged-waveform-host.log`。
 远程Windows Node22/24检查可从[草稿PR11](https://github.com/JayceVane/SV-Tools/pull/11)复查。
 
-在本轮明确覆盖的Windows x64和工具版本范围内，未发现仍阻断正式发布的已确认P0/P1；建议以通过最终CI的beta.14作为封版基线。正式4.0.0仍须独立版本化、重建与发布，不重命名或覆盖候选包。
+在本轮明确覆盖的Windows x64和工具版本范围内，未发现仍阻断正式发布的已确认P0/P1；beta.14曾作为通过最终CI的封版基线；后续用户报告的文件头配置问题改由beta.15修复。正式4.0.0仍须独立版本化、重建与发布，不重命名或覆盖候选包。
 
 ## beta.14干净构建复核
 
@@ -111,3 +112,30 @@ Node22启动器专项25/25通过；完整包前回归再次通过。日志为`be
 | svtools.win32-x64-msvc.node | 24163328 | `9b82aa57d626c3ba18d48eef3d17299f268a4faa25c96c1efd39cd8ed6767912` |
 
 远程CI以最终推送的Windows Node22/24检查为准，入口为[PR11](https://github.com/JayceVane/SV-Tools/pull/11)。正式4.0.0尚未创建tag或Release。
+
+
+## beta.15文件头配置补充审查
+
+用户报告的外部文件模板和多行设置未被beta.14发现或修复，不能用已有原生字符串测试替代设置入口验收。
+旧Rust替换器没有删除实际LF；换行在单行设置控件中已经丢失。详见[调试笔记](bugs/compat-header-template-multiline.md)。
+
+`svtools.headerTemplate`现声明`multilineText`，新增`svtools.headerTemplateFile`；配置按当前文档资源读取。
+支持绝对路径、`${workspaceFolder}`、所属工作区相对路径；工作区外使用源码目录。
+外部文件优先、每次重读，严格UTF-8且允许BOM；缺失/空白/错误编码明确报错，不回退插入默认头。
+只规范化换行，不解码字面反斜杠；模板末尾补LF，避免行注释吞掉源码。以前压平的模板需要重新粘贴。
+
+真实宿主脚本：`scripts/verify-waveform-host.ps1 -CodePath <IDE.exe> -TestPath test/vscode_header_host.js -MultiRoot`。
+双根工作区从启动时载入，避免测试期间切换工作区的窗口流程影响测试运行。
+每个宿主6项：运行配置注册、配置JSON往返和一次撤销、BOM/中文路径/CRLF、实时重读、三类错误不修改源码、双根同名模板隔离。
+
+变更文件清单：
+
+- `src/editor/header-template.js`、`src/editor/commands.js`：模板加载、路径/编码边界与插入命令接入。
+- `package.json`、`package.nls.json`、`package.nls.zh-cn.json`：配置控件、文件设置和双语说明。
+- `test/editor_test.js`、`test/vscode_header_host.js`、`scripts/verify-waveform-host.ps1`、`.gitignore`：聚焦回归、隔离双根宿主与测试文件入库。
+- `README.md`、`CHANGELOG.md`、`docs/bugs/compat-header-template-multiline.md`、本报告：用法、缺陷成因、交付边界和验收证据。
+- `package-lock.json`、`src/native/package.json`、`src/native/package-lock.json`、`src/native/Cargo.toml`、`src/native/Cargo.lock`：候选版本统一为beta.15，防止覆盖旧安装包。
+
+本轮本地完整回归：JS184文件，golden42/42，Node657通过/1项可选跳过，电路170/170，Rust153/153。
+文件头聚焦回归在Node22/24均为21/21；VS Code1.143.0和Qoder API1.106.3的真实双根宿主各6/6。
+日志：`bin/beta15-native-build.log`、`bin/beta15-full.log`、`bin/beta15-rust.log`。包内运行内容和解包宿主结果在打包后补记。
