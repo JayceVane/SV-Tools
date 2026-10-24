@@ -1,3 +1,16 @@
+# 自用ModelSim默认运行到结束（2026-10-25）
+
+用户反馈波形默认只到1us，在完整调试器控制与默认到finish两个方案中，本轮实现默认到结束。当前分支`codex/fix-modelsim-run-until-finish`，保留此前格式化、高亮、仿真菜单及VCD目录修复；运行代码改动全部在已忽略的`src/private/modelsim`中。
+
+- 协议层用唯一`DEFAULT_RUNTIME='all'`提供默认值，私有清单引用同一常量，runner取消两处1us回退。默认`run -all`直到`$finish`或事件队列自然结束；显式有限时长仍优先，已有手动1us设置需删除或改为all。
+- 停止按钮及阶段实际耗时超时仍有效，默认120000ms，可按原配置调大；该值不是HDL仿真时间。未增加单步/暂停等交互调试器功能，也未修改用户设置。
+- 新自用包`bin/private-dist/svtools-4.0.1-local.8-win32-x64.vsix`，464文件、18574437 bytes；SHA256为`ad48d0ee98f60b3ba6336d4ac7fff995161e539c7cdb7064ff083f665f53ad58`。实际归档清单默认all、私有运行文件及公共资源均与构建一致，公开发布门禁仍拒绝该私有包。
+- 真实Questa专项17/17：未配置时运行到2.203us的finish，VCD保留1us后变化；显式时长、失败、取消、超时、fileList/include/ini保持。VCD末时间表示最后变化，不强求等于finish时间，结束时刻核对工具日志。
+- 解包最终VSIX在真实Qoder API1.106.3宿主17/17，包含核心格式化/生成、菜单启动后默认2.204us的finish、有限100ns覆盖及删除覆盖恢复all、重复VCD与停止。完整回归golden44/44、Node676通过/11可选跳过、电路170/170，私有构建纯合同5通过/2实际工具组可选跳过。
+- 报告`bin/modelsim-until-finish-package-verification.json`、`bin/modelsim-until-finish-acceptance-report.json`及modelsim-until-finish相关日志；私有源码与构建/验收脚本另存private-dist备份。公开版本仍4.0.0，未推送、合并、发布或安装到日常IDE。
+
+以下为历史交接。
+
 # 无基数常量高亮修复交接（2026-10-25）
 
 用户反馈`'0`、`'1`的单引号未着色。原TextMate语法没有无基数无位宽常量规则，只有后面的十进制数字被着色。当前分支`codex/fix-unbased-literal-highlight`沿用已完成的自用格式化及仿真修复。
