@@ -2,6 +2,14 @@
 
 All notable changes to the SystemVerilog VSCode Extension will be documented in this file.
 
+## [4.0.0] - 2026-10-24
+
+**变更内容：** 发布4.0首个正式版本，提供GitHub Wiki图文使用指南及Windows x64 VSIX/CLI。包含字符与词法保全格式化器、task/function默认值及标量列对齐、独立UTF-8文件头、标准目录与上下文补全、Icarus/Vivado任务和工程管理、流式VCD/二维mem/浮点/总线展开/布局复用，以及内置Yosys与Vivado电路视图和两种视图的SVG/PNG导出。
+
+**为什么：** beta.16已完成发布前正确性修复、完整回归、真实编辑器及Node22/24远程CI；将可用功能、操作步骤和限制整理成与版本绑定的指南，再进入稳定发布渠道。
+
+**影响面：** 本轮运行逻辑沿用已验收beta.16，统一版本并重建正式产物，不重命名或覆盖预览包。发布工具的Azure/MSAL及UUID开发依赖完成定向安全约束并重验打包，相关依赖不进入VSIX。最低VS Code1.106.0，正式附件为Windows x64；内置查看仅支持VCD，复杂标准语义和Vivado IP管理仍有明确边界。Wiki源稿及截图随源码保存，正式验收记录见docs/V4_RELEASE_AUDIT.md。
+
 ## [4.0.0-beta.16] - 2026-10-24
 
 **变更内容：** 多行task/function形参的默认值等号按列对齐；省略方向词的标量形参预留整组位宽列，twakeup等名称与向量参数对齐，遵循portNameGap。

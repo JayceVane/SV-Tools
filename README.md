@@ -5,7 +5,7 @@
 
 改编自 Sublime Text [SystemVerilog](https://github.com/TheClams/SystemVerilog)（格式化）与 [Verilog-Gadget](https://github.com/poucotm/Verilog-Gadget)（生产力工具）插件。
 
-当前开发预览版本为 **4.0.0-beta.16**，补齐task/function形参默认值等号及标量/向量名称列对齐，包含独立文件头模板与多行设置；继承发布审查的格式化词法、模板端口/位宽、Vivado文件集事务和特殊路径修复，默认生成VCD测试台。参见[4.0发布审查](docs/V4_RELEASE_AUDIT.md)。[已发布4.0.0-beta.2](https://github.com/JayceVane/SV-Tools/releases/tag/v4.0.0-beta.2) 提供 Windows x64 VSIX 与 CLI。开发候选可通过本地VSIX安装并重载窗口，正式版目标为 **4.0.0**。源码位于 `src/`，构建产物位于 `bin/`。
+当前正式版本为 **4.0.0**。[GitHub Wiki 使用指南](https://github.com/JayceVane/SV-Tools/wiki)提供安装、升级、配置、仿真、波形与电路操作说明及界面截图；Windows x64 VSIX 与独立 CLI 从 [GitHub Releases](https://github.com/JayceVane/SV-Tools/releases) 获取。安装后重载窗口。源码位于 `src/`，构建产物位于 `bin/`，发布验收范围见[审查记录](docs/V4_RELEASE_AUDIT.md)。
 
 格式化只能改变普通空格、Tab、CR、LF；其它字符的内容、次数和顺序必须保持，即使输入
 全部乱码或语法不完整。无法安全提交的布局保留原文，详见 [格式化规范](docs/FORMAT_SPEC.md)。
@@ -50,7 +50,7 @@
 - ▶ 仿真（Icarus / Vivado xsim 引擎选择）与 ⊕ 工程文件管理按钮
 - 工程创建向导（源文件分类、器件选型逐级筛选、顶层识别）+ 工程结构模板
 
-**电路结构查看器**（4.0 beta，可选本地工具）
+**电路结构查看器**（内置 Yosys，可选本地 Vivado）
 - 内置离线 Yosys，无需 Python 或额外安装；从当前 RTL 生成，或导入已有 JSON，支持源文件顺序、顶层、include 和宏
 - 默认自动收集工作区子模块与包依赖，显式 sources 保留编译顺序；错误摘要显示原文件行列
 - 独立电路模型与 ELK.js 正交布局，SVG 平移缩放、搜索、网络高亮、参数化模块下钻和源码定位
@@ -100,7 +100,7 @@ npm run package        # 生成 svtools-<版本>.vsix
 | 插入文件头 | `Ctrl+Shift+Insert` / `Cmd+Shift+Insert` |
 | Icarus lint / 仿真 / Vivado 命令 | 命令面板搜索 "SystemVerilog Tools" |
 
-全部 40 个命令与 48 项配置见命令面板与设置面板（已按 缩进与空行 → 换行与对齐 → 代码生成 → Icarus Verilog → Vivado 分组）。
+全部 47 个命令与 63 项配置见命令面板与设置面板（已按 缩进与空行 → 换行与对齐 → 代码生成 → Icarus Verilog → Vivado 分组）。
 
 ### 核心格式化配置
 

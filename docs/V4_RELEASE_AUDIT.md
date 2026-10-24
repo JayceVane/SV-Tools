@@ -1,9 +1,17 @@
-# 4.0正式发布前审查 — beta.16
+# 4.0.0正式发布审查
 
 审查日期：2026-10-23至24日。基线 `e7eba3b` / `4.0.0-beta.11`，独立分支 `codex/feat-circuit-viewer`。
 只在4.0 worktree修复和构建，未改用户维护的3.x目录或corelib RTL。
 
-## 当前判断
+
+## 4.0.0当前发布结论
+
+用户已确认发布首个4.0正式版本，并要求先上线GitHub Wiki图文指南。Wiki已发布到独立仓库提交`e60845957461b67297831e1e23d3e397067aa797`：16份页面/导航源稿，6张当前Webview实际截图；4个主要页面匿名可访问，6图公开SHA256与原图一致。
+运行代码沿用已验收beta.16，六处版本统一4.0.0后重建原生模块和CLI；本地完整回归为JS184、golden44/44、Node666通过/1项可选跳过、电路170/170、Rust155/155。
+发布前npm复查发现构建SDK通告并定向修复，目前根目录/native审计均0；兼容override与未测试的Marketplace认证路径见PUBLISH.md及调试笔记，不改变本轮GitHub渠道。
+正式tag须指向PR11的已验收合并提交，Release附件由tag CI独立构建。实际下载附件以Release的SHA256SUMS.txt核对；后续打包/宿主证据保存在本机bin/v4-stable-*及v4-release-*，本报告不将预览包哈希冒充正式包哈希。
+
+## 预览阶段判断（历史）
 
 基线完整测试虽通过，仍复现了源码词法损坏、错误模板和工程引用丢失。本轮必须先修复这些问题，不能直接以beta.11发布4.0。
 修复后，以下明确复现的问题及其回归均已解决；在本轮覆盖范围内未发现尚未修复的P0/P1。
@@ -197,3 +205,16 @@ beta.16候选源码 `bb6a3281364cad4bdf879fcde0e6ffcac95fe571`，安装包458文
 最终远程检查以PR11当前提交为准；本轮仅更新既有开发分支和草稿PR，正式4.0.0尚未tag或Release。
 
 补充：编辑器golden验收在写入隔离文档前统一夹具行尾，避免干净Windows检出的CRLF使比较与目标LF不一致。此测试源调整不改变VSIX运行内容。
+
+
+## 4.0.0变更文件清单
+
+- `docs/wiki/*.md`：16份用户指南、侧栏和页脚，配置63项、命令47项取自扩展清单。
+- `docs/wiki/images/*.png`、`docs/wiki/images/manifest.json`：6张已目视检查的当前界面图、公开数据来源、尺寸、SHA256及UI源文件哈希。
+- `docs/WIKI.md`：Wiki维护与同步方式。
+- `docs/releases/v4.0.0.md`、`README.md`、`CHANGELOG.md`：正式版说明和Wiki入口。
+- `INSTALL.md`、`PUBLISH.md`：实际最低宿主/构建要求、GitHub发布顺序和构建依赖约束。
+- `docs/CIRCUIT.md`、`docs/WAVEFORM.md`、`docs/FORMAT_SPEC.md`：当前版本标记，修正总线收起旧描述。
+- `docs/bugs/compat-vsce-msal-auth-dependency.md`、本报告：发布前复查和兼容取舍。
+- `package.json`、`package-lock.json`：正式版本和开发依赖安全约束。
+- `src/native/package.json`、`src/native/package-lock.json`、`src/native/Cargo.toml`、`src/native/Cargo.lock`：原生/CLI版本统一4.0.0。

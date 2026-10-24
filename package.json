@@ -2,7 +2,7 @@
   "name": "svtools",
   "displayName": "SystemVerilog Tools",
   "description": "Verilog/SystemVerilog formatter, module instantiation, testbench generation, and productivity tools (Rust native backend)",
-  "version": "4.0.0-beta.16",
+  "version": "4.0.0",
   "publisher": "JayceVane",
   "author": {
     "name": "JayceVane",
@@ -1251,6 +1251,12 @@
     "tar-stream": "3.1.8"
   },
   "overrides": {
+    "@azure/identity": {
+      ".": "4.13.0",
+      "@azure/msal-node": {
+        "uuid": "11.1.1"
+      }
+    },
     "netlistsvg": {
       "json5": "1.0.2",
       "yargs": "7.1.2"

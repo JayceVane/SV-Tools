@@ -1,0 +1,69 @@
+{
+  "version": "4.0.0",
+  "method": "当前源码的真实Webview渲染；公开验收VCD或真实Yosys网表；仅截取内容区域，不含IDE外壳。",
+  "uiSources": {
+    "src/waveform/view.js": "787e146806fa6e90e5870a2e053b25da6fc79549956dcbf5b51a4552af5eeaa0",
+    "src/waveform/view.css": "2edeb502f00faffdfb6aa1b568f3e61118323154a57c019eb50b2d45caaf0d12",
+    "src/waveform/client.js": "890b5da5ad7d67c5410377d7fb950de3bec38296001fd907896cefc87e58b8ac",
+    "src/waveform/renderer.js": "636ff58095ce00b28294a6265e00f432d0cb3901e1a662200d68286190fa6d4e",
+    "src/circuit/view.js": "ebd51dc794ee92faeb7ef518e3704aaeb9d5e8902475a946bb109faccc2dddf2",
+    "src/circuit/view.css": "a07c9b6a0178aaba31c0d38ffc6478abd7b7e8548aed7446fd133a3c236fbcc2",
+    "src/circuit/client.js": "b1bd34571c33c656f506beb21255bbd6d495859959df29bbfe2a506122983f65"
+  },
+  "images": [
+    {
+      "file": "waveform-bits-light.png",
+      "caption": "总线展开、角色图标、背景高亮与分组菜单",
+      "fixture": "scripts/preview-waveform.js:fixtureSignals",
+      "width": 1416,
+      "height": 908,
+      "bytes": 130054,
+      "sha256": "1e4b3a53945e16b47ac0afe8d39892bff2ac48b3669905be3f13f7ce0f41bc7a"
+    },
+    {
+      "file": "waveform-floats-dark.png",
+      "caption": "浮点与Analog、A/B游标、暗色主题",
+      "fixture": "scripts/preview-waveform.js:fixtureVcd",
+      "width": 1416,
+      "height": 908,
+      "bytes": 159870,
+      "sha256": "6dbf269ace655f498d4d88277f367505c20c3bfe9273392b4c06c8c251323c92"
+    },
+    {
+      "file": "memory-matrix-light.png",
+      "caption": "二维mem矩阵与FP32 A/B精确值",
+      "fixture": "scripts/preview-waveform.js:fixtureVcd",
+      "width": 1416,
+      "height": 908,
+      "bytes": 158054,
+      "sha256": "0e999d929ec452a2d1a91cbf29a7f39dc764df69384afed2edac1c1e1b34a878"
+    },
+    {
+      "file": "waveform-export-dialog.png",
+      "caption": "波形导出选项：黑白风、SVG、A/B区间",
+      "fixture": "scripts/preview-waveform.js:fixtureVcd",
+      "width": 1416,
+      "height": 908,
+      "bytes": 161910,
+      "sha256": "bf1c58730ddb637a5ad346ebd829d38901ca2be3c2a911b1b2ccefd3743d55e2"
+    },
+    {
+      "file": "circuit-inspector-light.png",
+      "caption": "真实Yosys电路、总线与网络详情高亮",
+      "fixture": "test/fixtures/circuit-demo.sv",
+      "width": 1416,
+      "height": 908,
+      "bytes": 85536,
+      "sha256": "10983e0a6a47538e8c47ca0546ee00668a768f1788d2462d5149530fb436be2d"
+    },
+    {
+      "file": "circuit-overview-dark.png",
+      "caption": "真实Yosys电路暗色主题",
+      "fixture": "test/fixtures/circuit-demo.sv",
+      "width": 1416,
+      "height": 908,
+      "bytes": 85638,
+      "sha256": "6fb321c88eb0d76da66260aaec91b0b643ee9a89962907f22c1ebb3d9b9fba27"
+    }
+  ]
+}
