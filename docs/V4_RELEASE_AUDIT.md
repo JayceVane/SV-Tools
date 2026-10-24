@@ -139,3 +139,19 @@ Node22启动器专项25/25通过；完整包前回归再次通过。日志为`be
 本轮本地完整回归：JS184文件，golden42/42，Node657通过/1项可选跳过，电路170/170，Rust153/153。
 文件头聚焦回归在Node22/24均为21/21；VS Code1.143.0和Qoder API1.106.3的真实双根宿主各6/6。
 日志：`bin/beta15-native-build.log`、`bin/beta15-full.log`、`bin/beta15-rust.log`。包内运行内容和解包宿主结果在打包后补记。
+
+
+beta.15候选源提交 `3ce9ae66fd70577367cc558fa36f9d6df8f084a1`；VSIX 458文件，443个运行/模板文件与源码及原生/vendor逐字节一致。
+包前默认回归647通过/11项可选跳过；启用真实Icarus的独立完整回归为657通过/1项可选跳过，均无失败。
+解包后VS Code1.143.0和Qoder API1.106.3各6/6，总计12/12文件头宿主验收通过。
+初次解包验收暴露测试的undo RPC完成早于文档通知，改为等待明确文档恢复事件，避免固定延时或重复撤销；
+这次测试同步修订不改变包内运行内容，不覆盖同号产物。打包与解包验收日志为`beta15-package.log`、
+`beta15-package-verification.log`、`beta15-packaged-vscode-header.log`、`beta15-packaged-qoder-header.log`。
+
+| beta.15产物 | 字节 | SHA256 |
+|---|---:|---|
+| svtools-4.0.0-beta.15-win32-x64.vsix | 18568839 | `efc2032b2264209824f15c780fbdf4eb3d4a13eb7c38865beb2221faef19495f` |
+| svtools.exe | 24017920 | `a5fc27f23673ff170429b1ffc9cbc9326d91bcc4115f0ac489f107466ad4de5a` |
+| svtools.win32-x64-msvc.node | 24163328 | `018e28372088f633b0acfa15a2de3052c0aa37da6517a9b158530c265feb22f8` |
+
+最终远程CI以PR11当前提交的Windows Node22/24检查为准；本轮仅推送既有开发分支与更新草稿PR，不创建正式tag或Release。
