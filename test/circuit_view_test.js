@@ -122,6 +122,18 @@ test('过期源码使源码按钮失效且图可继续查看，后续图保持�
     assert.equal(page.ui('openSource').disabled, false); page.client.destroy();
 });
 
+test('展开栏增加高度后仍保持起点屏幕锚点，按更新后的画布尺寸计算相机', () => {
+    const page = fakePage(), message = tracedMessage();
+    page.ui('circuit').getBoundingClientRect = () => ({ left: 5, top: 200 + page.ui('traceBranches').children.length * 28, width: 900, height: 600 });
+    page.client.receive(message); page.window.paint(); const before = page.client.getState().camera;
+    const expanded = structuredClone(message); expanded.graph.id = 'trace-expanded'; expanded.traceUpdate = 'expand';
+    expanded.graph.trace.branches = [{ id: 'new', label: '新增分支' }];
+    expanded.graph.trace.anchor = { previous: { x: 100, y: 80 }, current: { x: 100, y: 80 } };
+    page.client.receive(expanded); page.window.paint();
+    assert.equal(page.client.getState().camera.y, before.y - 28); assert.equal(page.client.getState().camera.x, before.x);
+    page.client.destroy();
+});
+
 test('端口详情使用声明方向，保持内部布局驱动方向独立', () => {
     const message = graphMessage();
     message.graph.nodes[0].kind = 'input';

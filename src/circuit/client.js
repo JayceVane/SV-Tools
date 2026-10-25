@@ -278,28 +278,28 @@
             if (message.type !== 'graph') return;
             if (!message.graph || !Array.isArray(message.graph.nodes) || !Array.isArray(message.graph.edges)) { setMode('error', '电路数据缺少节点或连接信息'); return; }
             if (drag) finishDrag(true);
-            const previousGraph = graph, previousCamera = { ...camera }, previousSelection = selection;
+            const previousGraph = graph, previousCamera = { ...camera }, previousSelection = selection, previousViewport = { ...size() };
             const continuous = ['expand', 'collapse'].includes(message.traceUpdate) && previousGraph?.trace?.rootKey === message.graph.trace?.rootKey;
             cancelCameraFrame(); saveView(); graph = message.graph; sourceStale = message.sourceStale === true;
             const nextDesign = message.design || design || {};
             const moduleId = graph.moduleId || (nextDesign.modules || []).find(module => module.id === graph.id || module.name === graph.name)?.id || graph.id;
             showDesign(nextDesign, moduleId); stateKey = graphStateKey(design, graph);
-            const view = measureViewport();
             drawing = renderer.renderGraph(ui.circuit, graph); lastClickHit = null; selection = undefined; selected = null;
             const crumbs = Array.isArray(message.breadcrumbs) && message.breadcrumbs.length ? message.breadcrumbs : [{ id: graph.id, name: graph.name }];
             showBreadcrumbs(crumbs);
             const stats = graph.stats || {};
             ui.graphStats.textContent = `${stats.cellCount ?? graph.nodes.filter(node => node.cellId).length} 单元 · ${graph.edges.length} 连接`;
+            traceControls.showGraph(graph, message.traceNavigation);
+            const view = measureViewport();
             const restored = views.get(stateKey); isFit = !restored || restored.isFit !== false;
             camera = isFit ? fitCamera(graph, view.width, view.height) : cleanCamera(restored.camera);
             if (continuous) {
                 const anchor = graph.trace.anchor;
                 camera = cleanCamera({ ...previousCamera,
-                    x: previousCamera.x + (anchor?.previous && anchor.current ? anchor.previous.x - anchor.current.x : 0) * previousCamera.scale,
-                    y: previousCamera.y + (anchor?.previous && anchor.current ? anchor.previous.y - anchor.current.y : 0) * previousCamera.scale });
+                    x: previousCamera.x + (anchor?.previous && anchor.current ? anchor.previous.x - anchor.current.x : 0) * previousCamera.scale + previousViewport.left - view.left,
+                    y: previousCamera.y + (anchor?.previous && anchor.current ? anchor.previous.y - anchor.current.y : 0) * previousCamera.scale + previousViewport.top - view.top });
                 isFit = false;
             }
-            traceControls.showGraph(graph, message.traceNavigation);
             setMode('graph'); inspect(continuous && describeSelection(graph, previousSelection, drawing.index) ? previousSelection : null); applyCamera(false); updateSearch(false, !continuous && message.traceUpdate !== 'history');
             ui.status.textContent = sourceStale ? '源码已变化，当前图仍对应生成快照；请刷新后再定位源码'
                 : `${graph.name || graph.id} · ${graph.nodes.length} 节点${graph.nodes.length ? '' : ' · 当前模块没有可显示的电路单元'}`;

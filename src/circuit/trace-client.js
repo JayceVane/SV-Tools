@@ -39,10 +39,11 @@
             ui.traceSummary.title = ui.traceSummary.textContent;
             ui.tracePrecision.textContent = trace ? trace.precision === 'cell' ? '含保守依赖范围' : '结构位映射' : '';
             ui.tracePrecision.dataset.precision = trace?.precision || '';
-            ui.traceLimit.textContent = trace?.truncated ? '容量已截断：' + trace.truncationReasons.join(' / ') : '';
+            ui.traceLimit.textContent = trace?.truncated ? '容量已截断：' + (trace.truncationLabels || trace.truncationReasons).join(' / ') : '';
+            ui.traceLimit.title = trace?.truncated ? '请缩小位范围或进入子模块追踪，当前图保留已发现的部分结果' : '';
             for (const branch of trace?.branches || []) add(ui.traceBranches, 'button', branch.label + ' · 收起 ×', 'branchId', branch.id);
             for (const frontier of trace?.frontiers || []) {
-                if (frontier.kind === 'boundary' && ['constant', 'module-port', 'no-dependent-bits'].includes(frontier.reason)) continue;
+                if (frontier.kind === 'boundary' && (frontier.reason.endsWith('-budget') || ['constant', 'module-port', 'no-dependent-bits'].includes(frontier.reason))) continue;
                 const label = frontier.kind === 'expand' ? (frontier.reason === 'sequential' ? '跨时序展开 · ' : '展开 · ') + frontier.name
                     : frontier.kind === 'enter' ? '进入模块端口 · ' + frontier.name : frontier.label;
                 const element = add(ui.traceFrontiers, frontier.kind === 'boundary' ? 'span' : 'button', label,

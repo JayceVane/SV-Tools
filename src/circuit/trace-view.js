@@ -82,7 +82,7 @@ function createTraceViews({ design, tracer, sourceLocator, layout = layoutProjec
         }
         graph.trace = { viewId, rootKey, origin: merged.origin, direction: request.direction, context: merged.context, contextLabel: contextLabel(design, merged.context),
             branches, frontiers: available, precision: merged.precision, truncated: merged.truncated,
-            truncationReasons: merged.truncationReasons, root: { moduleId: request.moduleId, direction: request.direction,
+            truncationReasons: merged.truncationReasons, truncationLabels: merged.truncationReasons.map(reason => REASONS[reason] || reason), root: { moduleId: request.moduleId, direction: request.direction,
                 origin: request.origin, instancePath: request.instancePath },
             anchor: old ? { previous: anchor(old, merged.origin), current: anchor(graph, merged.origin) } : null };
         previous = graph; previousRoot = rootKey;

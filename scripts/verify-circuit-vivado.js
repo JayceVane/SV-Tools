@@ -9,6 +9,8 @@ const { runVivadoBatchTask } = require('../src/vivado/batch');
 const { tclUtf8Literal: tclQuote } = require('../src/circuit/vivado-export');
 const { runVivadoCircuit } = require('../src/circuit/vivado-runner');
 const { fromVivado } = require('../src/circuit/adapters/vivado');
+const { createCircuitTracer } = require('../src/circuit/trace');
+const { createTraceViews } = require('../src/circuit/trace-view');
 
 /** @param {string} value 安装目录、bin 目录或可执行文件。 @returns {Promise<string>} 明确配置不存在时不回退其它版本。 */
 async function resolveExecutable(value) {
@@ -90,6 +92,17 @@ async function main() {
         assert.deepEqual(adder.ports.find(port => port.name === 'I0').bits, ports.get('a').bits);
         assert.deepEqual(module.signals.find(signal => signal.name === 'u_leaf/a').bits, ports.get('a').bits);
         assert.deepEqual(module.signals.find(signal => signal.name === 'u_leaf/q').bits, ports.get('q').bits);
+        const tracer = createCircuitTracer(design), views = createTraceViews({ design, tracer });
+        let traceReport;
+        try {
+            const request = { moduleId: design.top, direction: 'drivers', origin: { objectId: ports.get('q').id, indices: [2] }, instancePath: [], branches: [] };
+            const graph = await views.render(request), boundary = graph.trace.frontiers.find(frontier => frontier.reason === 'sequential');
+            assert.ok(boundary); assert.equal(boundary.kind, 'expand');
+            const expanded = await views.render({ ...request, branches: [{ id: boundary.id }] });
+            assert.equal(expanded.trace.branches.length, 1); assert.equal(expanded.trace.precision, 'cell');
+            assert.deepEqual(graph.trace.origin.bits.map(bit => bit.index), [2]);
+            traceReport = { rootNodes: graph.nodes.length, expandedNodes: expanded.nodes.length, originIndices: [2], flat: true, precision: expanded.trace.precision };
+        } finally { views.dispose(); tracer.dispose(); }
         for (const cell of module.cells.filter(cell => cell.kind === 'register')) {
             assert.deepEqual(cell.ports.find(port => port.name === 'C').bits, ports.get('clk').bits);
             assert.deepEqual(cell.ports.find(port => port.name === 'CE').bits, ports.get('en').bits);
@@ -131,9 +144,9 @@ async function main() {
             assert.deepEqual(await Promise.all([rtl, standalone, unreferenced].map(file => fs.readFile(file, 'utf8'))), sourceBefore);
         } finally { await outsideTask.finish({ keepArtifacts: true }); }
         const report = { root, executable, part: values.part, engine: design.provenance, rawFile: exported.filePath, moduleCount: design.modules.length,
-            top: design.top, cells: module.cells.length, ports: module.ports.length, selectedTops, rejectedSource,
+            top: design.top, cells: module.cells.length, ports: module.ports.length, selectedTops, rejectedSource, traceReport,
             checks: ['真实只读RTL详细化', '跨层级segments真实连接', '加法/寄存器数据与时钟使能连接', 'descending/ascending总线LSB-first', '顶层直通IBUF/OBUF真实连接',
-                '项目入口保持工程top', '当前工程成员文件使用leaf覆盖top', '旧top未引用且AutoDisabled的独立文件也能详细化', '工程外文件明确拒绝并提供加入工程或Yosys提示', '每次成功或失败后工程文件树SHA256及源文件内容未变'], logPaths: task.logPaths };
+                '项目入口保持工程top', '当前工程成员文件使用leaf覆盖top', '旧top未引用且AutoDisabled的独立文件也能详细化', '工程外文件明确拒绝并提供加入工程或Yosys提示', '每次成功或失败后工程文件树SHA256及源文件内容未变', '共享位级追踪和局部ELK：选定位、时序边界及显式跨越'], logPaths: task.logPaths };
         await fs.writeFile(path.join(root, 'report.json'), JSON.stringify(report, null, 2));
         console.log(JSON.stringify(report, null, 2));
     } finally { await task.finish({ keepArtifacts: true }); await manager.dispose(); }

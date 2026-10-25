@@ -7,7 +7,9 @@ const MAX_VIEW_CELLS = 512, MAX_VIEW_POSITIONS = 16384, MAX_VIEW_REQUESTS = 16;
 const idFor = value => createHash('sha256').update(JSON.stringify(value)).digest('hex').slice(0, 24);
 const REASONS = Object.freeze({ depth: '继续展开', sequential: '时序边界', instance: '模块边界', blackbox: '黑盒', memory: '存储器',
     'unknown-direction': '方向未知', 'multiple-drivers': '多个驱动', undriven: '无已知驱动', unloaded: '无负载', loop: '组合环路',
-    constant: '常量', 'module-port': '模块接口', 'no-dependent-bits': '无相关位' });
+    constant: '常量', 'module-port': '模块接口', 'no-dependent-bits': '无相关位',
+    'cell-budget': '单元数量上限', 'endpoint-budget': '端点位数量上限', 'transition-budget': '位关系数量上限',
+    'boundary-budget': '边界数量上限', 'wire-budget': '网络位数量上限', 'work-budget': '查询工作量上限' });
 
 /** @param {object[]} results 相同模块和上下文的M1结果。 @returns {object} 有界合并结果；跨模块由导航处理。 */
 function mergeTraces(results) {

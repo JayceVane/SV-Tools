@@ -92,6 +92,7 @@ class TraceQuery {
     enqueueEndpoint(id, state) {
         const point = this.index.endpoint(id);
         if (!this.scheduled.has(id) && this.scheduled.size >= this.budget.maxVisitedBits) { this.stop('endpoint-budget', point, {}, true); return false; }
+        if (point.cellId && !this.recordCell(point, state.depth)) return false;
         this.select(point, state.precision);
         if (point.bit.startsWith('n:')) this.rememberNet(point.bit, point);
         if (state.path.includes(id)) { this.stop('loop', point); return true; }
@@ -117,6 +118,7 @@ class TraceQuery {
         for (const id of net?.ambiguous || []) {
             if (!this.spend(point)) return;
             const unknown = index.endpoint(id);
+            if (unknown.cellId && !this.recordCell(unknown, state.depth)) return;
             this.select(unknown, state.precision); remembered.endpoints.set(id, unknown);
             this.stop('unknown-direction', unknown);
         }
