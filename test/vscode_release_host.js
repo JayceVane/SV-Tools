@@ -30,7 +30,11 @@ async function run() {
     checks.push('真实编辑器格式化保留字符顺序及二元/一元运算符边界');
     await vscode.commands.executeCommand('editor.action.formatDocument');
     assert.equal(fixture.document.getText(), formatted);
+    await vscode.commands.executeCommand('workbench.action.focusActiveEditorGroup');
     await vscode.commands.executeCommand('undo');
+    // 全局撤销命令返回与扩展宿主正文通知可能交错，仍严格要求恢复原始正文。
+    const undoDeadline = Date.now() + 3000;
+    while (fixture.document.getText() !== source && Date.now() < undoDeadline) await new Promise(resolve => setTimeout(resolve, 25));
     assert.equal(fixture.document.getText(), source);
     assert.equal(await fs.readFile(fixture.uri.fsPath, 'utf8'), source);
     checks.push('格式化幂等、撤销恢复原文、磁盘源码不被后台覆盖');
