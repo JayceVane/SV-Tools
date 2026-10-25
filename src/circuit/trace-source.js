@@ -104,7 +104,8 @@ function traceCandidates(design, target, snapshots) {
     if (!target || typeof target.path !== 'string' || typeof target.qualifiedName !== 'string'
         || ![target.moduleLine, target.declLine].every(Number.isSafeInteger)) throw new TypeError('源码追踪声明无效');
     const snapshot = snapshots.get(keyPath(target.path));
-    if (!snapshot || snapshot.hash !== target.sourceHash) throw new Error('源码选择与生成快照不一致，请重新执行追踪');
+    if (!snapshot) throw new Error('该文件没有生成时的源码快照（未参与生成、过大或非UTF-8编码），无法从源码发起追踪，可在电路中选择引脚');
+    if (snapshot.hash !== target.sourceHash) throw new Error('源码选择与生成快照不一致，请重新执行追踪');
     const candidates = []; let truncated = false;
     for (const module of design.modules) {
         if (!module.source || keyPath(module.source.path) !== keyPath(target.path) || module.source.line !== target.moduleLine) continue;

@@ -6,7 +6,7 @@ const path = require('node:path');
 const fs = require('node:fs/promises');
 const os = require('node:os');
 const { traceSelection, traceCandidates, instanceContexts, keyPath } = require('../src/circuit/trace-source');
-const { sourceHash, snapshotSources, createSourceLocator } = require('../src/circuit/source-snapshots');
+const { sourceHash, sourceMatches, snapshotSources, createSourceLocator } = require('../src/circuit/source-snapshots');
 const { fromYosys } = require('../src/circuit/adapters/yosys');
 
 test('源码选择按声明作用域解析，引用不被误当作块内声明，静态位范围保留', () => {
@@ -68,6 +68,23 @@ test('生成前快照支持脏正文映射，内容变化后验证失效；声�
     await fs.writeFile(snapshot, text.replace('a;', '~a;'));
     const fresh = createSourceLocator(model, entries); await fresh.verify(); assert.equal(fresh.snapshots.size, 0);
     assert.equal(sourceHash('\uFEFFa\r\n'), sourceHash('a\n'));
+});
+
+test('非UTF-8源文件跳过快照不阻塞生成，缺快照与内容变化分别提示', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'svtools-snapshot-gbk-'));
+    try {
+        const valid = path.join(root, 'lane.sv'), gbk = path.join(root, 'gbk.sv');
+        const text = 'module lane(input a, output y); assign y=a; endmodule';
+        await fs.writeFile(valid, text);
+        await fs.writeFile(gbk, Buffer.concat([Buffer.from('// '), Buffer.from([0xD6, 0xD0, 0xCE, 0xC4]), Buffer.from('\n' + text)]));
+        const entries = await snapshotSources({ sources: [valid, gbk] });
+        assert.equal(entries.length, 1); assert.equal(path.resolve(entries[0].inputPath), valid);
+        assert.equal(await sourceMatches(gbk, sourceHash(text)), false);
+        const model = fromYosys({ modules: { lane: { attributes: { src: valid.replace(/\\/g, '/') + ':1.1' },
+            ports: { a: { direction: 'input', bits: [1] }, y: { direction: 'output', bits: [1] } }, cells: {}, netnames: { y: { bits: [1] } } } } });
+        const target = { ...traceSelection(text, { offset: text.indexOf('y)') }), path: gbk, sourceHash: sourceHash(text), moduleLine: 1 };
+        assert.throws(() => traceCandidates(model, target, new Map([[keyPath(valid), { hash: sourceHash(text) }]])), /没有生成时的源码快照/);
+    } finally { await fs.rm(root, { recursive: true, force: true }); }
 });
 
 test('源码观察仅检查已编译文件，合并输入事件，一次提示且换快照和关闭清理资源', () => {

@@ -13,14 +13,17 @@ async function readBounded(file, maximum) {
         if (!stat.isFile() || stat.size > maximum) return null;
         const buffer = Buffer.alloc(stat.size + 1), { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
         if (bytesRead !== stat.size) return null;
-        return { bytes: bytesRead, text: new TextDecoder('utf-8', { fatal: true }).decode(buffer.subarray(0, bytesRead)) };
+        let text;
+        try { text = new TextDecoder('utf-8', { fatal: true }).decode(buffer.subarray(0, bytesRead)); }
+        catch { return null; }
+        return { bytes: bytesRead, text };
     } finally { await handle.close(); }
 }
 
 /** @param {string} text 源码文本。 @returns {string} 忽略UTF-8 BOM和CRLF编码差异的内容身份。 */
 function sourceHash(text) { return createHash('sha256').update(text.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n')).digest('hex'); }
 
-/** @param {object} request 工具源文件和快照映射。 @returns {Promise<object[]>} 有界的生成前快照身份；大文件仍可生成，但不伪称可验证定位。 */
+/** @param {object} request 工具源文件和快照映射。 @returns {Promise<object[]>} 有界的生成前快照身份；超大或非UTF-8文件按无快照跳过，不阻塞生成，也不伪称可验证定位。 */
 async function snapshotSources({ sources, sourceMap, sourceDirectories }) {
     const mapPath = createSourcePathMapper({ sourceMap, sourceDirectories }), snapshots = []; let bytes = 0;
     for (const inputPath of sources.slice(0, 4096)) {
