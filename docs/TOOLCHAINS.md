@@ -23,7 +23,8 @@ Vivado 的 `ERROR` 即使退出码为 0 也使 batch 失败，`CRITICAL WARNING`
 执行 cwd 与脚本路径保持原有约定。每个阶段写入 `01-probe.log`、`02-compiling.log`、
 `01-xvlog.log`、`02-xelab.log`、`01-vivado.log` 等按阶段递增的独立文件，输出通道
 显示本轮日志路径。任务完成后保留日志；lint/详细化只清理自己目录的其它内容，仿真
-保留其 vvp 和任务产物供复查。日志和保留产物会累积磁盘占用，目前没有自动保留期。
+保留其 vvp 和任务产物供复查。任务目录按修改时间自动封顶，各类任务默认保留最近
+5个目录（`svtools.tasks.retainedRuns`，0=不清理），避免长期累积磁盘占用。
 
 仿真继续在当前源码目录运行，保持相对 `$readmemh` 与 `$dumpfile` 行为。只有成功
 运行且本轮文件元数据发生变化的 VCD/FST 才进入产物通知；失败的部分波形留在磁盘
