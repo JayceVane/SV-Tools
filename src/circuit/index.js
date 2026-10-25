@@ -144,7 +144,7 @@ function activateCircuitViewer(context, { vivado, sourceCatalog, vscode = requir
         const { createSourceWatch } = require('./source-watch');
         const watch = createSourceWatch({ vscode, onStale: () => binding.markSourceStale() });
         const binding = bindCircuitPanel({ panel, load: request => load({ ...request, trackSources: entries => {
-            if (!request.signal.aborted) watch.replace(entries);
+            if (!request.signal.aborted) { binding.sourceSnapshotCaptured(); watch.replace(entries); }
         } }), initialTrace, chooseSignal, chooseCandidate,
             async chooseContext(contexts, truncated) {
                 if (truncated) throw new Error('实例上下文过多，请从顶层逐级进入所需实例');

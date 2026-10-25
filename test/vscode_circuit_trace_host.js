@@ -39,6 +39,7 @@ async function run() {
         await editor.edit(edit => edit.insert(new vscode.Position(document.lineCount - 1, 0), '// unsaved edit\n'));
         const stale = await binding.revealSource({ objectId: origin.objectId }); assert.equal(stale.ok, false); assert.match(stale.error, /变化/);
         await binding.reload(); const refreshed = binding.getState(); assert.ok(refreshed.graph.trace);
+        assert.equal(refreshed.sourceStale, false, '新快照不能继承旧观察器的过期标记');
         assert.notEqual(refreshed.design.revision, loaded.design.revision);
         const fresh = await binding.revealSource({ objectId: refreshed.graph.trace.origin.objectId }); assert.equal(fresh.ok, true, fresh.error);
         assert.equal(document.isDirty, true); assert.equal(await fs.readFile(file, 'utf8'), source);
@@ -50,6 +51,33 @@ async function run() {
             assert.equal(loadResult.graph.trace.direction, 'loads');
             checks.push('追踪负载源码命令也可使用未保存快照直接打开局部图');
         } finally { loadBinding.dispose(); }
+        // 可选人工/计算机视觉验收门；只修改本次隔离工作区主题，不影响用户配置。
+        if (process.env.SVTOOLS_TRACE_VISUAL === '1') {
+            await vscode.commands.executeCommand('workbench.action.closeSidebar');
+            let current = binding.getState().graph;
+            await binding.trace.expand(current.trace.frontiers.find(item => item.reason === 'sequential').id);
+            current = binding.getState().graph;
+            await binding.trace.expand(current.trace.frontiers.find(item => item.kind === 'expand' && item.reason === 'depth').id);
+            const themes = vscode.extensions.all.flatMap(item => item.packageJSON.contributes?.themes || []);
+            for (const [phase, uiTheme, kind] of [['dark', 'vs-dark', vscode.ColorThemeKind.Dark], ['light', 'vs', vscode.ColorThemeKind.Light]]) {
+                const theme = themes.find(item => item.uiTheme === uiTheme && /modern/i.test(item.id || '')) || themes.find(item => item.uiTheme === uiTheme && !(item.id || item.label).startsWith('%'));
+                assert.ok(theme, '隔离IDE缺少内置' + phase + '主题');
+                await vscode.workspace.getConfiguration('workbench').update('colorTheme', theme.id || theme.label, vscode.ConfigurationTarget.Workspace);
+                const deadline = Date.now() + 15000;
+                while (vscode.window.activeColorTheme.kind !== kind && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 100));
+                assert.equal(vscode.window.activeColorTheme.kind, kind);
+                await fs.writeFile(path.join(root, '..', 'ui-ready.json'), JSON.stringify({ phase, root, extensionPath: extension.extensionPath }));
+                const timeout = Number(process.env.SVTOOLS_TRACE_VISUAL_TIMEOUT_MS || 120000);
+                assert.ok(Number.isSafeInteger(timeout) && timeout >= 1000 && timeout <= 600000);
+                const visualDeadline = Date.now() + timeout;
+                while (Date.now() < visualDeadline) {
+                    try { await fs.access(path.join(root, '..', 'ui-' + phase + '-continue')); break; }
+                    catch (error) { if (error.code !== 'ENOENT') throw error; }
+                    await new Promise(resolve => setTimeout(resolve, 250));
+                }
+                checks.push('实际IDE的' + phase + '主题保持局部电路和来源状态');
+            }
+        }
         await fs.writeFile(path.join(root, '..', 'host-report.json'), JSON.stringify({ vscode: vscode.version,
             version: extension.packageJSON.version, extensionPath: extension.extensionPath, checks, count: checks.length,
             graph: { nodes: refreshed.graph.nodes.length, edges: refreshed.graph.edges.length }, context: refreshed.graph.trace.context }, null, 2));

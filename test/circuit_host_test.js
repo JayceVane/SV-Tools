@@ -119,6 +119,19 @@ test('刷新取代旧 loader，旧失败不会覆盖新图', async () => {
     host.close();
 });
 
+test('刷新期间旧观察器的延迟过期通知，在捕获新编译快照时清除', async () => {
+    const pending = [], host = setup({ load: () => new Promise(resolve => pending.push(resolve)) });
+    await host.send({ type: 'ready' }); pending.shift()({ filePath: 'first.json' });
+    for (let i = 0; i < 4; i++) await flush();
+    await host.send({ type: 'reload' });
+    await host.binding.markSourceStale(); assert.equal(host.binding.getState().sourceStale, true);
+    host.binding.sourceSnapshotCaptured(); pending.shift()({ filePath: 'fresh.json' });
+    for (let i = 0; i < 4; i++) await flush();
+    assert.equal(host.sent.at(-1).type, 'graph'); assert.equal(host.sent.at(-1).sourceStale, false);
+    await host.binding.markSourceStale(); assert.equal(host.binding.getState().sourceStale, true);
+    host.close();
+});
+
 test('迟到的源码响应不触发离开当前导航的编辑器跳转', async () => {
     let resolveSource;
     const host = setup({ request: async (command, payload) => {

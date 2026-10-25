@@ -153,8 +153,9 @@ function bindCircuitPanel({ panel, load, onSource, onError = console.error, imag
         trace.dispose();
         messageSubscription.dispose(); panelSubscription.dispose(); session.dispose();
     }
-    return { dispose, loaded, trace, markSourceStale() { sourceStale = true; return send({ type: 'source-stale' }); }, revealSource: params => handlers.source(params),
-        getState: () => ({ design: descriptor, graph: currentGraph, breadcrumbs }), reload: () => {
+    return { dispose, loaded, trace, markSourceStale() { sourceStale = true; return send({ type: 'source-stale' }); },
+        sourceSnapshotCaptured() { sourceStale = false; }, revealSource: params => handlers.source(params),
+        getState: () => ({ design: descriptor, graph: currentGraph, breadcrumbs, sourceStale }), reload: () => {
         const version = ++operation;
         return reload().catch(error => { if (version === operation) report(error); });
     } };
