@@ -5,11 +5,11 @@
 
 改编自 Sublime Text [SystemVerilog](https://github.com/TheClams/SystemVerilog)（格式化）与 [Verilog-Gadget](https://github.com/poucotm/Verilog-Gadget)（生产力工具）插件。
 
-当前正式版本为 **4.0.0**。[GitHub Wiki 使用指南](https://github.com/JayceVane/SV-Tools/wiki)提供安装、升级、配置、仿真、波形与电路操作说明及界面截图；Windows x64 VSIX 与独立 CLI 从 [GitHub Releases](https://github.com/JayceVane/SV-Tools/releases) 获取。安装后重载窗口。源码位于 `src/`，构建产物位于 `bin/`，发布验收范围见[审查记录](docs/V4_RELEASE_AUDIT.md)。
+当前正式版本为 **4.0.0**。[GitHub Wiki 使用指南](https://github.com/JayceVane/SV-Tools/wiki)提供安装、升级、配置、仿真、波形与电路操作说明及界面截图；Windows x64 VSIX 与独立 CLI 从 [GitHub Releases](https://github.com/JayceVane/SV-Tools/releases) 获取。安装后重载窗口。源码位于 `src/`，构建产物位于 `bin/`。
 
-下一版本 **4.1** 以“信号追踪”为主线：已完成[M1位级查询](docs/V4_1_M1.md)和[M2源码入口与局部视图](docs/V4_1_M2.md)。开发版可在RTL信号上右键追踪驱动/负载，逐级展开并跨越显式时序边界，使用前进/返回恢复分支与视口，再定位经过快照验证的源码。当前处于M3预览验收阶段，后续再接波形联动；阶段范围见[4.1 开发计划](docs/V4_1_PLAN.md)，当前正式版仍为4.0.0。
+下一版本 **4.1** 以“信号追踪”为主线：已完成M1位级查询和M2源码入口与局部视图。开发版可在RTL信号上右键追踪驱动/负载，逐级展开并跨越显式时序边界，使用前进/返回恢复分支与视口，再定位经过快照验证的源码。当前处于M3预览验收阶段，后续再接波形联动，当前正式版仍为4.0.0。
 
-**4.1.0-beta.3** 是本地验收预览：新增高扇出部分结果保护，修正展开时的视口跳动、刷新来源过期状态以及源码清单变更被误报为文件超限的问题，并同步原生模块及CLI版本。明暗主题、真实工具、性能条件和安装包验收进展见[M3记录](docs/V4_1_M3.md)。波形映射与游标值属于后续M4。
+**4.1.0-beta.3** 是本地验收预览：新增高扇出部分结果保护，修正展开时的视口跳动、刷新来源过期状态以及源码清单变更被误报为文件超限的问题，并同步原生模块及CLI版本。波形映射与游标值属于后续M4。
 
 格式化只能改变普通空格、Tab、CR、LF；其它字符的内容、次数和顺序必须保持，即使输入
 全部乱码或语法不完整。无法安全提交的布局保留原文，详见 [格式化规范](docs/FORMAT_SPEC.md)。

@@ -61,7 +61,7 @@ node scripts/verify-toolchains.js --iverilog <iverilog可执行文件> --vvp <vv
 
 可以只提供 Icarus 或 Vivado；`--out` 指定验收父目录，默认在
 `bin/toolchain-native-validation/run-*/` 新建目录。脚本实际执行编译、运行及错误判定，
-生成 `report.json`、完整阶段日志和 VCD；具体 alpha4 结果见 `V4_ALPHA4.md`。
+生成 `report.json`、完整阶段日志和 VCD。
 
 本轮尚未统一三种引擎的源文件/宏/top 编译计划，也未实现内容驱动的增量源码索引。
 独立 xvlog 目录只在一次任务内使用 --incr，首次与跨任务编译可能比旧共享缓存更慢。

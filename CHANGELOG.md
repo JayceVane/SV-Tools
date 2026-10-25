@@ -2,6 +2,14 @@
 
 All notable changes to the SystemVerilog VSCode Extension will be documented in this file.
 
+## [Unreleased] - V4交付记录转为本地归档
+
+**变更内容：** `docs/V4_*.md` 全部38份开发/验收记录移入本地忽略目录`docs/private/`，公开仓库不再包含这些文件；README、ROADMAP、ARCHITECTURE及本文档未发布段落中的引用同步清理。
+
+**为什么：** 这些是内部交付与验收记录（含本机测量、产物哈希等细节），不应随公开仓库发布；沿用`src/private/`的本地隔离模式，`.vscodeignore`已排除docs，不影响安装包。
+
+**影响面：** 4.1分支合入后，远程仓库工作区不再包含V4记录；已发布的历史提交和远程master旧版本中的同名文件仍存在于Git历史，如需彻底移除需另行处理历史。已发布的CHANGELOG段落按惯例保持原文。
+
 ## [Unreleased] - 非UTF-8源文件快照容错
 
 **变更内容：** 生成前快照、定位复核和磁盘校验遇到无效UTF-8文件时按无快照跳过，不再抛出异常中断电路生成；追踪起点缺快照与内容变化分别给出准确的中文提示。
@@ -16,7 +24,7 @@ All notable changes to the SystemVerilog VSCode Extension will be documented in 
 
 **为什么：** 仅限制出队单元数仍可能让端点集合超出展示预算；仅补偿ELK图坐标不能避免页面控件重排导致的屏幕跳动。
 
-**影响面：** 新增公开768扇出、多时钟、重复实例、总线与存储器夹具，实际浏览器明暗主题和交互测量；共享源码清单在失效后有界重读，并区分持续变更和文件超限，忽略工具产物及主题变更。JS、native与CLI同步4.1.0-beta.3，保持既有硬预算及公开/自用工具链边界。M3验收和限制见docs/V4_1_M3.md。
+**影响面：** 新增公开768扇出、多时钟、重复实例、总线与存储器夹具，实际浏览器明暗主题和交互测量；共享源码清单在失效后有界重读，并区分持续变更和文件超限，忽略工具产物及主题变更。JS、native与CLI同步4.1.0-beta.3，保持既有硬预算及公开/自用工具链边界。
 
 ## [Unreleased] - 4.1追踪交互M2
 
@@ -24,7 +32,7 @@ All notable changes to the SystemVerilog VSCode Extension will be documented in 
 
 **为什么：** 查询层需要形成“源码→局部图→连续追踪→源码”的可用流程；局部布局应独立于全模块布局，常量展示也不能混同不同端口的连接。
 
-**影响面：** 新增局部投影、导航控制器和来源适配，复用4.0的ELK、SVG、导出和会话生命周期。Qoder及VS Code实际流程、容量/取消/作用域回归通过；2万单元合成Worker+ELK测量保留条件。M3尚未完成安装包及视觉验收，当前版本号仍为4.0.0。详见docs/V4_1_M2.md。
+**影响面：** 新增局部投影、导航控制器和来源适配，复用4.0的ELK、SVG、导出和会话生命周期。Qoder及VS Code实际流程、容量/取消/作用域回归通过；2万单元合成Worker+ELK测量保留条件。M3尚未完成安装包及视觉验收，当前版本号仍为4.0.0。
 
 ## [Unreleased] - 4.1位级追踪基础
 
@@ -32,7 +40,7 @@ All notable changes to the SystemVerilog VSCode Extension will be documented in 
 
 **为什么：** 已布局图会合并总线及常量展示，不能作为精确位追踪的真相；大模块也需要在全图布局之前查询附近逻辑。
 
-**影响面：** 复用现有电路模型和Yosys/Vivado适配器，不改4.0展示及模型总预算。新增公开RTL、真实Yosys/Worker回归和两万单元合成性能基线；复杂运算保守标注。当前交付为查询层，源码入口及交互视图由M2接入，版本号保持4.0.0。详见docs/V4_1_M1.md。
+**影响面：** 复用现有电路模型和Yosys/Vivado适配器，不改4.0展示及模型总预算。新增公开RTL、真实Yosys/Worker回归和两万单元合成性能基线；复杂运算保守标注。当前交付为查询层，源码入口及交互视图由M2接入，版本号保持4.0.0。
 
 ## [Unreleased] - 无基数常量完整高亮
 
