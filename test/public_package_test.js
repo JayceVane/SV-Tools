@@ -19,7 +19,7 @@ test('公开清单拒绝自用版本、构建标识及专用命令或配置', ()
 
 test('公开文件表拒绝私有目录，兼容归档前缀、大小写和Windows路径', () => {
     assert.doesNotThrow(() => assertPublicPaths(['extension.js', 'src/toolchains/job.js', 'bin/vendor/yosys/yosys.wasm']));
-    for (const file of ['src/private/tool.js', 'extension/SRC/PRIVATE/tool.js', 'src\\private\\tool.js', 'extension/.local/entry.js', 'src-rust/target/old.obj', 'svtools.win32-x64-msvc.node']) {
+    for (const file of ['src/private/tool.js', 'extension/SRC/PRIVATE/tool.js', 'src\\private\\tool.js', 'extension/.local/entry.js', 'src-rust/target/old.obj', 'svtools.win32-x64-msvc.node', 'extension/.ZCODE/plans/session.md', '.vscode-test/profile/cache.json']) {
         assert.throws(() => assertPublicPaths([file]), /公开包/);
     }
     assert.throws(() => assertPublicPaths(Array(4097).fill('extension.js')), /预算/);
@@ -52,6 +52,8 @@ test('检查实际VSIX内容，不只依赖编辑器菜单是否隐藏', async t
     assert.equal(result.version, '4.0.0'); assert.equal(result.files, 2);
     for (const extra of [
         { 'extension/src/private/adapter.js': 'module.exports = {};' },
+        { 'extension/.zcode/plans/session.md': 'local session' },
+        { 'extension/.vscode-test/profile/settings.json': '{}' },
         { 'extension/extension.js': 'require("./src/private/entry"); // SVTOOLS_LOCAL_ONLY' },
         { 'extension/package.json': '{"version":"4.0.0","contributes":{"commands":[{"command":"svtools.modelsim.simulate"}]}}' }
     ]) await assert.rejects(verifyPublicVsix(await archive(t, { ...normal, ...extra })), /公开包/);

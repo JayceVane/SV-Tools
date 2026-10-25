@@ -41,6 +41,8 @@ __pycache__/**
 .arts/**
 .opencode/**
 .sisyphus/**
+.zcode/**
+.vscode-test/**
 .codeartsdoer/**
 test_project/**
 .svtools/**

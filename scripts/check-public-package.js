@@ -17,7 +17,7 @@ function assertPublicPaths(files) {
     if (files.length > MAX_FILES) throw new Error('公开包文件数超过4096预算，检查是否夹带缓存');
     for (const file of files) {
         const normalized = file.replace(/\\/g, '/').replace(/^extension\//i, '').toLowerCase();
-        if (/^(?:src\/private|src-rust|\.local|local-private)(?:\/|$)/.test(normalized) || /^[^/]+\.node$/.test(normalized)) {
+        if (/^(?:src\/private|src-rust|\.local|local-private|\.zcode|\.vscode-test)(?:\/|$)/.test(normalized) || /^[^/]+\.node$/.test(normalized)) {
             throw new Error('公开包包含自用文件：' + file);
         }
     }
