@@ -66,6 +66,7 @@ Thumbs.db
 .arts/
 .opencode/
 .sisyphus/
+.zcode/
 nul
 
 # Private test project (proprietary, not for open source)
