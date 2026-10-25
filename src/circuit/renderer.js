@@ -86,6 +86,7 @@
         const width = Math.max(2, finite(node.width, 120)), height = Math.max(2, finite(node.height, 56));
         const bitCount = PORT_KINDS.has(kind) ? node.ports?.[0]?.bits?.length || 0 : 0;
         const group = element(document, 'g', { class: `cell kind-${kind}${bitCount > 1 ? ' busPort' : ''}`, transform: `translate(${finite(node.x)} ${finite(node.y)})`, 'data-node-id': node.id, role: 'button', tabindex: '0', 'aria-label': `${node.label || node.id}${node.moduleId ? '，模块实例，可进入' : ''}` });
+        if (node.traceNew) group.classList.add('traceNew');
         group.appendChild(element(document, 'title', {}, [node.label || node.id, node.toolName, node.detail, node.description].filter(Boolean).join('\n')));
         group.appendChild(nodeBody(document, node, width, height));
         if (kind === 'bus') {
@@ -163,6 +164,10 @@
             updateClasses(edges, 'searchMatch', searched.edges, next.edges);
             searched = next; return next.matches;
         }
+        function setFocus(objectIds) {
+            const focused = new Set(objectIds);
+            for (const { element, node } of nodes.values()) element.classList.toggle('traceFocused', node.ports.some(port => focused.has(port.traceOrigin?.objectId)));
+        }
         function setViewport(camera, width, height) {
             const next = scene.query(camera, width, height);
             function reconcile(entries, parent, prefix) {
@@ -198,7 +203,7 @@
             return null;
         }
 
-        return { layer, nodes, ports, edges, index, setSelection, setSearch, setViewport, hitTarget };
+        return { layer, nodes, ports, edges, index, setSelection, setSearch, setFocus, setViewport, hitTarget };
     }
 
     return { edgePath, busMarker: viewport.busMarker, renderGraph };

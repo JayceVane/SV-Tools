@@ -143,3 +143,16 @@ footer { min-height: 29px; border-top: 1px solid var(--border); display: flex; a
 .graphLayer[data-detail="compact"] .mappingLabel { display: block; }
 .kind-bus.selected .busSpine { stroke-width: 4.2; }
 .pin:hover .busTap, .pin.selected .busTap { stroke: var(--diagramActive); }
+.tracePanel { padding: 8px 14px; border-bottom: 1px solid var(--border); background: var(--panel); }
+.tracePanel[hidden], #traceCancel[hidden] { display: none; }
+.traceHeading, .traceBranches, .traceFrontiers { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.traceHeading strong { font-size: 13px; max-width: 60%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.traceBadge { color: var(--register); font-size: 12px; padding: 3px 7px; border: 1px solid var(--border); border-radius: 12px; }
+.traceBadge[data-precision="cell"], #traceLimit { color: var(--mux); }
+.traceBranches, .traceFrontiers { margin-top: 5px; max-height: 80px; overflow: auto; }
+.traceFrontiers button, .traceBranches button { padding: 4px 8px; border-radius: 5px; }
+.traceBoundary { font-size: 12px; color: var(--muted); }.traceBoundary[data-reason="sequential"] { border-color: var(--register); }
+.traceSelection { border-top: 1px solid var(--border); margin-top: 18px; padding-top: 12px; }
+.traceSelection label { display: block; color: var(--muted); margin-bottom: 6px; }.traceSelection input { width: 100%; padding: 6px 8px; background: var(--input); color: var(--fg); border: 1px solid var(--border); border-radius: 5px; }
+.traceSelection .selectionActions { margin-top: 8px; }
+.cell.traceNew .cellBody { animation: traceArrival 700ms ease-out; }.cell.traceFocused .cellBody { stroke: var(--diagramActive); stroke-width: 2.5; stroke-dasharray: 5 3; }
+@keyframes traceArrival { from { stroke: var(--diagramActive); stroke-width: 4; } to { stroke-width: 1.3; } }

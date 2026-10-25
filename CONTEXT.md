@@ -1,3 +1,19 @@
+# 4.1信号追踪M2交接（2026-10-25）
+
+用户要求“进入下一阶段”，沿用`codex/feat-v4.1-signal-tracing`完成M2。源码右键驱动/负载、原位局部投影、显式时序/实例端口边界、逐级展开/收起、32项历史、64个关注对象、视口锚点/恢复和源码快照验证已接通。扩展/native/CLI仍4.0.0，不准备4.1安装包、不推送或合并，私有ModelSim代码及local.8包保持。
+
+- 源码身份联合编译前快照、工具模块位置、声明作用域、真实网络及实际实例；拒绝层级成员、局部遮蔽和证据不足的条件编译声明。Slang常缺单条netname位置，容错解析也可能误记赋值右侧变量，排查见`docs/bugs/logic-circuit-source-trace-identity.md`。
+- `trace-source`/`source-snapshots`/`source-watch`负责来源；`trace-projection`只裁剪展示副本且按端口隔离常量；`trace-view`重放可信边界并复用ELK；`trace-controller`拥有导航状态；`trace-actions`/`trace-client`负责原始身份和控件。完整38文件清单`docs/V4_1_M2_FILES.md`。
+- 验收：JS223文件；完整npm test为golden44/44、既有Node675通过/12环境可选跳过，另指定本机Qoder TextMate复验4/4，补验其中1项；最终电路214/214。完整日志`bin/circuit-trace-m2-full-tests.log`，收尾电路`bin/circuit-trace-m2-final-circuit.log`，收尾导航47/47为`bin/circuit-trace-m2-final-navigation.log`。
+- 真实Qoder API1.106.3与VS Code1.143.0各6/6：源码q[2]进入、寄存器和组合展开、历史与收起、受验证位置、脏正文刷新及拒绝旧位置、负载命令。日志`bin/circuit-trace-m2-{qoder,code}-final.log`。使用隔离bin工作区，没有写用户RTL或用户配置。
+- 合成2万独立反相器固定5次冷会话/5次预热/20次热布局，Worker+索引+查询+投影+ELK：冷P95 422.11ms、热P95 44.78ms、加载P95 308.26ms；局部1单元/3节点/2线，无截断，完整布局超既有预算。报告`bin/circuit-trace-view-benchmark/report.json`，不含工具生成/源码解析/SVG或鼠标帧率。
+- Windows浏览器自动化因无法可靠确认当前URL而停止，实际明暗主题/鼠标视觉验收未完成；不要把宿主脚本或Fake DOM测试当作实际视觉验收。两个预览进程均已核对PID/脚本后关闭，没有改用户浏览器设置。
+- `docs/V4_1_M2.md`记录范围与限制；相机只固定起点屏幕锚点，ELK可能移动其他节点，没有实现位置锁定或跨IDE重启追踪持久化。外部JSON和缺少源码快照的Vivado工程可图上追踪，但局部源码跳转禁用。编辑观察针对已打开输入文件，磁盘外部改动在跳转时核对。
+
+下一步为M3：补实际明暗主题/鼠标视觉验收、扩充密集/高扇出及复杂源码公开夹具、复核发布范围并准备4.1安装包及解包复验。P1波形映射按M4，不在M2冒充完成。
+
+以下为历史交接。
+
 # 4.1信号追踪M1交接（2026-10-25）
 
 用户授权开始4.1特性，当前分支`codex/feat-v4.1-signal-tracing`，沿用全部4.0维护修复；M1位级查询与Worker接口已完成，M2界面待开发。扩展、native、CLI仍4.0.0，没有4.1安装包或远程发布。

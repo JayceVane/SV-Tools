@@ -29,6 +29,11 @@ test('完整模块超过布局预算时，Worker直接查询局部位级逻辑�
     assert.equal(result.cells.length, 1); assert.equal(result.cells[0].name, 'not_2345');
     assert.equal(result.truncated, false); assert.equal(result.precision, 'bit');
     assert.equal(result.indexStats.builds, 1);
+    const local = await session.request('traceLayout', { ...request, direction: 'drivers',
+        origin: { objectId: objects.items[0].objectId, positions: [2345] }, branches: [] });
+    assert.equal(local.trace.truncated, false); assert.equal(local.stats.cellCount, 1);
+    assert.ok(local.nodes.length <= 3); assert.ok(local.edges.every(edge => edge.bits.length === 1));
+    assert.deepEqual(local.trace.origin.bits.map(bit => bit.index), [2345]);
     const warm = await session.request('trace', { ...request, direction: 'drivers', origin: { objectId: objects.items[0].objectId, positions: [0] } });
     assert.equal(warm.indexStats.builds, 1);
 });
@@ -47,6 +52,7 @@ test('重载相同JSON也使旧追踪世代失效，并释放旧索引', async t
     const second = await session.request('load', { filePath });
     assert.equal(first.id, second.id); assert.notEqual(first.revision, second.revision);
     await assert.rejects(session.request('trace', { ...old, direction: 'drivers', origin }), /过期/);
+    await assert.rejects(session.request('traceLayout', { ...old, direction: 'drivers', origin, branches: [] }), /过期/);
     const current = await session.request('trace', { ...old, revision: second.revision, direction: 'drivers', origin });
     assert.equal(current.indexStats.builds, 1);
     await assert.rejects(session.request('trace', { moduleId: second.top, direction: 'drivers', origin }), /过期/);

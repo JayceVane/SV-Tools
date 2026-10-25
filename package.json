@@ -386,6 +386,18 @@
         "title": "%cmd.circuit.fromVivadoFile.title%",
         "category": "SV Tools",
         "icon": "$(circuit-board)"
+      },
+      {
+        "command": "svtools.circuit.traceDrivers",
+        "title": "%cmd.circuit.traceDrivers.title%",
+        "category": "SystemVerilog Tools",
+        "icon": "$(references)"
+      },
+      {
+        "command": "svtools.circuit.traceLoads",
+        "title": "%cmd.circuit.traceLoads.title%",
+        "category": "SystemVerilog Tools",
+        "icon": "$(references)"
       }
     ],
     "viewsContainers": {
@@ -645,6 +657,16 @@
           "command": "svtools.vivado.runActiveScript",
           "when": "resourceExtname == .tcl",
           "group": "9_svtools"
+        },
+        {
+          "command": "svtools.circuit.traceDrivers",
+          "group": "5_circuit_trace@1",
+          "when": "resourceScheme == file && resourceExtname =~ /\\.(sv|v)$/i"
+        },
+        {
+          "command": "svtools.circuit.traceLoads",
+          "group": "5_circuit_trace@2",
+          "when": "resourceScheme == file && resourceExtname =~ /\\.(sv|v)$/i"
         }
       ],
       "svtools.submenu": [

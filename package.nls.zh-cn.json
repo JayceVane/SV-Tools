@@ -118,5 +118,7 @@
   "cfg.circuit.defines": "预处理宏，例如 SYNTHESIS 或 WIDTH=8。",
   "cfg.circuit.top": "RTL 电路顶层模块；留空则从当前文件选择。",
   "cfg.circuit.generationTimeout": "电路生成超时，单位秒。",
-  "cmd.circuit.fromVivadoFile.title": "查看当前文件电路（Vivado）"
+  "cmd.circuit.fromVivadoFile.title": "查看当前文件电路（Vivado）",
+  "cmd.circuit.traceDrivers.title": "追踪信号驱动",
+  "cmd.circuit.traceLoads.title": "追踪信号负载"
 }

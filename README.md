@@ -7,7 +7,7 @@
 
 当前正式版本为 **4.0.0**。[GitHub Wiki 使用指南](https://github.com/JayceVane/SV-Tools/wiki)提供安装、升级、配置、仿真、波形与电路操作说明及界面截图；Windows x64 VSIX 与独立 CLI 从 [GitHub Releases](https://github.com/JayceVane/SV-Tools/releases) 获取。安装后重载窗口。源码位于 `src/`，构建产物位于 `bin/`，发布验收范围见[审查记录](docs/V4_RELEASE_AUDIT.md)。
 
-下一版本 **4.1** 以“信号追踪”为主线：已完成[M1位级查询与Worker接口](docs/V4_1_M1.md)，接下来接入源码驱动/负载入口、局部逻辑锥和连续导航，后续再接波形定位与游标值。阶段范围见[4.1 开发计划](docs/V4_1_PLAN.md)及[路线图](docs/ROADMAP.md)；当前使用的正式版仍为4.0.0。
+下一版本 **4.1** 以“信号追踪”为主线：已完成[M1位级查询](docs/V4_1_M1.md)和[M2源码入口与局部视图](docs/V4_1_M2.md)。开发版可在RTL信号上右键追踪驱动/负载，逐级展开并跨越显式时序边界，使用前进/返回恢复分支与视口，再定位经过快照验证的源码。下一阶段进行M3发布验收，后续再接波形联动；阶段范围见[4.1 开发计划](docs/V4_1_PLAN.md)，当前正式版仍为4.0.0。
 
 格式化只能改变普通空格、Tab、CR、LF；其它字符的内容、次数和顺序必须保持，即使输入
 全部乱码或语法不完整。无法安全提交的布局保留原文，详见 [格式化规范](docs/FORMAT_SPEC.md)。

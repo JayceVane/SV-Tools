@@ -118,5 +118,7 @@
   "cfg.circuit.defines": "Preprocessor definitions such as SYNTHESIS or WIDTH=8.",
   "cfg.circuit.top": "Top module for RTL circuit generation. Leave empty to choose from the active file.",
   "cfg.circuit.generationTimeout": "Maximum circuit generation time in seconds.",
-  "cmd.circuit.fromVivadoFile.title": "View Current File Circuit (Vivado)"
+  "cmd.circuit.fromVivadoFile.title": "View Current File Circuit (Vivado)",
+  "cmd.circuit.traceDrivers.title": "Trace Signal Drivers",
+  "cmd.circuit.traceLoads.title": "Trace Signal Loads"
 }

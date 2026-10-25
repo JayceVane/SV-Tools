@@ -1,14 +1,14 @@
 (function (root, factory) {
     'use strict';
-    if (typeof module === 'object' && module.exports) module.exports = factory(require('./graph-index'));
+    if (typeof module === 'object' && module.exports) module.exports = factory(require('./graph-index'), require('./trace-client'), require('./trace-actions'));
     else {
-        root.CircuitClient = factory(root.CircuitGraphIndex);
+        root.CircuitClient = factory(root.CircuitGraphIndex, root.CircuitTraceClient, root.CircuitTraceActions);
         const bridge = typeof acquireVsCodeApi === 'function' ? acquireVsCodeApi() : { postMessage() {}, getState() { return {}; }, setState() {} };
         root.CircuitClient.createClient(root.document, root, bridge, root.CircuitRenderer);
     }
-})(typeof globalThis === 'object' ? globalThis : this, function (graphIndex) {
+})(typeof globalThis === 'object' ? globalThis : this, function (graphIndex, traceClient, traceActions) {
     'use strict';
-    const MIN_SCALE = .0001, MAX_SCALE = 8, PADDING = 40, MAX_SAVED_VIEWS = 12;
+    const MIN_SCALE = .0001, MAX_SCALE = 8, PADDING = 40, MAX_SAVED_VIEWS = 32;
     const MAX_DETAIL_BITS = 256, MAX_PARAMETERS = 32, MAX_PARAMETER_CHARS = 256;
     const finite = (value, fallback) => Number.isFinite(value) ? value : fallback;
     const text = value => value === undefined || value === null ? '—' : String(value);
@@ -90,7 +90,7 @@
             }
             if (node.toolName && node.toolName !== node.label) properties.push(['工具名称', node.toolName]);
             if (node.ports?.length) properties.push(['引脚', node.ports.map(port => `${port.label || port.id} · ${port.declaredDirection || port.direction || 'unknown'} · ${(port.bits || []).length} bit${port.description ? ' · ' + port.description : ''}`).join('\n')]);
-            if (node.kind === 'constant') properties.push(...bitsProperties(node.ports?.[0]?.bits, index));
+            if (node.kind === 'constant') properties.push(...bitsProperties(node.ports?.[0]?.originalBits || node.ports?.[0]?.bits, index));
             if (node.source?.path) properties.push(['源码', `${node.source.path}:${node.source.line || 1}`]);
             return { name: node.label || node.id, kind: KINDS[node.kind] || node.kind, properties, cellId: node.cellId, moduleId: node.moduleId, source: node.source };
         }
@@ -98,7 +98,7 @@
             const entry = index.ports.get(String(selection.id));
             if (entry) {
                 const { node, port } = entry;
-                return { name: port.label || port.id, kind: ['input', 'output', 'inout'].includes(node.kind) ? '模块端口' : '单元引脚', properties: [['所属单元', node.label || node.id], ['方向', port.declaredDirection || port.direction || 'unknown'], ...(port.description ? [['语义', port.description]] : []), ...(port.bitPositions ? [['端口位映射（LSB=0）', mappingText(port)]] : []), ...bitsProperties(port.bits, index)], cellId: node.cellId, source: node.source };
+                return { name: port.label || port.id, kind: ['input', 'output', 'inout'].includes(node.kind) ? '模块端口' : '单元引脚', properties: [['所属单元', node.label || node.id], ['方向', port.declaredDirection || port.direction || 'unknown'], ...(port.originalWidth ? [['原始端口位宽', String(port.originalWidth)]] : []), ...(port.description ? [['语义', port.description]] : []), ...(port.bitPositions ? [['端口位映射（LSB=0）', mappingText(port)]] : []), ...bitsProperties(port.originalBits || port.bits, index)], cellId: node.cellId, source: node.source };
             }
         }
         if (selection.type === 'edge') {
@@ -107,7 +107,7 @@
             const portName = id => { const entry = index.ports.get(String(id)); return entry ? `${entry.node.label || entry.node.id}.${entry.port.label || entry.port.id}` : id; };
             const endpoints = new Set();
             for (const item of index.networkEdges(edge)) { endpoints.add(portName(item.source)); endpoints.add(portName(item.target)); }
-            return { name: edge.label || edge.netId, kind: '网络', properties: [...bitsProperties(edge.bits, index), ['网络 ID', edge.netId], ['连接端点', [...endpoints].join('\n')]] };
+            return { name: edge.label || edge.netId, kind: '网络', properties: [...bitsProperties(edge.originalBits || edge.bits, index), ['网络 ID', edge.netId], ['连接端点', [...endpoints].join('\n')]] };
         }
         return null;
     }
@@ -130,9 +130,10 @@
         const ui = Object.fromEntries(ids.map(id => [id, document.getElementById(id)]));
         const imageRequests = new Map(); let imageRequestId = 0, exportingImage = false;
         const disposers = [], saved = bridge.getState?.(), views = new Map(Array.isArray(saved?.views) ? saved.views.filter(entry => Array.isArray(entry) && typeof entry[0] === 'string').slice(-MAX_SAVED_VIEWS) : []);
-        let graph = null, design = null, currentModuleId = null, drawing = null, selection = undefined, selected = null, camera = cleanCamera(), stateKey = null, isFit = true, isLoading = true, drag = null, lastClickHit = null, matches = [], matchIndex = -1, searchTimer = null, saveTimer = null, cameraFrame = null, saveAfterFrame = false, viewportRect = null, isDestroyed = false;
+        let graph = null, design = null, currentModuleId = null, drawing = null, selection = undefined, selected = null, camera = cleanCamera(), stateKey = null, isFit = true, isLoading = true, sourceStale = false, drag = null, lastClickHit = null, matches = [], matchIndex = -1, searchTimer = null, saveTimer = null, cameraFrame = null, saveAfterFrame = false, viewportRect = null, isDestroyed = false;
         const listen = (target, type, callback, options) => { target.addEventListener(type, callback, options); disposers.push(() => target.removeEventListener(type, callback, options)); };
         const post = message => { if (!isDestroyed) bridge.postMessage(message); };
+        const traceControls = traceClient.createTraceControls({ document, post, applyFocus: focus => drawing?.setFocus?.(focus) });
         function measureViewport() {
             const rect = ui.circuit.getBoundingClientRect();
             viewportRect = { left: rect.left, top: rect.top, width: Math.max(1, rect.width || 800), height: Math.max(1, rect.height || 500) };
@@ -177,6 +178,7 @@
         function inspect(value) {
             if (selection !== undefined && selection?.type === value?.type && selection?.id === value?.id) return;
             selection = value; selected = describeSelection(graph, value, drawing?.index); drawing?.setSelection(value);
+            traceControls.select(value);
             ui.selectionEmpty.hidden = !!selected; ui.selectionDetails.hidden = !selected;
             if (!selected) return;
             ui.selectionKind.textContent = selected.kind; ui.selectionName.textContent = selected.name;
@@ -186,7 +188,7 @@
                 term.textContent = text(label); detail.textContent = text(value); ui.properties.appendChild(term); ui.properties.appendChild(detail);
             }
             ui.enterInstance.hidden = !selected.moduleId || !selected.cellId;
-            ui.openSource.disabled = !selected.source?.path;
+            ui.openSource.disabled = sourceStale || !selected.source?.path || !!graph?.trace && !selected.source.expectedHash;
             ui.status.textContent = `${selected.kind} · ${selected.name}`;
         }
 
@@ -207,17 +209,18 @@
             }
         }
 
-        function updateSearch(advance = false) {
+        function updateSearch(advance = false, shouldFocus = true) {
             if (isLoading) return;
             matches = drawing?.setSearch(ui.search.value) || [];
             matchIndex = matches.length ? (advance ? (matchIndex + 1) % matches.length : 0) : -1;
             ui.searchCount.textContent = ui.search.value.trim() ? matches.length ? `${matchIndex + 1}/${matches.length}` : '0' : '';
             ui.nextMatch.disabled = !matches.length;
-            if (matches.length) focusMatch(matches[matchIndex]);
+            if (matches.length && shouldFocus) focusMatch(matches[matchIndex]);
         }
 
         function setMode(mode, message) {
             isLoading = mode !== 'graph'; document.body.dataset.mode = mode;
+            traceControls.setLoading(isLoading);
             if (isLoading) cancelCameraFrame();
             ui.message.hidden = mode === 'graph'; ui.message.setAttribute('role', mode === 'error' ? 'alert' : 'status');
             if (mode !== 'graph') { ui.messageTitle.textContent = mode === 'error' ? '无法生成电路视图' : '正在生成电路'; ui.messageDetail.textContent = message || '后台读取网表并计算布局'; ui.status.textContent = message || ui.messageTitle.textContent; }
@@ -227,12 +230,13 @@
             ui.back.disabled = mode === 'loading' || !ui.back.dataset.available;
             ui.home.disabled = mode === 'loading' || !design?.top;
             ui.nextMatch.disabled = mode !== 'graph' || !matches.length;
-            ui.reload.disabled = mode === 'loading'; ui.enterInstance.disabled = mode !== 'graph'; ui.openSource.disabled = mode !== 'graph' || !selected?.source?.path;
+            ui.reload.disabled = mode === 'loading'; ui.enterInstance.disabled = mode !== 'graph'; ui.openSource.disabled = sourceStale || mode !== 'graph' || !selected?.source?.path || !!graph?.trace && !selected?.source?.expectedHash;
             if (mode === 'error') ui.graphStats.textContent = '';
         }
 
         function showDesign(next, moduleId) {
             design = next || {}; currentModuleId = moduleId || design.top;
+            traceControls.setDesign(design);
             ui.designTitle.textContent = text(design.title || graph?.name || '电路结构'); ui.provenance.textContent = provenanceText(design.provenance); ui.provenance.title = JSON.stringify(design.provenance || {});
             ui.modules.replaceChildren();
             for (const module of design.modules || []) { const option = document.createElement('option'); option.value = module.id; option.textContent = module.name; option.selected = module.id === currentModuleId; ui.modules.appendChild(option); }
@@ -248,6 +252,17 @@
 
         function receive(message) {
             if (isDestroyed || !message || typeof message !== 'object') return;
+            if (message.type === 'source-stale') {
+                sourceStale = true; ui.openSource.disabled = true;
+                ui.status.textContent = '源码已变化，当前图仍对应生成快照；请刷新后再定位源码'; return;
+            }
+            if (message.type === 'notice') { ui.status.textContent = text(message.message); return; }
+            if (message.type === 'trace-state') {
+                traceControls.setNavigation(message.navigation);
+                ui.exportImage.disabled = exportingImage || isLoading || !!message.navigation?.busy;
+                if (message.navigation?.busy) ui.status.textContent = '正在计算局部电路，可继续平移或取消';
+                return;
+            }
             if (message.type === 'image-result') {
                 const pending = imageRequests.get(message.requestId); if (!pending) return; imageRequests.delete(message.requestId);
                 if (message.error) pending.reject(new Error(message.error)); else pending.resolve(message.result); return;
@@ -255,7 +270,7 @@
             if (message.type === 'design') { showDesign(message.design); return; }
             if (message.type === 'loading' || message.type === 'error') {
                 if (drag) finishDrag(true);
-                if (message.reset) { showDesign({}); showBreadcrumbs([]); }
+                if (message.reset) { sourceStale = false; showDesign({}); showBreadcrumbs([]); }
                 if (Array.isArray(message.breadcrumbs)) showBreadcrumbs(message.breadcrumbs);
                 if (message.moduleId) ui.modules.value = currentModuleId = message.moduleId;
                 setMode(message.type, text(message.message)); return;
@@ -263,7 +278,9 @@
             if (message.type !== 'graph') return;
             if (!message.graph || !Array.isArray(message.graph.nodes) || !Array.isArray(message.graph.edges)) { setMode('error', '电路数据缺少节点或连接信息'); return; }
             if (drag) finishDrag(true);
-            cancelCameraFrame(); saveView(); graph = message.graph;
+            const previousGraph = graph, previousCamera = { ...camera }, previousSelection = selection;
+            const continuous = ['expand', 'collapse'].includes(message.traceUpdate) && previousGraph?.trace?.rootKey === message.graph.trace?.rootKey;
+            cancelCameraFrame(); saveView(); graph = message.graph; sourceStale = message.sourceStale === true;
             const nextDesign = message.design || design || {};
             const moduleId = graph.moduleId || (nextDesign.modules || []).find(module => module.id === graph.id || module.name === graph.name)?.id || graph.id;
             showDesign(nextDesign, moduleId); stateKey = graphStateKey(design, graph);
@@ -275,12 +292,29 @@
             ui.graphStats.textContent = `${stats.cellCount ?? graph.nodes.filter(node => node.cellId).length} 单元 · ${graph.edges.length} 连接`;
             const restored = views.get(stateKey); isFit = !restored || restored.isFit !== false;
             camera = isFit ? fitCamera(graph, view.width, view.height) : cleanCamera(restored.camera);
-            setMode('graph'); inspect(null); applyCamera(false); updateSearch();
-            ui.status.textContent = `${graph.name || graph.id} · ${graph.nodes.length} 节点${graph.nodes.length ? '' : ' · 当前模块没有可显示的电路单元'}`;
+            if (continuous) {
+                const anchor = graph.trace.anchor;
+                camera = cleanCamera({ ...previousCamera,
+                    x: previousCamera.x + (anchor?.previous && anchor.current ? anchor.previous.x - anchor.current.x : 0) * previousCamera.scale,
+                    y: previousCamera.y + (anchor?.previous && anchor.current ? anchor.previous.y - anchor.current.y : 0) * previousCamera.scale });
+                isFit = false;
+            }
+            traceControls.showGraph(graph, message.traceNavigation);
+            setMode('graph'); inspect(continuous && describeSelection(graph, previousSelection, drawing.index) ? previousSelection : null); applyCamera(false); updateSearch(false, !continuous && message.traceUpdate !== 'history');
+            ui.status.textContent = sourceStale ? '源码已变化，当前图仍对应生成快照；请刷新后再定位源码'
+                : `${graph.name || graph.id} · ${graph.nodes.length} 节点${graph.nodes.length ? '' : ' · 当前模块没有可显示的电路单元'}`;
         }
 
-        function enter() { if (!isLoading && selected?.cellId && selected.moduleId) post({ type: 'navigate', cellId: selected.cellId }); }
-        function source() { if (!isLoading && selected?.source?.path) post({ type: 'source', ...(selected.cellId ? { cellId: selected.cellId } : {}) }); }
+        function enter() {
+            if (isLoading || !selected?.cellId || !selected.moduleId) return;
+            if (graph?.trace) { if (!traceControls.enter(selected.cellId)) ui.status.textContent = '请在追踪边界中选择具体模块端口进入'; return; }
+            post({ type: 'navigate', cellId: selected.cellId });
+        }
+        function source() {
+            if (isLoading || ui.openSource.disabled || !selected) return;
+            const origin = graph?.trace && traceActions.traceOrigin(graph, selection);
+            post({ type: 'source', ...(selected.cellId ? { cellId: selected.cellId } : {}), ...(origin ? { objectId: origin.objectId } : {}) });
+        }
         function eventPoint(event) { const rect = size(); return { x: event.clientX - rect.left, y: event.clientY - rect.top }; }
         function finishDrag(cancel) {
             if (!drag) return;
@@ -298,7 +332,7 @@
         listen(ui.exportImage, 'click', async () => {
             if (!graph || isLoading || exportingImage) return;
             const options = await window.ImageExport.choose(document, { returnFocus: ui.circuit }); if (!options) return;
-            exportingImage = true; ui.exportImage.disabled = true; ui.status.textContent = '正在生成完整电路图…';
+            exportingImage = true; ui.exportImage.disabled = true; ui.status.textContent = graph.trace ? '正在生成当前局部电路图…' : '正在生成完整电路图…';
             try {
                 await new Promise(resolve => window.requestAnimationFrame(resolve));
                 if (isLoading) throw new Error('电路正在切换，请加载完成后重新导出');
@@ -337,7 +371,8 @@
             if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'f') { event.preventDefault(); ui.search.focus(); ui.search.select(); return; }
             if (event.key === 'Escape') { if (drag) { event.preventDefault(); finishDrag(true); } else if (!isInput) inspect(null); return; }
             if (isInput || isLoading || event.ctrlKey || event.metaKey) return;
-            if (event.altKey && event.key === 'ArrowLeft') { event.preventDefault(); if (!ui.back.disabled) post({ type: 'back' }); return; }
+            if (event.altKey && event.key === 'ArrowLeft') { event.preventDefault(); if (!traceControls.back() && !ui.back.disabled) post({ type: 'back' }); return; }
+            if (event.altKey && event.key === 'ArrowRight') { event.preventDefault(); traceControls.forward(); return; }
             if (event.altKey) return;
             const actions = { f: fit, F: fit, '+': () => zoom(1.25), '=': () => zoom(1.25), '-': () => zoom(.8), Enter: enter, s: source, S: source };
             if (actions[event.key]) { event.preventDefault(); actions[event.key](); return; }
@@ -348,7 +383,7 @@
         else listen(window, 'resize', resize);
         listen(window, 'blur', () => { if (drag) finishDrag(true); }); listen(window, 'pagehide', saveView);
         setMode('loading', '正在连接电路数据'); post({ type: 'ready' });
-        return { receive, getState: () => ({ graph, selection, camera: { ...camera }, isFit, isLoading }), destroy() { if (isDestroyed) return; if (drag) finishDrag(true); saveView(); isDestroyed = true; for (const pending of imageRequests.values()) pending.resolve(false); imageRequests.clear(); cancelCameraFrame(); window.clearTimeout(searchTimer); window.clearTimeout(saveTimer); for (const dispose of disposers) dispose(); } };
+        return { receive, getState: () => ({ graph, selection, camera: { ...camera }, isFit, isLoading }), destroy() { if (isDestroyed) return; if (drag) finishDrag(true); saveView(); isDestroyed = true; traceControls.destroy(); for (const pending of imageRequests.values()) pending.resolve(false); imageRequests.clear(); cancelCameraFrame(); window.clearTimeout(searchTimer); window.clearTimeout(saveTimer); for (const dispose of disposers) dispose(); } };
     }
 
     return { cleanCamera, fitCamera, zoomCamera, graphStateKey, searchGraph, describeSelection, provenanceText, createClient };

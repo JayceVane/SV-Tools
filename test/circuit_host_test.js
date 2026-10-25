@@ -66,7 +66,7 @@ test('层级、模块选择和返回仅接受当前设计中的对象', async ()
     await host.send({ type: 'navigate', cellId: 'not-visible' });
     assert.equal(host.sent.filter(message => message.type === 'graph').length, 1);
     await host.send({ type: 'navigate', cellId: 'cell/inst' });
-    assert.deepEqual(host.sent.at(-1).breadcrumbs, [{ id: descriptor.top, name: 'top' }, { id: 'module/child', name: 'u_child' }]);
+    assert.deepEqual(host.sent.at(-1).breadcrumbs, [{ id: descriptor.top, name: 'top' }, { id: 'module/child', name: 'u_child', cellId: 'cell/inst' }]);
     await host.send({ type: 'back' });
     assert.equal(host.sent.at(-1).graph.moduleId, descriptor.top);
     await host.send({ type: 'module', moduleId: 'outside-design' });

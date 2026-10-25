@@ -61,6 +61,67 @@ function walk(element) { return [element, ...element.children.flatMap(walk)]; }
 function findData(page, attribute, value) { return walk(page.ui('circuit')).find(element => element.getAttribute(attribute) === value); }
 function clickObject(page, target) { page.ui('circuit').dispatch('pointerdown', { target, button: 0, pointerId: 1, clientX: 10, clientY: 20 }); page.ui('circuit').dispatch('pointerup', { pointerId: 1 }); }
 
+function tracedMessage() {
+    const message = graphMessage(); message.graph.id = 'trace-a'; message.graph.moduleId = 'top';
+    message.graph.nodes[0].ports[0].traceOrigin = { objectId: 'real-pin', positions: [2, 3] };
+    message.graph.trace = { rootKey: 'root', origin: { name: 'data[3:2]' }, direction: 'drivers', context: { kind: 'instance' },
+        precision: 'bit', branches: [], frontiers: [{ id: 'boundary', kind: 'expand', reason: 'sequential', name: 'q.D', controls: [] }] };
+    message.traceNavigation = { back: true, forward: true, focus: [] };
+    return message;
+}
+
+test('追踪面板以原始位身份发送动作，忙碌和加载禁用操作，导航及监听可释放', () => {
+    const page = fakePage(), message = tracedMessage(); page.client.receive(message);
+    clickObject(page, findData(page, 'data-port-id', 'a-y'));
+    page.ui('traceBits').value = '3:2'; page.ui('traceDrivers').dispatch('click');
+    assert.deepEqual(page.sent.at(-1), { type: 'trace-start', selection: { type: 'port', id: 'a-y' }, direction: 'drivers', bitChoice: '3:2' });
+    const boundary = page.ui('traceFrontiers').children[0]; assert.match(boundary.textContent, /跨时序展开/);
+    page.ui('traceFrontiers').dispatch('click', { target: boundary }); assert.deepEqual(page.sent.at(-1), { type: 'trace-expand', frontierId: 'boundary' });
+    page.client.receive({ type: 'trace-state', navigation: { busy: true, back: true } });
+    assert.equal(boundary.disabled, true); assert.equal(page.ui('traceCancel').hidden, false);
+    const count = page.sent.length; page.ui('traceDrivers').dispatch('click'); page.ui('traceFrontiers').dispatch('click', { target: boundary }); assert.equal(page.sent.length, count);
+    page.ui('traceCancel').dispatch('click'); assert.deepEqual(page.sent.at(-1), { type: 'trace-cancel' });
+    page.client.receive({ type: 'trace-state', navigation: { busy: false, back: true, forward: true, focus: ['real-pin'] } });
+    assert.equal(page.ui('traceFocus').textContent, '取消关注'); assert.equal(findData(page, 'data-node-id', 'a').classList.contains('traceFocused'), true);
+    page.key({ key: 'ArrowLeft', altKey: true }); assert.deepEqual(page.sent.at(-1), { type: 'trace-back' });
+    page.key({ key: 'ArrowRight', altKey: true }); assert.deepEqual(page.sent.at(-1), { type: 'trace-forward' });
+    page.client.receive({ type: 'loading' }); assert.equal(page.ui('traceChoose').disabled, true); assert.equal(page.ui('traceDrivers').disabled, true);
+    page.client.destroy(); const after = page.sent.length;
+    page.ui('traceCancel').dispatch('click'); assert.equal(page.sent.length, after);
+    assert.equal(page.ui('traceFrontiers').listeners.get('click').size, 0);
+});
+
+test('连续展开保留相机锚点及选中对象，搜索不抢焦点，历史恢复自己的视口', () => {
+    const page = fakePage(), message = tracedMessage(); page.client.receive(message);
+    page.ui('search').value = 'data'; page.ui('search').dispatch('input'); page.window.flush();
+    clickObject(page, findData(page, 'data-port-id', 'a-y'));
+    page.key({ key: '+' }); page.key({ key: 'ArrowLeft' }); page.window.paint();
+    const previous = page.client.getState(), expanded = structuredClone(message);
+    expanded.graph.id = 'trace-b'; expanded.traceUpdate = 'expand';
+    expanded.graph.trace.anchor = { previous: { x: 100, y: 80 }, current: { x: 250, y: 120 } };
+    page.client.receive(expanded); page.window.paint();
+    const current = page.client.getState(); assert.deepEqual(current.selection, previous.selection);
+    assert.equal(current.camera.scale, previous.camera.scale);
+    assert.equal(current.camera.x, previous.camera.x - 150 * previous.camera.scale);
+    assert.equal(current.camera.y, previous.camera.y - 40 * previous.camera.scale);
+    assert.equal(current.isFit, false);
+    page.client.receive({ ...message, traceUpdate: 'history' });
+    assert.deepEqual(page.client.getState().camera, previous.camera);
+    page.client.destroy();
+});
+
+test('过期源码使源码按钮失效且图可继续查看，后续图保持过期状态直到重新生成', () => {
+    const page = fakePage(), message = tracedMessage();
+    message.graph.nodes[0].source.expectedHash = 'compiled-hash'; page.client.receive(message);
+    clickObject(page, findData(page, 'data-node-id', 'a')); assert.equal(page.ui('openSource').disabled, false);
+    page.client.receive({ type: 'source-stale' }); assert.equal(page.ui('openSource').disabled, true);
+    assert.match(page.ui('status').textContent, /源码已变化/); assert.equal(page.client.getState().isLoading, false);
+    page.client.receive({ ...message, sourceStale: true }); clickObject(page, findData(page, 'data-node-id', 'a'));
+    assert.equal(page.ui('openSource').disabled, true);
+    page.client.receive({ ...message, sourceStale: false }); clickObject(page, findData(page, 'data-node-id', 'a'));
+    assert.equal(page.ui('openSource').disabled, false); page.client.destroy();
+});
+
 test('端口详情使用声明方向，保持内部布局驱动方向独立', () => {
     const message = graphMessage();
     message.graph.nodes[0].kind = 'input';
@@ -94,7 +155,7 @@ test('页面不内嵌网表，CSP nonce 随页面变化且无需加载 VS Code �
     assert.doesNotMatch(first, /url\(\s*["']?https?:\/\//);
     assert.doesNotMatch(first, /innerHTML\s*=/);
     assert.notEqual(first.match(/nonce-([a-f0-9]+)/)[1], second.match(/nonce-([a-f0-9]+)/)[1]);
-    assert.equal((first.match(/<script nonce=/g) || []).length, 7);
+    assert.equal((first.match(/<script nonce=/g) || []).length, 9);
 });
 
 test('相机适配、缩放锚点及非法持久化数值保持有限', () => {
