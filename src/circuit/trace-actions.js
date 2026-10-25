@@ -17,11 +17,13 @@
         if (selection.type === 'port') {
             const port = ports.find(entry => entry.port.id === selection.id)?.port;
             if (port?.traceOrigin) return port.traceOrigin;
+            if (graph.trace) return null;
             return port?.id.startsWith('port:') ? { objectId: port.id.slice(5), positions: port.bits.map((_, position) => position) } : null;
         }
         const edge = selection.type === 'edge' && graph.edges.find(edge => edge.id === selection.id);
         if (!edge) return null;
         if (edge.traceOrigin) return edge.traceOrigin;
+        if (graph.trace) return null;
         const direct = ports.find(entry => entry.port.id === edge.target && entry.port.id.startsWith('port:'))
             || ports.find(entry => entry.port.id === edge.source && entry.port.id.startsWith('port:'));
         const candidate = direct || (!edge.bits.some(bit => bit.startsWith('c:')) && ports.find(entry => entry.port.id.startsWith('port:') && edge.bits.every(bit => entry.port.bits.includes(bit))));

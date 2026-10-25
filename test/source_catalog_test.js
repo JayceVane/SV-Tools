@@ -30,6 +30,34 @@ test('失效期间完成的发现不能污染新缓存，取消不会中断其�
     assert.equal((await second).uris[0].fsPath,'/p/new.sv');assert.equal(calls,2);catalog.dispose();
 });
 
+test('扫描期间的真实新增会有界重读，不把清单世代变化误当作文件超限', async () => {
+    const pending = [], catalog = createSourceCatalog({ vscode: { workspace: { findFiles: () => new Promise(resolve => pending.push(resolve)) } } });
+    const request = catalog.discover();
+    catalog.invalidate({ kind: 'create', uri: uri('/p/new.sv') }); pending.shift()([uri('/p/old.sv')]);
+    await new Promise(resolve => setImmediate(resolve)); assert.equal(pending.length, 1);
+    pending.shift()([uri('/p/new.sv')]); const result = await request;
+    assert.equal(result.truncated, false); assert.equal(result.uris[0].fsPath, '/p/new.sv'); catalog.dispose();
+});
+
+test('连续失效只重读一次，返回失效原因而不谎称清单完整', async () => {
+    const pending = [], catalog = createSourceCatalog({ vscode: { workspace: { findFiles: () => new Promise(resolve => pending.push(resolve)) } } });
+    const request = catalog.discover(); catalog.invalidate(); pending.shift()([uri('/p/a.sv')]);
+    await new Promise(resolve => setImmediate(resolve)); catalog.invalidate(); pending.shift()([uri('/p/b.sv')]);
+    const result = await request; assert.equal(result.invalidated, true); assert.equal(result.truncated, true);
+    assert.equal(pending.length, 0); catalog.dispose();
+});
+
+test('工具产物和主题配置不会使源码缓存失效，相关配置仍会刷新', async () => {
+    let configure, calls = 0;
+    const catalog = createSourceCatalog({ vscode: { workspace: {
+        findFiles: async () => { calls++; return [uri('/p/a.sv')]; },
+        onDidChangeConfiguration(callback) { configure = callback; return { dispose() {} }; }
+    } } });
+    await catalog.discover(); catalog.invalidate({ kind: 'create', uri: uri('/p/.svtools/circuit/sources.sv') });
+    configure({ affectsConfiguration: key => key === 'workbench.colorTheme' }); await catalog.discover(); assert.equal(calls, 1);
+    configure({ affectsConfiguration: key => key === 'svtools' }); await catalog.discover(); assert.equal(calls, 2); catalog.dispose();
+});
+
 const { createCompletionIndex } = require('../src/editor/completion/index');
 test('外部include目录新增文件使共享发现缓存失效，不依赖TTL或重新打开编辑器',async()=>{
     const contents=new Map([['/p/top.sv','module top; endmodule'],['/include/first.svh','typedef int first_word;']]),handlers=new Map();

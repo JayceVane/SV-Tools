@@ -67,6 +67,8 @@ test('常量合并展示不能反推其它端口，HDL位选择受边界限制',
     const graph = { nodes: [{ id: 'constant', ports: [{ id: 'constant-port:c:0', bits: ['c:0'] }] },
         { id: 'bus', ports: [{ id: 'synthetic', bits: ['c:0'] }] }], edges: [{ id: 'edge', source: 'constant-port:c:0', target: 'synthetic', bits: ['c:0'] }] };
     assert.equal(traceOrigin(graph, { type: 'edge', id: 'edge' }), null);
+    const local = { trace: {}, nodes: [{ id: 'constant', ports: [{ id: 'port:display-only', bits: ['n:display'] }] }], edges: [] };
+    assert.equal(traceOrigin(local, { type: 'node', id: 'constant' }), null);
     assert.deepEqual(bitIndices('7:4'), [4, 5, 6, 7]); assert.deepEqual(bitIndices('-2'), [-2]);
     assert.throws(() => bitIndices('4096:0'), /4096/);
 });

@@ -52,6 +52,7 @@ test('同值常量按不同端口隔离，常量分支动作只包含对应值�
     assert.equal(constants.length, 4);
     const zeros = constants.filter(node => node.label.startsWith('0'));
     assert.equal(zeros.length, 2);
+    assert.ok(zeros.every(node => node.ports[0].originalBits.every(bit => bit === 'c:0')));
     assert.ok(zeros[0].ports[0].bits.every(bit => !zeros[1].ports[0].bits.includes(bit)));
     const branches = projection.edges.filter(edge => edge.originalBits?.every(bit => bit === 'c:0'));
     assert.ok(branches.length > 0);

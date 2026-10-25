@@ -53,7 +53,7 @@ function indexSuffix(object, positions) {
 }
 
 function createSelectedPorts(selected) {
-    const portInfo = new Map(), constantCells = [], constantIds = new Set();
+    const portInfo = new Map(), constantCells = [], constantValues = new Map();
     function trim(port) {
         const selection = selected.get(port.id);
         if (!selection?.positions.length) return null;
@@ -66,7 +66,7 @@ function createSelectedPorts(selected) {
             groups.get(bit).push(unique); return unique;
         });
         for (const [value, constants] of groups) {
-            const id = 'trace:constant:' + idFor([port.id, value]); constantIds.add(id);
+            const id = 'trace:constant:' + idFor([port.id, value]); constantValues.set(id, value);
             constantCells.push({ id, name: value.slice(2).toUpperCase() + (constants.length > 1 ? ` × ${constants.length}` : ''), type: 'constant', kind: 'logic',
                 ports: [{ id: id + ':value', name: '', direction: 'output', bits: constants }] });
         }
@@ -76,7 +76,7 @@ function createSelectedPorts(selected) {
             label: port.name + indexSuffix(port, positions) });
         return { ...port, bits };
     }
-    return { trim, portInfo, constantCells, constantIds };
+    return { trim, portInfo, constantCells, constantValues };
 }
 
 function selectedAliases(module, ports, cells) {
@@ -96,11 +96,15 @@ function selectedAliases(module, ports, cells) {
     return signals;
 }
 
-function decorateNodes(projected, { portInfo, constantIds }, markerId) {
+function decorateNodes(projected, { portInfo, constantValues }, markerId) {
     const geometries = new Map(projected.input.children.map(child => [child.id, child]));
     for (const node of projected.nodes) {
-        const constant = constantIds.has(node.cellId);
-        if (constant) { node.kind = 'constant'; node.detail = '独立常量连接'; node.width = Math.max(54, Math.min(128, node.label.length * 8 + 24)); node.height = 36; delete node.cellId; }
+        const constant = constantValues.get(node.cellId);
+        if (constant) {
+            node.kind = 'constant'; node.detail = '独立常量连接'; node.width = Math.max(54, Math.min(128, node.label.length * 8 + 24)); node.height = 36;
+            for (const port of node.ports) port.originalBits = port.bits.map(() => constant);
+            delete node.cellId;
+        }
         if (node.id === 'node:' + markerId) { node.kind = 'junction'; node.detail = '追踪起点（非硬件接口）'; }
         for (const port of node.ports) {
             const original = portInfo.get(port.id);
