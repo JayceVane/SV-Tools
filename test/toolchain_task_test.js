@@ -112,7 +112,7 @@ test('并发xvlog脏缓冲区有独立目录、源文件及prj，内容不相互
     assert.ok(results.every(result => result.ok)); assert.notEqual(path.dirname(results[0].logPath), path.dirname(results[1].logPath));
     assert.match(await fs.readFile(results[0].logPath, 'utf8'), /module alpha/);
     assert.match(await fs.readFile(results[1].logPath, 'utf8'), /module beta/);
-    for (const result of results) assert.deepEqual(await fs.readdir(path.dirname(result.logPath)), [path.basename(result.logPath)]);
+    for (const result of results) assert.deepEqual((await fs.readdir(path.dirname(result.logPath))).sort(), ['.svtools-task-complete.json', path.basename(result.logPath)]);
 });
 
 test('新的xvlog任务取消旧进程，旧检查不发布迟到诊断', async t => {
@@ -482,23 +482,26 @@ test('vvp 默认dumpfile覆盖参与真实runner的关闭屏障及输出发现',
 });
 
 test('任务目录封顶只删本类型旧目录，保留最新keep个，protect目录不动', async t => {
-    const { pruneTaskDirectories } = require('../src/toolchains/task-retention');
+    const { createTaskDirectory, pruneTaskDirectories } = require('../src/toolchains/task-retention');
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'svtools-retention-')), base = path.join(root, 'tasks');
     const stamp = async (directory, index) => { const time = new Date(Date.now() + index * 10000); await fs.utimes(directory, time, time); };
+    const directories = [];
     for (let index = 0; index < 5; index++) {
-        const directory = path.join(base, 'xvlog-' + index);
-        await fs.mkdir(directory, { recursive: true }); await fs.writeFile(path.join(directory, index + '.log'), 'log');
+        const lease = await createTaskDirectory(base, 'xvlog'), directory = lease.path;
+        directories.push(directory);
+        await fs.writeFile(path.join(directory, index + '.log'), 'log'); await lease.dispose();
         await stamp(directory, index);
     }
     await fs.mkdir(path.join(base, 'vivado-keep'));
     await fs.writeFile(path.join(base, 'loose-file.log'), 'not a directory');
-    const oldest = path.join(base, 'xvlog-0');
+    const oldest = directories[0];
     const removed = await pruneTaskDirectories(base, 'xvlog', 3, { protect: new Set([path.resolve(oldest)]) });
-    assert.deepEqual(removed, [path.join(base, 'xvlog-1')]);
-    assert.deepEqual((await fs.readdir(base)).sort(), ['loose-file.log', 'vivado-keep', 'xvlog-0', 'xvlog-2', 'xvlog-3', 'xvlog-4']);
+    assert.deepEqual(removed, [directories[1]]);
+    assert.deepEqual((await fs.readdir(base)).sort(), ['loose-file.log', 'vivado-keep', ...[0, 2, 3, 4].map(index => path.basename(directories[index]))].sort());
     assert.deepEqual(await pruneTaskDirectories(path.join(base, 'missing'), 'xvlog', 3), []);
     await assert.rejects(pruneTaskDirectories(base, 'xvlog', 0), RangeError);
-    await fs.rm(root, { recursive: true, force: true });
+    assert.equal(path.dirname(path.resolve(root)), path.resolve(os.tmpdir()));
+    assert.ok(path.basename(root).startsWith('svtools-retention-')); await fs.rm(root, { recursive: true, force: true });
 });
 
 test('任务结束后自动封顶到配置数量；keep=0关闭清理', async t => {
@@ -522,5 +525,6 @@ test('任务结束后自动封顶到配置数量；keep=0关闭清理', async t 
     await delay(120);
     assert.equal((await fs.readdir(base)).length, 5);
     await keepAll.dispose();
-    await fs.rm(root, { recursive: true, force: true });
+    assert.equal(path.dirname(path.resolve(root)), path.resolve(os.tmpdir()));
+    assert.ok(path.basename(root).startsWith('svtools-retention-mgr-')); await fs.rm(root, { recursive: true, force: true });
 });

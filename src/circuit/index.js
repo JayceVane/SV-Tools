@@ -130,7 +130,13 @@ function activateCircuitViewer(context, { vivado, sourceCatalog, vscode = requir
         return vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title, cancellable: true },
             async (_, token) => {
                 const cancellation = token.onCancellationRequested(() => task.cancel('用户取消电路生成'));
-                try { await task.waitForPrevious(); return await runner(task); }
+                try {
+                    await task.waitForPrevious();
+                    const result = await runner(task);
+                    // 未保存正文的源码定位仍依赖磁盘快照，保留到本轮页面刷新或关闭。
+                    task.retainDirectories(signal);
+                    return result;
+                }
                 finally {
                     signal?.removeEventListener('abort', abort);
                     cancellation.dispose(); output.flush(); await task.finish({ keepArtifacts: true });

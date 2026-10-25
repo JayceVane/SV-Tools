@@ -35,6 +35,16 @@ test.after(() => { require.cache[vivadoRunnerPath].exports = vivadoRunner; });
 const disposable = () => ({ dispose() {} });
 const uri = fsPath => ({ fsPath, scheme: 'file' });
 
+async function waitForReleasedDirectory(directory) {
+    const deadline = Date.now() + 5000;
+    while (true) {
+        const entries = await fs.readdir(directory).catch(error => { if (error.code === 'ENOENT') return null; throw error; });
+        if (!entries || entries.includes('.svtools-task-complete.json')) return;
+        assert.ok(Date.now() < deadline, '快照占用未在页面生命周期结束后释放');
+        await new Promise(resolve => setTimeout(resolve, 10));
+    }
+}
+
 async function fixture(t, options = {}) {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'svtools-circuit-command-'));
     const rtl = path.join(root, options.fileName || 'top.sv'), json = path.join(root, 'top.json');
@@ -46,7 +56,7 @@ async function fixture(t, options = {}) {
     const commands = new Map(), generated = [], errors = [], context = { subscriptions: [] };
     const state = { root, rtl, json, commands, generated, errors, text, vivadoGenerated: [], picked: undefined, dialogs: 0, quickPicks: [],
         quickPick: options.quickPick, configTop: options.configTop === undefined ? 'top' : options.configTop,
-        projectTop: options.projectTop || 'project_top', projectPath: options.noProject ? undefined : path.join(root, 'design.xpr'), panels: [], saves: 0, progress: [] };
+        projectTop: options.projectTop || 'project_top', projectPath: options.noProject ? undefined : path.join(root, 'design.xpr'), panels: [], saves: 0, progress: [], retainedRuns: options.retainedRuns ?? 5 };
     const document = { uri: { ...uri(rtl), scheme: options.scheme || 'file' }, isDirty: !!options.dirty, getText: () => state.text,
         async save() { state.saves++; this.isDirty = false; return true; } };
     state.document = document;
@@ -55,7 +65,7 @@ async function fixture(t, options = {}) {
     const vscode = {
         commands: { registerCommand(name, fn) { commands.set(name, fn); return disposable(); } },
         workspace: { getWorkspaceFolder: () => ({ uri: uri(root) }), workspaceFolders: [{ uri: uri(root) }],
-            getConfiguration: () => ({ get: (key, fallback) => key === 'top' ? state.configTop : fallback }),
+            getConfiguration: () => ({ get: (key, fallback) => key === 'top' ? state.configTop : key === 'retainedRuns' ? state.retainedRuns : fallback }),
             openTextDocument: async file => file.fsPath === rtl ? document : ({ uri: file, isDirty: false, getText: () => text }) },
         window: { activeTextEditor: { document },
             createOutputChannel: () => channel, showErrorMessage: message => errors.push(message),
@@ -108,6 +118,38 @@ test('RTL 右键 URI 进入生成流程，文件头注释不能被当成 JSON', 
         assert.equal(result.graph.edges.length, 1);
         assert.deepEqual(f.errors, []);
     } finally { binding.dispose(); }
+});
+
+test('打开的脏正文电路快照跨后续生成保留，刷新和关闭才交还目录', async t => {
+    const { pruneTaskDirectories } = require('../src/toolchains/task-retention');
+    const { createSourceLocator, sourceHash } = require('../src/circuit/source-snapshots');
+    const { fromYosys } = require('../src/circuit/adapters/yosys');
+    const f = await fixture(t, { dirty: true, retainedRuns: 1, text: 'module top(input a, output y); assign y=a; endmodule' });
+    const binding = await f.circuit.fromSource(uri(f.rtl));
+    assert.equal((await binding.loaded).ok, true);
+    const snapshot = f.generated[0].sources[0], directory = path.dirname(path.dirname(snapshot));
+    const sourceBase = path.dirname(directory);
+    const model = fromYosys({ modules: { top: { attributes: { src: f.rtl.replace(/\\/g, '/') + ':1.1' },
+        ports: { a: { direction: 'input', bits: [2] }, y: { direction: 'output', bits: [2] } }, cells: {}, netnames: { y: { bits: [2] } } } } });
+    const locator = createSourceLocator(model, [{ path: f.rtl, inputPath: snapshot, hash: sourceHash(f.text) }]);
+    await locator.verify();
+    try {
+        for (let index = 0; index < 3; index++) {
+            const other = await f.circuit.fromSource(uri(f.rtl));
+            assert.equal((await other.loaded).ok, true); other.dispose();
+        }
+        await pruneTaskDirectories(sourceBase, 'source', 1);
+        assert.equal(await fs.readFile(snapshot, 'utf8'), f.text);
+        const module = model.modules[0], signal = module.signals.find(item => item.name === 'y');
+        const source = await locator.locate(module.id, { objectId: signal.id });
+        assert.equal(source.path, f.rtl); assert.equal(source.line, 1);
+        await binding.reload();
+        const replacement = f.generated.at(-1).sources[0];
+        assert.notEqual(replacement, snapshot); assert.equal(await fs.readFile(replacement, 'utf8'), f.text);
+        await waitForReleasedDirectory(directory);
+        binding.dispose();
+        await waitForReleasedDirectory(path.dirname(path.dirname(replacement)));
+    } finally { locator.dispose(); binding.dispose(); }
 });
 
 test('JSON URI 仍直接导入，不调用 Yosys；命令面板取消导入不读取当前 RTL', async t => {
