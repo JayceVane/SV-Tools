@@ -931,6 +931,14 @@
           "default": true,
           "description": "%cfg.lintCurrentFileOnly.desc%"
         },
+        "svtools.tasks.retainedRuns": {
+          "order": 64.6,
+          "type": "integer",
+          "default": 5,
+          "minimum": 0,
+          "maximum": 100,
+          "description": "%cfg.tasksRetainedRuns.desc%"
+        },
         "svtools.iverilog.path": {
           "order": 70,
           "type": "string",

@@ -20,7 +20,9 @@ function activateIverilog(context, deps) {
     const simBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 0);
     const elaborateBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 1);
     const engineBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 2);
-    const tasks = createToolTaskManager({ startProcess: deps.startProcess, onChange() { if (!disposed) updateStatusBar(); } });
+    const tasks = createToolTaskManager({ startProcess: deps.startProcess,
+        retention: { keep: () => vscode.workspace.getConfiguration('svtools.tasks').get('retainedRuns', 5) },
+        onChange() { if (!disposed) updateStatusBar(); } });
     const scanSources = deps.scanWorkspaceSources || scanWorkspaceSources;
     const invalidateSources = deps.invalidateWorkspaceSources || invalidateWorkspaceSources;
     const getConfig = document => vscode.workspace.getConfiguration('svtools.iverilog', document?.uri);

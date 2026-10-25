@@ -47,7 +47,8 @@ function activateVivado(context, deps) {
     const vscode = (deps && deps.vscode) || require('vscode');
     const out = vscode.window.createOutputChannel(OUTPUT_CHANNEL_TITLE);
     let projectTree = null;
-    const output = createBufferedOutput(out), tasks = createToolTaskManager({ onChange(job) { projectTree?.setRunning(job.finished ? null : job.state); } });
+    const retainedRuns = () => vscode.workspace.getConfiguration('svtools.tasks').get('retainedRuns', 5);
+    const output = createBufferedOutput(out), tasks = createToolTaskManager({ retention: { keep: retainedRuns }, onChange(job) { projectTree?.setRunning(job.finished ? null : job.state); } });
     const projectSelection = createProjectSelection({ workspace: vscode.workspace, state: context.workspaceState });
 
     let running = null;      // { job, scriptPath }，准备阶段也可停止。

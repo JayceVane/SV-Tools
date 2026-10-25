@@ -480,3 +480,47 @@ test('vvp 默认dumpfile覆盖参与真实runner的关闭屏障及输出发现',
         assert.ok(!prepared.paths.includes(path.join(f.root, 'dump.vcd')));
     } finally { await h.api.dispose(); }
 });
+
+test('任务目录封顶只删本类型旧目录，保留最新keep个，protect目录不动', async t => {
+    const { pruneTaskDirectories } = require('../src/toolchains/task-retention');
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'svtools-retention-')), base = path.join(root, 'tasks');
+    const stamp = async (directory, index) => { const time = new Date(Date.now() + index * 10000); await fs.utimes(directory, time, time); };
+    for (let index = 0; index < 5; index++) {
+        const directory = path.join(base, 'xvlog-' + index);
+        await fs.mkdir(directory, { recursive: true }); await fs.writeFile(path.join(directory, index + '.log'), 'log');
+        await stamp(directory, index);
+    }
+    await fs.mkdir(path.join(base, 'vivado-keep'));
+    await fs.writeFile(path.join(base, 'loose-file.log'), 'not a directory');
+    const oldest = path.join(base, 'xvlog-0');
+    const removed = await pruneTaskDirectories(base, 'xvlog', 3, { protect: new Set([path.resolve(oldest)]) });
+    assert.deepEqual(removed, [path.join(base, 'xvlog-1')]);
+    assert.deepEqual((await fs.readdir(base)).sort(), ['loose-file.log', 'vivado-keep', 'xvlog-0', 'xvlog-2', 'xvlog-3', 'xvlog-4']);
+    assert.deepEqual(await pruneTaskDirectories(path.join(base, 'missing'), 'xvlog', 3), []);
+    await assert.rejects(pruneTaskDirectories(base, 'xvlog', 0), RangeError);
+    await fs.rm(root, { recursive: true, force: true });
+});
+
+test('任务结束后自动封顶到配置数量；keep=0关闭清理', async t => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'svtools-retention-mgr-')), base = path.join(root, 'tasks');
+    const capped = createToolTaskManager({ retention: { keep: () => 2 } });
+    for (let index = 0; index < 4; index++) {
+        const task = capped.start('run' + index);
+        await task.directory(base, 'xvlog'); await task.finish();
+        await delay(20);
+    }
+    await waitFor(async () => (await fs.readdir(base)).length === 2);
+    const remaining = (await fs.readdir(base)).sort();
+    assert.equal(remaining.length, 2);
+    assert.ok(remaining.every(name => name.startsWith('xvlog-')));
+    await capped.dispose();
+    const keepAll = createToolTaskManager({ retention: { keep: 0 } });
+    for (let index = 0; index < 3; index++) {
+        const task = keepAll.start('stay' + index);
+        await task.directory(base, 'xvlog'); await task.finish();
+    }
+    await delay(120);
+    assert.equal((await fs.readdir(base)).length, 5);
+    await keepAll.dispose();
+    await fs.rm(root, { recursive: true, force: true });
+});

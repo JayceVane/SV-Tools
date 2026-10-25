@@ -78,6 +78,7 @@
   "cmd.lint_selectEngine.title": "Lint：选择引擎（iverilog / xvlog）",
   "cmd.xvlog_elaborate.title": "Lint：xelab 详细化检查（当前文件 + 工作区依赖）",
   "cfg.lintCurrentFileOnly.desc": "只对打开的文件做语法检查——快速、不产生工作区其他文件的诊断。关闭后跨文件解析（iverilog -y 扫描 / xvlog 附带工作区文件集）",
+  "cfg.tasksRetainedRuns.desc": "各类任务在 .svtools 下最多保留的最近任务目录数量（阶段日志与运行产物），任务结束后自动删除更早的。0 = 不自动清理",
   "cmd.vivado_reports.title": "Vivado：OOC 报告（资源占用 + 逻辑级数）",
   "cmd.vivado_tree_refresh.title": "刷新工程树",
   "cmd.vivado_tree_addFile.title": "添加文件到工程",

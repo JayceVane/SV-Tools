@@ -4,7 +4,9 @@ const os = require('node:os');
 const path = require('node:path');
 const { randomUUID } = require('node:crypto');
 const { startProcess } = require('./process');
+const { pruneTaskDirectories } = require('./task-retention');
 const MAX_CONCURRENT_PROCESSES = 2;
+const DEFAULT_RETAINED_RUNS = 5;
 
 function cancelledError(reason) {
     const error = new Error(reason || '任务已取消'); error.code = 'TOOL_CANCELLED'; return error;
@@ -78,7 +80,9 @@ class ToolTask {
             finally {
                 this.finished = true; this.state = this.signal.aborted ? 'cancelled' : 'finished';
                 if (this.manager.current.get(this.key) === this) this.manager.current.delete(this.key);
-                this.manager.tasks.delete(this); this.resolveCompletion(); this.manager.changed(this);
+                this.manager.tasks.delete(this);
+                this.manager.retain(this);
+                this.resolveCompletion(); this.manager.changed(this);
             }
         })();
         return this.finishing;
@@ -87,12 +91,30 @@ class ToolTask {
 
 /**
  * 同 key 的新请求取消旧请求；不同文档任务以独立目录并行。
- * @param {{startProcess?:Function,onChange?:(task:ToolTask)=>void}} [options]
+ * @param {{startProcess?:Function,onChange?:(task:ToolTask)=>void,retention?:{keep:number|(()=>number)}}} [options]
  * @returns {{start:(key:string)=>ToolTask,cancel:Function,cancelAll:Function,dispose:Function}}
  */
-function createToolTaskManager({ startProcess: launch = startProcess, onChange = () => {} } = {}) {
+function createToolTaskManager({ startProcess: launch = startProcess, onChange = () => {}, retention = { keep: DEFAULT_RETAINED_RUNS } } = {}) {
     const acquire = createProcessSlots(MAX_CONCURRENT_PROCESSES);
+    function retainedRuns() {
+        try {
+            const keep = typeof retention.keep === 'function' ? retention.keep() : retention.keep;
+            return Number.isSafeInteger(keep) && keep >= 0 && keep <= 100 ? keep : DEFAULT_RETAINED_RUNS;
+        } catch (error) { console.error('读取任务目录保留配置失败：' + error.message); return DEFAULT_RETAINED_RUNS; }
+    }
     const manager = { current: new Map(), tasks: new Set(), startProcess: launch, changed: onChange, acquire,
+        /** 任务结束后对其使用的各 (base,kind) 目录封顶；失败不影响任务结果。 */
+        retain(task) {
+            const keep = retainedRuns();
+            if (!keep) return;
+            const protect = new Set();
+            for (const live of manager.tasks) for (const directory of live.directories.values()) protect.add(path.resolve(directory));
+            for (const key of task.directories.keys()) {
+                const separator = key.lastIndexOf(':');
+                pruneTaskDirectories(key.slice(0, separator), key.slice(separator + 1), keep, { protect })
+                    .catch(error => console.error('任务目录封顶失败(' + key.slice(0, separator) + ')：' + error.message));
+            }
+        },
         start(key) {
             const previous = manager.current.get(key); previous?.cancel('被新的任务取代');
             const task = new ToolTask(manager, key, previous); manager.current.set(key, task); manager.tasks.add(task);

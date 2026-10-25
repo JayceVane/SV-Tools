@@ -2,6 +2,14 @@
 
 All notable changes to the SystemVerilog VSCode Extension will be documented in this file.
 
+## [Unreleased] - 任务目录自动封顶
+
+**变更内容：** 工具任务结束后按修改时间自动封顶 `.svtools` 下同类任务目录（xvlog/xsim、iverilog、Vivado、电路生成），默认保留最近5个；新配置 `svtools.tasks.retainedRuns`（0–100，默认5，0=不清理）。
+
+**为什么：** 任务目录由 mkdtemp 逐次新建且日志永不删除，长期使用后 `.svtools/tasks` 等目录无限累积（实测单工作区41个xvlog任务目录）；完整日志对近期排障才有价值，保留最近数次即可。
+
+**影响面：** 封顶只匹配各入口自己创建的 `<kind>-*` 目录，进行中任务目录与无关文件不动；单目录删除失败仅记录不中断。Icarus/xvlog/Vivado/电路四个入口统一读取同一配置，未显式配置的行为从"永不清理"变为"保留最近5次"。
+
 ## [Unreleased] - V4交付记录转为本地归档
 
 **变更内容：** `docs/V4_*.md` 全部38份开发/验收记录移入本地忽略目录`docs/private/`，公开仓库不再包含这些文件；README、ROADMAP、ARCHITECTURE及本文档未发布段落中的引用同步清理。
