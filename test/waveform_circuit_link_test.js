@@ -4,6 +4,17 @@ const { test } = require('node:test');
 const { clientHarness } = require('./helpers/waveform-client-harness');
 const { createWaveLinkHost } = require('../src/waveform/link-host');
 
+test('没有观察者不广播游标；订阅后仅游标变化广播，取消订阅立即停止',async()=>{
+    const h=clientHarness();await h.flush();
+    const packets=()=>h.messages.filter(message=>message.type==='circuit-cursors');assert.equal(packets().length,0);
+    h.windowListeners.message({data:{type:'circuit-cursor-subscribe',enabled:true}});assert.equal(packets().length,1);
+    h.node('jumpTime').value='20';h.node('jump').onclick();await h.flush();assert.equal(packets().at(-1).a,20);assert.equal(packets().length,2);
+    h.node('jump').onclick();await h.flush();assert.equal(packets().length,2);
+    h.windowListeners.message({data:{type:'circuit-cursor-subscribe',enabled:false}});
+    h.node('jumpTime').value='30';h.node('jump').onclick();await h.flush();assert.equal(packets().length,2);
+    h.windowListeners.message({data:{type:'circuit-cursor-subscribe',enabled:true}});assert.equal(packets().at(-1).a,30);
+});
+
 test('来自电路的信号添加及逐位定位保留时间视窗，展开已收起组并确认实际行身份', async () => {
     const vars = [{path:'tb.data',name:'data',scopePath:'tb',id:'!',range:'[7:4]',width:4,type:'reg',changeCount:3}];
     const h = clientHarness({fileKey:'test',selected:['tb.data'],start:20,span:30,groups:{'tb.data':'DATA'},collapsedGroups:['DATA']},{vars});

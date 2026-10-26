@@ -98,6 +98,8 @@ ModuleInst与Testbench继续共用同一实例构造器。Testbench仅跳过已�
 
 ## 波形与仿真文件生命周期
 
+`debug/cursor-values.js`在人工确认的映射上维护少量显式观察信号。游标快照由波形页面经宿主校验后发布，独立查询泵复用原VCD Worker，合并旧世代并原子发布A/B结果。位投影保留实际HDL下标及X/Z，不复制事件、不调用电路布局。电路的`cursor-values-client.js`只更新列表与SVG文字，画布标注还要匹配模块、实际实例和物理位；常量不能按同值传播。映射失效同时清除读值，观察不跨仿真持久化。
+
 4.1 M4以 `debug/wave-links.js` 协调已打开电路和VCD的会话关系，`debug/signal-mapping.js` 只验证层级分段、声明范围和位选择。映射来自用户明确选择的VCD根层级，记录双方会话身份和人工确认状态，不声称同次构建。电路端仅通过带设计世代的Worker请求解析真实网络，波形端仅接收宿主验证的行键。刷新、源码变化、关闭和重新仿真使映射失效；源数据、查询及布局仍由各自Worker负责。
 
 VCD默认文件关联和命令入口共用registry中的面板/绑定身份。host和session重复dispose返回同一释放Promise；

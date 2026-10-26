@@ -133,6 +133,7 @@
         finally { windowBusy = false; pumpWindow(); }
     }
     function queueValues() {
+        circuitLink.reportCursors();
         memory.refresh(state.cursorA, state.cursorB, state.secondsPerTick);
         const params = { ids: visibleIds(), a: state.cursorA, b: state.cursorB }, key = JSON.stringify(params);
         if (key === valuesKey) return;

@@ -33,6 +33,18 @@ function metadata(timescale = '10 ps') {
         vars: [{ path: 'tb.clk', name: 'clk', id: '!', width: 1, type: 'wire', scopePath: 'tb', changeCount: 4 }] };
 }
 
+test('联动游标只接受已加载VCD范围内的时间，读值复用同一Worker并在关闭后拒绝',async()=>{
+    const page=panelFixture(),cursors=[],calls=[];
+    const binding=bindWaveformPanel({filePath:'test.vcd',panel:page.panel,onCursors:value=>cursors.push(value),
+        createSession:()=>({open:async()=>metadata(),values:async params=>{calls.push(params);return {values:{'!':'1'}};},dispose:async()=>{}})});
+    page.receive({type:'circuit-cursors',a:0,b:null});assert.equal(cursors.length,0);
+    await binding.loaded;binding.subscribeCursors(true);page.receive({type:'circuit-cursors',a:20,b:30});assert.deepEqual(cursors,[{a:20,b:30}]);
+    for(const a of [-1,251,NaN,Infinity,'20'])page.receive({type:'circuit-cursors',a,b:null});
+    page.receive({type:'circuit-cursors',a:20,b:-1});assert.equal(cursors.length,1);
+    assert.deepEqual(await binding.linkedValues({ids:['!'],time:20}),{values:{'!':'1'}});assert.equal(calls.length,1);
+    await binding.dispose();await assert.rejects(binding.linkedValues({ids:['!'],time:20}),/已关闭/);
+});
+
 /** 可控的服务端异步边界，特意允许 dispose 后迟到响应以验证宿主抑制逻辑。 */
 function hostFixture() {
     const page = panelFixture(), opening = deferred(), calls = [], logs = [];

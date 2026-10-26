@@ -36,7 +36,8 @@ function createCircuitWaveHost({readState,session,trace,instancePath,onWave,onIn
         return result;
     }
     return {
-        handlers:{'wave-map':message=>action(message,'configure'),'wave-show':message=>action(message,'show')},
+        handlers:{'wave-map':message=>action(message,'configure'),'wave-show':message=>action(message,'show'),
+            'wave-watch':message=>action(message,'watch'),'wave-unwatch':message=>action(message,'remove')},
         targets,
         snapshot() {
             const state = readState();
@@ -48,6 +49,7 @@ function createCircuitWaveHost({readState,session,trace,instancePath,onWave,onIn
         },
         begin(target,direction) {requireCurrent();return trace.begin({...target,direction});},
         notify:state=>send({type:'wave-link-state',state}),
+        notifyValues:message=>send(message),
         invalidate:reason=>onInvalidated?.(reason)
     };
 }

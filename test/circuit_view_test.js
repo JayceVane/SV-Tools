@@ -70,6 +70,32 @@ function tracedMessage() {
     return message;
 }
 
+test('电路读值更新保留图和相机，标注校验实例，移除、切换图和失效均不保留旧值', () => {
+    const page=fakePage(),message=tracedMessage();message.waveContext=[];message.viewGeneration=3;
+    page.client.receive(message);page.window.paint();
+    const camera=page.client.getState().camera,graph=page.client.getState().graph;
+    const row={id:'probe',label:'top/data[3:2]',target:{moduleId:'top',bits:['b2','b3']},context:{instancePath:[]},anchor:{type:'edge',id:'e1'},viewGeneration:3,
+        a:{status:'value',text:"2'h1"},b:{status:'value',text:"2'h2"},difference:{status:'changed',text:'Δ 2 bit',indices:[2,3]}};
+    const update={type:'wave-values',rows:[row],times:{aText:'10 ns',bText:'20 ns'}};
+    page.client.receive(update);
+    const badge=walk(page.ui('circuit')).find(element=>element.getAttribute('class')==='cursorValue');
+    assert.ok(badge);assert.match(badge.textContent,/data\[3:2\].*A.*2'h1/);
+    page.client.receive({...update,rows:[row,{...row,id:'probe-slice',label:'top/data[2]'}]});
+    const annotations=walk(page.ui('circuit')).filter(element=>element.getAttribute('class')==='cursorValue');
+    assert.equal(annotations.length,2);assert.notEqual(annotations[0].getAttribute('transform'),annotations[1].getAttribute('transform'));
+    assert.match(page.ui('waveValuesList').textContent,/Δ 2 bit/);assert.equal(page.ui('waveValuesPanel').hidden,false);
+    page.client.receive({...update,rows:[{...row,a:{status:'no-event',text:'无事件'},difference:{status:'unavailable',text:'不可比较',indices:[]}}]});
+    assert.equal(page.client.getState().graph,graph);assert.deepEqual(page.client.getState().camera,camera);
+    assert.match(badge.textContent,/无事件/);
+    page.ui('waveValuesOverlay').dispatch('click');assert.equal(badge.parentNode,null);
+    page.ui('waveValuesOverlay').dispatch('click');assert.ok(walk(page.ui('circuit')).some(element=>element===badge)===false); // 重新创建标注，无需重绘电路。
+    const remove=page.ui('waveValuesList').children[0].children[1];remove.onclick();assert.equal(page.sent.at(-1).type,'wave-unwatch');assert.equal(page.sent.at(-1).probeId,'probe');
+    page.client.receive({...message,viewGeneration:4,waveContext:['different-instance']});
+    assert.equal(walk(page.ui('circuit')).some(element=>element.getAttribute('class')==='cursorValue'),false);
+    page.client.receive({type:'wave-values',rows:[],times:null,invalid:true});assert.equal(page.ui('waveValuesPanel').hidden,true);
+    page.client.destroy();
+});
+
 test('追踪面板以原始位身份发送动作，忙碌和加载禁用操作，导航及监听可释放', () => {
     const page = fakePage(), message = tracedMessage(); page.client.receive(message);
     clickObject(page, findData(page, 'data-port-id', 'a-y'));
@@ -167,7 +193,7 @@ test('页面不内嵌网表，CSP nonce 随页面变化且无需加载 VS Code �
     assert.doesNotMatch(first, /url\(\s*["']?https?:\/\//);
     assert.doesNotMatch(first, /innerHTML\s*=/);
     assert.notEqual(first.match(/nonce-([a-f0-9]+)/)[1], second.match(/nonce-([a-f0-9]+)/)[1]);
-    assert.equal((first.match(/<script nonce=/g) || []).length, 10);
+    assert.equal((first.match(/<script nonce=/g) || []).length, 11);
 });
 
 test('相机适配、缩放锚点及非法持久化数值保持有限', () => {

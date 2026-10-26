@@ -19,6 +19,23 @@
     --grid: #23313f;
     --error: var(--vscode-errorForeground, #f29595);
 }
+.waveValuesPanel { border-top:1px solid var(--border); margin-top:16px; padding-top:12px; }
+.waveValuesHeading { display:flex; align-items:center; gap:6px; margin-bottom:7px; }
+.waveValuesHeading strong { flex:1; }
+.waveValuesHeading button { padding:4px 7px; }
+#waveValuesTimes { margin-bottom:8px; font-variant-numeric:tabular-nums; }
+#waveValuesList { max-height:300px; overflow:auto; }
+.waveValueRow { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:4px 6px; padding:9px 0; border-bottom:1px solid var(--border); }
+.waveValueRow strong { font-size:inherit; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.waveValueRow button { padding:0 6px; }
+.waveValueNumbers { grid-column:1 / -1; font-family:var(--vscode-editor-font-family,monospace); overflow-wrap:anywhere; }
+.waveValueRow[data-status=changed] { border-left:3px solid var(--accent); padding-left:7px; }
+.waveValueRow[data-status=unknown] { border-left:3px solid var(--vscode-editorWarning-foreground,#bc8800); padding-left:7px; }
+.cursorValue { pointer-events:none; }
+.cursorValue text { fill:var(--fg); stroke:var(--bg); stroke-width:4px; paint-order:stroke; text-anchor:middle; font:12px var(--vscode-editor-font-family,monospace); }
+.cursorValue[data-status=changed] text { fill:var(--diagramActive); font-weight:600; }
+.cursorValue[data-status=unknown] text { fill:var(--vscode-editorWarning-foreground,#bc8800); }
+.graphLayer[data-detail=overview] .cursorValue { display:none; }
 body.vscode-light, body.vscode-high-contrast-light {
     --diagramActive: #005fb8; --wire: #758797; --register: #348579; --mux: #a27a32; --logic: #557cad; --instance: #8361a5; --cellBg: #f7fafd; --grid: #e4eaf0;
 }

@@ -53,7 +53,7 @@ function createWaveCatalog(metadata) {
         const indices = Number.isInteger(signal.bitOffset) ? [signal.bitIndex] : Array.from({ length: declaration.width }, (_, i) => declaration.right + i * (declaration.left >= declaration.right ? 1 : -1));
         return { signal, parent, declaration, indices, scope: parent.scopeId === null ? [] : paths[parent.scopeId] };
     }
-    return { variables, byKey, paths, scopes, scopeKeys, byScopedName, select };
+    return { variables, byKey, paths, scopes, scopeKeys, byScopedName, select, secondsPerTick:metadata.secondsPerTick };
 }
 
 /** @param {object} target 经过电路Worker验证的声明和选定位。 @param {object} catalog VCD索引。 @param {number} rootId 人工确认的VCD根作用域。 @returns {object[]} 精确范围候选；不以相同VCD id合并不同声明。 */

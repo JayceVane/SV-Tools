@@ -1,6 +1,7 @@
 'use strict';
 const path = require('node:path');
 const fs = require('node:fs/promises');
+const { watch } = require('node:fs');
 const { bindWaveformPanel } = require('./host');
 const { collectSourceContext } = require('./source-roles');
 const { createImageFiles } = require('../graphics/image-files');
@@ -17,17 +18,26 @@ function activateWaveViewer(context, deps) {
         registry.assertAvailable(key);
         sourceFile ||= registry.sourceFile(key);
         panel.webview.options = { enableScripts: true, localResourceRoots: [] };
-        let registration;
+        let registration,fileWatch,fileChanged=false;
         const base = bindWaveformPanel({ filePath: key, panel, channel: deps?.channel, imageFiles: createImageFiles({ vscode, sourcePath: key }), layoutFiles: createLayoutFiles({ vscode, filePath: key }),
             onCircuit:message=>message.type==='circuit-link'?registration?.configure():registration?.trace(message.key,message.direction),
+            onCursors:cursor=>registration?.cursors(cursor),
             getSourceContext: () => collectSourceContext(vscode, key, deps?.sourceCatalog, sourceFile) });
         registration = deps?.waveLinks?.registerWave({file:key,label:()=>path.basename(key),
             snapshot:()=>base.getMetadata()?{id:key,revision:1}:null,metadata:async()=>{await base.loaded;return base.getMetadata();},
             async validate(){await base.loaded;const metadata=base.getMetadata();if(!metadata)throw new Error('VCD未成功加载或已经关闭');
+                if(fileChanged)throw new Error('VCD文件已变化，请关闭后重新打开并确认关联');
                 const stat=await fs.stat(key);if(!metadata.fileIdentity||stat.size!==metadata.fileIdentity.size||stat.mtimeMs!==metadata.fileIdentity.mtimeMs){registration.invalidate('VCD已变化，请重新打开并确认映射');throw new Error('VCD文件已变化，请关闭后重新打开并确认关联');}},
-            notify:base.notifyLink,reveal:async request=>{panel.reveal();return base.revealSignals(request);} });
+            values:base.linkedValues,subscribeCursors:base.subscribeCursors,notify:base.notifyLink,reveal:async request=>{panel.reveal();return base.revealSignals(request);} });
+        if(registration)void base.loaded.then(()=>{
+            if(!base.getMetadata())return;
+            try {
+                fileWatch=watch(key,()=>{fileChanged=true;registration.invalidate('VCD文件已变化，请重新打开并确认关联');});
+                fileWatch.on('error',error=>{registration.invalidate('VCD文件监视失效，请重新确认关联');deps?.channel?.appendLine('[VCD] 文件监视失败：'+error.message);});
+            } catch(error) {deps?.channel?.appendLine('[VCD] 无法监视文件，查询时继续核对身份：'+error.message);}
+        });
         const binding = {...base,configureCircuit:()=>registration?.configure(),traceCircuit:(key,direction)=>registration?.trace(key,direction),
-            dispose(){registration?.dispose();return base.dispose();}};
+            dispose(){fileWatch?.close();fileWatch=null;registration?.dispose();return base.dispose();}};
         return registry.attach(key, panel, binding, sourceFile);
     }
     async function openWaveform(filePath, { sourceFile } = {}) {

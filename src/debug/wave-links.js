@@ -1,6 +1,7 @@
 'use strict';
 const path = require('node:path');
 const { createWaveCatalog, matchCircuitSignal, waveCircuitRequest } = require('./signal-mapping');
+const { createCursorValues } = require('./cursor-values');
 const MAX_LINKS = 64, MAX_PICKER_ITEMS = 512;
 
 /**
@@ -10,6 +11,11 @@ const MAX_LINKS = 64, MAX_PICKER_ITEMS = 512;
 function createWaveLinks({ vscode }) {
     const circuits = new Map(), waves = new Map(), links = new Map(); let sequence = 0, busy = false, disposed = false, operation;
     const identity = entry => entry.endpoint.snapshot();
+    const values = createCursorValues({
+        valid:link=>{const now=identity(link.circuit);return !disposed && link.circuit.active && link.wave.active && links.get(link.key)===link && now && !now.sourceStale && now.id===link.snapshot.id && now.revision===link.snapshot.revision;},
+        validate:wave=>validateWave(wave),
+        notify:(entry,message)=>{if(entry.active)Promise.resolve(entry.endpoint.notifyValues?.(message)).catch(error=>console.error('电路读值发送失败：'+error.message));}
+    });
     function current(entry, snapshot, view = false) {
         if (disposed || !entry.active) throw new Error('关联的视图已关闭，请重新选择');
         operation?.entries.add(entry);
@@ -24,6 +30,7 @@ function createWaveLinks({ vscode }) {
     }
     function removeLink(key, reason) {
         const link = links.get(key); if (!link) return; links.delete(key);
+        values.invalidate(link);
         for (const entry of [link.circuit,link.wave]) notify(entry,{ status:'invalid',text:reason });
     }
     function invalidate(entry, reason) {
@@ -80,6 +87,7 @@ function createWaveLinks({ vscode }) {
         if (!root) return null;
         current(circuit,snapshot); await validateWave(wave); current(wave);
         const label = '人工确认：' + topName + ' ↔ ' + root.path + ' · ' + path.basename(wave.endpoint.file || wave.endpoint.label()) + ' · 未验证同次构建';
+        if(links.has(key))removeLink(key,'波形根映射已重新确认');
         const link = { key,circuit,wave,snapshot,rootId:root.id,label }; links.set(key,link);
         while (links.size > MAX_LINKS) removeLink(links.keys().next().value,'较早的波形映射已淘汰，请重新确认');
         for (const entry of [circuit,wave]) notify(entry,{status:'confirmed',text:label});
@@ -90,7 +98,7 @@ function createWaveLinks({ vscode }) {
         const wave = await chooseEndpoint('wave',entry.kind === 'wave' ? entry : null); if (!wave) return {cancelled:true};
         const link = await configure(circuit,wave,true); return link ? {ok:true,label:link.label} : {cancelled:true};
     }
-    async function toWave(circuit, selection) {
+    async function toWave(circuit, selection, observe = false) {
         const snapshot = current(circuit), result = await circuit.endpoint.targets(selection); current(circuit,snapshot,true);
         const signal = await pick(result.candidates,'选择要加入波形的命名网络',item => ({label:item.name,description:item.width+' bit · offset '+item.offset})); if (!signal) return {cancelled:true};
         const context = await pick(result.contexts,'确认实际电路实例',item => ({label:item.label,description:JSON.stringify(item.instancePath)})); if (!context) return {cancelled:true};
@@ -98,10 +106,11 @@ function createWaveLinks({ vscode }) {
         const link = await configure(circuit,wave); if (!link) return {cancelled:true};
         current(circuit,snapshot,true); const catalog = await waveCatalog(wave);
         const matches = matchCircuitSignal({...signal,...context},catalog,link.rootId);
-        if (!matches.length) throw new Error('没有层级、名称和位范围均匹配的VCD声明；该信号可能未dump、被优化或来自不同参数/源码');
-        const match = await pick(matches,'确认VCD信号声明',item => ({label:item.path+item.range,description:item.width+' bit · '+item.indices.length+'个选定位'}));
-        if (!match) return {cancelled:true};
+        if (!matches.length && !observe) throw new Error('没有层级、名称和位范围均匹配的VCD声明；该信号可能未dump、被优化或来自不同参数/源码');
+        const match = matches.length ? await pick(matches,'确认VCD信号声明',item => ({label:item.path+item.range,description:item.width+' bit · '+item.indices.length+'个选定位'})) : null;
+        if (matches.length && !match) return {cancelled:true};
         current(circuit,snapshot,true); await validateWave(wave); current(wave);
+        if(observe)return values.watch(link,{target:signal,context,selection:selection.selection,viewGeneration:snapshot.viewGeneration,match,catalog});
         await wave.endpoint.reveal({keys:match.keys,text:link.label});
         return {ok:true,keys:match.keys,target:signal,context,label:link.label};
     }
@@ -125,12 +134,14 @@ function createWaveLinks({ vscode }) {
         const entry = {id:String(++sequence),kind,endpoint,active:true}; (kind === 'circuit' ? circuits : waves).set(entry.id,entry);
         return {id:entry.id,configure:()=>run(()=>setup(entry)),
             show:selection=>run(()=>toWave(entry,selection)),trace:(key,direction)=>run(()=>toCircuit(entry,key,direction)),
+            watch:selection=>run(()=>toWave(entry,selection,true)),removeProbe:id=>values.remove(entry,id),
+            cursors:cursor=>values.cursors(entry,cursor),probes:()=>values.snapshot(entry),
             invalidate(reason) {invalidate(entry,reason);},
-            dispose() {if(!entry.active)return;entry.active=false;invalidate(entry,kind === 'wave' ? '关联波形已关闭或重新仿真，请重新确认' : '关联电路已关闭，请重新确认');(kind === 'circuit' ? circuits : waves).delete(entry.id);entry.catalog=null;}
+            dispose() {if(!entry.active)return;entry.active=false;invalidate(entry,kind === 'wave' ? '关联波形已关闭或重新仿真，请重新确认' : '关联电路已关闭，请重新确认');(kind === 'circuit' ? circuits : waves).delete(entry.id);if(kind==='wave')values.disposeWave(entry);entry.catalog=null;}
         };
     }
     return {registerCircuit:endpoint=>register('circuit',endpoint),registerWave:endpoint=>register('wave',endpoint),
         state:()=>({circuits:circuits.size,waves:waves.size,busy,links:[...links.values()].map(link=>({circuit:link.circuit.id,wave:link.wave.id,designId:link.snapshot.id,revision:link.snapshot.revision,rootId:link.rootId,label:link.label}))}),
-        dispose() {disposed=true;if(operation){operation.reason='关联服务已关闭';operation.cancellation?.cancel();}for(const [key] of links)removeLink(key,'关联服务已关闭');for(const entry of [...circuits.values(),...waves.values()]){entry.active=false;entry.catalog=null;}circuits.clear();waves.clear();}}
+        dispose() {disposed=true;values.dispose();if(operation){operation.reason='关联服务已关闭';operation.cancellation?.cancel();}for(const [key] of links)removeLink(key,'关联服务已关闭');for(const entry of [...circuits.values(),...waves.values()]){entry.active=false;entry.catalog=null;}circuits.clear();waves.clear();}}
 }
 module.exports = { createWaveLinks };

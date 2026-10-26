@@ -153,7 +153,7 @@ function activateCircuitViewer(context, { vivado, sourceCatalog, waveLinks, vsco
         const binding = bindCircuitPanel({ panel, load: request => load({ ...request, trackSources: entries => {
             if (!request.signal.aborted) { binding.sourceSnapshotCaptured(); watch.replace(entries); }
         } }), initialTrace, chooseSignal, chooseCandidate,
-            onWave:(action,message)=>action==='configure'?registration?.configure():registration?.show(message),
+            onWave:(action,message)=>action==='configure'?registration?.configure():action==='watch'?registration?.watch(message):action==='remove'?registration?.removeProbe(message.probeId):registration?.show(message),
             onWaveInvalidated:reason=>registration?.invalidate(reason),
             async chooseContext(contexts, truncated) {
                 if (truncated) throw new Error('实例上下文过多，请从顶层逐级进入所需实例');
@@ -177,8 +177,10 @@ function activateCircuitViewer(context, { vivado, sourceCatalog, waveLinks, vsco
             editor.revealRange(new vscode.Range(position, position));
         } });
         registration=waveLinks?.registerCircuit({label:()=>binding.getState().design?.title||'电路结构',snapshot:binding.waveSnapshot,
-            targets:binding.waveTargets,find:binding.findWaveTarget,trace:binding.traceWaveTarget,notify:binding.notifyWave,reveal:()=>panel.reveal()});
+            targets:binding.waveTargets,find:binding.findWaveTarget,trace:binding.traceWaveTarget,notify:binding.notifyWave,notifyValues:binding.notifyWaveValues,reveal:()=>panel.reveal()});
         const handle = { ...binding,configureWave:()=>registration?.configure(),linkWave:(selection,bitChoice='*')=>registration?.show({...binding.waveSnapshot(),designId:binding.waveSnapshot()?.id,selection,bitChoice}),
+            watchWave:(selection,bitChoice='*')=>registration?.watch({...binding.waveSnapshot(),designId:binding.waveSnapshot()?.id,selection,bitChoice}),
+            waveProbes:()=>registration?.probes(),removeWaveProbe:id=>registration?.removeProbe(id),
             dispose() { registration?.dispose(); watch.dispose(); binding.dispose(); panel.dispose(); } };
         panels.add(handle);
         panel.onDidDispose(() => { registration?.dispose(); watch.dispose(); panels.delete(handle); });

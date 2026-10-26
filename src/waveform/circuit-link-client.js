@@ -5,7 +5,14 @@
     'use strict';
     /** @param {object} deps 页面现有行、选择和查询入口。 @returns {object} 关联显示不改变时间范围和原始事件。 */
     function createWaveCircuitLink({state,post,addSignals,select,tracks,status,document}){
+        let subscribed=false,cursorKey;
+        function reportCursors(){
+            if(!subscribed||!state.metadata)return;
+            const key=JSON.stringify([state.cursorA,state.cursorB]);if(key===cursorKey)return;
+            cursorKey=key;post({type:'circuit-cursors',a:state.cursorA,b:state.cursorB});
+        }
         function receive(message){
+            if(message.type==='circuit-cursor-subscribe'){subscribed=message.enabled===true;cursorKey=undefined;reportCursors();return true;}
             if(message.type==='circuit-link-state'){
                 const node=document.getElementById('circuitLinkStatus');if(node){node.hidden=false;node.textContent=message.state.text;node.title=message.state.text;node.dataset.status=message.state.status;}return true;
             }
@@ -31,7 +38,7 @@
             }catch(error){status(error.message);post({type:'link-revealed',token:message.token,ok:false,error:error.message});}
             return true;
         }
-        return {receive};
+        return {receive,reportCursors};
     }
     return {createWaveCircuitLink};
 });

@@ -11,11 +11,12 @@ const QUERY_METHODS = new Set(['window', 'values', 'edge']);
  * @param {{filePath:string,panel:object,channel?:object,createSession?:(options:object)=>object,getSourceContext?:()=>Promise<object>}} options
  * @returns {{dispose:()=>Promise<void>,loaded:Promise<void>}} 可独立验证，不依赖 vscode 全局。
  */
-function bindWaveformPanel({ filePath, panel, channel, createSession = options => new VcdSession(options), getSourceContext, layoutFiles, imageFiles, onCircuit }) {
+function bindWaveformPanel({ filePath, panel, channel, createSession = options => new VcdSession(options), getSourceContext, layoutFiles, imageFiles, onCircuit, onCursors }) {
     let resolveInitialized, closing;
     const initialized = new Promise(resolve => { resolveInitialized = resolve; });
     const activity = { window: 0, values: 0, edge: 0 };
     let disposed = false, cancelled = false, ready = false, metadata = null, lastProgress = null, loadError = null;
+    let cursorSubscribed=false;
     const log = text => channel?.appendLine('[VCD] ' + text);
     function send(message) {
         if (disposed || !ready) return;
@@ -26,6 +27,7 @@ function bindWaveformPanel({ filePath, panel, channel, createSession = options =
         else if (metadata) send({ type: 'init', metadata });
         else if (lastProgress) send({ type: 'progress', progress: lastProgress });
         circuitLink.reportState();
+        if(cursorSubscribed)send({type:'circuit-cursor-subscribe',enabled:true});
     }
     const circuitLink = createWaveLinkHost({send,initialized,closed:()=>disposed||cancelled,onAction:onCircuit});
     const session = createSession({ onProgress(progress) { lastProgress = progress; if (!cancelled) send({ type: 'progress', progress }); } });
@@ -33,6 +35,12 @@ function bindWaveformPanel({ filePath, panel, channel, createSession = options =
         if (!message || disposed) return;
         if (message.type === 'ready') { ready = true; reportState(); return; }
         if (message.type === 'initialized') { resolveInitialized({ signals: message.signals, rows: message.rows }); return; }
+        if (message.type === 'circuit-cursors') {
+            if(!metadata || cancelled || !cursorSubscribed)return;
+            const valid=time=>Number.isFinite(time)&&time>=0&&time<=metadata.endTime;
+            if(valid(message.a)&&(message.b===null||valid(message.b)))onCursors?.({a:message.a,b:message.b});
+            return;
+        }
         if (['link-revealed','circuit-link','circuit-trace'].includes(message.type)) { await circuitLink.receive(message); return; }
         if (message.type === 'close') { panel.dispose(); return; }
         if (message.type === 'cancel') {
@@ -89,6 +97,8 @@ function bindWaveformPanel({ filePath, panel, channel, createSession = options =
         await session.dispose();
     });
     return { dispose, loaded, initialized, revealSignals:circuitLink.reveal, notifyLink:circuitLink.notify, getMetadata:()=>disposed||cancelled?null:metadata,
+        subscribeCursors(enabled){cursorSubscribed=!!enabled;send({type:'circuit-cursor-subscribe',enabled:cursorSubscribed});},
+        linkedValues(params){if(disposed||cancelled||!metadata)return Promise.reject(new Error('VCD已关闭或尚未加载'));activity.values++;return session.values(params);},
         getStatus: () => ({ ready, loaded: !!metadata, error: loadError, activity: { ...activity } }) };
 }
 module.exports = { bindWaveformPanel };

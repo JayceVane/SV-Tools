@@ -14,7 +14,7 @@ function bindCircuitPanel({ panel, load, onSource, onError = console.error, imag
     let completeLoad;
     const loaded = new Promise(resolve => { completeLoad = resolve; });
     const send = message => { if (!closed) return Promise.resolve(panel.webview.postMessage(message)); };
-    const sendGraph = message => send({...message,viewGeneration:generation});
+    const sendGraph = message => send({...message,viewGeneration:generation,waveContext:message.graph?.trace?.context?.kind==='instance' ? message.graph.trace.context.instancePath : instancePath()});
     const instancePath = () => breadcrumbs[0]?.id === descriptor?.top && breadcrumbs.slice(1).every(crumb => crumb.cellId)
         ? breadcrumbs.slice(1).map(crumb => crumb.cellId) : undefined;
     const validId = value => typeof value === 'string' && value.length > 0 && value.length <= MAX_ID_LENGTH;
@@ -160,7 +160,7 @@ function bindCircuitPanel({ panel, load, onSource, onError = console.error, imag
         trace.dispose();
         messageSubscription.dispose(); panelSubscription.dispose(); session.dispose();
     }
-    return { dispose, loaded, trace, waveSnapshot:waveLink.snapshot, notifyWave:waveLink.notify, waveTargets:waveLink.targets,
+    return { dispose, loaded, trace, waveSnapshot:waveLink.snapshot, notifyWave:waveLink.notify, notifyWaveValues:waveLink.notifyValues, waveTargets:waveLink.targets,
         findWaveTarget:waveLink.find, traceWaveTarget:waveLink.begin,
         markSourceStale() { sourceStale = true; waveLink.invalidate('源码已变化，请刷新电路并重新关联'); return send({ type: 'source-stale' }); },
         sourceSnapshotCaptured() { sourceStale = false; }, revealSource: params => handlers.source(params),

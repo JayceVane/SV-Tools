@@ -36,6 +36,7 @@ function createCircuitWaveSignals(design, tracer) {
         const resolved = tracer.resolveOrigin({ moduleId: module.id, origin });
         return { moduleId: module.id, objectId: object.id, name: cleanName(object.name), nameParts: nameParts(object.name),
             width: object.bits.length, offset: object.offset || 0, upto: object.upto || false,
+            bits:resolved.bits.map(bit=>bit.bit),
             indices: resolved.bits.map(bit => bit.index), origin: { objectId: object.id, positions: resolved.bits.map(bit => bit.position) } };
     }
     function selection({ moduleId, origin, instancePath }) {
