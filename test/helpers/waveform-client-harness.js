@@ -65,6 +65,7 @@ function clientHarness(saved, { vars, height = 400, width = 900, reducedMotion =
         cancelAnimationFrame: id => frames.delete(id), setTimeout, clearTimeout,
         ResizeObserver: class { observe() {} }, MutationObserver: class { observe() {} } };
     window.WaveTimeNavigation = require('../../src/waveform/time-scrollbar');
+    window.WaveCircuitLink = require('../../src/waveform/circuit-link-client');
     for (const name of ['row-gesture.js', 'column-resize.js', 'client.js']) vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../../src/waveform', name), 'utf8'), context);
     const canvas = document.getElementById('waveCanvas'), tracks = document.getElementById('tracks');
     function event(type, x, y, modifiers = {}) {

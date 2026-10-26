@@ -52,6 +52,9 @@
         blocked: () => !!groupDialog || columns.active || gestures.active,
         onStart() { ++edgeVersion; hideMenu(false); gestures.finishMotion(); },
         onPreview(view) { state.view = view; viewportChanged(); }, onCommit: persist, onEnd: () => columns.sync() });
+    const circuitLink = window.WaveCircuitLink.createWaveCircuitLink({state,document,post:message=>api.postMessage(message),addSignals,
+        select:applySelection,tracks,status});
+    $('circuitLink').onclick=()=>api.postMessage({type:'circuit-link'});
     $('title').textContent = BOOT.fileName;
 
     function status(text) { $('status').textContent = text; }
@@ -365,6 +368,9 @@
             { icon: 'expand', disabled: overBudget, detail: overBudget ? '最多2000行' : '' }));
         if (parents.some(key => children(key).length)) busItems.push(action('collapse-bus', '收起总线bit', () => collapseBus(targets), { icon: 'collapse' }));
         items.splice(2, 0, ...busItems);
+        items.splice(3,0,{id:'circuit-trace',label:'电路追踪',detail:targets.length===1?'':'单信号',submenu:[
+            action('circuit-drivers','在电路追踪驱动',()=>api.postMessage({type:'circuit-trace',key:targets[0],direction:'drivers'}),{disabled:targets.length!==1}),
+            action('circuit-loads','在电路追踪负载',()=>api.postMessage({type:'circuit-trace',key:targets[0],direction:'loads'}),{disabled:targets.length!==1})]});
         for (const name of [...new Set(targets.map(key => state.groups[key]).filter(Boolean))]) items.push(action('toggle-group-' + name, (state.collapsedGroups.includes(name) ? '展开分组：' : '收起分组：') + name, () => toggleGroup(name), { icon: 'group' }));
         if (groups.length) items.push({ id: 'join-group', label: '加入已有分组', icon: 'group', submenu: groups.map((name, index) =>
             action('join-group-' + index, name, () => assignGroup(targets, name), { icon: 'group' })) });
@@ -380,6 +386,7 @@
     function initialize(metadata) {
         metadata = { ...metadata, vars: M.prepareSignals(metadata.vars) };
         state.metadata = metadata; state.signals = new Map(metadata.vars.map(signal => [M.signalKey(signal), signal])); state.secondsPerTick = metadata.secondsPerTick || null;
+        $('circuitLink').disabled=false;
         const saved = api.getState();
         if (saved?.fileKey === BOOT.fileKey) D.restoreBits(saved.bitKeys || saved.selected, state.signals, MAX_TRACKS);
         state.bitKeys = new Set((Array.isArray(saved?.bitKeys || saved?.selected) ? saved.bitKeys || saved.selected : []).filter(key => Number.isInteger(state.signals.get(key)?.bitOffset)));
@@ -430,6 +437,7 @@
     }
     window.addEventListener('message', event => {
         const message = event.data;
+        if(circuitLink.receive(message))return;
         if (message.type === 'response') { const promise = pending.get(message.requestId); if (!promise) return; pending.delete(message.requestId);
             if (message.error) promise.reject(new Error(message.error)); else promise.resolve(message.result); }
         else if (message.type === 'init') initialize(message.metadata);

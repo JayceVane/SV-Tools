@@ -11,11 +11,12 @@ const { createCircuitTracer } = require('./trace');
 const { createTraceViews } = require('./trace-view');
 const { createSourceLocator } = require('./source-snapshots');
 const { traceSelection, traceCandidates, instanceContexts } = require('./trace-source');
+const { createCircuitWaveSignals } = require('./wave-signals');
 const MAX_JSON_BYTES = 64 * 1024 * 1024;
 const MAX_MESSAGE_BYTES = 16 * 1024 * 1024;
 let design;
 let tracer, designId;
-let sourceLocator, traceViews;
+let sourceLocator, traceViews, waveSignals;
 let loadSequence = 0;
 
 /** 只有快照文件映射回原文位置，模型坐标与原始 JSON 均不发送到扩展宿主。 */
@@ -31,6 +32,7 @@ function remapSources(model, sourceMap = {}, sourceDirectories = []) {
 async function load({ filePath, format, stage, top, title, sourceRoot, sourceMap, sourceDirectories, sourceSnapshots = [] }) {
     const version = ++loadSequence;
     design = undefined;
+    waveSignals = undefined;
     tracer?.dispose(); tracer = undefined; designId = undefined;
     traceViews?.dispose(); traceViews = undefined;
     sourceLocator?.dispose(); sourceLocator = undefined;
@@ -68,6 +70,7 @@ async function load({ filePath, format, stage, top, title, sourceRoot, sourceMap
     sourceLocator = locator;
     tracer = createCircuitTracer(design);
     traceViews = createTraceViews({ design, tracer, sourceLocator });
+    waveSignals = createCircuitWaveSignals(design,tracer);
     designId = createHash('sha256').update(bytes).update(design.top).digest('hex');
     return { id: designId, revision: version, title: design.title,
         top: design.top, provenance: design.provenance, modules: design.modules.map(module => ({ id: module.id, name: module.name })) };
@@ -94,6 +97,8 @@ const commands = {
     },
     traceCancel: payload => { currentTrace(payload); traceViews.cancel(); return { cancelled: true }; },
     traceSignals: payload => ({ ...currentTrace(payload).listSignals(payload), designId, revision: loadSequence }),
+    waveTargets: payload => { currentTrace(payload); return waveSignals.selection(payload); },
+    waveFind: payload => { currentTrace(payload); return waveSignals.find(payload.signal); },
     trace: payload => {
         const current = currentTrace(payload);
         return { ...current.trace(payload), designId, revision: loadSequence, indexStats: current.stats() };

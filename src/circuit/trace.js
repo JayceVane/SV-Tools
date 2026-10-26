@@ -253,6 +253,7 @@ function createCircuitTracer(design) {
             const module = moduleFor(request.moduleId);
             return new TraceQuery({ design, module, index: indexFor(module), request }).run();
         },
+        resolveOrigin({ moduleId, origin }) { return indexFor(moduleFor(moduleId)).resolveOrigin(origin); },
         listSignals({ moduleId, query = '', limit = 200 }) {
             if (typeof query !== 'string' || query.length > 1024 || !Number.isSafeInteger(limit) || limit < 1 || limit > 500) throw new TypeError('追踪信号检索参数无效');
             const module = moduleFor(moduleId), needle = query.toLowerCase(), items = []; let total = 0;

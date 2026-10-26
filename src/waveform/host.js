@@ -3,6 +3,7 @@ const path = require('node:path');
 const { VcdSession } = require('./session');
 const { parseTimescaleSeconds } = require('./parser');
 const { buildWaveformHtml } = require('./view');
+const { createWaveLinkHost } = require('./link-host');
 const QUERY_METHODS = new Set(['window', 'values', 'edge']);
 
 /**
@@ -10,7 +11,7 @@ const QUERY_METHODS = new Set(['window', 'values', 'edge']);
  * @param {{filePath:string,panel:object,channel?:object,createSession?:(options:object)=>object,getSourceContext?:()=>Promise<object>}} options
  * @returns {{dispose:()=>Promise<void>,loaded:Promise<void>}} 可独立验证，不依赖 vscode 全局。
  */
-function bindWaveformPanel({ filePath, panel, channel, createSession = options => new VcdSession(options), getSourceContext, layoutFiles, imageFiles }) {
+function bindWaveformPanel({ filePath, panel, channel, createSession = options => new VcdSession(options), getSourceContext, layoutFiles, imageFiles, onCircuit }) {
     let resolveInitialized, closing;
     const initialized = new Promise(resolve => { resolveInitialized = resolve; });
     const activity = { window: 0, values: 0, edge: 0 };
@@ -24,12 +25,15 @@ function bindWaveformPanel({ filePath, panel, channel, createSession = options =
         if (loadError) send({ type: 'error', error: loadError });
         else if (metadata) send({ type: 'init', metadata });
         else if (lastProgress) send({ type: 'progress', progress: lastProgress });
+        circuitLink.reportState();
     }
+    const circuitLink = createWaveLinkHost({send,initialized,closed:()=>disposed||cancelled,onAction:onCircuit});
     const session = createSession({ onProgress(progress) { lastProgress = progress; if (!cancelled) send({ type: 'progress', progress }); } });
     async function handleMessage(message) {
         if (!message || disposed) return;
         if (message.type === 'ready') { ready = true; reportState(); return; }
         if (message.type === 'initialized') { resolveInitialized({ signals: message.signals, rows: message.rows }); return; }
+        if (['link-revealed','circuit-link','circuit-trace'].includes(message.type)) { await circuitLink.receive(message); return; }
         if (message.type === 'close') { panel.dispose(); return; }
         if (message.type === 'cancel') {
             resolveInitialized(null);
@@ -61,6 +65,7 @@ function bindWaveformPanel({ filePath, panel, channel, createSession = options =
         if (disposed) return closing;
         resolveInitialized(null);
         disposed = true; metadata = null; lastProgress = null; loadError = null;
+        circuitLink.dispose();
         messages.dispose(); lifetime.dispose();
         closing = Promise.resolve(session.dispose());
         closing.catch(error => log('关闭数据服务失败：' + error.message));
@@ -83,6 +88,7 @@ function bindWaveformPanel({ filePath, panel, channel, createSession = options =
         loadError = error.message; reportState(); log('加载失败：' + error.message);
         await session.dispose();
     });
-    return { dispose, loaded, initialized, getStatus: () => ({ ready, loaded: !!metadata, error: loadError, activity: { ...activity } }) };
+    return { dispose, loaded, initialized, revealSignals:circuitLink.reveal, notifyLink:circuitLink.notify, getMetadata:()=>disposed||cancelled?null:metadata,
+        getStatus: () => ({ ready, loaded: !!metadata, error: loadError, activity: { ...activity } }) };
 }
 module.exports = { bindWaveformPanel };

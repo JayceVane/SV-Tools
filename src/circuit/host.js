@@ -1,18 +1,22 @@
 'use strict';
 const { CircuitSession } = require('./session');
 const { createTraceController } = require('./trace-controller');
+const { createCircuitWaveHost } = require('./wave-link-host');
 const MAX_ID_LENGTH = 32768;
 
 /**
  * @param {{panel:object,load:Function,onSource?:Function,onError?:Function,session?:CircuitSession}} options
  * @returns {{dispose:Function,reload:Function,loaded:Promise<object>}} loaded 明确返回首轮成败，页面只提交对象 ID。
  */
-function bindCircuitPanel({ panel, load, onSource, onError = console.error, imageFiles, initialTrace, chooseSignal, chooseContext, chooseCandidate, session = new CircuitSession() }) {
+function bindCircuitPanel({ panel, load, onSource, onError = console.error, imageFiles, initialTrace, chooseSignal, chooseContext, chooseCandidate, onWave, onWaveInvalidated, session = new CircuitSession() }) {
     let closed = false, started = false, generation = 0, operation = 0, descriptor, currentGraph, breadcrumbs = [];
     let loadController, sourceStale = false;
     let completeLoad;
     const loaded = new Promise(resolve => { completeLoad = resolve; });
     const send = message => { if (!closed) return Promise.resolve(panel.webview.postMessage(message)); };
+    const sendGraph = message => send({...message,viewGeneration:generation});
+    const instancePath = () => breadcrumbs[0]?.id === descriptor?.top && breadcrumbs.slice(1).every(crumb => crumb.cellId)
+        ? breadcrumbs.slice(1).map(crumb => crumb.cellId) : undefined;
     const validId = value => typeof value === 'string' && value.length > 0 && value.length <= MAX_ID_LENGTH;
     const report = error => {
         completeLoad({ ok: false, error: error.message });
@@ -21,15 +25,16 @@ function bindCircuitPanel({ panel, load, onSource, onError = console.error, imag
     const readyTimer = setTimeout(() => report(new Error('电路页面未能连接到扩展宿主')), 15000);
     const trace = createTraceController({ session, send, descriptor: () => descriptor, graph: () => currentGraph,
         beginOperation: () => ++generation, current: ticket => !closed && ticket === generation, chooseSignal, chooseContext, onError,
-        instancePath: () => breadcrumbs[0]?.id === descriptor?.top && breadcrumbs.slice(1).every(crumb => crumb.cellId)
-            ? breadcrumbs.slice(1).map(crumb => crumb.cellId) : undefined,
+        instancePath,
         displayModule: (path, restore) => display(path, restore),
         async displayTrace(graph, { navigation, update, focus }) {
             currentGraph = graph;
             breadcrumbs = [{ id: graph.moduleId, name: descriptor.modules.find(module => module.id === graph.moduleId)?.name || graph.name }];
-            await send({ type: 'graph', graph, design: descriptor, breadcrumbs, sourceStale, traceNavigation: navigation, traceUpdate: update, traceFocus: focus });
+            await sendGraph({ type: 'graph', graph, design: descriptor, breadcrumbs, sourceStale, traceNavigation: navigation, traceUpdate: update, traceFocus: focus });
             completeLoad({ ok: true, design: descriptor, graph });
         } });
+    const waveLink = createCircuitWaveHost({session,trace,instancePath,onWave,onInvalidated:onWaveInvalidated,send,onError,
+        readState:()=>({design:descriptor,graph:currentGraph,generation,sourceStale,closed})});
 
     async function display(path, restore = false) {
         const version = ++generation;
@@ -43,19 +48,20 @@ function bindCircuitPanel({ panel, load, onSource, onError = console.error, imag
             if (closed || version !== generation) return { ok: false };
             if (!restore || !previous) throw error;
             currentGraph = previous; breadcrumbs = previousCrumbs;
-            await send({ type: 'graph', graph: previous, design: descriptor, breadcrumbs, sourceStale, traceNavigation: trace.navigation(), traceUpdate: 'history' });
+            await sendGraph({ type: 'graph', graph: previous, design: descriptor, breadcrumbs, sourceStale, traceNavigation: trace.navigation(), traceUpdate: 'history' });
             await send({ type: 'notice', message: error.message }); return { ok: false };
         }
         if (closed || version !== generation) return { ok: false };
         breadcrumbs = path;
         currentGraph = graph;
         const traceNavigation = trace.moduleShown(path, restore);
-        await send({ type: 'graph', graph, design: descriptor, breadcrumbs, sourceStale, traceNavigation });
+        await sendGraph({ type: 'graph', graph, design: descriptor, breadcrumbs, sourceStale, traceNavigation });
         completeLoad({ ok: true, design: descriptor, graph });
         return { ok: true };
     }
 
     async function reload() {
+        waveLink.invalidate('电路已刷新，请重新确认波形映射');
         const version = ++generation;
         currentGraph = null;
         descriptor = null;
@@ -92,6 +98,7 @@ function bindCircuitPanel({ panel, load, onSource, onError = console.error, imag
 
     const handlers = {
         ...trace.handlers,
+        ...waveLink.handlers,
         ready: async () => { if (!started) { started = true; clearTimeout(readyTimer); await reload(); } },
         reload,
         'image-save': async message => {
@@ -153,7 +160,9 @@ function bindCircuitPanel({ panel, load, onSource, onError = console.error, imag
         trace.dispose();
         messageSubscription.dispose(); panelSubscription.dispose(); session.dispose();
     }
-    return { dispose, loaded, trace, markSourceStale() { sourceStale = true; return send({ type: 'source-stale' }); },
+    return { dispose, loaded, trace, waveSnapshot:waveLink.snapshot, notifyWave:waveLink.notify, waveTargets:waveLink.targets,
+        findWaveTarget:waveLink.find, traceWaveTarget:waveLink.begin,
+        markSourceStale() { sourceStale = true; waveLink.invalidate('源码已变化，请刷新电路并重新关联'); return send({ type: 'source-stale' }); },
         sourceSnapshotCaptured() { sourceStale = false; }, revealSource: params => handlers.source(params),
         getState: () => ({ design: descriptor, graph: currentGraph, breadcrumbs, sourceStale }), reload: () => {
         const version = ++operation;

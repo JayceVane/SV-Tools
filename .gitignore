@@ -40,6 +40,7 @@ test/*
 !test/vscode_completion_host.js
 !test/vscode_circuit_host.js
 !test/vscode_circuit_trace_host.js
+!test/vscode_wave_link_host.js
 !test/vscode_release_host.js
 !test/vscode_header_host.js
 !test/helpers/
@@ -51,6 +52,7 @@ test/fixtures/*
 !test/fixtures/memory_dump.vcd
 !test/fixtures/circuit-demo.sv
 !test/fixtures/circuit-trace-stress.sv
+!test/fixtures/circuit-wave-link.sv
 !test/fixtures/codegen/
 test/fixtures/codegen/*
 !test/fixtures/codegen/*.sv

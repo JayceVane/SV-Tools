@@ -22,6 +22,7 @@ const vscode = require('vscode');
 const { activateIverilog } = require('./toolchains/iverilog');
 const { activateWaveViewer } = require('./waveform');
 const { activateCircuitViewer } = require('./circuit');
+const { createWaveLinks } = require('./debug/wave-links');
 const { activateVivado } = require('./vivado');
 
 const { createNativeLoader } = require('./native-loader');
@@ -141,12 +142,13 @@ function activate(context) {
     }
 
     // Icarus Verilog lint 与仿真（诊断、命令、状态栏）
-    const waveViewer = activateWaveViewer(context, { sourceCatalog });
+    const waveLinks = createWaveLinks({vscode}); context.subscriptions.push(waveLinks);
+    const waveViewer = activateWaveViewer(context, { sourceCatalog, waveLinks });
     activateIverilog(context, { waveViewer, scanWorkspaceSources: force => { if (force) sourceCatalog.invalidate(); return sourceIndex.scan(force); }, invalidateWorkspaceSources: sourceIndex.invalidate });
 
     // Vivado TCL 批处理运行与工程创建
-    const circuit = activateCircuitViewer(context, { vivado, sourceCatalog });
-    return { vivado, circuit, waveViewer };
+    const circuit = activateCircuitViewer(context, { vivado, sourceCatalog, waveLinks });
+    return { vivado, circuit, waveViewer, waveLinks };
 }
 
 /**

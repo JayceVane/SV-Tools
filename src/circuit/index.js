@@ -22,7 +22,7 @@ function insideRoots(file, roots) {
 }
 
 /** @param {object} context @param {{vivado:object,vscode?:object}} dependencies @returns {object} 注册电路数据入口及面板生命周期。 */
-function activateCircuitViewer(context, { vivado, sourceCatalog, vscode = require('vscode') }) {
+function activateCircuitViewer(context, { vivado, sourceCatalog, waveLinks, vscode = require('vscode') }) {
     const manager = createToolTaskManager({ retention: { keep: () => vscode.workspace.getConfiguration('svtools.tasks').get('retainedRuns', 5) } });
     const resolveSources = createCircuitSourceResolver({ vscode, sourceCatalog });
     const channel = vscode.window.createOutputChannel('SV Tools · Circuit');
@@ -145,6 +145,7 @@ function activateCircuitViewer(context, { vivado, sourceCatalog, vscode = requir
     }
 
     function open(load, roots, { initialTrace } = {}) {
+        let registration;
         const panel = vscode.window.createWebviewPanel('svtoolsCircuit', '电路结构', vscode.ViewColumn.Beside,
             { enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [] });
         const { createSourceWatch } = require('./source-watch');
@@ -152,6 +153,8 @@ function activateCircuitViewer(context, { vivado, sourceCatalog, vscode = requir
         const binding = bindCircuitPanel({ panel, load: request => load({ ...request, trackSources: entries => {
             if (!request.signal.aborted) { binding.sourceSnapshotCaptured(); watch.replace(entries); }
         } }), initialTrace, chooseSignal, chooseCandidate,
+            onWave:(action,message)=>action==='configure'?registration?.configure():registration?.show(message),
+            onWaveInvalidated:reason=>registration?.invalidate(reason),
             async chooseContext(contexts, truncated) {
                 if (truncated) throw new Error('实例上下文过多，请从顶层逐级进入所需实例');
                 if (contexts.length === 1) return contexts[0];
@@ -173,9 +176,12 @@ function activateCircuitViewer(context, { vivado, sourceCatalog, vscode = requir
             editor.selection = new vscode.Selection(position, position);
             editor.revealRange(new vscode.Range(position, position));
         } });
-        const handle = { ...binding, dispose() { watch.dispose(); binding.dispose(); panel.dispose(); } };
+        registration=waveLinks?.registerCircuit({label:()=>binding.getState().design?.title||'电路结构',snapshot:binding.waveSnapshot,
+            targets:binding.waveTargets,find:binding.findWaveTarget,trace:binding.traceWaveTarget,notify:binding.notifyWave,reveal:()=>panel.reveal()});
+        const handle = { ...binding,configureWave:()=>registration?.configure(),linkWave:(selection,bitChoice='*')=>registration?.show({...binding.waveSnapshot(),designId:binding.waveSnapshot()?.id,selection,bitChoice}),
+            dispose() { registration?.dispose(); watch.dispose(); binding.dispose(); panel.dispose(); } };
         panels.add(handle);
-        panel.onDidDispose(() => { watch.dispose(); panels.delete(handle); });
+        panel.onDidDispose(() => { registration?.dispose(); watch.dispose(); panels.delete(handle); });
         panel.webview.html = createCircuitHtml({ webview: panel.webview, extensionUri: context.extensionUri });
         return handle;
     }

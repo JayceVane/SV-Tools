@@ -37,6 +37,8 @@ async function open(filePath, sourceContext) {
     }
     parser.write(decoder.decode());
     const parsed = parser.finish();
+    const after = await fs.promises.stat(filePath);
+    if (after.size !== stat.size || after.mtimeMs !== stat.mtimeMs) throw new Error('VCD读取期间文件已变化，请在仿真结束后重新打开');
     store = candidate;
     loading = false;
     progress('ready');
@@ -46,7 +48,7 @@ async function open(filePath, sourceContext) {
         try { roles = await readSignalRoles(parsed.vars, sourceContext); }
         catch (error) { roles.sourceRoleNote = '方向匹配不可用：' + error.message; }
     }
-    return { ...store.metadata({ ...parsed, ...roles }, bytesRead), parseMs: Date.now() - startedAt,
+    return { ...store.metadata({ ...parsed, ...roles }, bytesRead), fileIdentity: { size: stat.size, mtimeMs: stat.mtimeMs }, parseMs: Date.now() - startedAt,
         workerHeapBytes: process.memoryUsage().heapUsed, workerArrayBufferBytes: process.memoryUsage().arrayBuffers };
 }
 

@@ -98,6 +98,8 @@ ModuleInst与Testbench继续共用同一实例构造器。Testbench仅跳过已�
 
 ## 波形与仿真文件生命周期
 
+4.1 M4以 `debug/wave-links.js` 协调已打开电路和VCD的会话关系，`debug/signal-mapping.js` 只验证层级分段、声明范围和位选择。映射来自用户明确选择的VCD根层级，记录双方会话身份和人工确认状态，不声称同次构建。电路端仅通过带设计世代的Worker请求解析真实网络，波形端仅接收宿主验证的行键。刷新、源码变化、关闭和重新仿真使映射失效；源数据、查询及布局仍由各自Worker负责。
+
 VCD默认文件关联和命令入口共用registry中的面板/绑定身份。host和session重复dispose返回同一释放Promise；
 registry在面板消失后仍追踪正在退出的worker。仿真runner在编译成功后通过有界simulation-waveforms发现磁盘源码的
 字面dumpfile路径，控制器转交波形服务申请写入租约，等待对应面板、文本标签及worker关闭后才启动vvp。

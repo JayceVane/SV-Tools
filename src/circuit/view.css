@@ -154,5 +154,10 @@ footer { min-height: 29px; border-top: 1px solid var(--border); display: flex; a
 .traceSelection { border-top: 1px solid var(--border); margin-top: 18px; padding-top: 12px; }
 .traceSelection label { display: block; color: var(--muted); margin-bottom: 6px; }.traceSelection input { width: 100%; padding: 6px 8px; background: var(--input); color: var(--fg); border: 1px solid var(--border); border-radius: 5px; }
 .traceSelection .selectionActions { margin-top: 8px; }
+.waveLinkState { max-width: 48%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
+.waveLinkState[data-status='confirmed'] { color: var(--register); }.waveLinkState[data-status='invalid'] { color: var(--mux); }
+.circuitLinkMenu { position: fixed; z-index: 50; min-width: 220px; max-width: 260px; padding: 5px; border: 1px solid var(--border); border-radius: 7px; background: var(--panel); box-shadow: 0 8px 28px #0004; }
+.circuitLinkMenu button { width: 100%; display: block; padding: 8px 10px; text-align: left; border: 0; background: transparent; }
+.circuitLinkMenu button:hover:not(:disabled), .circuitLinkMenu button:focus-visible { background: var(--button); outline: 1px solid var(--accent); }
 .cell.traceNew .cellBody { animation: traceArrival 700ms ease-out; }.cell.traceFocused .cellBody { stroke: var(--diagramActive); stroke-width: 2.5; stroke-dasharray: 5 3; }
 @keyframes traceArrival { from { stroke: var(--diagramActive); stroke-width: 4; } to { stroke-width: 1.3; } }

@@ -30,6 +30,7 @@ function createVcdParser({ onChange = () => {}, onVariable = () => {}, limits = 
     }
     const metadata = { headers: [], scopes: [], vars: [], endTime: 0, timescale: '' };
     const scopes = [];
+    const scopeIds = [];
     const ids = new Set();
     let command = null;
     let commandParts = [];
@@ -103,10 +104,12 @@ function createVcdParser({ onChange = () => {}, onVariable = () => {}, limits = 
             if (definitionsEnded || parts.length !== 2) fail('$scope 声明不完整');
             if (scopes.length >= cap.maxScopeDepth || scopes.join('.').length + parts[1].length + 1 > cap.maxReferenceLength) failResource('VCD 作用域超过安全深度或长度');
             scopes.push(parts[1]);
-            metadata.scopes.push({ type: parts[0], name: parts[1], path: scopes.join('.') });
+            metadata.scopes.push({ type: parts[0], name: parts[1], path: scopes.join('.'), parentId: scopeIds.at(-1) ?? null });
+            scopeIds.push(metadata.scopes.length - 1);
         } else if (command === '$upscope') {
             if (parts.length || !scopes.length) fail('$upscope 没有对应作用域');
             scopes.pop();
+            scopeIds.pop();
         } else if (command === '$var') {
             if (definitionsEnded || parts.length < 4) fail('$var 声明不完整');
             const width = Number(parts[1]);
@@ -117,7 +120,7 @@ function createVcdParser({ onChange = () => {}, onVariable = () => {}, limits = 
             const selected = reference(parts, width);
             const path = scopePath ? scopePath + '.' + selected.name : selected.name;
             if (path.length > cap.maxReferenceLength) failResource('VCD 信号路径超过安全长度');
-            const variable = { type: parts[0], width, id: parts[2], ...selected, scopePath, path };
+            const variable = { type: parts[0], width, id: parts[2], ...selected, scopePath, scopeId: scopeIds.at(-1) ?? null, path };
             metadata.vars.push(variable);
             ids.add(variable.id);
             deliver(onVariable, variable);

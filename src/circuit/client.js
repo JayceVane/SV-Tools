@@ -1,12 +1,12 @@
 (function (root, factory) {
     'use strict';
-    if (typeof module === 'object' && module.exports) module.exports = factory(require('./graph-index'), require('./trace-client'), require('./trace-actions'));
+    if (typeof module === 'object' && module.exports) module.exports = factory(require('./graph-index'), require('./trace-client'), require('./trace-actions'), require('./wave-link-client'));
     else {
-        root.CircuitClient = factory(root.CircuitGraphIndex, root.CircuitTraceClient, root.CircuitTraceActions);
+        root.CircuitClient = factory(root.CircuitGraphIndex, root.CircuitTraceClient, root.CircuitTraceActions, root.CircuitWaveLink);
         const bridge = typeof acquireVsCodeApi === 'function' ? acquireVsCodeApi() : { postMessage() {}, getState() { return {}; }, setState() {} };
         root.CircuitClient.createClient(root.document, root, bridge, root.CircuitRenderer);
     }
-})(typeof globalThis === 'object' ? globalThis : this, function (graphIndex, traceClient, traceActions) {
+})(typeof globalThis === 'object' ? globalThis : this, function (graphIndex, traceClient, traceActions, waveLinkClient) {
     'use strict';
     const MIN_SCALE = .0001, MAX_SCALE = 8, PADDING = 40, MAX_SAVED_VIEWS = 32;
     const MAX_DETAIL_BITS = 256, MAX_PARAMETERS = 32, MAX_PARAMETER_CHARS = 256;
@@ -134,6 +134,7 @@
         const listen = (target, type, callback, options) => { target.addEventListener(type, callback, options); disposers.push(() => target.removeEventListener(type, callback, options)); };
         const post = message => { if (!isDestroyed) bridge.postMessage(message); };
         const traceControls = traceClient.createTraceControls({ document, post, applyFocus: focus => drawing?.setFocus?.(focus) });
+        const waveControls = waveLinkClient.createWaveLinkControls({document,window,post});
         function measureViewport() {
             const rect = ui.circuit.getBoundingClientRect();
             viewportRect = { left: rect.left, top: rect.top, width: Math.max(1, rect.width || 800), height: Math.max(1, rect.height || 500) };
@@ -179,6 +180,7 @@
             if (selection !== undefined && selection?.type === value?.type && selection?.id === value?.id) return;
             selection = value; selected = describeSelection(graph, value, drawing?.index); drawing?.setSelection(value);
             traceControls.select(value);
+            waveControls.select(value);
             ui.selectionEmpty.hidden = !!selected; ui.selectionDetails.hidden = !selected;
             if (!selected) return;
             ui.selectionKind.textContent = selected.kind; ui.selectionName.textContent = selected.name;
@@ -252,6 +254,7 @@
 
         function receive(message) {
             if (isDestroyed || !message || typeof message !== 'object') return;
+            waveControls.receive(message);
             if (message.type === 'source-stale') {
                 sourceStale = true; ui.openSource.disabled = true;
                 ui.status.textContent = '源码已变化，当前图仍对应生成快照；请刷新后再定位源码'; return;
@@ -349,6 +352,7 @@
         listen(ui.search, 'keydown', event => { if (event.key === 'Enter') { event.preventDefault(); window.clearTimeout(searchTimer); updateSearch(true); } });
         listen(ui.nextMatch, 'click', () => updateSearch(true));
         listen(ui.circuit, 'wheel', event => { if (!drawing || isLoading) return; event.preventDefault(); zoom(Math.exp(-Math.max(-300, Math.min(300, event.deltaY)) * .002), eventPoint(event)); }, { passive: false });
+        listen(ui.circuit,'contextmenu',event=>{if(!drawing||isLoading)return;inspect(drawing.hitTarget(event.target));waveControls.contextMenu(event);});
         listen(ui.circuit, 'pointerdown', event => {
             if (isLoading || !drawing || event.button !== 0 || drag) return;
             ui.circuit.focus({ preventScroll: true });
@@ -383,7 +387,7 @@
         else listen(window, 'resize', resize);
         listen(window, 'blur', () => { if (drag) finishDrag(true); }); listen(window, 'pagehide', saveView);
         setMode('loading', '正在连接电路数据'); post({ type: 'ready' });
-        return { receive, getState: () => ({ graph, selection, camera: { ...camera }, isFit, isLoading }), destroy() { if (isDestroyed) return; if (drag) finishDrag(true); saveView(); isDestroyed = true; traceControls.destroy(); for (const pending of imageRequests.values()) pending.resolve(false); imageRequests.clear(); cancelCameraFrame(); window.clearTimeout(searchTimer); window.clearTimeout(saveTimer); for (const dispose of disposers) dispose(); } };
+        return { receive, getState: () => ({ graph, selection, camera: { ...camera }, isFit, isLoading }), destroy() { if (isDestroyed) return; if (drag) finishDrag(true); saveView(); isDestroyed = true; traceControls.destroy(); waveControls.destroy(); for (const pending of imageRequests.values()) pending.resolve(false); imageRequests.clear(); cancelCameraFrame(); window.clearTimeout(searchTimer); window.clearTimeout(saveTimer); for (const dispose of disposers) dispose(); } };
     }
 
     return { cleanCamera, fitCamera, zoomCamera, graphStateKey, searchGraph, describeSelection, provenanceText, createClient };
