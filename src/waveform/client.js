@@ -19,6 +19,7 @@
     const pending = new Map();
     let requestId = 0, paintPending = false, staticDirty = true, filtered = [], windowBusy = false, windowWanted = null;
     let valuesBusy = false, valuesWanted = null, valuesKey = '', edgeVersion = 0, menu = null, groupDialog = null;
+    let timeNavigation;
     const gestures = window.createWaveRowGestures({ canvas, tracks, state, model: M, renderer,
         refreshRows, commitRows: rebuildRows, paint, onSelection: applySelection,
         onNameClick(point, row, event) {
@@ -32,19 +33,25 @@
             if (row) state.activeKey = M.signalKey(row.signal);
             const g = renderer.geometry(), time = state.view.start + Math.max(0, (point.x - g.names) / g.plot) * state.view.span;
             placeCursor(time, event.shiftKey ? 'B' : state.activeCursor, row?.signal);
-        }, onSettled: viewportChanged, onStart: () => hideMenu(false), blocked: () => !!groupDialog || columns.active, status });
+        }, onSettled: viewportChanged, onStart: () => hideMenu(false), blocked: () => !!groupDialog || columns.active || !!timeNavigation?.active, status });
     const columnHandles = [
         { element: $('catalogResize'), label: '设计信号目录宽度', getWidth: () => state.columns.catalog,
             getEffectiveWidth: () => catalogGeometry().width, setWidth: value => setColumn('catalog', value), bounds: catalogGeometry },
         { element: $('namesResize'), label: '信号名称与读值栏宽度', getWidth: () => state.columns.names,
             getEffectiveWidth: () => renderer.geometry().names, setWidth: value => setColumn('names', value), bounds: () => renderer.geometry() }
     ];
-    const columns = window.createWaveColumnResize({ handles: columnHandles, blocked: () => !!groupDialog || gestures.active,
+    const columns = window.createWaveColumnResize({ handles: columnHandles, blocked: () => !!groupDialog || gestures.active || !!timeNavigation?.active,
         onStart() { hideMenu(false); gestures.finishMotion(); document.body.classList.add('columnResizing'); },
         onEnd() { document.body.classList.remove('columnResizing'); },
         onPreview() { applyColumnLayout(); paint(); },
         onCommit() { applyColumnLayout(); viewportChanged(); persist(); },
         onCancel() { applyColumnLayout(); paint(); } });
+    timeNavigation = window.WaveTimeNavigation.createTimeScrollbar({ rail: $('timeScrollbar'), thumb: $('timeViewport'),
+        previous: $('timeScrollLeft'), next: $('timeScrollRight'), extent: $('timeExtent'),
+        getView: () => state.view, getEnd: () => state.metadata?.endTime || 0, formatTime: time => M.formatTime(time, state.secondsPerTick),
+        blocked: () => !!groupDialog || columns.active || gestures.active,
+        onStart() { ++edgeVersion; hideMenu(false); gestures.finishMotion(); },
+        onPreview(view) { state.view = view; viewportChanged(); }, onCommit: persist, onEnd: () => columns.sync() });
     $('title').textContent = BOOT.fileName;
 
     function status(text) { $('status').textContent = text; }
@@ -65,6 +72,8 @@
         $('catalogPane').style.width = width + 'px'; $('catalogResize').style.left = width + 'px';
         $('namesResize').style.left = renderer.geometry().names + 'px';
         $('namesResize').style.height = $('ruler').clientHeight + tracks.clientHeight + 'px';
+        $('timeExtent').style.width = Math.max(0, renderer.geometry().names - 8) + 'px';
+        timeNavigation?.sync();
         columns.sync();
     }
     function paint(overlayOnly = false) {
@@ -479,11 +488,11 @@
     $('cancel').onclick = () => api.postMessage({ type: 'cancel' });
     canvas.oncontextmenu = event => { event.preventDefault(); columns.cancel(); gestures.cancel(); gestures.finishMotion(); showMenu(event, renderer.rowAt(event.offsetY)); };
     document.addEventListener('pointerdown', event => { if (menu && !menu.contains(event.target)) hideMenu(false); });
-    window.addEventListener('blur', () => { hideMenu(false); columns.cancel(); gestures.cancel(); });
-    window.addEventListener('resize', () => { hideMenu(false); columns.cancel(); gestures.cancel(); gestures.finishMotion(); applyColumnLayout(); viewportChanged(); });
+    window.addEventListener('blur', () => { hideMenu(false); timeNavigation.cancel(); columns.cancel(); gestures.cancel(); });
+    window.addEventListener('resize', () => { hideMenu(false); timeNavigation.cancel(); columns.cancel(); gestures.cancel(); gestures.finishMotion(); applyColumnLayout(); viewportChanged(); });
     tracks.addEventListener('wheel', event => {
         if (!state.metadata) return;
-        if (gestures.rowActive || columns.active) { event.preventDefault(); return; }
+        if (gestures.rowActive || columns.active || timeNavigation.active) { event.preventDefault(); return; }
         if (event.ctrlKey || event.metaKey) { event.preventDefault(); const left = tracks.getBoundingClientRect().left, g = renderer.geometry();
             setView(M.zoomView(state.view, event.deltaY > 0 ? 1.25 : .8, (event.clientX - left - g.names) / g.plot, state.metadata.endTime));
         } else if (event.shiftKey || Math.abs(event.deltaX) > Math.abs(event.deltaY)) { event.preventDefault();
@@ -492,6 +501,8 @@
     $('ruler').onclick = event => { if (!state.metadata) return; const g = renderer.geometry();
         if (event.offsetX >= g.names) placeCursor(state.view.start + (event.offsetX - g.names) / g.plot * state.view.span, event.shiftKey ? 'B' : state.activeCursor, state.signals.get(state.activeKey)); };
     document.addEventListener('keydown', event => {
+        if (timeNavigation.active) { if (event.key === 'Escape') { timeNavigation.cancel(); event.preventDefault(); } return; }
+        if (['timeScrollbar','timeScrollLeft','timeScrollRight'].includes(event.target.id)) return;
         if (columns.active) { if (event.key === 'Escape') { columns.cancel(); event.preventDefault(); } return; }
         if (columnHandles.some(handle => handle.element === event.target)) return;
         if (menu || groupDialog || /^(INPUT|SELECT|TEXTAREA)$/.test(event.target.tagName) || event.target.isContentEditable) return;

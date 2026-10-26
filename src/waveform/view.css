@@ -58,6 +58,16 @@ body.columnResizing, body.columnResizing * { cursor: col-resize !important; user
 #right { flex: 1; min-width: 0; display: flex; flex-direction: column; position: relative; }
 #ruler { height: 35px; width: 100%; display: block; background: var(--panel); }
 #tracks { flex: 1; overflow: auto; position: relative; min-height: 0; }#trackSpace { position: relative; min-width: 100%; }
+#timeNavigation { flex: 0 0 34px; display: flex; gap: 6px; align-items: center; padding: 4px 8px; border-top: 1px solid var(--border); background: var(--panel); }
+#timeExtent { flex: 0 0 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
+#timeNavigation button { width: 24px; height: 24px; padding: 0; font-size: 19px; line-height: 20px; }
+#timeScrollbar { flex: 1; min-width: 0; height: 22px; position: relative; border: 1px solid var(--border); border-radius: 5px; background: var(--bg); cursor: pointer; touch-action: none; user-select: none; }
+#timeViewport { position: absolute; top: 2px; bottom: 2px; left: 0; border: 1px solid color-mix(in srgb, var(--accent), var(--border) 45%); border-radius: 4px; background: color-mix(in srgb, var(--accent) 24%, var(--raised)); display: grid; place-items: center; cursor: grab; }
+#timeViewport span { width: 12px; height: 8px; border-left: 1px solid var(--dim); border-right: 1px solid var(--dim); pointer-events: none; }
+#timeScrollbar:hover #timeViewport, #timeScrollbar:focus-visible #timeViewport { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 35%, var(--raised)); }
+#timeScrollbar.is-dragging, #timeScrollbar.is-dragging #timeViewport { cursor: grabbing; }
+#timeScrollbar:focus-visible { outline: 2px solid var(--a); outline-offset: 2px; }
+#timeScrollbar[aria-disabled='true'] { cursor: default; }#timeScrollbar[aria-disabled='true'] #timeViewport { cursor: default; opacity: .4; }
 #waveCanvas { position: sticky; top: 0; left: 0; display: block; cursor: crosshair; touch-action: none; user-select: none; }
 .waveDragPreview { position: fixed; z-index: 12; pointer-events: none; width: 252px; max-width: calc(100vw - 24px); padding: 10px 12px;
     background: var(--raised); color: var(--fg); border: 1px solid var(--accent); border-radius: 7px;
