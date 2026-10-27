@@ -887,4 +887,4 @@ function contextAt(model, offset) {
     return base;
 }
 
-module.exports = { tokenize, matchDelimiters, parseDocument, contextAt };
+module.exports = { tokenize, matchDelimiters, splitTopLevel, parseDocument, contextAt };

@@ -16,10 +16,10 @@ const RUN_LABELS = ['工程综合', '布局布线', '综合报告', '资源报�
 /**
  * 单一侧边栏；页面只传节点令牌和允许的动作，文件路径与工程身份由宿主持有。
  * @param {object} context 扩展上下文。
- * @param {{vscode:object,projects:object,vivado:object,sourceCatalog:object}} dependencies
+ * @param {{vscode:object,projects:object,vivado:object}} dependencies
  * @returns {object} 刷新、显式追踪及销毁。
  */
-function activateProjectView(context, { vscode, projects, vivado, sourceCatalog }) {
+function activateProjectView(context, { vscode, projects, vivado }) {
     let view, project, nodes = [], revision = 0, refreshGeneration = 0, disposed = false, message, busy = false, timer, selectionTimer;
     const nodeIndex = new Map(), projections = new Map(), expandedState = context.workspaceState.get('svtools.project.views', {});
     const report = error => {
@@ -30,7 +30,7 @@ function activateProjectView(context, { vscode, projects, vivado, sourceCatalog 
         vscode.window.showErrorMessage('SV Tools 工程：' + error.message);
         send();
     };
-    const flow = createProjectFlowController({ vscode, projects, sourceCatalog, onChange(change) {
+    const flow = createProjectFlowController({ vscode, projects, onChange(change) {
             if (disposed) {
                 return;
             }
@@ -66,7 +66,7 @@ function activateProjectView(context, { vscode, projects, vivado, sourceCatalog 
         const currentFlow = flow.get(), projection = projections.get(project?.id) || expandedState[project?.id]?.projection || 'files';
         void view.webview.postMessage({ type: 'snapshot', revision, project: project ? { id: project.id, name: project.name, kind: project.kind } : null, nodes, projection,
             tracing: !!currentFlow, traceId: currentFlow?.traceId, pinned: currentFlow?.pinned, busy, message, actions: actionList(), issues: currentFlow?.issues ||
-                (projection === 'instances' ? ['源码引用预览；执行信号追踪后显示工具验证的实际实例层级'] : []) });
+                (projection === 'instances' ? ['源码引用预览；执行信号追踪后显示静态RTL连接中可确定的实例层级'] : []) });
     }
     async function refresh() {
         const version = ++refreshGeneration;

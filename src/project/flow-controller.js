@@ -1,20 +1,14 @@
 'use strict';
 const path = require('node:path');
 const { CircuitSession } = require('../circuit/session');
-const { prepareSourceRequest } = require('../circuit/source-request');
-const { createCircuitSourceResolver } = require('../circuit/source-context');
-const { runYosysCircuit } = require('../circuit/yosys-runner');
-const { sourceHash, snapshotSources, sourceMatches } = require('../circuit/source-snapshots');
+const { sourceHash, sourceMatches } = require('../circuit/source-snapshots');
 const { createSourceWatch } = require('../circuit/source-watch');
-const { createToolTaskManager } = require('../toolchains/job');
 /**
- * 工程追踪独立拥有一个惰性Worker和生成任务；不创建电路面板或运行ELK。
- * @param {{vscode:object,projects:object,sourceCatalog:object,onChange:Function}} dependencies
+ * 工程追踪独立拥有一个惰性静态RTL Worker；不创建工具任务、临时网表或电路面板。
+ * @param {{vscode:object,projects:object,onChange:Function}} dependencies
  * @returns {object} 显式追踪、有效定位和生命周期边界。
  */
-function createProjectFlowController({ vscode, projects, sourceCatalog, onChange }) {
-    const tasks = createToolTaskManager(), resolveSources = createCircuitSourceResolver({ vscode, sourceCatalog });
-    const output = vscode.window.createOutputChannel('SV Tools · Project');
+function createProjectFlowController({ vscode, projects, onChange }) {
     let session, result, generation = 0, disposed = false, controller, selectedProject, pinned = false, identity, selectionGeneration = 0, activeContext;
     const watch = createSourceWatch({ vscode, onStale() {
             clear('源码发生变化，请重新追踪');
@@ -31,11 +25,11 @@ function createProjectFlowController({ vscode, projects, sourceCatalog, onChange
         selectedProject = undefined;
         activeContext = undefined;
         watch.replace([]);
-        onChange({ flow: null, message });
+        onChange({ flow: null, message, busy: false });
     }
     async function trace(uri) {
         const editor = vscode.window.activeTextEditor;
-        if (!editor || editor.document.uri.scheme !== 'file' || !/\.(sv|v)$/i.test(editor.document.uri.fsPath)) {
+        if (!editor || editor.document.uri.scheme !== 'file' || !/\.(sv|v|svh|vh)$/i.test(editor.document.uri.fsPath)) {
             throw new Error('请在RTL编辑器中选中信号');
         }
         if (uri?.fsPath && path.resolve(uri.fsPath) !== path.resolve(editor.document.uri.fsPath)) {
@@ -59,11 +53,17 @@ function createProjectFlowController({ vscode, projects, sourceCatalog, onChange
         clear();
         activeContext = { id: project.id, key: project.key };
         const version = generation;
-        session = new CircuitSession();
+        session = new CircuitSession({ workerFile: path.join(__dirname, 'rtl-worker.js') });
         const worker = session;
-        controller = new AbortController();
-        const signal = controller.signal;
-        const task = tasks.start('project-flow'), abort = () => task.cancel('工程追踪已取消');
+        const requestController = new AbortController();
+        controller = requestController;
+        const signal = requestController.signal;
+        const throwIfCancelled = () => {
+            if (signal.aborted) {
+                throw Object.assign(new Error('工程追踪已取消'), { code: 'TOOL_CANCELLED' });
+            }
+        };
+        const abort = () => worker.dispose(Object.assign(new Error('工程追踪已取消'), { code: 'TOOL_CANCELLED' }));
         signal.addEventListener('abort', abort, { once: true });
         try {
             const selection = await worker.request('traceSelection', { text, offset });
@@ -76,30 +76,26 @@ function createProjectFlowController({ vscode, projects, sourceCatalog, onChange
                 return;
             }
             onChange({ flow: null, message: '正在分析工程信号走向…', busy: true });
-            await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: '分析工程信号走向 · Yosys', cancellable: true }, async (_, token) => {
+            await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: '分析工程信号走向 · 静态RTL', cancellable: true }, async (_, token) => {
                 const cancellation = token.onCancellationRequested(() => {
-                    abort();
-                    worker.dispose();
+                    requestController.abort();
                 });
                 try {
-                    await task.waitForPrevious();
-                    task.throwIfCancelled();
-                    const config = vscode.workspace.getConfiguration('svtools.circuit', document.uri), outputBase = path.join(project.root, '.svtools', 'circuit');
-                    const files = project.sets.filter(set => set.type === 'DesignSrcs').flatMap(set => set.files).filter(file => /\.(sv|v)$/i.test(file));
-                    const options = await prepareSourceRequest({ document, root: project.root, top, task, outputBase, resolveSources,
-                        config: { sources: files, includeDirs: [...project.includeDirs, ...config.get('includeDirs', [])], defines: [...project.defines, ...config.get('defines', [])], frontend: config.get('frontend', 'auto') } });
-                    const sourceSnapshots = await snapshotSources(options);
+                    throwIfCancelled();
+                    const config = vscode.workspace.getConfiguration('svtools.circuit', document.uri);
+                    const files = [...new Set(project.sets.filter(set => set.type === 'DesignSrcs' || set.files.some(file => path.resolve(file).toLowerCase() === path.resolve(document.uri.fsPath).toLowerCase())).flatMap(set => set.files).filter(file => /\.(sv|v|svh|vh)$/i.test(file)))];
+                    const design = await worker.request('loadRTL', { files, top,
+                        includeDirs: [...project.includeDirs, ...config.get('includeDirs', []).map(directory => path.resolve(project.root, directory))], defines: [...project.defines, ...config.get('defines', [])] });
+                    const sourceSnapshots = design.sourceSnapshots;
                     watch.replace(sourceSnapshots);
-                    const generated = await runYosysCircuit({ ...options, task, outputBase, executable: config.get('yosysPath', 'bundled'), timeoutMs: config.get('generationTimeout', 120) * 1000, onOutput: chunk => output.append(chunk) });
-                    task.throwIfCancelled();
-                    const design = await worker.request('load', { ...generated, top, sourceMap: options.sourceMap, sourceSnapshots });
+                    throwIfCancelled();
                     const loadedIdentity = { designId: design.id, revision: design.revision };
                     const candidates = await worker.request('traceCandidates', { ...loadedIdentity, target: { ...selection, path: document.uri.fsPath, sourceHash: sourceHash(text) } });
                     if (candidates.truncated) {
                         throw new Error('信号实例超过预算，请缩小工程顶层');
                     }
                     if (!candidates.candidates.length) {
-                        throw new Error(candidates.reason || '工具未保留所选信号');
+                        throw new Error((candidates.reason || '静态模型未解析所选信号') + '\n' + design.issues.slice(1, 5).join('\n'));
                     }
                     const candidate = candidates.candidates.length === 1 ? candidates.candidates[0] : (await vscode.window.showQuickPick(candidates.candidates.map(candidate => ({ label: candidate.label, description: candidate.moduleName, candidate })), { title: '选择信号所属实例' }))?.candidate;
                     if (!candidate) {
@@ -110,7 +106,7 @@ function createProjectFlowController({ vscode, projects, sourceCatalog, onChange
                     }
                     const flow = await worker.request('projectFlow', { ...loadedIdentity, moduleId: candidate.moduleId, instancePath: candidate.instancePath,
                         origin: { objectId: candidate.objectId, ...(selection.indices ? { indices: selection.indices } : {}) } });
-                    task.throwIfCancelled();
+                    throwIfCancelled();
                     if (version !== generation || disposed) {
                         return;
                     }
@@ -131,7 +127,6 @@ function createProjectFlowController({ vscode, projects, sourceCatalog, onChange
                     selectedProject = project.id;
                     identity = loadedIdentity;
                     result = { ...flow, sourceSnapshots, projectId: project.id, top, pinned, traceId: Date.now() + ':' + version };
-                    task.retainDirectories(signal);
                     onChange({ flow: result, busy: false, message: flow.truncated ? '结果达到预算，详见提示' : undefined });
                 }
                 finally {
@@ -147,7 +142,6 @@ function createProjectFlowController({ vscode, projects, sourceCatalog, onChange
         }
         finally {
             signal.removeEventListener('abort', abort);
-            await task.finish({ keepArtifacts: true });
             if (version === generation && !disposed && !result) {
                 clear();
             }
@@ -190,7 +184,7 @@ function createProjectFlowController({ vscode, projects, sourceCatalog, onChange
         const same = candidates.candidates.filter(item => JSON.stringify(item.instancePath) === JSON.stringify(previous.origin.instancePath));
         const candidate = same.length === 1 ? same[0] : candidates.candidates.length === 1 ? candidates.candidates[0] : null;
         if (!candidate || candidates.truncated) {
-            onChange({ message: '所选信号有多个实例或未被工具保留，请右键选择追踪上下文' });
+            onChange({ message: '所选信号有多个实例或静态连接不确定，仍显示此前追踪；请右键选择上下文' });
             return;
         }
         const next = await worker.request('projectFlow', { ...identity, moduleId: candidate.moduleId, instancePath: candidate.instancePath, origin: { objectId: candidate.objectId, ...(target.indices ? { indices: target.indices } : {}) } });
@@ -235,8 +229,6 @@ function createProjectFlowController({ vscode, projects, sourceCatalog, onChange
             disposed = true;
             clear();
             watch.dispose();
-            output.dispose();
-            tasks.dispose().catch(error => console.error(error));
         } };
 }
 module.exports = { createProjectFlowController };

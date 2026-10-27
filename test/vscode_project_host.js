@@ -5,6 +5,7 @@ async function run() {
     const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
     assert.ok(root && path.basename(root) === 'workspace');
     const extension = vscode.extensions.getExtension('JayceVane.svtools'), api = await extension.activate(), checks = [];
+    await vscode.workspace.getConfiguration('svtools.circuit').update('yosysPath',path.join(root,'missing-yosys.exe'),vscode.ConfigurationTarget.Workspace);
     assert.ok(api.projects && api.projectView);
     checks.push('统一工程服务与单一Webview注册');
     const file = path.join(root, 'flow.sv'), text = 'module leaf(input [7:0] data,output [7:0] result); assign result={data[3:0],data[7:4]}; endmodule\nmodule middle(input [7:0] rx,output [7:0] tx); leaf u_leaf(.data(rx),.result(tx)); endmodule\nmodule top(input [7:0] a,b,output [7:0] y,z); middle u_a(.rx(a),.tx(y)); middle u_b(.rx(b),.tx(z)); endmodule\n';
@@ -27,7 +28,9 @@ async function run() {
     assert.ok(snapshot.flow);
     assert.ok(snapshot.flow.nodes.filter(n => n.names[0] === 'u_b').every(n => !n.roles.length));
     assert.ok(snapshot.flow.nodes.some(n => n.names.join('.') === 'u_a.u_leaf' && n.roles.length));
-    checks.push('真实Yosys三层端口改名、位重排、实例隔离');
+    assert.equal(snapshot.flow.analysis,'rtl-static');
+    assert.ok(!(await fs.readdir(path.join(root,'.svtools'))).includes('circuit'));
+    checks.push('无Yosys仍完成静态RTL三层透传，未创建网表或工具任务目录');
     const kinds = extension.packageJSON.contributes.views['svtools-vivado'];
     assert.equal(kinds.length, 1);
     assert.equal(kinds[0].type, 'webview');

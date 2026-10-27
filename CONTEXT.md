@@ -1,3 +1,17 @@
+# 工程追踪静态RTL后端修复（2026-10-27）
+
+当前分支`codex/fix-rtl-project-trace`，基线`a636f33`。用户报告工程信号追踪因sfifo.sv编译单元timeunit报错，并要求不依赖Yosys。根因是原工程追踪将DesignSrcs全部include到同一编译单元，使后续文件的合法时间声明位于已有模块之后；没有修改用户RTL，也没有在本次改写电路生成包装器。
+
+- 工程追踪默认使用独立`project/rtl-worker.js`，不启动Yosys/ELK、不创建工具任务或临时网表。`rtl-model.js`适配声明、已知参数、连续别名和明确实例，`rtl-expression.js`有界解析常量/直接位表达式，共用原跨层端口查询及源码快照核验。
+- 支持非ANSI顺序端口、隐式命名/通配、字面include、升降序/切片/拼接/复制和参数覆盖。普通宏、生成块、未知类型/范围不展开，明确止步；多驱动、条件驱动及未解析实例阻止不安全的别名合并。静态结果不是完整SystemVerilog详细化证明。
+- 最终回归：语法277、golden44、Node744通过／12跳过、电路227通过、Local22通过／5跳过。新增13项静态测试；最终包实际VS Code1.143.0/Qoder API1.106.3各8项通过，Yosys路径设为不存在且无网表目录。
+- 新包`bin/private-dist/svtools-4.1.0-beta.4-local.13-win32-x64.vsix`，SHA256 `6a59819d225e65858c91911d512c85cbbd674baa049b6d5e349d32aa175142ee`。503项归档载荷/149项src脚本核对，私有12项运行文件保持原哈希；源码/包记录见`bin/project-rtl-package-verification.json`，全量日志`bin/project-rtl-local-build-final.log`。
+- 对05_corelib的12个源文件（包含sfifo）只读验证adder静态追踪通过；存在生成/逻辑边界提示，不宣称完整网表。全部用户源文件字节哈希前后不变；报告`bin/project-rtl-corelib-validation-final.json`。
+
+用法见`docs/V4_1_PROJECT_MANAGER.md`；根因增补在`docs/bugs/compat-yosys-systemverilog-frontend.md`。原Yosys/Vivado电路图入口及自用ModelSim保留。没有安装、推送、合并或发布。后续如扩展宏/generate，应建立独立的预处理/展开合同，不能用同名或单比特回退伪造确定性。
+
+以下为历史交接。
+
 # 4.1统一工程管理与多层透传交接（2026-10-27）
 
 当前分支`codex/feat-project-signal-flow`，基线`6a6a170`，功能提交`148d9f0`。用户已确认单一工程侧边栏、顶部工程切换、文件／实例节点右侧角色标记，以及多层级信号透传；本轮已实现并验证。公开源码与自用ModelSim保持隔离，没有推送、合并、发布或安装。
