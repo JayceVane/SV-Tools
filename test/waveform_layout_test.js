@@ -38,6 +38,13 @@ test('分组收起仅影响可见行，不改变成员顺序或设置', () => {
 });
 
 const { createLayoutFiles } = require('../src/waveform/layout-files');
+test('保存布局不能将JSON写进RTL或其他非布局扩展名',async()=>{
+    const layout=S.capture({signals:new Map(vars('!').map(s=>[s.key,s])),selected:['tb.bus'],view:{start:0,span:100},cursorA:0,cursorB:null});
+    let writes=0;
+    const files=createLayoutFiles({filePath:'/p/test.vcd',vscode:{workspace:{fs:{async writeFile(){writes++;}}}}});
+    await assert.rejects(files.save(layout,{scheme:'file',fsPath:'/p/design.sv'}),/json/i);
+    assert.equal(writes,0);
+});
 test('布局文件通过用户选择的独立URI读写，取消、超预算、覆盖VCD和损坏JSON有明确结果', async () => {
     const layout=S.capture({signals:new Map(vars('!').map(s=>[s.key,s])),selected:['tb.bus'],view:{start:0,span:100},cursorA:0,cursorB:null});
     let data, size=0, picked;

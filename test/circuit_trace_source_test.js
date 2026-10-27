@@ -2,12 +2,37 @@
 const { createSourceWatch } = require('../src/circuit/source-watch');
 const test = require('node:test');
 const assert = require('node:assert/strict');
+
+test('编辑后在防抖结束前关闭源码文档仍必须使生成快照失效',()=>{
+    let listener,callback,warnings=0,body='module top; endmodule';
+    const document={uri:{fsPath:'D:/audit/top.sv'},isClosed:false,getText:()=>body};
+    const watch=createSourceWatch({watchDirectory:()=>({close(){}}),vscode:{workspace:{textDocuments:[],onDidChangeTextDocument(fn){listener=fn;return{dispose(){}};}}},
+        clock:{clearTimeout(){},setTimeout(fn){callback=fn;return 1;}},onStale(){warnings++;}});
+    watch.replace([{path:document.uri.fsPath,hash:require('../src/circuit/source-snapshots').sourceHash(body)}]);
+    body='module top; wire changed; endmodule';listener({document});document.isClosed=true;callback();
+    assert.equal(warnings,1);watch.dispose();
+});
 const path = require('node:path');
 const fs = require('node:fs/promises');
 const os = require('node:os');
 const { traceSelection, traceCandidates, instanceContexts, keyPath } = require('../src/circuit/trace-source');
 const { sourceHash, sourceMatches, snapshotSources, createSourceLocator } = require('../src/circuit/source-snapshots');
 const { fromYosys } = require('../src/circuit/adapters/yosys');
+
+test('未打开的依赖在磁盘改写后使快照失效，保存相同内容及旧监听响应不误报',async()=>{
+    const root=await fs.mkdtemp(path.resolve('bin/audit-source-watch-')),file=path.join(root,'dep.sv');
+    const body='module dep; endmodule';await fs.writeFile(file,body);
+    const callbacks=[],timers=new Map();let next=0,warnings=0,closed=0;
+    const observer=createSourceWatch({vscode:{workspace:{textDocuments:[]}},onStale(){warnings++;},
+        clock:{setTimeout(callback){timers.set(++next,callback);return next;},clearTimeout(id){timers.delete(id);}},
+        watchDirectory(directory,options,callback){assert.equal(directory,keyPath(root));callbacks.push(callback);return{close(){closed++;}};}});
+    const flush=async()=>{const batch=[...timers.values()];timers.clear();for(const callback of batch)callback();await new Promise(resolve=>setTimeout(resolve,30));};
+    observer.replace([{path:file,hash:sourceHash(body)}]);callbacks[0]('change','dep.sv');await flush();assert.equal(warnings,0);
+    await fs.writeFile(file,body+'\n// external');callbacks[0]('change','dep.sv');await flush();assert.equal(warnings,1);
+    observer.replace([{path:file,hash:sourceHash(body+'\n// external')}]);callbacks[0]('change','dep.sv');assert.equal(timers.size,0);
+    callbacks[1]('change','dep.sv');await flush();assert.equal(warnings,1);
+    observer.dispose();callbacks[1]('change','dep.sv');assert.equal(timers.size,0);assert.equal(closed,2);
+});
 
 test('源码选择按声明作用域解析，引用不被误当作块内声明，静态位范围保留', () => {
     const text = 'module top(input logic clk, output logic [3:0] q); logic [3:0] r; always @(posedge clk) begin q <= r[2]; end endmodule';
@@ -92,7 +117,7 @@ test('源码观察仅检查已编译文件，合并输入事件，一次提示�
     const document = { uri: { fsPath: path.resolve('tracked.sv') }, getText: () => content };
     const clock = { setTimeout(callback) { timers.set(++next, callback); return next; }, clearTimeout(id) { timers.delete(id); } };
     const flush = () => { for (const callback of [...timers.values()]) callback(); timers.clear(); };
-    const watch = createSourceWatch({ clock, onStale() { warnings++; }, vscode: { workspace: { textDocuments: [document],
+    const watch = createSourceWatch({ watchDirectory:()=>({close(){}}), clock, onStale() { warnings++; }, vscode: { workspace: { textDocuments: [document],
         onDidChangeTextDocument(callback) { handler = callback; return { dispose() { disposed = true; } }; } } } });
     watch.replace([{ path: document.uri.fsPath, hash: sourceHash(content) }]); flush(); assert.equal(warnings, 0);
     handler({ document: { uri: { fsPath: path.resolve('unrelated.sv') } } }); assert.equal(timers.size, 0);

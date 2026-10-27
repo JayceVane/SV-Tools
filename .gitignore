@@ -42,6 +42,7 @@ test/*
 !test/vscode_circuit_trace_host.js
 !test/vscode_wave_link_host.js
 !test/vscode_cursor_values_host.js
+!test/vscode_critical_audit_host.js
 !test/vscode_release_host.js
 !test/vscode_header_host.js
 !test/helpers/

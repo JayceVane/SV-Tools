@@ -189,7 +189,11 @@ function activateCircuitViewer(context, { vivado, sourceCatalog, waveLinks, vsco
     }
 
     async function fromSource(uri, { traceDirection } = {}) {
-        const document = await rtlDocument(uri);
+        let document = await rtlDocument(uri);
+        const currentDocument = async () => {
+            if (document.isClosed) document = await vscode.workspace.openTextDocument(document.uri);
+            return document;
+        };
         const config = settings(document.uri);
         let traceTarget = traceDirection ? await sourceSelection(document) : null;
         let firstTraceLoad = true;
@@ -209,7 +213,7 @@ function activateCircuitViewer(context, { vivado, sourceCatalog, waveLinks, vsco
         const root = rootOf(document.uri), outputBase = path.join(root, '.svtools', 'circuit');
         const roots = [root, path.dirname(document.uri.fsPath), ...(vscode.workspace.workspaceFolders || []).map(folder => folder.uri.fsPath)];
         return open(({ signal, trackSources }) => runJob('生成 RTL 电路 · Yosys', async task => {
-            const options = await prepareSourceRequest({ document, root, top, task, outputBase, resolveSources,
+            const options = await prepareSourceRequest({ document:await currentDocument(), root, top, task, outputBase, resolveSources,
                 config: Object.fromEntries(['sources', 'includeDirs', 'defines', 'frontend'].map(key => [key, config.get(key)])) });
             for (const file of options.sources) if (!insideRoots(file, [root])) {
                 if (!roots.includes(path.dirname(file))) roots.push(path.dirname(file));
@@ -222,8 +226,11 @@ function activateCircuitViewer(context, { vivado, sourceCatalog, waveLinks, vsco
                 onOutput: output.append });
             return { ...result, format: 'yosys', stage: 'rtl', top, title: options.title, sourceMap: options.sourceMap, sourceSnapshots };
         }, signal), roots, { initialTrace: traceDirection ? async () => {
-            if (firstTraceLoad) firstTraceLoad = false;
-            else traceTarget = await sourceSelection(document, traceTarget);
+            const current = await currentDocument();
+            if (firstTraceLoad) {
+                firstTraceLoad = false;
+                if (traceTarget.sourceHash !== sourceHash(current.getText())) traceTarget = await sourceSelection(current, traceTarget);
+            } else traceTarget = await sourceSelection(current, traceTarget);
             return { target: traceTarget, direction: traceDirection };
         } : undefined });
     }
@@ -234,6 +241,7 @@ function activateCircuitViewer(context, { vivado, sourceCatalog, waveLinks, vsco
         if (sourcePath) roots.push(path.dirname(sourcePath));
         return open(({ signal, trackSources }) => runJob(document ? '生成当前文件电路 · Vivado RTL' : '生成工程电路 · Vivado RTL', async task => {
             // 刷新时再次检查，避免用户编辑后仍显示磁盘上的旧正文。
+            if (document?.isClosed) document = await vscode.workspace.openTextDocument(document.uri);
             if (document) requireSavedVivadoFile(document);
             const sourceSnapshots = document ? await snapshotSources({ sources: [document.uri.fsPath] }) : [];
             trackSources(sourceSnapshots);

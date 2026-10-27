@@ -17,6 +17,18 @@ function fixture(query=async({time})=>({values:{v:time===0?'0011':'1010'}})) {
 }
 async function settled(){for(let i=0;i<12;i++)await turn();}
 
+test('重新确认同一电路信号的另一条VCD声明必须替换事件来源，不能沿用第一次读值',async()=>{
+    const f=fixture(async({ids})=>({values:Object.fromEntries(ids.map(id=>[id,id==='v'?'0011':'1110']))}));
+    const catalog=createWaveCatalog({scopes:f.input.catalog.scopes,vars:[f.input.catalog.variables[0],{...f.input.catalog.variables[0],id:'other'}]});
+    f.service.cursors(f.link.wave,{a:0,b:null});
+    const first=f.service.watch(f.link,{...f.input,catalog,match:{key:catalog.variables[0].key}});await settled();
+    assert.equal(f.service.snapshot(f.link.circuit)[0].a.text,"4'h3");
+    const second=f.service.watch(f.link,{...f.input,catalog,match:{key:catalog.variables[1].key}});await settled();
+    assert.equal(second.id,first.id);assert.equal(f.service.snapshot(f.link.circuit).length,1);
+    assert.equal(f.service.snapshot(f.link.circuit)[0].a.text,"4'hE");
+    f.service.dispose();
+});
+
 test('读值保持位选择顺序、零扩展、X/Z扩展及无初始化语义',()=>{
     assert.deepEqual(sample('1',[0,1,2,3]),{status:'value',bits:'0001',unknown:false,text:"4'h1"});
     assert.equal(sample('10xz',[3,0,2]).bits,'0z1');

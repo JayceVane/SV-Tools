@@ -120,6 +120,19 @@ test('RTL 右键 URI 进入生成流程，文件头注释不能被当成 JSON', 
     } finally { binding.dispose(); }
 });
 
+test('刷新时已关闭的正文必须重新取得当前文档，不能读取旧文档对象',async t=>{
+    const f=await fixture(t),binding=await f.circuit.fromSource(uri(f.rtl));
+    assert.equal((await binding.loaded).ok,true);
+    const text='module top(input a, output y); assign y=~a; endmodule';
+    f.document.isClosed=true;f.document.getText=()=>{throw new Error('old document was closed');};
+    f.vscode.workspace.openTextDocument=async()=>({uri:uri(f.rtl),isDirty:true,getText:()=>text});
+    try{
+        await binding.reload();assert.equal(f.generated.length,2);
+        assert.equal(await fs.readFile(f.generated[1].sources[0],'utf8'),text);
+        assert.ok(binding.getState().graph);
+    }finally{binding.dispose();}
+});
+
 test('打开的脏正文电路快照跨后续生成保留，刷新和关闭才交还目录', async t => {
     const { pruneTaskDirectories } = require('../src/toolchains/task-retention');
     const { createSourceLocator, sourceHash } = require('../src/circuit/source-snapshots');

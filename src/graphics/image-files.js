@@ -1,6 +1,7 @@
 
 'use strict';
 const path=require('node:path');
+const {assertExportTarget}=require('../workspace/export-target');
 const MAX_BYTES=32*1024*1024;
 const PNG_SIGNATURE=Buffer.from([137,80,78,71,13,10,26,10]);
 /** @param {{vscode:object,sourcePath?:string}} deps @returns {{save:Function}} 图片保存仅使用用户选择的独立文件。 */
@@ -23,6 +24,7 @@ function createImageFiles({vscode,sourcePath}){
         if(!uri)return false;
         if(uri.scheme!=='file'||path.extname(uri.fsPath).toLowerCase()!=='.'+payload.format)throw new Error('导出文件扩展名必须是 .'+payload.format);
         if(sourcePath&&path.resolve(uri.fsPath).toLowerCase()===path.resolve(sourcePath).toLowerCase())throw new Error('导出图片不能覆盖源文件');
+        await assertExportTarget(uri.fsPath,sourcePath);
         await vscode.workspace.fs.writeFile(uri,bytes);return true;
     }
     return {save};

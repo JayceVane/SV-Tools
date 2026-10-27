@@ -90,12 +90,12 @@ function createCursorValues({notify,valid,validate,onError=console.error}) {
             let group=groups.get(link.key);
             if(!group){group={link,version:0,probes:new Map(),secondsPerTick:catalog.secondsPerTick};groups.set(link.key,group);}
             const identity=JSON.stringify([target.moduleId,context.instancePath,target.objectId,target.indices]);
-            const existing=[...group.probes.values()].find(probe=>probe.identity===identity);
-            if(existing){existing.anchor=selection;existing.viewGeneration=viewGeneration;queue(group,true);return {ok:true,id:existing.id};}
-            const count=[...group.probes.values()].reduce((sum,probe)=>sum+probe.target.indices.length,0);
-            if(group.probes.size>=MAX_PROBES || count+target.indices.length>MAX_PROBE_BITS)throw new Error('电路读值最多观察32个信号、合计4096位，请先移除部分观察');
             const parent=match && catalog.byKey.get(match.key), declaration=parent && waveDeclaration(parent);
             const query=parent ? {id:parent.id,offsets:target.indices.map(index=>(index-declaration.right)*(declaration.left>=declaration.right?1:-1))} : null;
+            const existing=[...group.probes.values()].find(probe=>probe.identity===identity);
+            if(existing){existing.anchor=selection;existing.viewGeneration=viewGeneration;existing.query=query;queue(group,true);return {ok:true,id:existing.id};}
+            const count=[...group.probes.values()].reduce((sum,probe)=>sum+probe.target.indices.length,0);
+            if(group.probes.size>=MAX_PROBES || count+target.indices.length>MAX_PROBE_BITS)throw new Error('电路读值最多观察32个信号、合计4096位，请先移除部分观察');
             const contiguous=target.indices.every((index,position)=>!position || index-target.indices[position-1]===target.indices[1]-target.indices[0]) && (target.indices.length===1 || Math.abs(target.indices[1]-target.indices[0])===1);
             const range=contiguous ? '['+target.indices.at(-1)+(target.indices.length>1?':'+target.indices[0]:'')+']' : '['+target.indices.slice().reverse().join(',')+']';
             const probe={id:String(++sequence),identity,target,context,anchor:selection,viewGeneration,query,
