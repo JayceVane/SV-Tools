@@ -12,6 +12,8 @@
 | `src/project/tree-model.js` | 文件角色汇总和实例角色投影，不生成信号树节点。 |
 | `src/project/index.js` | 单侧边栏宿主、工程切换、令牌化动作和源码定位。 |
 | `src/project/view.js` | 主题化Webview与本地脚本CSP。 |
+| `src/project/style.css` | 文件树主滚动区、明显展开控件／角色标记、主题及窄面板布局、底部流程区。 |
+| `src/project/icons.js` | 固定路径SVG图标，文件／文件夹／实例／方向／工具动作共用。 |
 | `src/project/client.js` | 右侧角色标记、提示、文件／实例切换、菜单与展开状态。 |
 | `src/extension.js` | 共享工程上下文接线，切换使源码清单世代失效。 |
 | `src/workspace/project-sources.js` | 两类工程统一提供源文件集合。 |
@@ -39,4 +41,5 @@
 | `docs/bugs/logic-project-trace-top-context.md` | 选择TB却使用综合根的根因、回退边界与自动模式回归。 |
 | `docs/bugs/compat-yosys-systemverilog-frontend.md` | 增补编译单元冲突根因、静态后端取舍与无工具验收。 |
 | `docs/V4_1_PROJECT_MANAGER.md` | 用法、配置与实际能力限制。 |
+| `docs/images/project-panel-light.png`、`docs/images/project-panel-dark.png` | 实际Webview模板的亮暗主题示例预览。 |
 | `docs/V4_1_PROJECT_MANAGER_FILES.md` | 本变更清单。 |

@@ -11,8 +11,15 @@ const LOCAL_ACTIONS = [{ id: 'setTop', label: '设置工程顶层…' }, { id: '
     {id:'moveToSim',label:'移入仿真集'}, {id:'moveToSources',label:'移入设计集'}];
 const VIVADO_ACTIONS = ['setTopSynth', 'setTopSim', 'moveToSim', 'moveToSources', 'removeFile', 'elaborate'];
 const VIVADO_LABELS = ['设置综合顶层…', '设置仿真顶层…', '移入仿真集', '移入设计集', '移出工程', '详细化模块…'];
-const RUN_ACTIONS = ['synthesize', 'implement', 'reportSynth', 'reportImplUtil', 'reportTiming', 'bitstream', 'stop'];
-const RUN_LABELS = ['工程综合', '布局布线', '综合报告', '资源报告', '时序报告', '生成 Bitstream', '停止 Vivado 任务'];
+const RUN_ACTIONS = [
+    { id: 'synthesize', label: '综合', icon: 'synthesize', group: 'build' },
+    { id: 'implement', label: '布局布线', icon: 'implement', group: 'build' },
+    { id: 'bitstream', label: '生成 Bitstream', icon: 'bitstream', group: 'build' },
+    { id: 'stop', label: '停止任务', icon: 'stop', group: 'build' },
+    { id: 'reportSynth', label: '综合报告', icon: 'report', group: 'reports' },
+    { id: 'reportImplUtil', label: '资源报告', icon: 'report', group: 'reports' },
+    { id: 'reportTiming', label: '时序报告', icon: 'report', group: 'reports' }
+];
 /**
  * 单一侧边栏；页面只传节点令牌和允许的动作，文件路径与工程身份由宿主持有。
  * @param {object} context 扩展上下文。
@@ -58,7 +65,7 @@ function activateProjectView(context, { vscode, projects, vivado }) {
     function actionList() {
         if (!project) return [];
         return [{ id: 'trace', label: '追踪编辑器所选信号' }, { id: 'traceTrigger', label: traceTrigger() === 'selection' ? '✓ 自动追踪 · 切换为手动触发' : '手动追踪 · 切换为选择即触发' }, {id:'expandAll',label:'全部展开'}, {id:'collapseAll',label:'全部收起'},
-            ...(project?.kind === 'vivado' ? RUN_ACTIONS.map((id, index) => ({ id, label: RUN_LABELS[index] })) : [{ id: 'edit', label: '编辑工程配置（顶层、宏、include目录）' }])];
+            ...(project?.kind === 'vivado' ? RUN_ACTIONS : [{ id: 'edit', label: '编辑工程配置（顶层、宏、include目录）' }])];
     }
     function send() {
         if (!view || disposed) {
@@ -66,7 +73,8 @@ function activateProjectView(context, { vscode, projects, vivado }) {
         }
         const currentFlow = flow.get(), projection = projections.get(project?.id) || expandedState[project?.id]?.projection || 'files';
         void view.webview.postMessage({ type: 'snapshot', revision, project: project ? { id: project.id, name: project.name, kind: project.kind } : null, nodes, projection,
-            tracing: !!currentFlow, traceId: currentFlow?.traceId, traceRoot: currentFlow ? `${currentFlow.contextKind === 'simulation' ? '仿真' : '设计'}追踪根：${currentFlow.top}${currentFlow.rootFallback ? '（所选模块）' : ''}` : '', pinned: currentFlow?.pinned, busy, message, actions: actionList(), issues: currentFlow?.issues ||
+            tracing: !!currentFlow, traceId: currentFlow?.traceId, traceRoot: currentFlow ? `${currentFlow.contextKind === 'simulation' ? '仿真' : '设计'}追踪根：${currentFlow.top}${currentFlow.rootFallback ? '（所选模块）' : ''}` : '', pinned: currentFlow?.pinned, busy, message,
+            actions: actionList().filter(action => !action.group), toolActions: project?.kind === 'vivado' ? RUN_ACTIONS : [], issues: currentFlow?.issues ||
                 (projection === 'instances' ? ['源码引用预览；执行信号追踪后显示静态RTL连接中可确定的实例层级'] : []) });
     }
     async function refresh() {

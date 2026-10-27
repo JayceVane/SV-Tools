@@ -2,6 +2,12 @@
 
 All notable changes to the SystemVerilog VSCode Extension will be documented in this file.
 
+## [Unreleased] - 工程面板与 Vivado 流程区
+
+- Vivado工程在文件树下方集中提供综合、布局布线、Bitstream、停止任务及报告入口；顶部Vivado按钮可展开流程区，添加文件移到该区域。自管理工程保留顶部添加入口。
+- 文件树采用更清晰的SVG文件／文件夹图标、展开箭头、层级引导线及右侧信号方向标记；文件夹名称支持直接展开，字体大小保持原设置。
+- 静态分析说明默认隐藏，按需从工程菜单查看；报告／操作菜单贴近入口展开，并保留键盘导航。
+
 ## [Unreleased] - 工程追踪上下文与自动触发
 
 - **修复工程追踪上下文：** 仿真文件优先采用相应仿真顶层，配置实例树不包含所选模块时以该模块为追踪根，避免TB信号收到无关综合顶层的提示；不修改工程top。

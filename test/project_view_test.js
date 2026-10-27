@@ -43,7 +43,7 @@ async function host(t) {
     const api = module.exports.activateProjectView(context, { vscode, projects, vivado: { refreshProjectContext: async () => {
             }, projectTree: { refresh: async () => {
                 } } }, sourceCatalog: {} });
-    provider.resolveWebviewView({ webview: { asWebviewUri: uri => uri.fsPath, postMessage: value => sent.push(value), onDidReceiveMessage(fn) {
+    provider.resolveWebviewView({ webview: { cspSource:'vscode-webview://test', asWebviewUri: uri => uri.fsPath, postMessage: value => sent.push(value), onDidReceiveMessage(fn) {
                 receive = fn;
                 return noop();
             } } });
@@ -82,9 +82,12 @@ test('空工程状态也发送恢复入口，工程文本不插入可执行HTML'
     await h.api.refresh();
     assert.equal(h.sent.at(-1).project, null);
     assert.deepEqual(h.sent.at(-1).nodes, []);
-    const html = projectHtml({ asWebviewUri: () => '/client.js' }, '/extension', { Uri: { joinPath: () => '/script' } });
+    const html = projectHtml({ cspSource:'vscode-webview://test', asWebviewUri: uri => uri }, '/extension', { Uri: { joinPath: (_, ...parts) => '/' + parts.join('/') } });
     assert.match(html, /default-src 'none'/);
     assert.match(html, /script-src 'nonce-/);
+    assert.match(html, /style-src vscode-webview:\/\/test/);
+    assert.match(html, /href="\/src\/project\/style.css"/);
+    assert.match(html, /src="\/src\/project\/icons.js"/);
     assert.ok(!html.includes('unsafe-inline'));
     const client = fs.readFileSync(path.resolve(__dirname, '../src/project/client.js'), 'utf8');
     assert.ok(!client.includes('innerHTML'));
@@ -99,6 +102,28 @@ test('工程菜单允许切换自动/手动追踪，并即时显示当前模式'
     await h.message({action:'command',revision:h.sent.at(-1).revision,command:'traceTrigger'});
     assert.match(h.sent.at(-1).actions.find(action=>action.id==='traceTrigger').label,/自动追踪/);
     assert.deepEqual(h.errors,[]);
+});
+
+test('Vivado流程独立提供七项命令，仍校验工程身份与快照世代', async t => {
+    const h=await host(t),local=h.api.getSnapshot().project;
+    assert.deepEqual(h.sent.at(-1).toolActions,[]);
+    h.setProject({...local,id:'vivado',kind:'vivado',path:path.resolve('bin/top.xpr')});
+    await h.api.refresh();
+    let snapshot=h.sent.at(-1);
+    assert.equal(snapshot.toolActions.length,7);
+    assert.equal(snapshot.actions.some(action=>action.id==='synthesize'),false);
+    await h.message({action:'command',revision:snapshot.revision,command:'implement'});
+    assert.equal(h.calls.at(-1)[0],'svtools.vivado.tree.implement');
+    assert.equal(h.calls.at(-1)[1].nodeData.xpr,path.resolve('bin/top.xpr'));
+    snapshot=h.sent.at(-1);
+    h.setProject(local);
+    await h.api.refresh();
+    const count=h.calls.length;
+    await h.message({action:'command',revision:snapshot.revision,command:'bitstream'});
+    assert.equal(h.calls.length,count);
+    await h.message({action:'command',revision:h.sent.at(-1).revision,command:'synthesize'});
+    assert.equal(h.calls.length,count);
+    assert.match(h.errors.at(-1),/允许列表/);
 });
 test('文件视图聚合角色，实例视图区分同文件多实例，信号不会成为树节点', () => {
     const file = path.resolve('bin/leaf.sv'), project = { root: path.dirname(file), sets: [{ name: 'sources', files: [file] }] }, nodes = [{ id: 'a', parentId: null, moduleName: 'leaf', label: 'u_a : leaf', source: { path: file }, names: ['u_a'], roles: ['internal', 'output'], details: [], declaration: { name: 'r_data', indices: [0] } }, { id: 'b', parentId: null, moduleName: 'leaf', label: 'u_b : leaf', source: { path: file }, names: ['u_b'], roles: ['input'], details: [] }];
