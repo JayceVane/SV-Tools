@@ -7,6 +7,7 @@
 - 交付`bin/private-dist/svtools-4.1.0-beta.4-local.17-win32-x64.vsix`，18,732,202字节，SHA256 `793fce3e26fcff37e34df0773ae283c0d3dc3701fda70878c0e4df3df3974887`。507项归档载荷一致、140项公开src脚本与当前源码一致，私有12项运行文件保持Local.16哈希。验收记录`bin/vivado-task-retention-delivery.json`，完整日志`bin/vivado-task-retention-local-build.log`。
 - 用户明确选择“确认工具已停止后，仅保留最近5次并删除其余”。进程核验未发现Vivado/xsim/xelab/xvlog/xvhdl；对指定actions/tasks根生成全部文件指纹和删除计划，逐项核验边界／链接／变化后实际删除62份旧记录，释放1,023,971字节。actions由57减到5，tasks由10减到0；保留5份的全部文件指纹不变。它们是action-bJJpa5、action-MNYUhi、action-kp9oRf、action-Si2MxL、action-PH88US。
 - 旧数据清理脚本、计划、报告、复核分别是`bin/vivado-legacy-cleanup.ps1`、`vivado-legacy-cleanup-plan.json`、`vivado-legacy-cleanup-report.json`、`vivado-legacy-cleanup-confirmation.json`，未纳入Git。这是明确授权的一次性清理，不代表自动清理可以删除无完成标记目录；留下的5份旧记录仍在actions，不迁移、不补写完成标记，新任务预算仅覆盖新受控记录。
+- 用户随后追加`.svtools/tasks`，延续相同保留最近5次／删除其余的明确授权。只读盘点301份xvlog记录，仅5份有完成标记，没有源码快照类型或链接；核验无活动编译／仿真进程后，生成指纹清单并删除296份，保留最新5份全部指纹不变，释放190,916字节。通用自动保留机制本身已有实现，未修改该产品逻辑。剩余xvlog-pdKudP、xvlog-s8fPNI、xvlog-Kd31Sr、xvlog-NBgLRk、xvlog-1ihUpS，其中一份旧记录仍无完成标记，不伪造终态。脚本／计划／报告／复核位于`bin/general-task-cleanup*`；总交付JSON已增补该结果。
 
 没有安装、推送、合并或发布；需用户安装Local.17后，后续运行才启用新布局。源码及交接均已保存，用法见`docs/TOOLCHAINS.md`，完整文件说明见`docs/VIVADO_TASK_RETENTION_FILES.md`，根因见`docs/bugs/logic-vivado-task-layout.md`。报告、波形和Vivado工程运行目录不在此次清理范围。当前没有必须完成的遗留工作。
 

@@ -19,3 +19,4 @@
 本地验收产物（`bin/`下未纳入Git）：`vivado-task-retention-local-build.log`记录全量回归，
 `vivado-task-retention-package-verification.json`记录安装包核对；
 `vivado-legacy-cleanup.ps1`及对应计划／报告／确认JSON记录本轮用户授权的旧目录清理。
+用户追加通用任务目录后的同类记录为`general-task-cleanup.ps1`及对应计划／报告／确认JSON。
