@@ -35,7 +35,7 @@ onLine捕获普通ERROR及带文件/行号的error，哪怕退出码为0也不�
 
 > **发现方式**：用户在工程中追踪信号，顶层为adder，无关sfifo文件报错。
 > **修复位置**：`project/flow-controller.js`、`project/rtl-worker.js`、`rtl-model.js`、`rtl-expression.js`。
-> **修复提交**：本轮提交后回填。
+> **修复提交**：`be6fdb2`。
 
 ```text
 1. Executing SLANG frontend.

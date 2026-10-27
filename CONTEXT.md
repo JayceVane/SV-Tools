@@ -1,6 +1,6 @@
 # 工程追踪静态RTL后端修复（2026-10-27）
 
-当前分支`codex/fix-rtl-project-trace`，基线`a636f33`。用户报告工程信号追踪因sfifo.sv编译单元timeunit报错，并要求不依赖Yosys。根因是原工程追踪将DesignSrcs全部include到同一编译单元，使后续文件的合法时间声明位于已有模块之后；没有修改用户RTL，也没有在本次改写电路生成包装器。
+当前分支`codex/fix-rtl-project-trace`，基线`a636f33`，修复提交`be6fdb2`。用户报告工程信号追踪因sfifo.sv编译单元timeunit报错，并要求不依赖Yosys。根因是原工程追踪将DesignSrcs全部include到同一编译单元，使后续文件的合法时间声明位于已有模块之后；没有修改用户RTL，也没有在本次改写电路生成包装器。
 
 - 工程追踪默认使用独立`project/rtl-worker.js`，不启动Yosys/ELK、不创建工具任务或临时网表。`rtl-model.js`适配声明、已知参数、连续别名和明确实例，`rtl-expression.js`有界解析常量/直接位表达式，共用原跨层端口查询及源码快照核验。
 - 支持非ANSI顺序端口、隐式命名/通配、字面include、升降序/切片/拼接/复制和参数覆盖。普通宏、生成块、未知类型/范围不展开，明确止步；多驱动、条件驱动及未解析实例阻止不安全的别名合并。静态结果不是完整SystemVerilog详细化证明。
