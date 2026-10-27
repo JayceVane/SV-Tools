@@ -3,7 +3,7 @@
 > **发现方式**：隔离 VS Code 工程管理端到端验收
 > **定位耗时**：约10分钟
 > **修复位置**：`src/project/flow-controller.js` / `projectChanged`，`src/project/index.js` / 工程变更监听
-> **修复提交**：待功能提交后回填
+> **修复提交**：`148d9f0`
 
 ## 症状
 
