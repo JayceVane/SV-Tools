@@ -2,7 +2,7 @@
 
 > **发现方式**：4.1严重缺陷排查；仅在隔离夹具写入。
 > **修复位置**：`workspace/export-target.js`、`waveform/layout-files.js`、`graphics/image-files.js`。
-> **修复提交**：待提交后回填。
+> **修复提交**：`fa0ecaaa196d1dc24c74002f5ffaae157281a652`。
 
 ## 症状
 

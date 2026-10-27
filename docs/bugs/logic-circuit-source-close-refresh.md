@@ -2,7 +2,7 @@
 
 > **发现方式**：4.1严重缺陷排查的失败测试。
 > **修复位置**：`src/circuit/source-watch.js`、`src/circuit/index.js`。
-> **修复提交**：待提交后回填。
+> **修复提交**：`fa0ecaaa196d1dc24c74002f5ffaae157281a652`。
 
 ## 症状与证据
 
