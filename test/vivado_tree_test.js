@@ -120,8 +120,8 @@ test('XPR创建/删除监听触发更新，不只监听内容变化', async t =>
 
 test('右键未加入文件直接使用所选文件，仅询问真实工程文件集', async t => {
     const f = await fixture(t); let script;
-    const h = await harness(f, { runScript: async file => {
-        script = await fs.readFile(file, 'utf8'); const text = await fs.readFile(f.xpr, 'utf8');
+    const h = await harness(f, { runScript: async input => {
+        script = input.body; const text = await fs.readFile(f.xpr, 'utf8');
         await fs.writeFile(f.xpr, text.replace('<Config>', '<File Path="$PPRDIR/other.sv"/><Config>'));
         return { code: 0, status: 'success', stdout: '' };
     } });

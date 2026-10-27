@@ -175,14 +175,7 @@ function activateProjectTree(context, deps) {
             }
         }
         await checkCurrent();
-        const base = vscode.workspace.getWorkspaceFolder(vscode.Uri.file(xpr))?.uri.fsPath || path.dirname(xpr);
-        const parent = path.join(base, '.svtools', 'vivado', 'actions');
-        await fs.promises.mkdir(parent, { recursive: true });
-        const directory = await fs.promises.mkdtemp(path.join(parent, 'action-'));
-        const scriptPath = path.join(directory, name);
-        await fs.promises.writeFile(scriptPath, body);
-        await checkCurrent();
-        return runScript(scriptPath, { quiet: true, panel: true });
+        return runScript({ anchor: xpr, name, body, validate: checkCurrent }, { quiet: true, panel: true });
     }
 
     /**

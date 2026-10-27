@@ -2,6 +2,11 @@
 
 All notable changes to the SystemVerilog VSCode Extension will be documented in this file.
 
+## [Unreleased] - Vivado 任务目录统一保留
+
+- 修复每次动作创建独立父目录，导致“保留最近几次”无法限制总目录数的问题。新Vivado仿真与工程操作统一归入`.svtools/vivado/tasks/vivado-*`，Tcl与完整日志成套保留，默认最近5轮，可通过`svtools.tasks.retainedRuns`调整。
+- 不再生成`actions/action-*`和嵌套的任务历史；脚本准备也纳入取消、工程身份与目录完成协议，失败／取消不会留下未归属的动作目录。旧版无完成标记目录保守保留，用户Tcl、工程运行产物、报告和波形不参与自动淘汰。
+
 ## [Unreleased] - 工程面板与 Vivado 流程区
 
 - Vivado工程在文件树下方集中提供综合、布局布线、Bitstream、停止任务及报告入口；顶部Vivado按钮可展开流程区，添加文件移到该区域。自管理工程保留顶部添加入口。

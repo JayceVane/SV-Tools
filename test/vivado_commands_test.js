@@ -70,7 +70,7 @@ async function harness(t, f, options = {}) {
         workspace: { workspaceFolders: folders, getWorkspaceFolder: resource => folders.find(folder => {
                 const relative = path.relative(folder.uri.fsPath, resource.fsPath); return relative !== '..' && !relative.startsWith('..' + path.sep) && !path.isAbsolute(relative);
             }), findFiles: async () => [], asRelativePath: file => path.relative(wsRoot || f.root, file),
-            getConfiguration: () => ({ get: (key, fallback) => key === 'path' ? f.bin : key === 'timeoutMs' ? 3000 : fallback }),
+            getConfiguration: () => ({ get: (key, fallback) => key === 'path' ? f.bin : key === 'timeoutMs' ? 3000 : key === 'retainedRuns' ? (h.retainedRuns ?? fallback) : fallback }),
             createFileSystemWatcher: () => ({ dispose() {}, onDidChange: disposable, onDidCreate: disposable, onDidDelete: disposable }),
             onDidChangeWorkspaceFolders: disposable, onDidSaveTextDocument: disposable },
         commands: { registerCommand(name, handler) { commands.set(name, handler); return disposable(); },
@@ -114,8 +114,8 @@ test('编辑器加入选择真实自定义文件集，脚本独立存储在所�
     assert.equal((await add(h)).code, 0);
     assert.deepEqual(h.picks[0].choices.map(choice => choice.value), ['rtl_custom', 'sim_custom']);
     assert.match(h.calls[0].body, /get_filesets sim_custom/); assert.ok(h.calls[0].body.includes(f.xpr.replace(/\\/g, '/')));
-    assert.ok(h.calls[0].path.startsWith(path.join(f.root, 'actual', '.svtools', 'vivado', 'actions') + path.sep));
-    assert.match(h.calls[0].path, /action-[^\\/]+[\\/]add_file\.tcl$/);
+    assert.ok(h.calls[0].path.startsWith(path.join(f.root, 'actual', '.svtools', 'vivado', 'tasks') + path.sep));
+    assert.match(h.calls[0].path, /vivado-[^\\/]+[\\/]add_file\.tcl$/);
 });
 
 test('移出按 XPR 实际成员归属，源码目录也能属于自定义仿真集', async t => {
@@ -177,10 +177,49 @@ test('连续增量操作创建不同动作目录，前次 Tcl 全文保持不变
     assert.equal(await fs.readFile(h.calls[0].path, 'utf8'), previous);
 });
 
+test('编辑器仿真和面板操作在同一父目录统一淘汰，脚本/日志成套保留，旧目录不猜测删除', async t => {
+    const f=await fixture(t,['sim_custom']),h=await harness(t,f);
+    h.retainedRuns=2;
+    const base=path.join(f.root,'actual','.svtools','vivado','tasks'),legacy=path.join(base,'vivado-legacy');
+    await fs.mkdir(legacy,{recursive:true});await fs.writeFile(path.join(legacy,'old.log'),'legacy');
+    h.onRun=async settings=>{
+        const result=await settings.task.run(process.execPath,['-e','console.log("batch log")'],{stage:'vivado',cwd:settings.cwd});
+        assert.equal(path.dirname(result.logPath),path.dirname(settings.scriptPath));
+        return {...success,logPath:result.logPath};
+    };
+    for(let index=0;index<6;index++) {
+        if(index%2) await h.commands.get('svtools.vivado.tree.synthesize')();
+        else await h.api.simulateWithVivado();
+    }
+    assert.equal(h.calls.length,6);
+    const directories=(await fs.readdir(base)).filter(name=>name!=='vivado-legacy');
+    assert.equal(directories.length,2);
+    assert.deepEqual(new Set(directories),new Set(h.calls.slice(-2).map(call=>path.basename(path.dirname(call.path)))));
+    for(const call of h.calls.slice(-2)) {
+        assert.equal(await fs.readFile(call.path,'utf8'),call.body);
+        assert.match(await fs.readFile(path.join(path.dirname(call.path),'01-vivado.log'),'utf8'),/batch log/);
+        await fs.stat(path.join(path.dirname(call.path),'.svtools-task-complete.json'));
+    }
+    assert.equal(await fs.readFile(path.join(legacy,'old.log'),'utf8'),'legacy');
+    await assert.rejects(fs.stat(path.join(f.root,'actual','.svtools','vivado','actions')),{code:'ENOENT'});
+});
+
+test('脚本生成阶段取消仍交还任务目录并释放busy，不启动批处理', async t => {
+    const f=await fixture(t),h=await harness(t,f);let checks=0;
+    const result=await h.api.runScript({anchor:f.xpr,name:'cancelled.tcl',body:'puts cancelled',validate:()=>{
+        if(++checks===2)throw Object.assign(new Error('project changed'),{code:'TOOL_CANCELLED'});
+    }});
+    assert.equal(result.status,'cancelled');assert.equal(h.calls.length,0);
+    const base=path.join(f.root,'actual','.svtools','vivado','tasks'),directories=await fs.readdir(base);
+    assert.equal(directories.length,1);
+    await fs.stat(path.join(base,directories[0],'.svtools-task-complete.json'));
+    assert.equal((await add(h)).code,0);
+});
+
 test('工作区外显式选择工程也可增量管理，不读取 workspaceFolders[0]', async t => {
     const f = await fixture(t, ['sim_custom']), h = await harness(t, f, { workspaceRoot: null });
     await remove(h); assert.equal(h.calls.length, 1);
-    assert.ok(h.calls[0].path.startsWith(path.join(path.dirname(f.xpr), '.svtools', 'vivado', 'actions') + path.sep));
+    assert.ok(h.calls[0].path.startsWith(path.join(path.dirname(f.xpr), '.svtools', 'vivado', 'tasks') + path.sep));
 });
 
 test('无工程及损坏工程显示错误，不运行脚本且树初始化完整', async t => {
