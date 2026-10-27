@@ -3,7 +3,7 @@
 > **发现方式**：用户报告`.svtools/vivado/actions`与`tasks`不断增加。
 > **定位范围**：Vivado脚本准备、运行目录分配和历史淘汰作用域。
 > **修复位置**：`src/vivado/script-task.js`、`index.js`、`projectTree.js`。
-> **修复提交**：待提交后回填。
+> **修复提交**：`f6c370b`。
 
 ## 症状
 
