@@ -1,3 +1,17 @@
+# 工程面板与Vivado流程区（2026-10-27）
+
+当前分支`codex/feat-project-panel-polish`，基线`4cb76d1`，功能提交`6ad6dc9`。用户要求Vivado工程添加位置改作工具入口、文件树下方集中综合／实现等流程、增强树图标／展开控件／方向标记，并去除底部常驻静态分析说明。本轮已实现，保留已有静态追踪与私有工具链。
+
+- `project/index.js`单一登记7项Vivado动作元数据，命令白名单与流程区共用。顶部“Vivado”展开文件树下方的流程区，综合／实现／Bitstream／停止为直接按钮，三类报告为锚定菜单；添加文件放在流程区，自管理工程保留顶部添加。仍调用原Vivado执行器，节点世代及工程身份校验保留。
+- `view.js`结构、`style.css`主题布局、`icons.js`固定SVG路径分离；保持原字号，强化展开控件与右侧方向标记。文件夹名称可直接展开，文件和实例标签仍定位源码。主滚动区只滚动树，流程区可按工程收起／展开。分析说明默认隐藏，从“⋯”按需查看，实际错误状态仍可见。菜单锚定入口，支持方向键及Esc恢复焦点。
+- 最终回归：语法281、golden44、Node757通过／12可选跳过、电路227通过、Local22通过／5可选跳过。最终包VS Code1.143.0和Qoder API1.106.3隔离宿主各11项通过；真实浏览器验证320px亮暗主题、240px窄布局、自管理切换、菜单位置／Esc、文件夹名称展开及按需提示，未见横向溢出、脚本或CSP错误。只验证命令路由，本轮没有执行实际Vivado综合任务。
+- 交付`bin/private-dist/svtools-4.1.0-beta.4-local.16-win32-x64.vsix`，18,730,730字节，SHA256 `bf01c55bc521951a64702eb4f8fe81a5505ef3ea0c77f8dc353627b6c5364988`。506项归档载荷一致，139项公开src脚本匹配当前源码，样式／图标另有明确核对，自用12项运行文件保持Local.15哈希。打包日志`bin/project-panel-local-build.log`，包验证`bin/project-panel-package-verification.json`，交付总记录`bin/project-panel-delivery.json`。
+- 视觉检查使用已有bundled Playwright及独立无头浏览器，不接管用户窗口。示例截图`docs/images/project-panel-light.png`和`project-panel-dark.png`已进入使用指南；它们使用真实Webview资源渲染，不代表真实工具任务状态。本次两个仅本地预览服务已精确关闭，没有新增依赖、安装扩展、推送、合并或发布。
+
+后续可根据用户实际体验微调工具区密度；目前没有必须完成的工作。全部文件说明见`docs/V4_1_PROJECT_MANAGER_FILES.md`，用法见`docs/V4_1_PROJECT_MANAGER.md`。既有宏/generate静态分析限制不变。
+
+以下为历史交接。
+
 # 工程追踪上下文与默认自动模式（2026-10-27）
 
 当前分支`codex/fix-project-trace-context`，基线`3b7169d`，修复提交`4302322`。用户在`sim/cdc/tb_cdc_hs_bits.sv`选择信号却收到adder的静态提示，并要求默认选择即追踪、可手动触发。根因是追踪入口无条件用综合top，读入TB不代表实例树包含TB。
