@@ -3,7 +3,7 @@
 > **发现方式**：用户选中仿真TB信号，侧边栏却报adder中用户类型／generate未解析。
 > **定位耗时**：本轮定位与隔离宿主回归。
 > **修复位置**：`src/project/trace-context.js`、`rtl-worker.js`、`flow-controller.js`。
-> **修复提交**：待提交后回填。
+> **修复提交**：`4302322`。
 
 ## 症状
 

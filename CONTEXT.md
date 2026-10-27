@@ -1,3 +1,17 @@
+# 工程追踪上下文与默认自动模式（2026-10-27）
+
+当前分支`codex/fix-project-trace-context`，基线`3b7169d`，修复提交`4302322`。用户在`sim/cdc/tb_cdc_hs_bits.sv`选择信号却收到adder的静态提示，并要求默认选择即追踪、可手动触发。根因是追踪入口无条件用综合top，读入TB不代表实例树包含TB。
+
+- 新增`project/trace-context.js`集中选择文件集／候选根：仿真文件优先仿真top，设计文件优先综合top；核验目标模块路径、行号及实例可达性，不包含时回退所选模块。未知位宽不通过换根掩盖，工程top不修改。RTL模型索引一次解析，备选根独立建模和提示。
+- 默认`svtools.project.traceTrigger=selection`，首次选中即可建模；300ms防抖、串行合并选择、旧选择不发布，已有匹配模型复用。工程“⋯”菜单切换`manual`，右键显式追踪仍保留实例选择。自动模式不弹框／抢焦点，侧边栏显示实际追踪根。清除失效结果同时释放固定状态，防止后续自动追踪被永久阻止。
+- 最终回归：语法280、golden44、Node754通过／12可选跳过、电路227通过、Local22通过／5可选跳过。包中代码在隔离VS Code1.143.0与Qoder API1.106.3各11项通过，覆盖首次自动、手动、模型跟随、TB根、连续选择和工程切换。
+- 对用户工程13个HDL输入只读验证：即使候选综合top为adder，TB中`i_clk_s`、`i_data_s`、`o_data_m`、`i_rst_n_m`、`l_data_s`正确追踪到TB与DUT的相应方向，输入哈希前后不变。报告`bin/project-trace-context-corelib-validation.json`。
+- 最终交付`bin/private-dist/svtools-4.1.0-beta.4-local.15-win32-x64.vsix`，SHA256 `dfa9ef87d861375c7757b3ed7939b15ff5e1b362af7797edad459cd4786b2f50`，18,726,773字节。504项归档载荷与staging一致，138项公开src脚本与当前源码一致，自用12项运行文件保持Local.13哈希。`readme.md`／`changelog.md`由vsce改写相对链接，单独识别。验证`bin/project-trace-context-package-verification.json`，完整交付记录`bin/project-trace-context-delivery.json`，回归日志`bin/project-trace-context-local-build-final.log`。
+
+本轮已提交全部产品修改，没有安装、推送、合并或发布。Local.14是补查固定状态问题前的中间构建，应使用Local.15。用法与完整文件说明见`docs/V4_1_PROJECT_MANAGER.md`和`docs/V4_1_PROJECT_MANAGER_FILES.md`；根因笔记`docs/bugs/logic-project-trace-top-context.md`。宏/generate/未知类型的静态展开限制仍保留；后续根据实际工程案例扩展明确合同。
+
+以下为历史交接。
+
 # 工程追踪静态RTL后端修复（2026-10-27）
 
 当前分支`codex/fix-rtl-project-trace`，基线`a636f33`，修复提交`be6fdb2`。用户报告工程信号追踪因sfifo.sv编译单元timeunit报错，并要求不依赖Yosys。根因是原工程追踪将DesignSrcs全部include到同一编译单元，使后续文件的合法时间声明位于已有模块之后；没有修改用户RTL，也没有在本次改写电路生成包装器。
