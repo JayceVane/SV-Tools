@@ -49,7 +49,7 @@ function activateVivado(context, deps) {
     let projectTree = null;
     const retainedRuns = () => vscode.workspace.getConfiguration('svtools.tasks').get('retainedRuns', 5);
     const output = createBufferedOutput(out), tasks = createToolTaskManager({ retention: { keep: retainedRuns }, onChange(job) { projectTree?.setRunning(job.finished ? null : job.state); } });
-    const projectSelection = createProjectSelection({ workspace: vscode.workspace, state: context.workspaceState });
+    const projectSelection = deps?.projectSelection || createProjectSelection({ workspace: vscode.workspace, state: context.workspaceState });
 
     let running = null;      // { job, scriptPath }，准备阶段也可停止。
     let statusItem = null;
@@ -684,7 +684,7 @@ function activateVivado(context, deps) {
     try {
         projectTree = activateProjectTree(context, {
             vscode, out, log, findProjectXpr: refreshProjectContext, runScript, selectProject, stopRun,
-            isRunning: () => !!running || !!incrementalOperation
+            isRunning: () => !!running || !!incrementalOperation, headless: deps?.projectView === false
         });
     } catch (err) {
         log('[vivado] 工程树初始化失败: ' + (err && err.message));

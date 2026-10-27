@@ -92,8 +92,8 @@
   "cmd.vivado_tree_implement.title": "Run Place & Route",
   "cmd.vivado_tree_reportSynth.title": "Synthesis Report (Utilization & Logic Levels)",
   "cmd.vivado_tree_reportImpl.title": "Implementation Report (Timing Summary & Utilization)",
-  "viewcontainer.vivado.title": "Vivado Project",
-  "view.vivado.projectTree.name": "Project Files",
+  "viewcontainer.vivado.title": "SV Tools Projects",
+  "view.vivado.projectTree.name": "Project",
   "cmd.vivado_tree_reportImplUtil.title": "Place & Route Report (Utilization)",
   "cmd.vivado_tree_reportTiming.title": "Timing Report (WNS/TNS)",
   "cmd.vivado_tree_bitstream.title": "Generate Bitstream",
@@ -121,5 +121,11 @@
   "cfg.circuit.generationTimeout": "Maximum circuit generation time in seconds.",
   "cmd.circuit.fromVivadoFile.title": "View Current File Circuit (Vivado)",
   "cmd.circuit.traceDrivers.title": "Trace Signal Drivers",
-  "cmd.circuit.traceLoads.title": "Trace Signal Loads"
+  "cmd.circuit.traceLoads.title": "Trace Signal Loads",
+  "cmd.project.choose.title": "Switch Project…",
+  "cmd.project.create.title": "Create SV Tools Project…",
+  "cmd.project.add.title": "Add to Current Project",
+  "cmd.project.addToProject.title": "Add to SV Tools Project…",
+  "cmd.project.trace.title": "Trace Selected Signal in Project",
+  "cmd.project.refresh.title": "Refresh Project"
 }

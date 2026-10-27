@@ -30,6 +30,9 @@ const { createFormatter } = require('./editor/formatting');
 const { createEditorCommands } = require('./editor/commands');
 const { createSourceCatalog } = require('./workspace/source-catalog');
 const { createProjectSourceProvider } = require('./workspace/project-sources');
+const { createProjectSelection } = require('./vivado/projects');
+const { createProjectManager } = require('./project/manager');
+const { activateProjectView } = require('./project');
 const { createWorkspaceSourceIndex } = require('./workspace/sources');
 const { createLanguageProviders } = require('./editor/language');
 const nativeLoader = createNativeLoader();
@@ -58,10 +61,12 @@ function reportNativeMissing() {
 function activate(context) {
     console.log('SystemVerilog extension is now active!');
 
-    const vivado = activateVivado(context);
-    const sourceCatalog = createSourceCatalog({ vscode, getPreferred: createProjectSourceProvider({ vscode, projectSelection: vivado.projectSelection }) });
+    const projects = createProjectManager({vscode,state:context.workspaceState,vivadoSelection:createProjectSelection({workspace:vscode.workspace,state:context.workspaceState})});
+    context.subscriptions.push(projects);
+    const vivado = activateVivado(context,{projectSelection:projects.vivadoSelection,projectView:false});
+    const sourceCatalog = createSourceCatalog({ vscode, getPreferred: createProjectSourceProvider({ vscode, projectSelection: vivado.projectSelection, projects }) });
     const sourceIndex = createWorkspaceSourceIndex({ workspace: vscode.workspace, sourceCatalog });
-    context.subscriptions.push(sourceCatalog, sourceCatalog.onDidChange(sourceIndex.invalidate), vivado.projectSelection.onDidChange(sourceCatalog.refreshContext));
+    context.subscriptions.push(sourceCatalog, sourceCatalog.onDidChange(sourceIndex.invalidate), vivado.projectSelection.onDidChange(sourceCatalog.invalidate));
     const dependencies = { vscode, loadNativeModule, reportNativeMissing, sourceCatalog };
     const { formatDocument } = createFormatter(dependencies);
     const languageProviders = createLanguageProviders(dependencies);
@@ -148,7 +153,8 @@ function activate(context) {
 
     // Vivado TCL 批处理运行与工程创建
     const circuit = activateCircuitViewer(context, { vivado, sourceCatalog, waveLinks });
-    return { vivado, circuit, waveViewer, waveLinks };
+    const projectView = activateProjectView(context,{vscode,projects,vivado,sourceCatalog});
+    return { vivado, circuit, waveViewer, waveLinks, projects, projectView };
 }
 
 /**

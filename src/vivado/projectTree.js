@@ -73,7 +73,7 @@ function activateProjectTree(context, deps) {
     roots = items([info('正在发现 Vivado 工程…')]);
     const provider = { onDidChangeTreeData: changes.event, getTreeItem: item => item,
         getChildren: item => item ? item.children || [] : roots, getParent: item => parents.get(item) };
-    const tree = vscode.window.createTreeView('svtools.vivado.projectTree', { treeDataProvider: provider, showCollapseAll: true });
+    const tree = deps.headless ? { dispose() {}, async reveal() {} } : vscode.window.createTreeView('svtools.vivado.projectTree', { treeDataProvider: provider, showCollapseAll: true });
     context.subscriptions.push(tree, changes);
 
     /** 每次构建局部快照，提交时核对代次；错误与空工作区也有可见内容。 */
@@ -425,6 +425,7 @@ function activateProjectTree(context, deps) {
 
     /** 全部展开（视图标题栏按钮；收起用 VS Code 内置 collapse-all）。 */
     async function expandAll() {
+        if (deps.headless) return vscode.commands.executeCommand('svtools.project.expandAll');
         await refresh(); const stack = [...roots]; let expanded = 0;
         while (stack.length) {
             const n = stack.pop();

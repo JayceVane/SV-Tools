@@ -92,8 +92,8 @@
   "cmd.vivado_tree_implement.title": "运行布局布线",
   "cmd.vivado_tree_reportSynth.title": "综合报告（资源占用 + 逻辑级数）",
   "cmd.vivado_tree_reportImpl.title": "实现报告（时序汇总 + 资源占用）",
-  "viewcontainer.vivado.title": "Vivado 工程",
-  "view.vivado.projectTree.name": "工程文件",
+  "viewcontainer.vivado.title": "SV Tools 工程",
+  "view.vivado.projectTree.name": "工程",
   "cmd.vivado_tree_reportImplUtil.title": "布局布线报告（资源占用）",
   "cmd.vivado_tree_reportTiming.title": "时序报告（WNS/TNS）",
   "cmd.vivado_tree_bitstream.title": "生成 Bitstream",
@@ -121,5 +121,11 @@
   "cfg.circuit.generationTimeout": "电路生成超时，单位秒。",
   "cmd.circuit.fromVivadoFile.title": "查看当前文件电路（Vivado）",
   "cmd.circuit.traceDrivers.title": "追踪信号驱动",
-  "cmd.circuit.traceLoads.title": "追踪信号负载"
+  "cmd.circuit.traceLoads.title": "追踪信号负载",
+  "cmd.project.choose.title": "切换工程…",
+  "cmd.project.create.title": "新建 SV Tools 工程…",
+  "cmd.project.add.title": "添加到当前工程",
+  "cmd.project.addToProject.title": "添加到 SV Tools 工程…",
+  "cmd.project.trace.title": "在工程中追踪所选信号",
+  "cmd.project.refresh.title": "刷新工程"
 }

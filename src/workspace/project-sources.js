@@ -5,9 +5,19 @@ const { parseXprText, samePath } = require('../vivado/xpr');
 const inside = (file, root) => { const relative = path.relative(root, file); return relative !== '..' && !relative.startsWith('..' + path.sep) && !path.isAbsolute(relative); };
 
 /** @param {{vscode:object,projectSelection:object}} deps @returns {Function} 当前工程成员适配；有多个仿真集且无法定位时保留全部，避免猜测。 */
-function createProjectSourceProvider({ vscode, projectSelection }) {
+function createProjectSourceProvider({ vscode, projectSelection, projects }) {
     let cached;
     return async ({ root, file }) => {
+        const active = projects ? await projects.current() : null;
+        if (active) {
+            const filesets = active.sets.filter(set => ['DesignSrcs','SimulationSrcs'].includes(set.type));
+            const member = file && filesets.some(set => set.files.some(member => samePath(member,file)));
+            if (root && !inside(root,active.root) && !inside(active.root,root)) return null;
+            if (file && !member && (!/\.vcd$/i.test(file) || !inside(file,active.root))) return null;
+            const matching = filesets.filter(set => set.type === 'SimulationSrcs' && set.files.some(member => samePath(member,file || '')));
+            const files = [...new Set(filesets.filter(set => set.type === 'DesignSrcs' || matching.length !== 1 || matching.includes(set)).flatMap(set => set.files))];
+            return {key:active.key,files,roots:[...new Set([active.root,...files.map(file => path.dirname(file))])]};
+        }
         const xpr = await projectSelection.current(); if (!xpr) return null;
         const stat = await fs.stat(xpr), key = xpr + ':' + stat.mtimeMs + ':' + stat.size;
         if (stat.size > 8 * 1024 * 1024) throw new Error('工程源码上下文的XPR超过8 MiB');

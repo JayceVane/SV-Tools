@@ -85,6 +85,7 @@ const commands = {
     load,
     traceSelection: ({ text, offset, previous }) => traceSelection(text, { offset, previous }),
     traceCandidates: payload => { currentTrace(payload); return traceCandidates(design, payload.target, sourceLocator.snapshots); },
+    projectFlow: payload => { currentTrace(payload); return require('../project/signal-flow').traceProjectSignal(design,payload); },
     traceContexts: payload => {
         currentTrace(payload);
         if (!findModule(design, payload.moduleId)) throw new Error('追踪模块不存在');

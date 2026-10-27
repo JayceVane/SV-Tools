@@ -1,3 +1,17 @@
+# 4.1统一工程管理与多层透传交接（2026-10-27）
+
+当前分支`codex/feat-project-signal-flow`，基线`6a6a170`。用户已确认单一工程侧边栏、顶部工程切换、文件／实例节点右侧角色标记，以及多层级信号透传；本轮已实现并验证。公开源码与自用ModelSim保持隔离，没有推送、合并、发布或安装。
+
+- `src/project/`拥有统一选择与配置、工程成员、Worker内真实位连接追踪、快照失效、侧边栏投影与页面。沿用原视图ID并改为WebviewView，旧Vivado管理命令无界面复用，工程top电路入口仍保留。
+- 新增16项工程测试。完整回归：golden44、Node731通过／12跳过、电路227通过；Local检查22通过／5跳过。包staging实际VS Code1.143.0和Qoder API1.106.3各8项宿主验收。
+- 自用包`bin/private-dist/svtools-4.1.0-beta.4-local.11-win32-x64.vsix`，SHA256为`d0478ad79cc9a5acc0e3c3c46eb8059520d14aba4de028d006eff213893f6439`。全量日志`bin/project-local-build-final.log`，包内容验证`bin/project-package-verification.json`。
+- 信号透传支持实际实例、父级／兄弟／子层级、改名和位重排，不按同名／同值常量连线，不跨过逻辑／寄存器／黑盒。跟随选中信号复用模型，固定不能阻止源码或工程变化的失效。切换工程释放Worker，返回后需重新追踪。
+- 未详细化的实例页仍明确标注源码引用预览；工程追踪目前用Yosys，不宣称已有Vivado层级追踪适配。源码定位复核快照；尚未做人工鼠标及明暗主题视觉验收。
+
+用法与配置见`docs/V4_1_PROJECT_MANAGER.md`，文件职责见`docs/V4_1_PROJECT_MANAGER_FILES.md`。下一步优先在实际工程试用目录跟随、实例选择和深层透传，再根据反馈完善视图交互；不自动扩大到穿越逻辑锥或跨会话持久化有效追踪。
+
+以下为历史交接。
+
 # 4.1严重缺陷审查交接（2026-10-27）
 
 当前分支`codex/fix-v4.1-critical-audit`，基线`9e2b563`。用户要求先核验严重BUG；本轮重现并修复来源失效/刷新、VCD候选重绑和导出覆盖风险。完整风险表、证据、计数及产物信息保存在被忽略的`docs/private/V4_1_CRITICAL_AUDIT.md`和`bin/critical-audit-delivery.json`。

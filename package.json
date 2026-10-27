@@ -49,7 +49,7 @@
   ],
   "main": "./extension.js",
   "scripts": {
-    "test": "npm run check && node test/golden_test.js && node --test test/task_retention_test.js test/public_package_test.js test/highlighting_test.js test/simulation_engines_test.js test/formatter_semantics_test.js test/codegen_release_test.js test/waveform_lifecycle_test.js test/module_inst_test.js test/formatter_contract_test.js test/formatter_conservation_test.js test/toolchain_test.js test/waveform_test.js test/editor_test.js test/workspace_test.js test/source_catalog_test.js test/waveform_stream_test.js test/waveform_ui_test.js test/waveform_signal_test.js test/waveform_layout_test.js test/image_export_test.js test/export_file_safety_test.js test/waveform_host_test.js test/waveform_memory_test.js test/waveform_memory_view_test.js test/waveform_float_test.js test/waveform_interaction_test.js test/waveform_renderer_test.js test/waveform_row_layout_test.js test/waveform_row_gesture_test.js test/waveform_column_layout_test.js test/waveform_column_resize_test.js test/waveform_column_client_test.js test/waveform_time_scrollbar_test.js test/waveform_circuit_link_test.js test/debug_wave_mapping_test.js test/debug_cursor_values_test.js test/process_output_test.js test/toolchain_task_test.js test/vivado_tree_test.js test/vivado_xpr_test.js test/vivado_commands_test.js test/completion_syntax_test.js test/completion_catalog_test.js test/completion_engine_test.js test/completion_index_test.js test/completion_provider_test.js && npm run test:circuit",
+    "test": "npm run check && node test/golden_test.js && node --test test/task_retention_test.js test/public_package_test.js test/highlighting_test.js test/simulation_engines_test.js test/formatter_semantics_test.js test/codegen_release_test.js test/waveform_lifecycle_test.js test/module_inst_test.js test/formatter_contract_test.js test/formatter_conservation_test.js test/toolchain_test.js test/waveform_test.js test/editor_test.js test/workspace_test.js test/source_catalog_test.js test/project_manager_test.js test/project_signal_flow_test.js test/project_view_test.js test/project_client_test.js test/waveform_stream_test.js test/waveform_ui_test.js test/waveform_signal_test.js test/waveform_layout_test.js test/image_export_test.js test/export_file_safety_test.js test/waveform_host_test.js test/waveform_memory_test.js test/waveform_memory_view_test.js test/waveform_float_test.js test/waveform_interaction_test.js test/waveform_renderer_test.js test/waveform_row_layout_test.js test/waveform_row_gesture_test.js test/waveform_column_layout_test.js test/waveform_column_resize_test.js test/waveform_column_client_test.js test/waveform_time_scrollbar_test.js test/waveform_circuit_link_test.js test/debug_wave_mapping_test.js test/debug_cursor_values_test.js test/process_output_test.js test/toolchain_task_test.js test/vivado_tree_test.js test/vivado_xpr_test.js test/vivado_commands_test.js test/completion_syntax_test.js test/completion_catalog_test.js test/completion_engine_test.js test/completion_index_test.js test/completion_provider_test.js && npm run test:circuit",
     "build:native": "node scripts/build-native.js",
     "package": "vsce package",
     "package:preview": "node scripts/package-preview.js",
@@ -399,6 +399,42 @@
         "title": "%cmd.circuit.traceLoads.title%",
         "category": "SystemVerilog Tools",
         "icon": "$(references)"
+      },
+      {
+        "command": "svtools.project.choose",
+        "title": "%cmd.project.choose.title%",
+        "category": "SV Tools",
+        "icon": "$(arrow-swap)"
+      },
+      {
+        "command": "svtools.project.create",
+        "title": "%cmd.project.create.title%",
+        "category": "SV Tools",
+        "icon": "$(new-folder)"
+      },
+      {
+        "command": "svtools.project.add",
+        "title": "%cmd.project.add.title%",
+        "category": "SV Tools",
+        "icon": "$(add)"
+      },
+      {
+        "command": "svtools.project.addToProject",
+        "title": "%cmd.project.addToProject.title%",
+        "category": "SV Tools",
+        "icon": "$(add)"
+      },
+      {
+        "command": "svtools.project.trace",
+        "title": "%cmd.project.trace.title%",
+        "category": "SV Tools",
+        "icon": "$(references)"
+      },
+      {
+        "command": "svtools.project.refresh",
+        "title": "%cmd.project.refresh.title%",
+        "category": "SV Tools",
+        "icon": "$(refresh)"
       }
     ],
     "viewsContainers": {
@@ -414,7 +450,8 @@
       "svtools-vivado": [
         {
           "id": "svtools.vivado.projectTree",
-          "name": "%view.vivado.projectTree.name%"
+          "name": "%view.vivado.projectTree.name%",
+          "type": "webview"
         }
       ]
     },
@@ -521,39 +558,24 @@
       ],
       "view/title": [
         {
-          "command": "svtools.vivado.tree.refresh",
+          "command": "svtools.circuit.fromVivado",
+          "group": "circuit@1",
+          "when": "view == svtools.vivado.projectTree && svtools.vivado.hasProject && !svtools.vivado.busy"
+        },
+        {
+          "command": "svtools.project.choose",
           "group": "navigation@1",
           "when": "view == svtools.vivado.projectTree"
         },
         {
-          "command": "svtools.vivado.tree.addFile",
-          "group": "navigation@3",
-          "when": "view == svtools.vivado.projectTree && svtools.vivado.hasProject"
-        },
-        {
-          "command": "svtools.vivado.tree.expandAll",
+          "command": "svtools.project.refresh",
           "group": "navigation@2",
-          "when": "view == svtools.vivado.projectTree && svtools.vivado.hasProject"
-        },
-        {
-          "command": "svtools.vivado.tree.selectProject",
-          "group": "navigation@0",
           "when": "view == svtools.vivado.projectTree"
         },
         {
           "command": "svtools.vivado.tree.stop",
-          "group": "navigation@0",
+          "group": "navigation@3",
           "when": "view == svtools.vivado.projectTree && svtools.vivado.busy"
-        },
-        {
-          "command": "svtools.vivado.createProject",
-          "group": "navigation@4",
-          "when": "view == svtools.vivado.projectTree && !svtools.vivado.hasProject && !svtools.vivado.busy"
-        },
-        {
-          "command": "svtools.circuit.fromVivado",
-          "when": "view == svtools.vivado.projectTree && svtools.vivado.hasProject && !svtools.vivado.busy",
-          "group": "navigation@3"
         }
       ],
       "view/item/context": [
@@ -668,6 +690,11 @@
           "command": "svtools.circuit.traceLoads",
           "group": "5_circuit_trace@2",
           "when": "resourceScheme == file && resourceExtname =~ /\\.(sv|v)$/i"
+        },
+        {
+          "command": "svtools.project.trace",
+          "group": "svtools@15",
+          "when": "editorLangId == verilog || editorLangId == systemverilog || editorLangId == system-verilog"
         }
       ],
       "svtools.submenu": [
@@ -720,6 +747,13 @@
         {
           "command": "svtools.circuit.stop",
           "group": "5_circuit"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "svtools.project.addToProject",
+          "group": "svtools@1",
+          "when": "resourceScheme == file && (explorerResourceIsFolder || resourceExtname =~ /\\.(sv|v|svh|vh)$/i)"
         }
       ]
     },
