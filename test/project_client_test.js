@@ -15,7 +15,7 @@ class Element {
     click() { this.events.click?.({target:this}); }
 }
 function client() {
-    const elements = new Map(['tree','menu','choose','projectName','projectKind','files','instances','add','refresh','actions','trace','pin','clear','message','issues'].map(id=>[id,new Element()]));
+    const elements = new Map(['tree','menu','choose','projectName','projectKind','files','instances','add','refresh','actions','trace','traceRoot','pin','clear','message','issues'].map(id=>[id,new Element()]));
     const messages=[],events={}; let saved;
     const document={ getElementById:id=>elements.get(id), createElement:tag=>new Element(tag), addEventListener(){} };
     vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../src/project/client.js'),'utf8'),{document,window:{addEventListener:(key,fn)=>{events[key]=fn;}},acquireVsCodeApi:()=>({getState:()=>({}),setState:value=>{saved=value;},postMessage:message=>messages.push(message)})});

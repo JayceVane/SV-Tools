@@ -7,16 +7,18 @@ const { tokenize } = require('../editor/completion/syntax');
 const { sourceHash } = require('../circuit/source-snapshots');
 const { traceSelection, traceCandidates, keyPath } = require('../circuit/trace-source');
 const { traceProjectSignal } = require('./signal-flow');
-const { buildRTLDesign, protectedRanges } = require('./rtl-model');
+const { buildRTLDesign, createRTLIndex, protectedRanges } = require('./rtl-model');
+const { buildTraceContext, containsTarget } = require('./trace-context');
 const MAX_FILES = 4096, MAX_FILE_BYTES = 2 * 1024 * 1024, MAX_TOTAL_BYTES = 16 * 1024 * 1024;
 let design, identity, snapshots, issues = [], generation = 0;
-async function loadRTL({ files, top, includeDirs = [], defines = [] }) {
+async function loadRTL({ files, top, tops, target, includeDirs = [], defines = [] }) {
     const version = ++generation;
     design = undefined;
     identity = undefined;
     snapshots = undefined;
     if (!Array.isArray(files) || files.length > MAX_FILES || !files.length || files.some(file => typeof file !== 'string' || !path.isAbsolute(file))
-        || typeof top !== 'string' || !top || !Array.isArray(includeDirs) || includeDirs.length > MAX_FILES || includeDirs.some(directory => typeof directory !== 'string' || !path.isAbsolute(directory))
+        || (target ? !Array.isArray(tops) || tops.length > 64 || tops.some(name => typeof name !== 'string') || typeof target.moduleName !== 'string' || typeof target.path !== 'string' || !Number.isSafeInteger(target.moduleLine) : typeof top !== 'string' || !top)
+        || !Array.isArray(includeDirs) || includeDirs.length > MAX_FILES || includeDirs.some(directory => typeof directory !== 'string' || !path.isAbsolute(directory))
         || !Array.isArray(defines) || defines.length > MAX_FILES || defines.some(define => typeof define !== 'string')) {
         throw new Error('静态RTL分析输入无效');
     }
@@ -115,12 +117,13 @@ async function loadRTL({ files, top, includeDirs = [], defines = [] }) {
     if (version !== generation) {
         throw new Error('静态RTL加载已被取代');
     }
-    const built = buildRTLDesign(documents, { top, defines });
+    const built = target ? buildTraceContext(createRTLIndex(documents, { defines }), tops, target) : buildRTLDesign(documents, { top, defines });
+    top = built.top || top;
     design = built.design;
     snapshots = new Map(entries.map(entry => [keyPath(entry.path), entry]));
     issues = [...new Set(['静态RTL连接分析：不调用Yosys，不执行综合；宏与生成分支未展开的部分会明确止步', ...readIssues, ...built.issues])].slice(0, 257);
     identity = createHash('sha256').update(JSON.stringify([top, defines, entries])).digest('hex');
-    return { id: identity, revision: version, sourceSnapshots: entries, issues };
+    return { id: identity, revision: version, sourceSnapshots: entries, issues, top, fallback: !!built.fallback };
 }
 function current(payload) {
     if (!design || payload.designId !== identity || payload.revision !== generation) {
@@ -130,6 +133,10 @@ function current(payload) {
 const commands = {
     loadRTL,
     traceSelection: ({ text, offset }) => traceSelection(text, { offset }),
+    containsTarget(payload) {
+        current(payload);
+        return containsTarget(design, payload.target);
+    },
     traceCandidates(payload) {
         current(payload);
         const result = traceCandidates(design, payload.target, snapshots);

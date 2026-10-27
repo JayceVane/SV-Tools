@@ -2,6 +2,11 @@
 
 All notable changes to the SystemVerilog VSCode Extension will be documented in this file.
 
+## [Unreleased] - 工程追踪上下文与自动触发
+
+- **修复工程追踪上下文：** 仿真文件优先采用相应仿真顶层，配置实例树不包含所选模块时以该模块为追踪根，避免TB信号收到无关综合顶层的提示；不修改工程top。
+- **选择即追踪：** 默认选中信号约300ms后自动显示走向，首次选择即可建模，后续复用模型，连续选择只发布最新结果。工程“⋯”菜单或`svtools.project.traceTrigger`可切换手动；侧边栏显示实际追踪根。
+
 ## [Unreleased] - 工程追踪默认改为静态RTL分析
 
 **变更内容：** 工程信号追踪不再依赖Yosys，独立Worker逐文件解析声明、参数、连续别名、实例和端口位映射；支持字面头文件、非ANSI及隐式端口，保留多层透传、快照核验和选择跟随。

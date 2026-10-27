@@ -2,6 +2,13 @@
 const assert = require('node:assert/strict'), fs = require('node:fs/promises'), path = require('node:path'), vscode = require('vscode');
 /** 在隔离测试工作区验证真实扩展注册、工程切换、多层透传和源码变化失效。 */
 async function run() {
+    const waitFor = async predicate => {
+        for (let attempt = 0; attempt < 100; attempt++) {
+            if (predicate()) return;
+            await new Promise(resolve => setTimeout(resolve, 50));
+        }
+        throw new Error('等待自动追踪超时');
+    };
     const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
     assert.ok(root && path.basename(root) === 'workspace');
     const extension = vscode.extensions.getExtension('JayceVane.svtools'), api = await extension.activate(), checks = [];
@@ -23,14 +30,14 @@ async function run() {
     const document = await vscode.workspace.openTextDocument(file), editor = await vscode.window.showTextDocument(document);
     const offset = text.indexOf('a,b');
     editor.selection = new vscode.Selection(document.positionAt(offset), document.positionAt(offset + 1));
-    await api.projectView.trace(document.uri);
+    await waitFor(() => api.projectView.getSnapshot().flow?.origin.name === 'a');
     const snapshot = api.projectView.getSnapshot();
     assert.ok(snapshot.flow);
     assert.ok(snapshot.flow.nodes.filter(n => n.names[0] === 'u_b').every(n => !n.roles.length));
     assert.ok(snapshot.flow.nodes.some(n => n.names.join('.') === 'u_a.u_leaf' && n.roles.length));
     assert.equal(snapshot.flow.analysis,'rtl-static');
     assert.ok(!(await fs.readdir(path.join(root,'.svtools'))).includes('circuit'));
-    checks.push('无Yosys仍完成静态RTL三层透传，未创建网表或工具任务目录');
+    checks.push('首次选择自动追踪，无Yosys仍完成静态RTL三层透传，未创建工具任务目录');
     const kinds = extension.packageJSON.contributes.views['svtools-vivado'];
     assert.equal(kinds.length, 1);
     assert.equal(kinds[0].type, 'webview');
@@ -49,6 +56,18 @@ async function run() {
     await new Promise(resolve=>setTimeout(resolve,500));
     assert.equal(api.projectView.getSnapshot().flow?.origin.name,'b');
     checks.push('复用已生成模型跟随选择，固定后保持原追踪');
+    api.projectView.setPinned(false);
+    const projectConfig = vscode.workspace.getConfiguration('svtools.project');
+    await projectConfig.update('traceTrigger', 'manual', vscode.ConfigurationTarget.Workspace);
+    editor.selection = new vscode.Selection(document.positionAt(offset+2), document.positionAt(offset+3));
+    editor.selection = new vscode.Selection(document.positionAt(offset), document.positionAt(offset+1));
+    await new Promise(resolve => setTimeout(resolve,600));
+    assert.equal(api.projectView.getSnapshot().flow.origin.name,'b');
+    await api.projectView.trace(document.uri);
+    assert.equal(api.projectView.getSnapshot().flow.origin.name,'a');
+    checks.push('手动模式停止自动更新，显式右键命令仍可追踪');
+    await projectConfig.update('traceTrigger', 'selection', vscode.ConfigurationTarget.Workspace);
+    await vscode.window.showTextDocument(document);
     const edit = new vscode.WorkspaceEdit();
     edit.insert(document.uri, new vscode.Position(0, 0), '// changed\n');
     await vscode.workspace.applyEdit(edit);
@@ -56,6 +75,26 @@ async function run() {
     assert.equal(api.projectView.getSnapshot().flow, undefined);
     checks.push('源码变化清除旧追踪标记');
     await vscode.commands.executeCommand('workbench.action.files.revert');
+    const tbFile = path.join(root,'tb.sv'), tbText = 'module tb; reg [7:0] data;wire [7:0] out; leaf u_dut(.data(data),.result(out));endmodule';
+    await fs.writeFile(tbFile,tbText);
+    await api.projects.add(project,tbFile);
+    await api.projects.move(project,tbFile,'simulation');
+    await api.projects.update(project, config => { config.simTop = 'tb'; });
+    const tbDocument = await vscode.workspace.openTextDocument(tbFile), tbEditor = await vscode.window.showTextDocument(tbDocument);
+    const dataOffset = tbText.indexOf('data');
+    tbEditor.selection = new vscode.Selection(tbDocument.positionAt(dataOffset),tbDocument.positionAt(dataOffset+4));
+    await waitFor(() => api.projectView.getSnapshot().flow?.top === 'tb');
+    assert.equal(api.projectView.getSnapshot().flow.origin.name,'data');
+    assert.equal(api.projectView.getSnapshot().flow.contextKind,'simulation');
+    assert.equal((await api.projects.current()).top,'top');
+    checks.push('仿真文件采用TB追踪根，综合top不改变');
+    const outOffset = tbText.indexOf('out;');
+    for (let repeat=0;repeat<8;repeat++) {
+        tbEditor.selection = new vscode.Selection(tbDocument.positionAt(dataOffset),tbDocument.positionAt(dataOffset+4));
+        tbEditor.selection = new vscode.Selection(tbDocument.positionAt(outOffset),tbDocument.positionAt(outOffset+3));
+    }
+    await waitFor(() => api.projectView.getSnapshot().flow?.origin.name === 'out');
+    checks.push('连续快速选择最终显示最后一个信号');
     const other = await api.projects.create(root, 'other');
     assert.equal(await api.vivado.projectSelection.current(), null);
     await api.projects.select(project);

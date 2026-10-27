@@ -34,6 +34,7 @@
         text('projectName', project?.name || '选择或创建工程');
         text('projectKind', project?.kind === 'vivado' ? 'Vivado' : project ? 'SV Tools' : '');
         document.getElementById('trace').hidden = !snapshot.tracing;
+        text('traceRoot', snapshot.traceRoot || '追踪编辑器所选信号');
         document.getElementById('pin').setAttribute('aria-pressed', String(!!snapshot.pinned));
         text('pin', snapshot.pinned ? '已固定' : '固定');
         text('message', snapshot.message);

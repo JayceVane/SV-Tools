@@ -127,5 +127,8 @@
   "cmd.project.add.title": "Add to Current Project",
   "cmd.project.addToProject.title": "Add to SV Tools Project…",
   "cmd.project.trace.title": "Trace Selected Signal in Project",
-  "cmd.project.refresh.title": "Refresh Project"
+  "cmd.project.refresh.title": "Refresh Project",
+  "cfg.project.traceTrigger.desc": "Choose when project signal tracing runs. Also available in the project actions menu.",
+  "cfg.project.traceTrigger.selection": "Trace a selected signal automatically after a short delay.",
+  "cfg.project.traceTrigger.manual": "Trace only through the editor context menu or project command."
 }

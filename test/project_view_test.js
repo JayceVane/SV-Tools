@@ -7,7 +7,7 @@ const noop = () => ({ dispose() {
     } });
 async function host(t) {
     const commands = new Map(), calls = [], sent = [], errors = [], subscriptions = [];
-    let provider, receive;
+    let provider, receive, traceMode = 'selection';
     let project = { id: 'p1', name: 'local', kind: 'svtools', path: path.resolve('bin/local.json'), root: path.resolve('bin'), sets: [{ name: 'sources', type: 'DesignSrcs', top: 'top', files: [path.resolve('bin/top.sv')] }], key: '1', includeDirs: [], defines: [] };
     const listeners = new Set(), projects = { current: async () => project, onDidChange(fn) {
             listeners.add(fn);
@@ -24,7 +24,7 @@ async function host(t) {
                 assert.equal(id, 'svtools.vivado.projectTree');
                 provider = value;
                 return noop();
-            }, showErrorMessage: error => errors.push(error), showQuickPick: async () => undefined }, workspace: { createFileSystemWatcher: () => ({ onDidChange: noop, onDidCreate: noop, onDidDelete: noop, dispose() {
+            }, showErrorMessage: error => errors.push(error), showQuickPick: async () => undefined }, ConfigurationTarget: {Workspace:2,Global:1}, workspace: { getConfiguration: () => ({ get: () => traceMode, update:async (_,value)=>{traceMode=value;} }), createFileSystemWatcher: () => ({ onDidChange: noop, onDidCreate: noop, onDidDelete: noop, dispose() {
                 } }) }, commands: { registerCommand(id, callback) {
                 commands.set(id, callback);
                 return noop();
@@ -32,7 +32,7 @@ async function host(t) {
     const context = { subscriptions, workspaceState: { get: () => ({}), update: async () => {
             } }, extensionUri: { fsPath: path.resolve('.') } };
     const filename = path.resolve(__dirname, '../src/project/index.js'), module = { exports: {} }, localRequire = createRequire(filename);
-    const flow = { get: () => null, clear() {
+    const flow = { get: () => null, cancelFollow() {}, clear() {
         }, projectChanged() {
         }, dispose() {
         }, trace: async () => {
@@ -89,6 +89,16 @@ test('空工程状态也发送恢复入口，工程文本不插入可执行HTML'
     const client = fs.readFileSync(path.resolve(__dirname, '../src/project/client.js'), 'utf8');
     assert.ok(!client.includes('innerHTML'));
     assert.match(client, /label.textContent\s*=\s*node.label/);
+});
+
+test('工程菜单允许切换自动/手动追踪，并即时显示当前模式', async t => {
+    const h = await host(t);
+    assert.match(h.sent.at(-1).actions.find(action=>action.id==='traceTrigger').label,/自动追踪/);
+    await h.message({action:'command',revision:h.sent.at(-1).revision,command:'traceTrigger'});
+    assert.match(h.sent.at(-1).actions.find(action=>action.id==='traceTrigger').label,/手动追踪/);
+    await h.message({action:'command',revision:h.sent.at(-1).revision,command:'traceTrigger'});
+    assert.match(h.sent.at(-1).actions.find(action=>action.id==='traceTrigger').label,/自动追踪/);
+    assert.deepEqual(h.errors,[]);
 });
 test('文件视图聚合角色，实例视图区分同文件多实例，信号不会成为树节点', () => {
     const file = path.resolve('bin/leaf.sv'), project = { root: path.dirname(file), sets: [{ name: 'sources', files: [file] }] }, nodes = [{ id: 'a', parentId: null, moduleName: 'leaf', label: 'u_a : leaf', source: { path: file }, names: ['u_a'], roles: ['internal', 'output'], details: [], declaration: { name: 'r_data', indices: [0] } }, { id: 'b', parentId: null, moduleName: 'leaf', label: 'u_b : leaf', source: { path: file }, names: ['u_b'], roles: ['input'], details: [] }];

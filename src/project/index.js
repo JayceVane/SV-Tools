@@ -22,6 +22,7 @@ const RUN_LABELS = ['工程综合', '布局布线', '综合报告', '资源报�
 function activateProjectView(context, { vscode, projects, vivado }) {
     let view, project, nodes = [], revision = 0, refreshGeneration = 0, disposed = false, message, busy = false, timer, selectionTimer;
     const nodeIndex = new Map(), projections = new Map(), expandedState = context.workspaceState.get('svtools.project.views', {});
+    const traceTrigger = () => vscode.workspace.getConfiguration('svtools.project', vscode.window.activeTextEditor?.document.uri).get('traceTrigger', 'selection');
     const report = error => {
         if (error.code === 'TOOL_CANCELLED') {
             return;
@@ -56,7 +57,7 @@ function activateProjectView(context, { vscode, projects, vivado }) {
     }
     function actionList() {
         if (!project) return [];
-        return [{ id: 'trace', label: '追踪编辑器所选信号' }, {id:'expandAll',label:'全部展开'}, {id:'collapseAll',label:'全部收起'},
+        return [{ id: 'trace', label: '追踪编辑器所选信号' }, { id: 'traceTrigger', label: traceTrigger() === 'selection' ? '✓ 自动追踪 · 切换为手动触发' : '手动追踪 · 切换为选择即触发' }, {id:'expandAll',label:'全部展开'}, {id:'collapseAll',label:'全部收起'},
             ...(project?.kind === 'vivado' ? RUN_ACTIONS.map((id, index) => ({ id, label: RUN_LABELS[index] })) : [{ id: 'edit', label: '编辑工程配置（顶层、宏、include目录）' }])];
     }
     function send() {
@@ -65,7 +66,7 @@ function activateProjectView(context, { vscode, projects, vivado }) {
         }
         const currentFlow = flow.get(), projection = projections.get(project?.id) || expandedState[project?.id]?.projection || 'files';
         void view.webview.postMessage({ type: 'snapshot', revision, project: project ? { id: project.id, name: project.name, kind: project.kind } : null, nodes, projection,
-            tracing: !!currentFlow, traceId: currentFlow?.traceId, pinned: currentFlow?.pinned, busy, message, actions: actionList(), issues: currentFlow?.issues ||
+            tracing: !!currentFlow, traceId: currentFlow?.traceId, traceRoot: currentFlow ? `${currentFlow.contextKind === 'simulation' ? '仿真' : '设计'}追踪根：${currentFlow.top}${currentFlow.rootFallback ? '（所选模块）' : ''}` : '', pinned: currentFlow?.pinned, busy, message, actions: actionList(), issues: currentFlow?.issues ||
                 (projection === 'instances' ? ['源码引用预览；执行信号追踪后显示静态RTL连接中可确定的实例层级'] : []) });
     }
     async function refresh() {
@@ -201,6 +202,14 @@ function activateProjectView(context, { vscode, projects, vivado }) {
             throw new Error('工程动作不在当前节点允许列表中');
         }
         const target = project;
+        if (command === 'traceTrigger') {
+            flow.cancelFollow();
+            clearTimeout(selectionTimer);
+            const config = vscode.workspace.getConfiguration('svtools.project', vscode.window.activeTextEditor?.document.uri);
+            await config.update('traceTrigger', traceTrigger() === 'selection' ? 'manual' : 'selection', vscode.workspace.workspaceFolders?.length ? vscode.ConfigurationTarget.Workspace : vscode.ConfigurationTarget.Global);
+            send();
+            return;
+        }
         if (command === 'expandAll' || command === 'collapseAll') return expand(command === 'expandAll');
         if (command === 'trace') {
             return trace();
@@ -347,7 +356,20 @@ function activateProjectView(context, { vscode, projects, vivado }) {
     if (vscode.window.onDidChangeTextEditorSelection) {
         context.subscriptions.push(vscode.window.onDidChangeTextEditorSelection(event => {
             clearTimeout(selectionTimer);
-            selectionTimer = setTimeout(() => void flow.follow(event.textEditor).catch(report), 300);
+            flow.cancelFollow();
+            if (traceTrigger() === 'selection') {
+                const editor = { document: event.textEditor.document, selection: event.textEditor.selection };
+                selectionTimer = setTimeout(() => void Promise.resolve(flow.follow(editor)).catch(report), 300);
+            }
+        }));
+    }
+    if (vscode.workspace.onDidChangeConfiguration) {
+        context.subscriptions.push(vscode.workspace.onDidChangeConfiguration(event => {
+            if (event.affectsConfiguration('svtools.project.traceTrigger')) {
+                clearTimeout(selectionTimer);
+                flow.cancelFollow();
+                send();
+            }
         }));
     }
     const dispose = () => {

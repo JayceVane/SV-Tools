@@ -127,5 +127,8 @@
   "cmd.project.add.title": "添加到当前工程",
   "cmd.project.addToProject.title": "添加到 SV Tools 工程…",
   "cmd.project.trace.title": "在工程中追踪所选信号",
-  "cmd.project.refresh.title": "刷新工程"
+  "cmd.project.refresh.title": "刷新工程",
+  "cfg.project.traceTrigger.desc": "工程信号走向的触发方式，也可在工程操作菜单中切换。",
+  "cfg.project.traceTrigger.selection": "选中信号后自动追踪，短暂防抖并复用静态模型。",
+  "cfg.project.traceTrigger.manual": "仅通过编辑器右键或工程命令手动追踪。"
 }
