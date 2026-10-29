@@ -8,6 +8,7 @@ const { createIcarusRunner } = require('../src/toolchains/iverilog-runner');
 const { compileWithModuleResolution, buildCommonArgs, buildChildEnv } = require('../src/toolchains/iverilog');
 const { lintWithXvlog, elaborateWithXvlog } = require('../src/toolchains/xvlog');
 const { runVivadoBatchTask } = require('../src/vivado/batch');
+const { defaultVcdPath } = require('../src/toolchains/waveform-paths');
 
 /** 真实工具验收只在显式指定的安装路径运行，所有生成文件位于独立验收目录。 */
 async function main() {
@@ -25,18 +26,38 @@ async function main() {
     const workspace = { workspaceFolders: [{ uri: { fsPath: root } }], getWorkspaceFolder: () => ({ uri: { fsPath: root } }),
         getConfiguration: () => ({ get: (name, fallback) => options[name] ?? fallback }) };
     if (values.iverilog) {
-        const manager = createToolTaskManager(), task = manager.start('simulation');
+        const manager = createToolTaskManager();
+        let expected;
         const runner = createIcarusRunner({ workspace, channel, getConfig: () => workspace.getConfiguration(),
             scanSources: async () => ({ dirs: [], modules: new Map() }), buildCommonArgs, compile: compileWithModuleResolution,
             getToolchain: async () => ({ iverilog: path.resolve(values.iverilog), vvp: path.resolve(values.vvp || path.join(path.dirname(values.iverilog), process.platform === 'win32' ? 'vvp.exe' : 'vvp')),
                 env: buildChildEnv(values.cygwin || null), cygwinDir: values.cygwin || null }),
             resolvePaths: dirs => dirs, expandFiles: async () => [], publish() {}, output: { append() {}, flush() {} },
-            showWaveforms: async (task, waves) => assert.ok(waves.includes(path.join(root, 'native.vcd'))) });
+            showWaveforms: async (task, waves) => assert.deepEqual(waves, [expected]) });
+        const explicit = path.join(root, 'waves', 'native.vcd'), configured = path.join(root, 'configured.vcd');
+        await fs.mkdir(path.dirname(explicit)); await fs.writeFile(path.join(root, 'payload.hex'), 'a5\n');
         try {
-            const result = await runner.simulate(task, document); assert.equal(result.status, 'success');
-            assert.ok((await fs.readFile(result.logPath, 'utf8')).includes('native simulation verified'));
-            report.checks.push({ name: 'Icarus compile + vvp + VCD', ...result });
-        } finally { await task.finish({ keepArtifacts: true }); await manager.dispose(); }
+            for (const item of [
+                { name: 'default VCD', dump: '', output: undefined },
+                { name: 'RTL literal VCD', dump: '$dumpfile("waves/native.vcd");', output: explicit },
+                { name: 'simArgs VCD', dump: '', output: configured, args: ['-dumpfile=' + configured] }
+            ]) {
+                const source = '`timescale 1ns/1ps\nmodule native_tb; reg clk=0; reg [7:0] data [0:0]; initial begin '
+                    + item.dump + ' $readmemh("payload.hex",data); if(data[0]!==8\'ha5) $fatal(1,"readmem failed"); '
+                    + '$dumpvars(0,native_tb); #1 clk=1; #1 $display("native simulation verified"); $finish; end endmodule\n';
+                await fs.writeFile(mainFile, source); options.simArgs = item.args || [];
+                expected = defaultVcdPath({ root, sourceFile: mainFile, engine: 'iverilog', top: 'native_tb', dumpFile: item.output });
+                const task = manager.start('simulation');
+                try {
+                    const result = await runner.simulate(task, document); assert.equal(result.status, 'success');
+                    assert.ok((await fs.readFile(result.logPath, 'utf8')).includes('native simulation verified'));
+                    assert.match(await fs.readFile(expected, 'utf8'), /\$enddefinitions\s+\$end/);
+                    if (item.output) await assert.rejects(fs.stat(item.output), { code: 'ENOENT' });
+                    assert.equal(await fs.readFile(mainFile, 'utf8'), source);
+                    report.checks.push({ name: 'Icarus compile + vvp + readmem + ' + item.name, ...result });
+                } finally { await task.finish({ keepArtifacts: true }); }
+            }
+        } finally { options.simArgs = []; await manager.dispose(); }
     }
     if (values.vivado) {
         const findings = [], ctx = { vscode: { workspace }, channel, isVerilogDocument: () => true,

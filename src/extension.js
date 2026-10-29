@@ -22,6 +22,7 @@ const vscode = require('vscode');
 const { activateIverilog } = require('./toolchains/iverilog');
 const { activateWaveViewer } = require('./waveform');
 const { activateCircuitViewer } = require('./circuit');
+const { createWaveLinks } = require('./debug/wave-links');
 const { activateVivado } = require('./vivado');
 
 const { createNativeLoader } = require('./native-loader');
@@ -29,6 +30,9 @@ const { createFormatter } = require('./editor/formatting');
 const { createEditorCommands } = require('./editor/commands');
 const { createSourceCatalog } = require('./workspace/source-catalog');
 const { createProjectSourceProvider } = require('./workspace/project-sources');
+const { createProjectSelection } = require('./vivado/projects');
+const { createProjectManager } = require('./project/manager');
+const { activateProjectView } = require('./project');
 const { createWorkspaceSourceIndex } = require('./workspace/sources');
 const { createLanguageProviders } = require('./editor/language');
 const nativeLoader = createNativeLoader();
@@ -55,12 +59,13 @@ function reportNativeMissing() {
  * Activate the extension
  */
 function activate(context) {
-    console.log('SystemVerilog extension is now active!');
 
-    const vivado = activateVivado(context);
-    const sourceCatalog = createSourceCatalog({ vscode, getPreferred: createProjectSourceProvider({ vscode, projectSelection: vivado.projectSelection }) });
+    const projects = createProjectManager({vscode,state:context.workspaceState,vivadoSelection:createProjectSelection({workspace:vscode.workspace,state:context.workspaceState})});
+    context.subscriptions.push(projects);
+    const vivado = activateVivado(context,{projectSelection:projects.vivadoSelection,projectView:false});
+    const sourceCatalog = createSourceCatalog({ vscode, getPreferred: createProjectSourceProvider({ vscode, projectSelection: vivado.projectSelection, projects }) });
     const sourceIndex = createWorkspaceSourceIndex({ workspace: vscode.workspace, sourceCatalog });
-    context.subscriptions.push(sourceCatalog, sourceCatalog.onDidChange(sourceIndex.invalidate), vivado.projectSelection.onDidChange(sourceCatalog.refreshContext));
+    context.subscriptions.push(sourceCatalog, sourceCatalog.onDidChange(sourceIndex.invalidate), vivado.projectSelection.onDidChange(sourceCatalog.invalidate));
     const dependencies = { vscode, loadNativeModule, reportNativeMissing, sourceCatalog };
     const { formatDocument } = createFormatter(dependencies);
     const languageProviders = createLanguageProviders(dependencies);
@@ -141,12 +146,14 @@ function activate(context) {
     }
 
     // Icarus Verilog lint 与仿真（诊断、命令、状态栏）
-    const waveViewer = activateWaveViewer(context, { sourceCatalog });
+    const waveLinks = createWaveLinks({vscode}); context.subscriptions.push(waveLinks);
+    const waveViewer = activateWaveViewer(context, { sourceCatalog, waveLinks });
     activateIverilog(context, { waveViewer, scanWorkspaceSources: force => { if (force) sourceCatalog.invalidate(); return sourceIndex.scan(force); }, invalidateWorkspaceSources: sourceIndex.invalidate });
 
     // Vivado TCL 批处理运行与工程创建
-    const circuit = activateCircuitViewer(context, { vivado, sourceCatalog });
-    return { vivado, circuit, waveViewer };
+    const circuit = activateCircuitViewer(context, { vivado, sourceCatalog, waveLinks });
+    const projectView = activateProjectView(context,{vscode,projects,vivado,sourceCatalog});
+    return { vivado, circuit, waveViewer, waveLinks, projects, projectView };
 }
 
 /**

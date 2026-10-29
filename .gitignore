@@ -37,10 +37,16 @@ test/*
 !test/render-vcd-badge.js
 !test/*_test.js
 !test/vscode_vivado_host.js
+!test/vscode_project_host.js
 !test/vscode_completion_host.js
 !test/vscode_circuit_host.js
+!test/vscode_circuit_trace_host.js
+!test/vscode_wave_link_host.js
+!test/vscode_cursor_values_host.js
+!test/vscode_critical_audit_host.js
 !test/vscode_release_host.js
 !test/vscode_header_host.js
+!test/vscode_waveform_host.js
 !test/helpers/
 test/helpers/*
 !test/helpers/waveform-client-harness.js
@@ -49,6 +55,8 @@ test/fixtures/*
 !test/fixtures/memory_dump.sv
 !test/fixtures/memory_dump.vcd
 !test/fixtures/circuit-demo.sv
+!test/fixtures/circuit-trace-stress.sv
+!test/fixtures/circuit-wave-link.sv
 !test/fixtures/codegen/
 test/fixtures/codegen/*
 !test/fixtures/codegen/*.sv
@@ -64,6 +72,7 @@ Thumbs.db
 .arts/
 .opencode/
 .sisyphus/
+.zcode/
 nul
 
 # Private test project (proprietary, not for open source)
@@ -71,9 +80,16 @@ test_project/
 
 # Local environment notes (machine-specific, do not publish)
 ENVIRONMENT.md
+CONTEXT.md
 
 # Extension simulation artifacts
 .svtools/
 
 # 编译产物集中在 bin；源代码留在 src
 bin/*
+
+# 自用功能源代码，仅供本地构建叠加，不推送到公开仓库
+src/private/
+
+# 4.x 开发/交付验收记录仅本地归档，不上传公开仓库
+docs/private/

@@ -17,9 +17,11 @@
 // 增量文件管理、双引擎仿真、器件选型）+ 各子模块纯函数汇总导出。
 // extension.js 的 require('./vivado') 解析到本目录。
 
-const { createToolTaskManager } = require('../toolchains/job');
+const { createToolTaskManager, cancelledError } = require('../toolchains/job');
 const { createBufferedOutput } = require('../toolchains/channel');
+const { createSimulationEnginePicker } = require('../toolchains/simulation-engines');
 const { runVivadoBatchTask } = require('./batch');
+const { prepareVivadoScript } = require('./script-task');
 const { scanWorkspaceSources } = require('../workspace/sources');
 const fs = require('fs');
 const os = require('os');
@@ -46,8 +48,9 @@ function activateVivado(context, deps) {
     const vscode = (deps && deps.vscode) || require('vscode');
     const out = vscode.window.createOutputChannel(OUTPUT_CHANNEL_TITLE);
     let projectTree = null;
-    const output = createBufferedOutput(out), tasks = createToolTaskManager({ onChange(job) { projectTree?.setRunning(job.finished ? null : job.state); } });
-    const projectSelection = createProjectSelection({ workspace: vscode.workspace, state: context.workspaceState });
+    const retainedRuns = () => vscode.workspace.getConfiguration('svtools.tasks').get('retainedRuns', 5);
+    const output = createBufferedOutput(out), tasks = createToolTaskManager({ retention: { keep: retainedRuns }, onChange(job) { projectTree?.setRunning(job.finished ? null : job.state); } });
+    const projectSelection = deps?.projectSelection || createProjectSelection({ workspace: vscode.workspace, state: context.workspaceState });
 
     let running = null;      // { job, scriptPath }，准备阶段也可停止。
     let statusItem = null;
@@ -176,14 +179,9 @@ function activateVivado(context, deps) {
             vscode.window.showWarningMessage('工程文件集或成员已变化，已取消操作，请重新执行命令。'); return false;
         };
         if (!valid()) return { code: null, status: 'cancelled', error: 'project-changed' };
-        const base = vscode.workspace.getWorkspaceFolder(vscode.Uri.file(xpr))?.uri.fsPath || path.dirname(xpr);
-        const parent = path.join(base, '.svtools', 'vivado', 'actions');
-        await fs.promises.mkdir(parent, { recursive: true });
-        const directory = await fs.promises.mkdtemp(path.join(parent, 'action-'));
-        const scriptPath = path.join(directory, name);
-        await fs.promises.writeFile(scriptPath, scriptBody, { flag: 'wx' });
-        if (incrementalCancelled || !await sameEditorProject(xpr) || !valid()) return { code: null, status: 'cancelled', error: 'project-changed' };
-        return runScript(scriptPath, { editorAction: true });
+        return runScript({ anchor: xpr, name, body: scriptBody, async validate() {
+            if (incrementalCancelled || !await sameEditorProject(xpr) || !valid()) throw cancelledError('工程已切换或操作已取消');
+        } }, { editorAction: true });
     }
 
     async function addCurrentToProject() {
@@ -389,16 +387,11 @@ function activateVivado(context, deps) {
     }
 
     /** 标签页 ▶ 按钮：选择仿真引擎。 */
-    async function simulatePick() {        const engine = await vscode.window.showQuickPick(
-            [
-                { label: '$(chip) Icarus Verilog', description: 'iverilog 编译 + vvp（无需 Vivado 工程）', value: 'iverilog' },
-                { label: '$(circuit-board) Vivado xsim', description: '行为仿真，当前文件置为 sim_1 顶层（需 Vivado 工程）', value: 'vivado' }
-            ],
-            { placeHolder: '选择仿真引擎' });
-        if (!engine) return;
-        if (engine.value === 'iverilog') return vscode.commands.executeCommand('svtools.iverilog.simulate');
-        return simulateWithVivado();
-    }
+    const simulationEngines = createSimulationEnginePicker({ showQuickPick: (items, options) => vscode.window.showQuickPick(items, options) });
+    simulationEngines.register({ id: 'iverilog', label: '$(chip) Icarus Verilog', description: 'iverilog 编译 + vvp（无需 Vivado 工程）', run: () => vscode.commands.executeCommand('svtools.iverilog.simulate') });
+    simulationEngines.register({ id: 'vivado', label: '$(circuit-board) Vivado xsim', description: '行为仿真，当前文件置为 sim_1 顶层（需 Vivado 工程）', run: () => simulateWithVivado() });
+    context.subscriptions.push(simulationEngines);
+    function simulatePick() { return simulationEngines.pick(); }
 
     // ---------------- 器件选型（Vivado 向导式：系列 → 封装 → 速度 → 搜索选择） ----------------
 
@@ -461,8 +454,8 @@ function activateVivado(context, deps) {
         });
     }
 
-    /** 运行 TCL 脚本。返回 Promise<{code, ms, issues, stdout}>。 */
-    async function runScript(scriptPath, opts = {}) {
+    /** 运行用户Tcl或生成动作；所有输入和日志共用受控任务目录与保留预算。 */
+    async function runScript(input, opts = {}) {
         if (running || incrementalOperation && !opts.editorAction || projectTree?.isBusy() && !opts.panel) {
             vscode.window.showWarningMessage('Vivado 正在处理任务，请先等待或停止');
             return { code: null, error: 'busy' };
@@ -477,20 +470,21 @@ function activateVivado(context, deps) {
             return { code: null, error: 'not-found' };
         }
         const executable = path.join(binDir, process.platform === 'win32' ? 'vivado.bat' : 'vivado');
-        const args = buildBatchArgs(scriptPath, opts.tclArgs || [], opts.extraArgs || []);
-        const cwd = opts.cwd || path.dirname(scriptPath);
         const timeoutMs = opts.timeoutMs === undefined
             ? vscode.workspace.getConfiguration('svtools.vivado').get('timeoutMs', 0) : opts.timeoutMs;
         if (!opts.quiet) out.show(true);
-        log('————————————————————————————————————');
-        log('[vivado] ' + executable + ' ' + args.join(' '));
-        log('[vivado] cwd: ' + cwd);
         status('$(loading~spin) Vivado 运行中…', 'svtools.vivado.stop');
         const job = tasks.start('vivado');
-        const task = { job, scriptPath };
+        const task = { job, scriptPath: typeof input === 'string' ? input : undefined };
         running = task;
         try {
-            await job.directory(path.join(path.dirname(scriptPath), 'tasks'), 'vivado');
+            const prepared = await prepareVivadoScript(job, input, { workspace: vscode.workspace, uri: vscode.Uri.file });
+            const scriptPath = prepared.scriptPath, cwd = opts.cwd || prepared.cwd;
+            task.scriptPath = scriptPath;
+            const args = buildBatchArgs(scriptPath, opts.tclArgs || [], opts.extraArgs || []);
+            log('————————————————————————————————————');
+            log('[vivado] ' + executable + ' ' + args.join(' '));
+            log('[vivado] cwd: ' + cwd);
             const result = await runVivadoBatchTask({ task: job, executable, args, cwd, scriptPath, timeoutMs, onOutput: output.append });
             output.flush();
             log(`[vivado] ${result.ok ? '完成' : result.message}，耗时 ${(result.ms / 1000).toFixed(1)}s`);
@@ -499,9 +493,9 @@ function activateVivado(context, deps) {
             if (!opts.quiet) await projectTree?.refresh(); return result;
         } catch (error) {
             log('[vivado] 任务失败：' + error.message);
-            return { code: null, status: job.signal.aborted ? 'cancelled' : 'failed', error: error.message };
+            return { code: null, status: job.signal.aborted || error.code === 'TOOL_CANCELLED' ? 'cancelled' : 'failed', error: error.message };
         } finally {
-            try { await job.finish(); } catch (error) { log('任务产物清理失败：' + error.message); }
+            try { await job.finish({ keepArtifacts: true }); } catch (error) { log('任务产物清理失败：' + error.message); }
             if (running === task) { running = null; status(null); projectTree?.setRunning(null); }
         }
     }
@@ -687,7 +681,7 @@ function activateVivado(context, deps) {
     try {
         projectTree = activateProjectTree(context, {
             vscode, out, log, findProjectXpr: refreshProjectContext, runScript, selectProject, stopRun,
-            isRunning: () => !!running || !!incrementalOperation
+            isRunning: () => !!running || !!incrementalOperation, headless: deps?.projectView === false
         });
     } catch (err) {
         log('[vivado] 工程树初始化失败: ' + (err && err.message));
@@ -696,7 +690,9 @@ function activateVivado(context, deps) {
     return {
         runScript, stopRun, createProject, simulateWithVivado,
         refreshProjectContext,
-        resolveBinDir, projectTree, projectSelection
+        resolveBinDir, projectTree, projectSelection,
+        registerSimulationEngine: engine => simulationEngines.register(engine),
+        listSimulationEngines: () => simulationEngines.list()
     };
 }
 

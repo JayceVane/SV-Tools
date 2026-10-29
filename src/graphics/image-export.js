@@ -70,25 +70,28 @@
                 ['all', '全部已添加信号（遵循展开/折叠状态）'], ['selected', `仅所选信号（${selectionCount} 条）`, !selectionCount]
             ]) : null;
             const hint = document.createElement('p');
-            hint.textContent = wave ? '按区间重新读取数据并自动调整画幅；密集跳变会明确标示。' : '导出当前模块完整电路，不受缩放或画布裁剪影响。';
+            hint.textContent = (wave ? '按区间重新读取数据并自动调整画幅；密集跳变会明确标示。' : '导出当前模块完整电路，不受缩放或画布裁剪影响。') + ' 复制到剪贴板会生成 2× PNG。';
             dialog.appendChild(hint);
             const actions = document.createElement('div'); actions.className = 'imageExportActions';
             const cancel = document.createElement('button'); cancel.textContent = '取消';
+            const copy = document.createElement('button'); copy.id = 'imageCopy'; copy.textContent = '复制到剪贴板'; copy.title = '将当前图以 2× PNG 复制到系统剪贴板';
             const confirm = document.createElement('button'); confirm.id = 'imageConfirm'; confirm.textContent = '导出图片';
-            actions.append(cancel, confirm); dialog.appendChild(actions); overlay.appendChild(dialog); document.body.appendChild(overlay);
+            actions.append(cancel, copy, confirm); dialog.appendChild(actions); overlay.appendChild(dialog); document.body.appendChild(overlay);
 
             const close = value => { overlay.remove(); returnFocus?.focus(); resolve(value); };
             cancel.onclick = () => close(null);
-            confirm.onclick = () => {
-                const options = { style: style.value, format: format.value };
+            const submit = action => {
+                const options = { style: style.value, format: format.value, action };
                 if (wave) { options.range = range.value; options.signals = signals.value; }
                 close(options);
             };
+            copy.onclick = () => submit('copy');
+            confirm.onclick = () => submit('save');
             overlay.onkeydown = event => {
                 if (event.key === 'Escape') close(null);
-                else if (event.key === 'Enter') confirm.click();
+                else if (event.key === 'Enter') (document.activeElement === copy ? copy : confirm).click();
                 else if (event.key === 'Tab') {
-                    const controls = [style, format, range, signals, cancel, confirm].filter(Boolean);
+                    const controls = [style, format, range, signals, cancel, copy, confirm].filter(Boolean);
                     const index = controls.indexOf(document.activeElement);
                     controls[(index + (event.shiftKey ? -1 : 1) + controls.length) % controls.length].focus();
                 } else { event.stopPropagation(); return; }

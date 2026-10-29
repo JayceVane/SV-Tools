@@ -124,6 +124,7 @@ function createDesign(input) {
         output.signals = Array.from(array(moduleInput.signals, `${where}.signals`), (item, i) => {
             const location = `${where}.signals[${i}]`, signal = identity(item, location);
             signal.bits = bits(item.bits, `${location}.bits`);
+            withOptional(signal, 'source', source(item.source, `${location}.source`));
             range(item, signal, location);
             if (item.hidden !== undefined) {
                 if (typeof item.hidden !== 'boolean') fail(location, 'hidden must be a boolean');

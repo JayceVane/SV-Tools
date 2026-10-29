@@ -99,7 +99,8 @@ function fromYosys(raw, { top, title, sourceRoot, stage = 'netlist' } = {}) {
         const signals = entries(netnames, `${name}.netnames`).map(([signalName, net]) => {
             object(net, `${name}.netnames.${signalName}`);
             if (net.hide_name !== undefined && ![0, 1, false, true].includes(net.hide_name)) throw new TypeError('Yosys JSON: hide_name must be 0 or 1');
-            return { id: id(moduleId, 'signal', signalName), name: signalName, bits: bits(net.bits, `${name}.${signalName}`), ...range(net), hidden: Boolean(net.hide_name) };
+            return { id: id(moduleId, 'signal', signalName), name: signalName, bits: bits(net.bits, `${name}.${signalName}`), ...range(net), hidden: Boolean(net.hide_name),
+                source: source(net.attributes, sourceRoot) };
         });
         return { id: moduleId, name, source: source(attributes, sourceRoot), ports, cells, signals, attributes, parameters: rawModule.parameter_default_values };
     });

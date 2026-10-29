@@ -310,7 +310,7 @@ if (!nativeBinding) {
   throw new Error(`Failed to load native binding`)
 }
 
-const { SymbolKind, formatText, generateModuleInst, generateTestbench, repeatCode, alignCode, generateHeader, extractSymbols, findSymbolByName } = nativeBinding
+const { SymbolKind, formatText, generateModuleInst, generateTestbench, repeatCode, alignCode, generateHeader, extractSymbols, findSymbolByName, writeClipboardPng } = nativeBinding
 
 module.exports.SymbolKind = SymbolKind
 module.exports.formatText = formatText
@@ -321,3 +321,4 @@ module.exports.alignCode = alignCode
 module.exports.generateHeader = generateHeader
 module.exports.extractSymbols = extractSymbols
 module.exports.findSymbolByName = findSymbolByName
+module.exports.writeClipboardPng = writeClipboardPng

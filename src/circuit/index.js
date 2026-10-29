@@ -10,6 +10,8 @@ const { CircuitSession } = require('./session');
 const { bindCircuitPanel } = require('./host');
 const { createImageFiles } = require('../graphics/image-files');
 const { createCircuitHtml } = require('./view');
+const { sourceHash, sourceMatches, snapshotSources } = require('./source-snapshots');
+const { bitIndices } = require('./trace-actions');
 
 /** @param {string} file @param {string[]} roots @returns {boolean} 用户选择的设计与工作区决定源码定位范围。 */
 function insideRoots(file, roots) {
@@ -20,8 +22,8 @@ function insideRoots(file, roots) {
 }
 
 /** @param {object} context @param {{vivado:object,vscode?:object}} dependencies @returns {object} 注册电路数据入口及面板生命周期。 */
-function activateCircuitViewer(context, { vivado, sourceCatalog, vscode = require('vscode') }) {
-    const manager = createToolTaskManager();
+function activateCircuitViewer(context, { vivado, sourceCatalog, waveLinks, vscode = require('vscode') }) {
+    const manager = createToolTaskManager({ retention: { keep: () => vscode.workspace.getConfiguration('svtools.tasks').get('retainedRuns', 5) } });
     const resolveSources = createCircuitSourceResolver({ vscode, sourceCatalog });
     const channel = vscode.window.createOutputChannel('SV Tools · Circuit');
     const output = createBufferedOutput(channel);
@@ -46,6 +48,46 @@ function activateCircuitViewer(context, { vivado, sourceCatalog, vscode = requir
                 try { return await session.request('topCandidates', { text }); }
                 finally { cancel.dispose(); session.dispose(); scans.delete(session); }
             });
+    }
+
+    async function sourceSelection(document, previous) {
+        const text = document.getText(), editor = vscode.window.activeTextEditor;
+        const offset = previous ? undefined : editor?.document === document && editor.selection
+            ? document.offsetAt(editor.selection.active) : undefined;
+        const session = new CircuitSession(); scans.add(session);
+        try {
+            const target = await session.request('traceSelection', { text, offset, previous });
+            return { ...target, path: document.uri.fsPath, sourceHash: sourceHash(text) };
+        } finally { session.dispose(); scans.delete(session); }
+    }
+
+    async function chooseBits(candidate, target = {}) {
+        let indices = target.indices;
+        if (target.dynamicSelect || candidate.width > 4096 && !indices) {
+            const value = await vscode.window.showInputBox({ title: '选择追踪位', prompt: '输入HDL下标或范围，如7:4；*表示整条总线', value: '*',
+                validateInput: value => { try { const bits = bitIndices(value); return !bits && candidate.width > 4096 ? '整条总线超过4096位，请选择切片' : undefined; } catch (error) { return error.message; } } });
+            if (value === undefined) return;
+            indices = bitIndices(value);
+        }
+        return { ...candidate, origin: { objectId: candidate.objectId, ...(indices ? { indices } : {}) } };
+    }
+
+    async function chooseCandidate(candidates, target, truncated) {
+        if (truncated) throw new Error('实例候选超过预算，请缩小顶层或通过电路引脚选择上下文');
+        const candidate = candidates.length === 1 ? candidates[0] : (await vscode.window.showQuickPick(candidates.map(candidate => ({
+            label: candidate.label + ' · ' + candidate.name, description: candidate.moduleName, candidate
+        })), { title: '确认追踪的实际设计实例', placeHolder: '同一声明可能在多个实例中出现，请选择上下文' }))?.candidate;
+        return candidate ? chooseBits(candidate, target) : undefined;
+    }
+
+    async function chooseSignal({ session, snapshot, moduleId }) {
+        const query = await vscode.window.showInputBox({ title: '追踪电路信号', prompt: '输入信号名称或片段' });
+        if (query === undefined) return;
+        const result = await session.request('traceSignals', { ...snapshot, moduleId, query });
+        if (!result.items.length) { vscode.window.showInformationMessage('当前模块没有匹配的实际网络'); return; }
+        const selected = await vscode.window.showQuickPick(result.items.map(candidate => ({ label: candidate.name, description: candidate.width + ' bit', candidate })),
+            { title: result.truncated ? '仅显示前200项，请用更具体的名称搜索' : '选择追踪起点' });
+        return selected ? (await chooseBits(selected.candidate))?.origin : undefined;
     }
 
     async function rtlDocument(uri) {
@@ -88,7 +130,13 @@ function activateCircuitViewer(context, { vivado, sourceCatalog, vscode = requir
         return vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title, cancellable: true },
             async (_, token) => {
                 const cancellation = token.onCancellationRequested(() => task.cancel('用户取消电路生成'));
-                try { await task.waitForPrevious(); return await runner(task); }
+                try {
+                    await task.waitForPrevious();
+                    const result = await runner(task);
+                    // 未保存正文的源码定位仍依赖磁盘快照，保留到本轮页面刷新或关闭。
+                    task.retainDirectories(signal);
+                    return result;
+                }
                 finally {
                     signal?.removeEventListener('abort', abort);
                     cancellation.dispose(); output.flush(); await task.finish({ keepArtifacts: true });
@@ -96,14 +144,31 @@ function activateCircuitViewer(context, { vivado, sourceCatalog, vscode = requir
             });
     }
 
-    function open(load, roots) {
+    function open(load, roots, { initialTrace } = {}) {
+        let registration;
         const panel = vscode.window.createWebviewPanel('svtoolsCircuit', '电路结构', vscode.ViewColumn.Beside,
             { enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [] });
-        const binding = bindCircuitPanel({ panel, load, imageFiles: createImageFiles({ vscode }), onError: fail, async onSource(source) {
+        const { createSourceWatch } = require('./source-watch');
+        const watch = createSourceWatch({ vscode, onStale: () => binding.markSourceStale() });
+        const binding = bindCircuitPanel({ panel, load: request => load({ ...request, trackSources: entries => {
+            if (!request.signal.aborted) { binding.sourceSnapshotCaptured(); watch.replace(entries); }
+        } }), initialTrace, chooseSignal, chooseCandidate,
+            onWave:(action,message)=>action==='configure'?registration?.configure():action==='watch'?registration?.watch(message):action==='remove'?registration?.removeProbe(message.probeId):registration?.show(message),
+            onWaveInvalidated:reason=>registration?.invalidate(reason),
+            async chooseContext(contexts, truncated) {
+                if (truncated) throw new Error('实例上下文过多，请从顶层逐级进入所需实例');
+                if (contexts.length === 1) return contexts[0];
+                return (await vscode.window.showQuickPick(contexts.map(context => ({ label: context.label, context })), { title: '选择实际设计实例' }))?.context;
+            }, imageFiles: createImageFiles({ vscode }), onError: fail, async onSource(source) {
+            if (source.requireVerified && !source.expectedHash) throw new Error('该位置缺少可验证的源码快照，请重新生成电路');
             const realFile = await fs.realpath(source.path);
             const realRoots = await Promise.all(roots.map(root => fs.realpath(root)));
             if (!insideRoots(realFile, realRoots)) throw new Error('源码位置不在当前设计或工作区范围内');
             const document = await vscode.workspace.openTextDocument(vscode.Uri.file(realFile));
+            if (source.expectedHash && sourceHash(document.getText()) !== source.expectedHash) throw new Error('源码内容已变化，请刷新电路后再定位');
+            if (source.expectedHash && !document.isDirty && !await sourceMatches(realFile, source.expectedHash)) throw new Error('磁盘源码已变化，请刷新电路后再定位');
+            if (source.requireVerified && (!Number.isSafeInteger(source.line) || source.line < 1 || source.line > document.lineCount
+                || !Number.isSafeInteger(source.column) || source.column < 1 || source.column > document.lineAt(source.line - 1).text.length + 1)) throw new Error('工具源码位置超出已验证快照范围');
             const editor = await vscode.window.showTextDocument(document, { preview: true, viewColumn: vscode.ViewColumn.One });
             const line = Math.max(0, Math.min(document.lineCount - 1, source.line - 1));
             const column = Math.max(0, Math.min(document.lineAt(line).text.length, (source.column || 1) - 1));
@@ -111,17 +176,29 @@ function activateCircuitViewer(context, { vivado, sourceCatalog, vscode = requir
             editor.selection = new vscode.Selection(position, position);
             editor.revealRange(new vscode.Range(position, position));
         } });
-        const handle = { ...binding, dispose() { binding.dispose(); panel.dispose(); } };
+        registration=waveLinks?.registerCircuit({label:()=>binding.getState().design?.title||'电路结构',snapshot:binding.waveSnapshot,
+            targets:binding.waveTargets,find:binding.findWaveTarget,trace:binding.traceWaveTarget,notify:binding.notifyWave,notifyValues:binding.notifyWaveValues,reveal:()=>panel.reveal()});
+        const handle = { ...binding,configureWave:()=>registration?.configure(),linkWave:(selection,bitChoice='*')=>registration?.show({...binding.waveSnapshot(),designId:binding.waveSnapshot()?.id,selection,bitChoice}),
+            watchWave:(selection,bitChoice='*')=>registration?.watch({...binding.waveSnapshot(),designId:binding.waveSnapshot()?.id,selection,bitChoice}),
+            waveProbes:()=>registration?.probes(),removeWaveProbe:id=>registration?.removeProbe(id),
+            dispose() { registration?.dispose(); watch.dispose(); binding.dispose(); panel.dispose(); } };
         panels.add(handle);
-        panel.onDidDispose(() => panels.delete(handle));
+        panel.onDidDispose(() => { registration?.dispose(); watch.dispose(); panels.delete(handle); });
         panel.webview.html = createCircuitHtml({ webview: panel.webview, extensionUri: context.extensionUri });
         return handle;
     }
 
-    async function fromSource(uri) {
-        const document = await rtlDocument(uri);
+    async function fromSource(uri, { traceDirection } = {}) {
+        let document = await rtlDocument(uri);
+        const currentDocument = async () => {
+            if (document.isClosed) document = await vscode.workspace.openTextDocument(document.uri);
+            return document;
+        };
         const config = settings(document.uri);
+        let traceTarget = traceDirection ? await sourceSelection(document) : null;
+        let firstTraceLoad = true;
         let top = config.get('top', '');
+        if (!top && traceTarget) top = traceTarget.moduleName;
         if (!top) {
             const candidates = await scanTop(document);
             if (!candidates.length) throw new Error('当前文件没有可识别的普通模块名，请配置 svtools.circuit.top 和 sources');
@@ -135,33 +212,45 @@ function activateCircuitViewer(context, { vivado, sourceCatalog, vscode = requir
         }
         const root = rootOf(document.uri), outputBase = path.join(root, '.svtools', 'circuit');
         const roots = [root, path.dirname(document.uri.fsPath), ...(vscode.workspace.workspaceFolders || []).map(folder => folder.uri.fsPath)];
-        return open(({ signal }) => runJob('生成 RTL 电路 · Yosys', async task => {
-            const options = await prepareSourceRequest({ document, root, top, task, outputBase, resolveSources,
+        return open(({ signal, trackSources }) => runJob('生成 RTL 电路 · Yosys', async task => {
+            const options = await prepareSourceRequest({ document:await currentDocument(), root, top, task, outputBase, resolveSources,
                 config: Object.fromEntries(['sources', 'includeDirs', 'defines', 'frontend'].map(key => [key, config.get(key)])) });
             for (const file of options.sources) if (!insideRoots(file, [root])) {
                 if (!roots.includes(path.dirname(file))) roots.push(path.dirname(file));
             }
             for (const directory of options.includeDirs) if (!roots.includes(directory)) roots.push(directory);
+            const sourceSnapshots = await snapshotSources(options);
+            trackSources(sourceSnapshots);
             const result = await runYosysCircuit({ ...options, task, outputBase,
                 executable: config.get('yosysPath', 'bundled'), timeoutMs: config.get('generationTimeout', 120) * 1000,
                 onOutput: output.append });
-            return { ...result, format: 'yosys', stage: 'rtl', top, title: options.title, sourceMap: options.sourceMap };
-        }, signal), roots);
+            return { ...result, format: 'yosys', stage: 'rtl', top, title: options.title, sourceMap: options.sourceMap, sourceSnapshots };
+        }, signal), roots, { initialTrace: traceDirection ? async () => {
+            const current = await currentDocument();
+            if (firstTraceLoad) {
+                firstTraceLoad = false;
+                if (traceTarget.sourceHash !== sourceHash(current.getText())) traceTarget = await sourceSelection(current, traceTarget);
+            } else traceTarget = await sourceSelection(current, traceTarget);
+            return { target: traceTarget, direction: traceDirection };
+        } : undefined });
     }
 
     function openVivado({ projectPath, bin, root, document, top }) {
         const sourcePath = document?.uri.fsPath;
         const roots = [root, path.dirname(projectPath)];
         if (sourcePath) roots.push(path.dirname(sourcePath));
-        return open(({ signal }) => runJob(document ? '生成当前文件电路 · Vivado RTL' : '生成工程电路 · Vivado RTL', async task => {
+        return open(({ signal, trackSources }) => runJob(document ? '生成当前文件电路 · Vivado RTL' : '生成工程电路 · Vivado RTL', async task => {
             // 刷新时再次检查，避免用户编辑后仍显示磁盘上的旧正文。
+            if (document?.isClosed) document = await vscode.workspace.openTextDocument(document.uri);
             if (document) requireSavedVivadoFile(document);
+            const sourceSnapshots = document ? await snapshotSources({ sources: [document.uri.fsPath] }) : [];
+            trackSources(sourceSnapshots);
             const { runVivadoCircuit } = require('./vivado-runner');
             const result = await runVivadoCircuit({ task, projectPath, top, sourcePath,
                 executable: path.join(bin, process.platform === 'win32' ? 'vivado.bat' : 'vivado'),
                 outputBase: path.join(root, '.svtools', 'circuit'), timeoutMs: settings(document?.uri).get('generationTimeout', 120) * 1000,
                 onOutput: output.append });
-            return { ...result, format: 'vivado', title: sourcePath ? path.basename(sourcePath) + ' · ' + top : path.basename(projectPath) };
+            return { ...result, format: 'vivado', sourceSnapshots, title: sourcePath ? path.basename(sourcePath) + ' · ' + top : path.basename(projectPath) };
         }, signal), roots);
     }
 
@@ -194,10 +283,12 @@ function activateCircuitViewer(context, { vivado, sourceCatalog, vscode = requir
 
     function stop() {
         manager.cancelAll('用户停止电路生成');
+        for (const panel of panels) panel.trace.cancel().catch(fail);
         for (const scan of scans) scan.dispose(Object.assign(new Error('顶层扫描已取消'), { code: 'TOOL_CANCELLED' }));
         scans.clear();
     }
-    const commands = { open: openCircuit, fromSource, fromVivado, fromVivadoFile, stop };
+    const traceDrivers = uri => fromSource(uri, { traceDirection: 'drivers' }), traceLoads = uri => fromSource(uri, { traceDirection: 'loads' });
+    const commands = { open: openCircuit, fromSource, fromVivado, fromVivadoFile, traceDrivers, traceLoads, stop };
     for (const [name, action] of Object.entries(commands)) {
         context.subscriptions.push(vscode.commands.registerCommand('svtools.circuit.' + name,
             (...args) => Promise.resolve().then(() => action(...args)).catch(fail)));
@@ -206,6 +297,6 @@ function activateCircuitViewer(context, { vivado, sourceCatalog, vscode = requir
         for (const panel of panels) panel.dispose();
         panels.clear(); stop(); manager.dispose().catch(fail);
     } });
-    return { fromSource, fromVivado, fromVivadoFile, openNetlist };
+    return { fromSource, fromVivado, fromVivadoFile, openNetlist, traceDrivers, traceLoads };
 }
 module.exports = { activateCircuitViewer, insideRoots };

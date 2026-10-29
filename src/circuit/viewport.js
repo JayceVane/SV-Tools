@@ -1,8 +1,8 @@
 (function (root, factory) {
     'use strict';
-    if (typeof module === 'object' && module.exports) module.exports = factory();
-    else root.CircuitViewport = factory();
-})(typeof globalThis === 'object' ? globalThis : this, function () {
+    if (typeof module === 'object' && module.exports) module.exports = factory(require('./symbol-library'), require('./route-geometry'));
+    else root.CircuitViewport = factory(root.CircuitSymbols, root.CircuitRoutes);
+})(typeof globalThis === 'object' ? globalThis : this, function (symbols, routes) {
     'use strict';
     const LEAF_SIZE = 8, OVERSCAN_PX = 100, GEOMETRY_EPSILON = 1e-6;
     const MIN_MARKER_SPAN = 64, MARKER_CELL_WIDTH = 64, MARKER_CELL_HEIGHT = 32;
@@ -21,20 +21,7 @@
         return { bounds, children: [build(items.slice(0, middle)), build(items.slice(middle))] };
     }
 
-    function routePoints(section) {
-        const points = [section.startPoint, ...(section.bendPoints || []), section.endPoint];
-        if (points.some(point => !point || !Number.isFinite(point.x) || !Number.isFinite(point.y))) return [];
-        const result = [];
-        for (const point of points) {
-            const b = result.at(-1), a = result.at(-2);
-            if (b && near(b.x, point.x) && near(b.y, point.y)) continue;
-            // 仅合并同向共线折点，不跨过拐角，也不修改原始路由。
-            if (a && ((near(a.x, b.x) && near(b.x, point.x) && (b.y - a.y) * (point.y - b.y) >= 0)
-                || (near(a.y, b.y) && near(b.y, point.y) && (b.x - a.x) * (point.x - b.x) >= 0))) result.pop();
-            result.push(point);
-        }
-        return result;
-    }
+    const routePoints = routes.routePoints;
 
     function busCandidates(sections, bitCount) {
         if (!Number.isSafeInteger(bitCount) || bitCount <= 1) return [];
@@ -91,10 +78,13 @@
         const markers = new Map(), occupied = new Map();
         for (const node of nodes) occupyBounds({ left: node.x - 10, top: node.y - 24,
             right: node.x + node.width + 10, bottom: node.y + node.height + 10 }, occupied);
+        const markedNetworks = new Set();
         for (const edge of edges) {
             const bitCount = edge.bits?.length || 0;
+            const network = edge.netId && JSON.stringify([edge.netId, edge.source, edge.bits]);
+            if (network && markedNetworks.has(network)) continue;
             const marker = busCandidates(edge.sections, bitCount).find(candidate => reserveMarker(candidate, bitCount, occupied));
-            if (marker) markers.set(String(edge.id), marker);
+            if (marker) { markers.set(String(edge.id), marker); if (network) markedNetworks.add(network); }
         }
         return markers;
     }
@@ -103,8 +93,9 @@
     function createViewportIndex(graph, markers = createBusMarkers(graph.edges || [], graph.nodes || [])) {
         const items = [];
         for (const node of graph.nodes || []) {
-            // 名称位于节点上方；保留外侧引脚和文字的绘制边界。
-            items.push({ key: 'node:' + node.id, left: node.x - 24, top: node.y - 24, right: node.x + node.width + 24, bottom: node.y + node.height + 24 });
+            const bounds = symbols.geometry(node).paintBounds;
+            items.push({ key: 'node:' + node.id, left: node.x + Math.min(-24, bounds.left), top: node.y + Math.min(-24, bounds.top),
+                right: node.x + Math.max(node.width + 24, bounds.right), bottom: node.y + Math.max(node.height + 24, bounds.bottom) });
         }
         for (const edge of graph.edges || []) {
             const segments = [];
@@ -128,7 +119,7 @@
             }
             visit(tree); return visible;
         }
-        return { query };
+        return { query, bounds: items.length ? union(items) : { left: 0, top: 0, right: 1, bottom: 1 } };
     }
     return { createViewportIndex, busMarker, createBusMarkers };
 });

@@ -66,7 +66,7 @@ test('层级、模块选择和返回仅接受当前设计中的对象', async ()
     await host.send({ type: 'navigate', cellId: 'not-visible' });
     assert.equal(host.sent.filter(message => message.type === 'graph').length, 1);
     await host.send({ type: 'navigate', cellId: 'cell/inst' });
-    assert.deepEqual(host.sent.at(-1).breadcrumbs, [{ id: descriptor.top, name: 'top' }, { id: 'module/child', name: 'u_child' }]);
+    assert.deepEqual(host.sent.at(-1).breadcrumbs, [{ id: descriptor.top, name: 'top' }, { id: 'module/child', name: 'u_child', cellId: 'cell/inst' }]);
     await host.send({ type: 'back' });
     assert.equal(host.sent.at(-1).graph.moduleId, descriptor.top);
     await host.send({ type: 'module', moduleId: 'outside-design' });
@@ -119,6 +119,19 @@ test('刷新取代旧 loader，旧失败不会覆盖新图', async () => {
     host.close();
 });
 
+test('刷新期间旧观察器的延迟过期通知，在捕获新编译快照时清除', async () => {
+    const pending = [], host = setup({ load: () => new Promise(resolve => pending.push(resolve)) });
+    await host.send({ type: 'ready' }); pending.shift()({ filePath: 'first.json' });
+    for (let i = 0; i < 4; i++) await flush();
+    await host.send({ type: 'reload' });
+    await host.binding.markSourceStale(); assert.equal(host.binding.getState().sourceStale, true);
+    host.binding.sourceSnapshotCaptured(); pending.shift()({ filePath: 'fresh.json' });
+    for (let i = 0; i < 4; i++) await flush();
+    assert.equal(host.sent.at(-1).type, 'graph'); assert.equal(host.sent.at(-1).sourceStale, false);
+    await host.binding.markSourceStale(); assert.equal(host.binding.getState().sourceStale, true);
+    host.close();
+});
+
 test('迟到的源码响应不触发离开当前导航的编辑器跳转', async () => {
     let resolveSource;
     const host = setup({ request: async (command, payload) => {
@@ -135,6 +148,43 @@ test('迟到的源码响应不触发离开当前导航的编辑器跳转', async
     host.close();
 });
 
+
+test('追踪计算中模块显示失败必须复位 navigation.busy', async () => {
+    const host = setup({ request: async (command, payload) => {
+        if (command === 'load') return descriptor;
+        if (command === 'layout' && payload.moduleId === 'module/child') throw new Error('child layout failed');
+        if (command === 'layout') return graph(payload.moduleId);
+        // 让追踪布局一直挂起，模拟“正在计算局部电路”时用户切换模块。
+        if (command === 'traceLayout') return new Promise(() => {});
+        return { path: 'rtl/top.sv', line: 2, column: 1 };
+    } });
+    await host.send({ type: 'ready' });
+    assert.equal((await host.binding.loaded).ok, true);
+    const pending = host.binding.trace.begin({ origin: { objectId: 'object:root' }, direction: 'drivers' });
+    for (let i = 0; i < 4; i++) await flush();
+    assert.equal(host.binding.trace.navigation().busy, true);
+    assert.equal(host.sent.filter(message => message.type === 'trace-state').at(-1).navigation.busy, true);
+    await host.send({ type: 'module', moduleId: 'module/child' });
+    // 模块布局失败后旧追踪被取代，busy 必须复位，错误仍要上报。
+    assert.equal(host.sent.at(-1).type, 'error');
+    assert.match(host.sent.at(-1).message, /child layout failed/);
+    assert.equal(host.errors.length, 1);
+    assert.equal(host.binding.trace.navigation().busy, false);
+    assert.equal(host.sent.filter(message => message.type === 'trace-state').at(-1).navigation.busy, false);
+    pending.catch(() => {});
+    host.close();
+});
+
+test('图片复制请求单独回复，不触发文件保存或重新布局',async()=>{
+    let copied=null;
+    const host=setup({imageFiles:{async save(){throw new Error('不应保存文件');},async copy(payload){copied=payload;return true;}}});
+    await host.send({type:'ready'});const layouts=host.calls.filter(call=>call.command==='layout').length;
+    await host.send({type:'image-copy',requestId:7,params:{format:'png',data:'png-data'}});
+    const response=host.sent.at(-1);
+    assert.equal(response.type,'image-result');assert.equal(response.requestId,7);assert.equal(response.result,true);
+    assert.deepEqual(copied,{format:'png',data:'png-data'});
+    assert.equal(host.calls.filter(call=>call.command==='layout').length,layouts);host.close();
+});
 
 test('图片保存成功、取消与失败均单独回复，不覆盖电路图或触发重新布局',async()=>{
     let outcome=true,calls=0;

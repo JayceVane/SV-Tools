@@ -38,4 +38,4 @@
 
 补全不执行完整预处理、宏展开、generate 详细化或任意表达式类型推导；条件编译、多文件类外方法和复杂重载仍有边界。不能将固定目录覆盖解释为所有标准语义场景的 100% 实现。
 
-[详细覆盖与边界](https://github.com/JayceVane/SV-Tools/blob/v4.0.0/docs/COMPLETION.md) · [公开参考库来源与许可证](https://github.com/JayceVane/SV-Tools/blob/v4.0.0/docs/COMPLETION_SOURCES.md)
+[详细覆盖与边界](https://github.com/JayceVane/SV-Tools/blob/v4.1.0/docs/COMPLETION.md) · [公开参考库来源与许可证](https://github.com/JayceVane/SV-Tools/blob/v4.1.0/docs/COMPLETION_SOURCES.md)

@@ -34,6 +34,12 @@ async function run(){
         assert.equal(await imageFiles.save({format:'png',name:'host-image',data:png.toString('base64')},pngUri),true);
         assert.deepEqual(await fs.readFile(pngUri.fsPath),png);
         checks.push('真实IDE文件系统验证SVG/PNG保存；图形生成另经实际浏览器验收');
+        const originalStorage = binding.getMetadata().storageBytes;
+        await fs.writeFile(path.join(root,'wave.sv'),'module host_wave(output [7:4] ctrl, input flag); endmodule');
+        await until(()=>binding.getMetadata()?.vars[0].role==='output'&&binding.getMetadata()?.vars[1].role==='input','源码稳定后自动刷新方向');
+        assert.equal(binding.getMetadata().storageBytes,originalStorage);
+        assert.equal((await binding.linkedValues({ids:['!'],time:40})).values['!'],'1110');
+        checks.push('源码修改后自动恢复I/O方向，同一Worker事件存储和精确读值保持');
         await fs.writeFile(path.join(root,'..','host-report.json'),JSON.stringify({vscode:vscode.version,appName:vscode.env.appName,
             node:process.versions.node,electron:process.versions.electron,extensionVersion:extension.packageJSON.version,extensionPath:extension.extensionPath,
             checks,count:checks.length,status:binding.getStatus()},null,2));

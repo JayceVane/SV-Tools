@@ -43,6 +43,8 @@
 
 仿真在当前源码目录运行，相对 `$readmemh` / `$dumpfile` 以该目录为准。未保存内容的 lint 可以检查快照；仿真使用磁盘内容，因此应先保存。运行超时可用 `svtools.iverilog.simTimeoutMs` 设置，默认 `0` 不限时。
 
+VCD输出集中在 `<工作区>/.svtools/vcd/`，没有工作区时以源码目录为根。未指定文件名时直接输出到该目录；RTL显式`$dumpfile(...)`或`simArgs`中的`-dumpfile=...`指定的VCD，在成功仿真后统一归档到该目录并打开。文件名保留可读名称，并按源文件、Top及原路径区分，重复仿真保持稳定。原有测试台不会被改写，仿真cwd仍为源码目录，相对`$readmemh`不受影响。旧的未变化波形不迁移；FST/LXT等格式保留原有输出规则。
+
 ## 重新仿真与旧 VCD
 
 编译成功、启动 vvp 前，插件关闭本次可能写入的旧 VCD 波形页和文本标签，并等待读取 worker 退出。写入期间暂时禁止重开相关波形，完成后读取新数据。编译失败保留旧视图；无法关闭标签时不会开始写入。
@@ -51,6 +53,6 @@
 
 ## 日志与依赖问题
 
-任务日志通常位于 `<工作区>/.svtools/tasks/`，每个阶段独立保存。优先看第一条具体语法、缺少 module/package、include 或参数错误，保留完整日志供排查。日志与产物会累积，目前没有自动保留期。
+任务日志通常位于 `<工作区>/.svtools/tasks/`，每个阶段独立保存。优先看第一条具体语法、缺少 module/package、include 或参数错误，保留完整日志供排查。工具任务默认保留最近5轮已交还记录，可通过`svtools.tasks.retainedRuns`调整；活动任务及仍在使用的快照保留。
 
-[详细任务边界与资源预算](https://github.com/JayceVane/SV-Tools/blob/v4.0.0/docs/TOOLCHAINS.md)
+[详细任务边界与资源预算](https://github.com/JayceVane/SV-Tools/blob/v4.1.0/docs/TOOLCHAINS.md)

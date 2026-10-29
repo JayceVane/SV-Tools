@@ -1,19 +1,19 @@
 # 安装与第一次运行
 
-## 安装 4.0.0
+## 安装 4.1.0
 
-1. 在 [Releases](https://github.com/JayceVane/SV-Tools/releases) 下载 Windows x64 的 `svtools-v4.0.0-win32-x64.vsix`。
+1. 在 [Releases](https://github.com/JayceVane/SV-Tools/releases) 下载 Windows x64 的 `svtools-v4.1.0-win32-x64.vsix`。
 2. 使用 VS Code 1.106.0 或更新版本。兼容 IDE 也需满足相同扩展宿主要求。
 3. 打开命令面板，执行 **Extensions: Install from VSIX… / 扩展：从 VSIX 安装**，选择文件。
 4. 执行 **Developer: Reload Window / 开发人员：重新加载窗口**。
-5. 在扩展详情中确认版本为 `4.0.0`，扩展 ID 为 `JayceVane.svtools`。
+5. 在扩展详情中确认版本为 `4.1.0`，扩展 ID 为 `JayceVane.svtools`。
 
 只安装扩展不需要 Node.js、Rust、Python 或系统 PATH 中的 Yosys。发布附件中的 `svtools.exe` 是独立 CLI，使用编辑器扩展时不必单独安装。
 
 需要核对下载完整性时，用 PowerShell 对附件求哈希，与同一 Release 的 `SHA256SUMS.txt` 比较：
 
 ```powershell
-Get-FileHash .\svtools-v4.0.0-win32-x64.vsix -Algorithm SHA256
+Get-FileHash .\svtools-v4.1.0-win32-x64.vsix -Algorithm SHA256
 ```
 
 ## 先完成一次格式化

@@ -187,7 +187,7 @@ test('多比特顶层端口预留位宽文本空间，单比特不按名字猜�
     const design = makeDesign({ ports: { data: { direction: 'input', bits: [2, 3, 4, 5, 6, 7, 8, 9] },
         'scalar[7:0]': { direction: 'input', bits: [10] } } });
     const before = JSON.stringify(design), graph = project(design);
-    assert.ok(graph.nodes.find(node => node.label === 'data').height >= 66);
-    assert.equal(graph.nodes.find(node => node.label === 'scalar[7:0]').height, 54);
+    assert.equal(graph.nodes.find(node => node.label === 'data').height, 40);
+    assert.equal(graph.nodes.find(node => node.label === 'scalar[7:0]').height, 32);
     assert.equal(JSON.stringify(design), before);
 });

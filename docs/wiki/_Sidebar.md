@@ -1,4 +1,4 @@
-# SV Tools 4.0
+# SV Tools 4.1
 
 - [首页](https://github.com/JayceVane/SV-Tools/wiki/Home)
 - [界面导览](https://github.com/JayceVane/SV-Tools/wiki/Screenshots)
@@ -11,6 +11,7 @@
 - [Vivado 工程管理](https://github.com/JayceVane/SV-Tools/wiki/Vivado)
 - [波形与存储器](https://github.com/JayceVane/SV-Tools/wiki/Waveforms)
 - [电路查看器](https://github.com/JayceVane/SV-Tools/wiki/Circuits)
+- [信号追踪与波形联动](https://github.com/JayceVane/SV-Tools/wiki/Signal-Tracing)
 - [配置参考](https://github.com/JayceVane/SV-Tools/wiki/Configuration)
 - [命令参考](https://github.com/JayceVane/SV-Tools/wiki/Command-Reference)
 - [故障排查](https://github.com/JayceVane/SV-Tools/wiki/Troubleshooting)

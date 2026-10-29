@@ -1,6 +1,7 @@
 'use strict';
 const path = require('node:path');
 const { validate, MAX_BYTES } = require('./layout-state');
+const { assertExportTarget } = require('../workspace/export-target');
 
 /** @param {{vscode:object,filePath:string}} deps @returns {{save:Function,load:Function}} 对话框边界；只接受用户选定的本地布局文件。 */
 function createLayoutFiles({ vscode, filePath }) {
@@ -11,6 +12,8 @@ function createLayoutFiles({ vscode, filePath }) {
         const uri = target || await vscode.window.showSaveDialog({ defaultUri: vscode.Uri.file(filePath.replace(/\.vcd$/i, '') + '.svwave.json'), filters });
         if (!uri) return false;
         if (uri.scheme !== 'file' || path.resolve(uri.fsPath).toLowerCase() === path.resolve(filePath).toLowerCase()) throw new Error('请选择独立的本地布局文件，不能覆盖 VCD');
+        if (path.extname(uri.fsPath).toLowerCase() !== '.json') throw new Error('布局文件扩展名必须是 .svwave.json 或 .json');
+        await assertExportTarget(uri.fsPath, filePath);
         const bytes = Buffer.from(JSON.stringify(layout, null, 2) + '\n', 'utf8');
         if (bytes.length > MAX_BYTES) throw new Error('布局文件超过4 MiB预算');
         await vscode.workspace.fs.writeFile(uri, bytes); return true;

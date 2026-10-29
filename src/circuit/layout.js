@@ -28,6 +28,11 @@ function geometry(value, where) {
  */
 async function layoutModule(design, moduleId, { elk } = {}) {
     const projection = projectModule(design, moduleId);
+    return layoutProjection(projection, { elk });
+}
+
+/** @param {object} projection 已验证的独立展示投影。 @param {{elk?:object}} options 布局引擎。 @returns {Promise<object>} 带几何的图，不修改领域模型。 */
+async function layoutProjection(projection, { elk } = {}) {
     if (!elk) {
         const Elk = require('../../bin/vendor/elk.bundled.js');
         elk = new Elk();
@@ -60,4 +65,4 @@ async function layoutModule(design, moduleId, { elk } = {}) {
         nodes, edges, signals: projection.signals, parameters: projection.parameters, stats: projection.stats };
 }
 
-module.exports = { layoutModule };
+module.exports = { layoutModule, layoutProjection };

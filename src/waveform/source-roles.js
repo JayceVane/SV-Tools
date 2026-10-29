@@ -2,6 +2,7 @@
 const fs = require('node:fs/promises');
 const { createReadStream } = require('node:fs');
 const path = require('node:path');
+const { setTimeout: delay } = require('node:timers/promises');
 const { parseDocument } = require('../editor/completion/syntax');
 const { SOURCE_EXCLUDE_GLOB, isExcludedSourcePath } = require('../workspace/source-policy');
 const MAX_FILES = 512, MAX_FILE_BYTES = 1024 * 1024, MAX_BYTES = 8 * 1024 * 1024;
@@ -69,14 +70,25 @@ function classifySignals(vars, units) {
 }
 
 /** @param {object} vscode @param {string} filePath @returns {Promise<object>} 只发现路径，不打开文档，避免触发自动lint。 */
-async function collectSourceContext(vscode, filePath, sourceCatalog, sourceFile) {
+async function collectSourceContext(vscode, filePath, sourceCatalog, sourceFile, { signal } = {}) {
+    for (let attempt = 0; attempt < 3; attempt++) {
+        signal?.throwIfAborted();
+        const context = await collectOnce(vscode, filePath, sourceCatalog, sourceFile);
+        signal?.throwIfAborted();
+        if (!context.invalidated || attempt === 2) return context;
+        await delay(50 * (attempt + 1), undefined, { signal });
+    }
+}
+
+async function collectOnce(vscode, filePath, sourceCatalog, sourceFile) {
     const folder = vscode.workspace.getWorkspaceFolder(vscode.Uri.file(filePath));
     const folders = folder ? [folder] : vscode.workspace.workspaceFolders || [];
-    const files = new Set(), sourceRoots = new Set(folders.map(root => root.uri.fsPath)); let truncated = false;
+    const files = new Set(), sourceRoots = new Set(folders.map(root => root.uri.fsPath)); let truncated = false, invalidated = false;
     for (const root of folders) {
         const pattern = new vscode.RelativePattern(root, '**/*.{sv,v,svh,vh}');
         const shared = sourceCatalog ? await sourceCatalog.discover({ root: root.uri.fsPath, file: sourceFile || filePath, limit: MAX_FILES }) : null;
         truncated ||= !!shared?.truncated;
+        invalidated ||= !!shared?.invalidated;
         for (const directory of shared?.roots || []) sourceRoots.add(directory);
         for (const uri of shared ? shared.uris : await vscode.workspace.findFiles(pattern, SOURCE_EXCLUDE_GLOB, MAX_FILES + 1)) {
             if (isExcludedSourcePath(uri.fsPath)) continue;
@@ -88,13 +100,14 @@ async function collectSourceContext(vscode, filePath, sourceCatalog, sourceFile)
         const text = document.getText(), size = Buffer.byteLength(text);
         if (size <= MAX_FILE_BYTES && bytes + size <= MAX_BYTES) { documents.push({ file: document.uri.fsPath, text }); bytes += size; } else truncated = true;
     }
-    return { roots: [...sourceRoots], files: [...files], documents, truncated };
+    return { roots: [...sourceRoots], files: [...files], documents, truncated, ...(invalidated ? { invalidated: true } : {}) };
 }
 const inside = (file, root) => { const relative = path.relative(root, file); return relative !== '..' && !relative.startsWith('..' + path.sep) && !path.isAbsolute(relative); };
 
 /** @param {object[]} vars @param {object} context 宿主发现的只读路径。@returns {Promise<object>} 在VCD worker中解析有界源码，失败仅降级方向图标。 */
 async function readSignalRoles(vars, context) {
     if (!context?.roots?.length) return { vars, sourceRoleNote: '方向未知：未找到工作区RTL' };
+    if (context.invalidated) return { vars, sourceRoleNote: '方向暂不可用：RTL源码清单正在变化，将在稳定后重试' };
     if (context.truncated || context.files?.length > MAX_FILES) return { vars, sourceRoleNote: '方向未知：RTL候选或脏缓冲区超过扫描预算' };
     const roots = await Promise.all(context.roots.map(root => fs.realpath(root)));
     const overlays = new Map((context.documents || []).map(item => [path.resolve(item.file), item.text]));

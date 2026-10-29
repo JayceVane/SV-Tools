@@ -6,7 +6,7 @@ const { randomUUID } = require('node:crypto');
 const { parseArgs } = require('node:util');
 
 // 开发预览复用真实 Worker、模型、ELK 和页面；SSE 仅替代 VS Code 的消息桥。
-const { values } = parseArgs({ options: { json: { type: 'string' }, root: { type: 'string' }, port: { type: 'string', default: '0' }, out: { type:'string' }, 'extension-root': { type:'string' } } });
+const { values } = parseArgs({ options: { json: { type: 'string' }, root: { type: 'string' }, port: { type: 'string', default: '0' }, out: { type:'string' }, measure: { type: 'boolean' }, 'extension-root': { type:'string' } } });
 const extensionRoot=path.resolve(values['extension-root']||path.join(__dirname,'..'));
 const {createImageFiles}=require(path.join(extensionRoot,'src/graphics/image-files'));
 const {createCircuitHtml}=require(path.join(extensionRoot,'src/circuit/view'));
@@ -51,6 +51,10 @@ window.acquireVsCodeApi = () => ({postMessage(message){ if(events.readyState===1
 `;
             const index = html.indexOf('>', html.lastIndexOf('<script nonce=')) + 1;
             html = html.slice(0, index) + bridge + html.slice(index);
+            if (values.measure) {
+                const script = fs.readFileSync(path.join(__dirname, 'circuit-browser-measurement.js'), 'utf8');
+                html = html.slice(0, index) + script + '\n' + html.slice(index);
+            }
             response.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' }); response.end(html);
             const timer = setTimeout(() => { if (!client.response) client.dispose(); }, 15000); timer.unref();
         } else if (request.method === 'GET' && url.pathname === '/events') {
@@ -60,6 +64,13 @@ window.acquireVsCodeApi = () => ({postMessage(message){ if(events.readyState===1
             response.write(': connected\n\n'); client.response = response;
             for (const event of client.events.splice(0)) response.write(event);
             request.on('close', () => client.dispose());
+        } else if (values.measure && request.method === 'POST' && url.pathname === '/measurements') {
+            const chunks = []; let bytes = 0;
+            for await (const chunk of request) { bytes += chunk.length; if (bytes > 256 * 1024) throw new Error('测量报告过大'); chunks.push(chunk); }
+            const report = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+            const theme = url.searchParams.get('theme') === 'light' ? 'light' : 'dark';
+            fs.writeFileSync(path.join(exportRoot, 'measurement-' + theme + '.json'), JSON.stringify(report, null, 2));
+            response.writeHead(204); response.end();
         } else if (request.method === 'POST' && url.pathname === '/command') {
             const client = clients.get(url.searchParams.get('client'));
             if (!client) { response.writeHead(404); response.end(); return; }

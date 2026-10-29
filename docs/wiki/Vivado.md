@@ -45,4 +45,4 @@
 
 Vivado 日志中的 `ERROR` 即使进程退出码为 0，也判定任务失败。先定位具体设计单元、端口、语法、器件或许可错误，再查看完整阶段日志。
 
-工程中已有的 IP 可作为 Vivado 上下文使用；插件内新增/定制 Vivado IP 的独立管理功能仍在[后续计划](https://github.com/JayceVane/SV-Tools/blob/v4.0.0/docs/ROADMAP.md)。
+工程中已有的 IP 可作为 Vivado 上下文使用；插件内新增/定制 Vivado IP 的独立管理功能仍在[后续计划](https://github.com/JayceVane/SV-Tools/blob/v4.1.0/docs/ROADMAP.md)。

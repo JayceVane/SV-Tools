@@ -70,7 +70,7 @@ scripts/verify-completion-host.ps1 -CodePath 'D:/Tools/Microsoft VS Code/Code.ex
 node scripts/verify-completion-performance.js
 ```
 
-性能脚本实际生成/读取 512 个 HDL 文件和十万行活动文档，监测冷索引、热请求、单文件变化、脏文档、I/O 与内存。它运行真实 provider/index/engine，VS Code 适配类使用轻量构造器；该耗时不是 IDE 绘制端到端延迟。交付版本的数值和报告位置见 [V4_ALPHA6.md](V4_ALPHA6.md)。
+性能脚本实际生成/读取 512 个 HDL 文件和十万行活动文档，监测冷索引、热请求、单文件变化、脏文档、I/O 与内存。它运行真实 provider/index/engine，VS Code 适配类使用轻量构造器；该耗时不是 IDE 绘制端到端延迟。
 
 ## 尚未覆盖的语义
 

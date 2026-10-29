@@ -82,6 +82,8 @@ class VcdSession {
     values(params) { return this.query('values', params); }
     /** @param {{id: string, time: number, direction: 'next'|'previous'|1|-1, bitOffset?:number, continuation?:number}} params @returns {Promise<object>} */
     edge(params) { return this.query('edge', params); }
+    /** @param {object} sourceContext 有界RTL清单。 @returns {Promise<object>} 只重算方向，不重新读取VCD或创建事件存储。 */
+    roles(sourceContext) { return this.query('roles', sourceContext); }
     /** 取消读取和全部 pending 请求；释放 worker 及其事件存储。 */
     dispose() {
         if (this.disposed) return this.closing;

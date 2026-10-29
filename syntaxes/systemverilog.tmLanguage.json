@@ -42,6 +42,7 @@
             "2": { "patterns": [
               { "include": "#strings" },
               { "include": "#comments" },
+              { "include": "#numbers" },
               {
                 "name": "entity.name.function.preprocessor.systemverilog",
                 "match": "\\w+"
@@ -97,6 +98,10 @@
     },
     "numbers": {
       "patterns": [
+        {
+          "name": "constant.numeric.unbased.systemverilog",
+          "match": "(?<![a-zA-Z0-9_$])'[01xXzZ](?![a-zA-Z0-9_$])"
+        },
         {
           "name": "constant.numeric.sized.systemverilog",
           "match": "\\b\\d+\\s*'[sS]?[bBoOdDhH]\\s*[0-9a-fA-FxXzZ_]+\\b"

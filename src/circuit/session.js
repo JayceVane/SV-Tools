@@ -7,8 +7,8 @@ const MAX_PENDING_REQUESTS = 8;
 
 /** 文件解析、模型构建和 ELK 布局均在独立 Worker 中执行，关闭页面释放整个会话。 */
 class CircuitSession {
-    constructor({ WorkerClass = Worker, timeoutMs = REQUEST_TIMEOUT_MS } = {}) {
-        this.worker = new WorkerClass(path.join(__dirname, 'worker.js'), {
+    constructor({ WorkerClass = Worker, timeoutMs = REQUEST_TIMEOUT_MS, workerFile = path.join(__dirname, 'worker.js') } = {}) {
+        this.worker = new WorkerClass(workerFile, {
             resourceLimits: { maxOldGenerationSizeMb: WORKER_HEAP_MB }
         });
         this.timeoutMs = timeoutMs;

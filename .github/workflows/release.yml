@@ -51,6 +51,10 @@ jobs:
           npm run package -- --target win32-x64 --out "bin/svtools-$TAG-win32-x64.vsix"
         shell: bash
 
+      - name: 验证公开安装包排除自用功能
+        run: Get-ChildItem bin/*.vsix | ForEach-Object { node scripts/check-public-package.js $_.FullName; if ($LASTEXITCODE -ne 0) { throw '公开安装包检查失败' } }
+        shell: pwsh
+
       - name: 运行 Rust 回归
         run: cargo test --manifest-path src/native/Cargo.toml
 

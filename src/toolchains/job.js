@@ -4,7 +4,9 @@ const os = require('node:os');
 const path = require('node:path');
 const { randomUUID } = require('node:crypto');
 const { startProcess } = require('./process');
+const { createTaskDirectory, pruneTaskDirectories, MAX_RETAINED_RUNS } = require('./task-retention');
 const MAX_CONCURRENT_PROCESSES = 2;
+const DEFAULT_RETAINED_RUNS = 5;
 
 function cancelledError(reason) {
     const error = new Error(reason || '任务已取消'); error.code = 'TOOL_CANCELLED'; return error;
@@ -15,7 +17,7 @@ class ToolTask {
     constructor(manager, key, previous) {
         this.manager = manager; this.key = key; this.id = randomUUID(); this.previous = previous;
         this.controller = new AbortController(); this.signal = this.controller.signal;
-        this.state = 'preparing'; this.reason = null; this.directories = new Map(); this.pending = new Set();
+        this.state = 'preparing'; this.reason = null; this.directories = new Map(); this.directoryLeases = new Map(); this.pending = new Set();
         this.logPaths = []; this.sequence = 0; this.finished = false; this.finishing = null;
         this.completion = new Promise(resolve => { this.resolveCompletion = resolve; });
     }
@@ -34,9 +36,28 @@ class ToolTask {
         if (!/^[a-z][a-z0-9-]*$/i.test(kind)) throw new Error('无效的工具任务目录类型');
         const root = path.resolve(base), key = root + ':' + kind;
         if (this.directories.has(key)) return this.directories.get(key);
-        await fs.mkdir(root, { recursive: true }); this.throwIfCancelled();
-        const directory = await fs.mkdtemp(path.join(root, kind + '-'));
-        this.directories.set(key, directory); this.throwIfCancelled(); return directory;
+        const lease = await createTaskDirectory(root, kind);
+        this.directoryLeases.set(key, lease); this.directories.set(key, lease.path);
+        this.throwIfCancelled(); return lease.path;
+    }
+
+    /**
+     * @param {AbortSignal} [signal] 面板刷新或关闭时交还占用。
+     * @returns {{dispose:()=>Promise<void>}} 延长当前目录的保留期；不替代 finish 的 keepArtifacts 选项。
+     * @throws {Error} 任务已结束或已取消。
+     */
+    retainDirectories(signal) {
+        this.throwIfCancelled();
+        const leases = [...this.directoryLeases.values()].map(lease => lease.retain());
+        let disposal;
+        const dispose = () => {
+            signal?.removeEventListener('abort', dispose);
+            disposal ||= this.manager.releaseDirectories(this, leases);
+            return disposal;
+        };
+        if (signal?.aborted) dispose();
+        else signal?.addEventListener('abort', dispose, { once: true });
+        return { dispose };
     }
 
     /** @param {string} command @param {string[]} args @param {object} [options] @returns {Promise<object>} */
@@ -78,7 +99,9 @@ class ToolTask {
             finally {
                 this.finished = true; this.state = this.signal.aborted ? 'cancelled' : 'finished';
                 if (this.manager.current.get(this.key) === this) this.manager.current.delete(this.key);
-                this.manager.tasks.delete(this); this.resolveCompletion(); this.manager.changed(this);
+                this.manager.tasks.delete(this);
+                await this.manager.releaseDirectories(this, this.directoryLeases.values());
+                this.resolveCompletion(); this.manager.changed(this);
             }
         })();
         return this.finishing;
@@ -87,12 +110,39 @@ class ToolTask {
 
 /**
  * 同 key 的新请求取消旧请求；不同文档任务以独立目录并行。
- * @param {{startProcess?:Function,onChange?:(task:ToolTask)=>void}} [options]
+ * @param {{startProcess?:Function,onChange?:(task:ToolTask)=>void,retention?:{keep:number|(()=>number)}}} [options]
  * @returns {{start:(key:string)=>ToolTask,cancel:Function,cancelAll:Function,dispose:Function}}
  */
-function createToolTaskManager({ startProcess: launch = startProcess, onChange = () => {} } = {}) {
+function createToolTaskManager({ startProcess: launch = startProcess, onChange = () => {}, retention = { keep: DEFAULT_RETAINED_RUNS } } = {}) {
     const acquire = createProcessSlots(MAX_CONCURRENT_PROCESSES);
+    const maintenance = new Set();
+    function retainedRuns() {
+        try {
+            const keep = typeof retention.keep === 'function' ? retention.keep() : retention.keep;
+            return Number.isSafeInteger(keep) && keep >= 0 && keep <= MAX_RETAINED_RUNS ? keep : DEFAULT_RETAINED_RUNS;
+        } catch (error) { console.error('读取任务目录保留配置失败：' + error.message); return DEFAULT_RETAINED_RUNS; }
+    }
     const manager = { current: new Map(), tasks: new Set(), startProcess: launch, changed: onChange, acquire,
+        /** 释放实际占用后仅淘汰终态目录；等待维护完成，但失败不改变工具任务结果。 */
+        releaseDirectories(task, leases) {
+            const work = (async () => {
+                for (const lease of leases) {
+                    try { await lease.dispose(); }
+                    catch (error) { console.error('交还任务目录失败(' + lease.path + ')：' + error.message); }
+                }
+                const keep = retainedRuns();
+                if (!keep) return;
+                await Promise.all([...task.directories.keys()].map(async key => {
+                    const separator = key.lastIndexOf(':');
+                    try { await pruneTaskDirectories(key.slice(0, separator), key.slice(separator + 1), keep); }
+                    catch (error) { console.error('任务目录封顶失败(' + key.slice(0, separator) + ')：' + error.message); }
+                }));
+            })();
+            maintenance.add(work);
+            const forget = () => maintenance.delete(work);
+            work.then(forget, forget);
+            return work;
+        },
         start(key) {
             const previous = manager.current.get(key); previous?.cancel('被新的任务取代');
             const task = new ToolTask(manager, key, previous); manager.current.set(key, task); manager.tasks.add(task);
@@ -100,7 +150,11 @@ function createToolTaskManager({ startProcess: launch = startProcess, onChange =
         },
         cancel(key, reason) { manager.current.get(key)?.cancel(reason); },
         cancelAll(reason = '工具链已关闭') { for (const task of manager.tasks) task.cancel(reason); },
-        async dispose() { manager.cancelAll(); await Promise.all([...manager.tasks].map(task => task.completion)); }
+        async dispose() {
+            manager.cancelAll();
+            await Promise.all([...manager.tasks].map(task => task.completion));
+            await Promise.all([...maintenance]);
+        }
     };
     return manager;
 }

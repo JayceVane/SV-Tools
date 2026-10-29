@@ -31,6 +31,8 @@ function createCircuitSourceResolver({ vscode, sourceCatalog }) {
             task.throwIfCancelled();
             const pattern = vscode.RelativePattern ? new vscode.RelativePattern(root, '**/*.{sv,v}') : '**/*.{sv,v}';
             const shared = sourceCatalog ? await sourceCatalog.discover({ root, file: current.file, extensions: ['sv','v'], limit: MAX_SCAN_FILES, token: cancellation?.token }) : null;
+            task.throwIfCancelled();
+            if (shared?.invalidated) throw new Error('源码清单在扫描期间持续变化，请等待工作区稳定或显式配置 sources');
             if (shared?.truncated) throw new Error('电路源码发现超过4096文件预算，请显式配置 sources');
             const files = shared ? shared.uris : await vscode.workspace.findFiles(pattern, SOURCE_EXCLUDE_GLOB, MAX_SCAN_FILES + 1, cancellation?.token);
             task.throwIfCancelled();

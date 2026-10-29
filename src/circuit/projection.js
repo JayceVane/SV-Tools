@@ -4,6 +4,7 @@ const { createHash } = require('crypto');
 const { findModule } = require('./model');
 const { registerSymbol } = require('./register-symbol');
 const { addBusConnections } = require('./bus-routing');
+const { prepareNode } = require('./symbol-library');
 
 const MAX_NODES = 2_000;
 const MAX_EDGES = 6_000;
@@ -38,7 +39,14 @@ function netLabel(bits, aliases) {
     return `${signal.name}[${bits.length === 1 ? first : `${last}:${first}`}]`;
 }
 function elkPort(port) {
-    return { id: port.id, width: port.width, height: port.height, layoutOptions: { 'elk.port.side': port.direction === 'output' ? 'EAST' : 'WEST' } };
+    return { id: port.id, x: port.x, y: port.y, width: port.width, height: port.height,
+        layoutOptions: { 'elk.port.side': port.side || (port.direction === 'output' ? 'EAST' : 'WEST') } };
+}
+
+/** @param {object} node 已分配符号锚点的展示节点。 @returns {object} 无业务字段的ELK节点。 */
+function elkNode(node) {
+    return { id: node.id, width: node.width, height: node.height,
+        layoutOptions: { 'elk.portConstraints': 'FIXED_POS' }, ports: node.ports.map(elkPort) };
 }
 
 /**
@@ -135,17 +143,19 @@ function projectModule(design, moduleId) {
         outputs.forEach(item => addEdge(item.port.id, item.endpoint, group));
     }
     const busNodeCount = addBusConnections(nodes, edges, { maxNodes: MAX_NODES, maxEdges: MAX_EDGES, maxPorts: MAX_PORTS });
+    for (let i = 0; i < nodes.length; i++) nodes[i] = prepareNode(nodes[i]);
     const graphId = `graph:${module.id}`;
     const input = { id: graphId, layoutOptions: {
         'elk.algorithm': 'layered', 'elk.direction': 'RIGHT', 'elk.edgeRouting': 'ORTHOGONAL',
-        'elk.spacing.nodeNode': '38', 'elk.layered.spacing.nodeNodeBetweenLayers': '84',
+        'elk.spacing.nodeNode': '32', 'elk.layered.spacing.nodeNodeBetweenLayers': '64',
+        'elk.spacing.edgeNode': '16', 'elk.spacing.edgeEdge': '12',
+        'elk.layered.spacing.edgeNodeBetweenLayers': '16', 'elk.layered.spacing.edgeEdgeBetweenLayers': '12',
         'elk.padding': '[top=32,left=32,bottom=32,right=32]',
-    }, children: nodes.map(node => ({ id: node.id, width: node.width, height: node.height,
-        layoutOptions: { 'elk.portConstraints': 'FIXED_ORDER' }, ports: node.ports.map(elkPort) })),
+    }, children: nodes.map(elkNode),
     edges: edges.map(edge => ({ id: edge.id, sources: [edge.source], targets: [edge.target] })) };
     return { id: graphId, moduleId: module.id, name: module.name, input, nodes, edges, signals: module.signals, parameters: module.parameters,
         stats: { bitCount: nets.size, portCount: module.ports.length, cellCount: module.cells.length, nodeCount: nodes.length, edgeCount: edges.length,
             undrivenBitCount, multiDriverBitCount, ambiguousBitCount, busNodeCount } };
 }
 
-module.exports = { MAX_NODES, MAX_EDGES, MAX_LAYOUT_BIT_REFERENCES, projectModule };
+module.exports = { MAX_NODES, MAX_EDGES, MAX_LAYOUT_BIT_REFERENCES, projectModule, elkNode };

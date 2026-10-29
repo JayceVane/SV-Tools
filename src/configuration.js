@@ -1,7 +1,9 @@
 'use strict';
 
 // VS Code 清单集中提供配置默认值；这里仅映射编辑器名称与 napi 字段。
-const properties = require('../package.json').contributes.configuration.properties;
+const configuration = require('../package.json').contributes.configuration;
+const sections = Array.isArray(configuration) ? configuration : [configuration];
+const properties = Object.assign({}, ...sections.map(section => section.properties));
 
 /** @param {{get: (key: string, defaultValue: unknown) => unknown}} config @param {string} name @returns {unknown} */
 function readOption(config, name) {

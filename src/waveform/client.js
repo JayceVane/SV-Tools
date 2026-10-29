@@ -19,6 +19,7 @@
     const pending = new Map();
     let requestId = 0, paintPending = false, staticDirty = true, filtered = [], windowBusy = false, windowWanted = null;
     let valuesBusy = false, valuesWanted = null, valuesKey = '', edgeVersion = 0, menu = null, groupDialog = null;
+    let timeNavigation;
     const gestures = window.createWaveRowGestures({ canvas, tracks, state, model: M, renderer,
         refreshRows, commitRows: rebuildRows, paint, onSelection: applySelection,
         onNameClick(point, row, event) {
@@ -32,19 +33,28 @@
             if (row) state.activeKey = M.signalKey(row.signal);
             const g = renderer.geometry(), time = state.view.start + Math.max(0, (point.x - g.names) / g.plot) * state.view.span;
             placeCursor(time, event.shiftKey ? 'B' : state.activeCursor, row?.signal);
-        }, onSettled: viewportChanged, onStart: () => hideMenu(false), blocked: () => !!groupDialog || columns.active, status });
+        }, onSettled: viewportChanged, onStart: () => hideMenu(false), blocked: () => !!groupDialog || columns.active || !!timeNavigation?.active, status });
     const columnHandles = [
         { element: $('catalogResize'), label: '设计信号目录宽度', getWidth: () => state.columns.catalog,
             getEffectiveWidth: () => catalogGeometry().width, setWidth: value => setColumn('catalog', value), bounds: catalogGeometry },
         { element: $('namesResize'), label: '信号名称与读值栏宽度', getWidth: () => state.columns.names,
             getEffectiveWidth: () => renderer.geometry().names, setWidth: value => setColumn('names', value), bounds: () => renderer.geometry() }
     ];
-    const columns = window.createWaveColumnResize({ handles: columnHandles, blocked: () => !!groupDialog || gestures.active,
+    const columns = window.createWaveColumnResize({ handles: columnHandles, blocked: () => !!groupDialog || gestures.active || !!timeNavigation?.active,
         onStart() { hideMenu(false); gestures.finishMotion(); document.body.classList.add('columnResizing'); },
         onEnd() { document.body.classList.remove('columnResizing'); },
         onPreview() { applyColumnLayout(); paint(); },
         onCommit() { applyColumnLayout(); viewportChanged(); persist(); },
         onCancel() { applyColumnLayout(); paint(); } });
+    timeNavigation = window.WaveTimeNavigation.createTimeScrollbar({ rail: $('timeScrollbar'), thumb: $('timeViewport'),
+        previous: $('timeScrollLeft'), next: $('timeScrollRight'), extent: $('timeExtent'),
+        getView: () => state.view, getEnd: () => state.metadata?.endTime || 0, formatTime: time => M.formatTime(time, state.secondsPerTick),
+        blocked: () => !!groupDialog || columns.active || gestures.active,
+        onStart() { ++edgeVersion; hideMenu(false); gestures.finishMotion(); },
+        onPreview(view) { state.view = view; viewportChanged(); }, onCommit: persist, onEnd: () => columns.sync() });
+    const circuitLink = window.WaveCircuitLink.createWaveCircuitLink({state,document,post:message=>api.postMessage(message),addSignals,
+        select:applySelection,tracks,status});
+    $('circuitLink').onclick=()=>api.postMessage({type:'circuit-link'});
     $('title').textContent = BOOT.fileName;
 
     function status(text) { $('status').textContent = text; }
@@ -65,6 +75,8 @@
         $('catalogPane').style.width = width + 'px'; $('catalogResize').style.left = width + 'px';
         $('namesResize').style.left = renderer.geometry().names + 'px';
         $('namesResize').style.height = $('ruler').clientHeight + tracks.clientHeight + 'px';
+        $('timeExtent').style.width = Math.max(0, renderer.geometry().names - 8) + 'px';
+        timeNavigation?.sync();
         columns.sync();
     }
     function paint(overlayOnly = false) {
@@ -121,6 +133,7 @@
         finally { windowBusy = false; pumpWindow(); }
     }
     function queueValues() {
+        circuitLink.reportCursors();
         memory.refresh(state.cursorA, state.cursorB, state.secondsPerTick);
         const params = { ids: visibleIds(), a: state.cursorA, b: state.cursorB }, key = JSON.stringify(params);
         if (key === valuesKey) return;
@@ -356,6 +369,9 @@
             { icon: 'expand', disabled: overBudget, detail: overBudget ? '最多2000行' : '' }));
         if (parents.some(key => children(key).length)) busItems.push(action('collapse-bus', '收起总线bit', () => collapseBus(targets), { icon: 'collapse' }));
         items.splice(2, 0, ...busItems);
+        items.splice(3,0,{id:'circuit-trace',label:'电路追踪',detail:targets.length===1?'':'单信号',submenu:[
+            action('circuit-drivers','在电路追踪驱动',()=>api.postMessage({type:'circuit-trace',key:targets[0],direction:'drivers'}),{disabled:targets.length!==1}),
+            action('circuit-loads','在电路追踪负载',()=>api.postMessage({type:'circuit-trace',key:targets[0],direction:'loads'}),{disabled:targets.length!==1})]});
         for (const name of [...new Set(targets.map(key => state.groups[key]).filter(Boolean))]) items.push(action('toggle-group-' + name, (state.collapsedGroups.includes(name) ? '展开分组：' : '收起分组：') + name, () => toggleGroup(name), { icon: 'group' }));
         if (groups.length) items.push({ id: 'join-group', label: '加入已有分组', icon: 'group', submenu: groups.map((name, index) =>
             action('join-group-' + index, name, () => assignGroup(targets, name), { icon: 'group' })) });
@@ -371,6 +387,7 @@
     function initialize(metadata) {
         metadata = { ...metadata, vars: M.prepareSignals(metadata.vars) };
         state.metadata = metadata; state.signals = new Map(metadata.vars.map(signal => [M.signalKey(signal), signal])); state.secondsPerTick = metadata.secondsPerTick || null;
+        $('circuitLink').disabled=false;
         const saved = api.getState();
         if (saved?.fileKey === BOOT.fileKey) D.restoreBits(saved.bitKeys || saved.selected, state.signals, MAX_TRACKS);
         state.bitKeys = new Set((Array.isArray(saved?.bitKeys || saved?.selected) ? saved.bitKeys || saved.selected : []).filter(key => Number.isInteger(state.signals.get(key)?.bitOffset)));
@@ -421,9 +438,22 @@
     }
     window.addEventListener('message', event => {
         const message = event.data;
+        if(circuitLink.receive(message))return;
         if (message.type === 'response') { const promise = pending.get(message.requestId); if (!promise) return; pending.delete(message.requestId);
             if (message.error) promise.reject(new Error(message.error)); else promise.resolve(message.result); }
         else if (message.type === 'init') initialize(message.metadata);
+        else if (message.type === 'roles' && state.metadata) {
+            const roles = new Map(message.roles.map(item => [item.path, item]));
+            const apply = signal => {
+                const parent = signal.parentKey ? state.signals.get(signal.parentKey) : signal;
+                const role = roles.get(parent?.path);
+                signal.role = role?.role || 'unknown'; signal.roleSource = role?.roleSource;
+            };
+            state.metadata.vars.forEach(apply); state.signals.forEach(apply);
+            state.metadata.sourceRoleNote = message.sourceRoleNote;
+            $('metadata').title = message.sourceRoleNote || '';
+            renderCatalog(); paint();
+        }
         else if (message.type === 'progress') {
             $('progress').max = Math.max(1, message.progress.fileBytes); $('progress').value = message.progress.bytesRead;
             $('loadDetail').textContent = `${(message.progress.bytesRead / 1048576).toFixed(1)} / ${(message.progress.fileBytes / 1048576).toFixed(1)} MiB · ${message.progress.eventCount.toLocaleString()} events`;
@@ -454,12 +484,13 @@
         const options = await window.ImageExport.choose(document, { wave: true, hasAB: state.cursorB !== null && state.cursorA !== state.cursorB,
             selectionCount: state.multi.size, returnFocus: canvas });
         if (!options) return;
-        exportingImage = true; $('exportImage').disabled = true; status('正在生成完整波形图…');
+        const copying = options.action === 'copy';
+        exportingImage = true; $('exportImage').disabled = true; status(copying ? '正在生成并复制波形图…' : '正在生成完整波形图…');
         try {
             const image = await window.WaveImageExport.create({ state, options, request, window, renderer, title: BOOT.fileName });
-            const payload = await window.ImageExport.payload(image, { ...options, name: BOOT.fileName.replace(/\.vcd$/i, '') + '-waveform' }, window);
-            status(await request('image-save', payload) ? '波形图片已导出' : '已取消图片导出');
-        } catch (error) { status('波形导出失败：' + error.message); }
+            const payload = await window.ImageExport.payload(image, { ...options, format: copying ? 'png' : options.format, name: BOOT.fileName.replace(/\.vcd$/i, '') + '-waveform' }, window);
+            status(await request(copying ? 'image-copy' : 'image-save', payload) ? (copying ? '波形图片已复制到剪贴板' : '波形图片已导出') : (copying ? '复制已取消' : '已取消图片导出'));
+        } catch (error) { status((copying ? '波形复制失败：' : '波形导出失败：') + error.message); }
         finally { exportingImage = false; $('exportImage').disabled = false; }
     };
     $('saveLayout').onclick = async () => {
@@ -479,11 +510,11 @@
     $('cancel').onclick = () => api.postMessage({ type: 'cancel' });
     canvas.oncontextmenu = event => { event.preventDefault(); columns.cancel(); gestures.cancel(); gestures.finishMotion(); showMenu(event, renderer.rowAt(event.offsetY)); };
     document.addEventListener('pointerdown', event => { if (menu && !menu.contains(event.target)) hideMenu(false); });
-    window.addEventListener('blur', () => { hideMenu(false); columns.cancel(); gestures.cancel(); });
-    window.addEventListener('resize', () => { hideMenu(false); columns.cancel(); gestures.cancel(); gestures.finishMotion(); applyColumnLayout(); viewportChanged(); });
+    window.addEventListener('blur', () => { hideMenu(false); timeNavigation.cancel(); columns.cancel(); gestures.cancel(); });
+    window.addEventListener('resize', () => { hideMenu(false); timeNavigation.cancel(); columns.cancel(); gestures.cancel(); gestures.finishMotion(); applyColumnLayout(); viewportChanged(); });
     tracks.addEventListener('wheel', event => {
         if (!state.metadata) return;
-        if (gestures.rowActive || columns.active) { event.preventDefault(); return; }
+        if (gestures.rowActive || columns.active || timeNavigation.active) { event.preventDefault(); return; }
         if (event.ctrlKey || event.metaKey) { event.preventDefault(); const left = tracks.getBoundingClientRect().left, g = renderer.geometry();
             setView(M.zoomView(state.view, event.deltaY > 0 ? 1.25 : .8, (event.clientX - left - g.names) / g.plot, state.metadata.endTime));
         } else if (event.shiftKey || Math.abs(event.deltaX) > Math.abs(event.deltaY)) { event.preventDefault();
@@ -492,6 +523,8 @@
     $('ruler').onclick = event => { if (!state.metadata) return; const g = renderer.geometry();
         if (event.offsetX >= g.names) placeCursor(state.view.start + (event.offsetX - g.names) / g.plot * state.view.span, event.shiftKey ? 'B' : state.activeCursor, state.signals.get(state.activeKey)); };
     document.addEventListener('keydown', event => {
+        if (timeNavigation.active) { if (event.key === 'Escape') { timeNavigation.cancel(); event.preventDefault(); } return; }
+        if (['timeScrollbar','timeScrollLeft','timeScrollRight'].includes(event.target.id)) return;
         if (columns.active) { if (event.key === 'Escape') { columns.cancel(); event.preventDefault(); } return; }
         if (columnHandles.some(handle => handle.element === event.target)) return;
         if (menu || groupDialog || /^(INPUT|SELECT|TEXTAREA)$/.test(event.target.tagName) || event.target.isContentEditable) return;

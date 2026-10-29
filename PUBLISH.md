@@ -1,12 +1,12 @@
-# 4.0 GitHub 发布
+# 4.1 GitHub 发布
 
-当前正式发布版本为 `4.0.0`，用户已确认先发布GitHub Wiki使用指南，再发布GitHub Release。本轮渠道为GitHub，不执行Marketplace或Open VSX发布。
+当前正式发布版本为 `4.1.0`，用户已确认先发布GitHub Wiki使用指南，再发布GitHub Release。本轮渠道为GitHub，不执行Marketplace或Open VSX发布。
 
 Wiki源稿位于 `docs/wiki/`，包含侧栏、页脚和截图；维护方式见 `docs/WIKI.md`。首次Wiki需在GitHub创建Home，之后通过独立Wiki Git仓库同步。发布前核对内部链接、配置/命令、图片来源与公开可访问性。
 
-预览使用 `npm run package:preview`，要求干净源码、六处版本一致、CLI匹配并禁止同号覆盖。正式版将六处版本统一为 `4.0.0`，重建原生模块并重新回归，不能重命名beta包替代正式构建。正式包的本地预检可用 `npm run package -- --target win32-x64 --out bin/svtools-v4.0.0-win32-x64.vsix`，先确认目标不存在。
+预览使用 `npm run package:preview`，要求干净源码、六处版本一致、CLI匹配并禁止同号覆盖。正式版将六处版本统一为 `4.1.0`，重建原生模块并重新回归，不能重命名beta包替代正式构建。正式包的本地预检可用 `npm run package -- --target win32-x64 --out bin/svtools-v4.1.0-win32-x64.vsix`，先确认目标不存在。
 
-通过PR合入master后，将 `v4.0.0` tag指向合并提交；CI从该tag独立构建正式附件。保留所有历史Release和附件，同名附件禁止clobber。发布后下载实际附件，核对SHA256、package/CLI版本并执行解包宿主验收。
+通过PR合入master后，将 `v4.1.0` tag指向合并提交；CI从该tag独立构建正式附件。保留所有历史Release和附件，同名附件禁止clobber。发布后下载实际附件，核对SHA256、package/CLI版本并执行解包宿主验收。
 
 `.github/workflows/release.yml` 校验 tag 与 package.json，构建 Windows x64 原生模块及 VSIX，执行 Node/Rust 回归并上传 SHA256 清单。含 `-` 的 tag 使用 GitHub prerelease，不改变稳定版 Latest。已有同名附件时上传失败，禁止 clobber。发布说明取 `docs/releases/<tag>.md`。
 
@@ -264,3 +264,10 @@ vsce publish
 本轮在devDependencies图中将Identity精确约束为4.13.0，使用未受该通告影响的MSAL3分支，并将该子树的uuid约束为含边界修复且仍支持CommonJS的11.1.1。
 这是显式兼容override，低于vsce声明的Identity范围；已检查其实际使用的6个Credential接口、模块导入、MSAL本地构造/缓存及uuid v4，并以真实VSIX打包验证。本轮不执行Azure/Marketplace认证，不能把本轮结果当作该认证路径验收。
 构建依赖不进入VSIX；后续vsce/Azure发布兼容修复时应优先回到上游依赖范围，再重验打包。不要用强制升级MSAL主版本或忽略audit替代验证。
+# 自用构建隔离
+
+`src/private/`只供本机叠加构建，Git与公开VSIX均排除。自用安装包和源码备份位于`bin/private-dist/`，公开发布上传清单只选择公开打包步骤的产物，不递归收集该目录。
+
+公开prepublish执行`node scripts/check-public-package.js`检查实际文件表；发布CI还会对生成的每个VSIX执行同一脚本的归档检查，确认没有私有源文件、构建标识、专用配置/命令或包装入口。自用包应被公开检查拒绝。任何自用功能的更新都不需要改写公开`package.json`或`extension.js`。
+
+旧`src-rust/`缓存及根目录旧`.node`同样排除。复制/压缩前及最终归档均限制4096文件、256 MiB未压缩大小；当前正式运行资源低于此预算。不要通过移除检查来容纳异常缓存，先查看vsce实际文件树。合法资源增长时单独评估预算。

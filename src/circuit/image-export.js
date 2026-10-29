@@ -10,14 +10,14 @@
         container.style.cssText='position:fixed;left:-100000px;top:0;visibility:hidden;pointer-events:none';container.appendChild(svg);document.body.appendChild(container);
         try{
             renderer.renderGraph(svg,graph);
-            for(const hit of svg.querySelectorAll('.wireHit,.pinHit,.busHit'))hit.remove();
+            for(const hit of svg.querySelectorAll('.wireHit,.pinHit,.busHit,.selectionOutline,.searchCorners'))hit.remove();
             // 独立场景没有选中/悬停状态；CSS变量在导出时解析为实际值。
             for(const element of svg.querySelectorAll('*')){
                 const computed=window.getComputedStyle(element),isText=element.tagName.toLowerCase()==='text';
                 for(const property of STYLE_PROPERTIES){
                     let value=computed.getPropertyValue(property);if(!value)continue;
                     if(options.style==='document'){
-                        if(property==='fill'&&value!=='none')value=isText?'#111111':'#ffffff';
+                        if(property==='fill'&&value!=='none')value=isText||element.classList.contains('junctionDot')||element.classList.contains('directionArrow')?'#111111':'#ffffff';
                         if(property==='stroke'&&value!=='none')value=isText?'#ffffff':'#111111';
                         if(property==='opacity')value='1';
                     }
@@ -27,7 +27,7 @@
                 element.style.setProperty('vector-effect','none');
                 for(const name of ['tabindex','role','aria-label'])element.removeAttribute(name);
             }
-            const bounds=svg.getBBox(),left=Math.min(0,bounds.x),top=Math.min(0,bounds.y),right=Math.max(graph.width||0,bounds.x+bounds.width),bottom=Math.max(graph.height||0,bounds.y+bounds.height);
+            const bounds=svg.getBBox(),left=bounds.x,top=bounds.y,right=bounds.x+bounds.width,bottom=bounds.y+bounds.height;
             if(![left,top,right,bottom].every(Number.isFinite))throw new Error('电路导出布局尺寸无效');
             const width=Math.ceil(right-left+PADDING*2),height=Math.ceil(bottom-top+PADDING*2+HEADER);
             const palette=window.getComputedStyle(document.body),paper=options.style==='document';

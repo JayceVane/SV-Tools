@@ -2,6 +2,7 @@
 const path = require('node:path');
 const { SOURCE_EXCLUDE_GLOB, isExcludedSourcePath } = require('./source-policy');
 const SOURCE_GLOB = '**/*.{v,sv,vh,svh}', MAX_FILES = 50000, TTL_MS = 10000, MAX_ROOTS = 32;
+const MAX_DISCOVERY_ATTEMPTS = 2;
 const keyOf = file => process.platform === 'win32' ? path.resolve(file).toLowerCase() : path.resolve(file);
 
 /**
@@ -14,44 +15,53 @@ function createSourceCatalog({ vscode, getPreferred, now = Date.now }) {
     let generation = 0, disposed = false;
     function refreshContext(change = { kind: 'context' }) { for (const listener of listeners) listener(change); }
     function invalidate(change) {
+        if (change?.uri && isExcludedSourcePath(change.uri.fsPath)) return;
         if (change?.kind !== 'change' || /\.xpr$/i.test(change.uri?.fsPath || '')) { generation++; cache.clear(); }
         refreshContext(change);
     }
     function onDidChange(listener) { listeners.add(listener); return { dispose: () => listeners.delete(listener) }; }
+    function workspaceUris(root) {
+        const key = root ? keyOf(root) : '$workspace';
+        let entry = cache.get(key);
+        if (!entry || entry.expiresAt <= now()) {
+            const pattern = root && vscode.RelativePattern ? new vscode.RelativePattern(root, SOURCE_GLOB) : SOURCE_GLOB;
+            entry = { expiresAt: now() + TTL_MS };
+            // 取消只影响等待方；共用发现不会被另一消费者的 token 终止。
+            entry.pending = Promise.resolve(vscode.workspace.findFiles(pattern, SOURCE_EXCLUDE_GLOB, MAX_FILES + 1)).catch(error => {
+                if (cache.get(key) === entry) cache.delete(key); throw error;
+            });
+            cache.set(key, entry);
+            if (cache.size > MAX_ROOTS) cache.delete(cache.keys().next().value);
+        }
+        return entry.pending;
+    }
     async function discover({ root, file, extensions = ['sv','v','svh','vh'], limit = MAX_FILES, token, force = false, preferProject = true } = {}) {
         if (disposed) throw new Error('源码清单服务已关闭');
         if (force) invalidate();
-        const preferred = preferProject && getPreferred ? await getPreferred({ root, file: file || vscode.window?.activeTextEditor?.document.uri.fsPath }) : null;
-        let uris, truncated = false;
-        if (preferred) {
-            uris = preferred.files.map(file => vscode.Uri.file(file));
-        } else {
-            const key = root ? keyOf(root) : '$workspace', revision = generation;
-            let entry = cache.get(key);
-            if (!entry || entry.expiresAt <= now()) {
-                const pattern = root && vscode.RelativePattern ? new vscode.RelativePattern(root, SOURCE_GLOB) : SOURCE_GLOB;
-                entry = { expiresAt: now() + TTL_MS };
-                // 取消只影响等待方；共用发现不会被另一消费者的 token 终止。
-                entry.pending = Promise.resolve(vscode.workspace.findFiles(pattern, SOURCE_EXCLUDE_GLOB, MAX_FILES + 1)).catch(error => {
-                    if (cache.get(key) === entry) cache.delete(key); throw error;
-                });
-                cache.set(key, entry);
-                if (cache.size > MAX_ROOTS) cache.delete(cache.keys().next().value);
-            }
-            uris = await entry.pending; truncated = uris.length > MAX_FILES || generation !== revision;
-        }
         const allowed = new Set(extensions.map(extension => '.' + extension.toLowerCase())), found = new Map();
-        for (const uri of uris) if (!isExcludedSourcePath(uri.fsPath) && allowed.has(path.extname(uri.fsPath).toLowerCase())) found.set(keyOf(uri.fsPath), uri);
         const budget = Math.min(MAX_FILES, Math.max(1, limit));
-        return { uris: token?.isCancellationRequested ? [] : [...found.values()].slice(0, budget),
-            truncated: truncated || found.size > budget || !!token?.isCancellationRequested, provenance: preferred ? 'project' : 'workspace', roots: preferred?.roots };
+        for (let attempt = 0; attempt < MAX_DISCOVERY_ATTEMPTS; attempt++) {
+            if (disposed) throw new Error('源码清单服务已关闭');
+            const revision = generation;
+            const preferred = preferProject && getPreferred ? await getPreferred({ root, file: file || vscode.window?.activeTextEditor?.document.uri.fsPath }) : null;
+            const uris = preferred ? preferred.files.map(file => vscode.Uri.file(file)) : await workspaceUris(root);
+            const invalidated = generation !== revision, cancelled = !!token?.isCancellationRequested;
+            if (invalidated && !cancelled && attempt + 1 < MAX_DISCOVERY_ATTEMPTS) continue;
+            for (const uri of uris) if (!isExcludedSourcePath(uri.fsPath) && allowed.has(path.extname(uri.fsPath).toLowerCase())) found.set(keyOf(uri.fsPath), uri);
+            return { uris: cancelled ? [] : [...found.values()].slice(0, budget),
+                truncated: uris.length > MAX_FILES || found.size > budget || invalidated || cancelled,
+                ...(invalidated ? { invalidated: true } : {}), provenance: preferred ? 'project' : 'workspace', roots: preferred?.roots };
+        }
     }
     if (vscode.workspace.createFileSystemWatcher) {
         const watcher = vscode.workspace.createFileSystemWatcher('**/*.{v,sv,vh,svh,xpr}');
         for (const event of ['onDidCreate','onDidChange','onDidDelete']) subscriptions.push(watcher[event](uri => invalidate({ uri, kind: event === 'onDidCreate' ? 'create' : event === 'onDidDelete' ? 'delete' : 'change' })));
         subscriptions.push(watcher);
     }
-    for (const event of ['onDidChangeWorkspaceFolders','onDidChangeConfiguration']) if (vscode.workspace[event]) subscriptions.push(vscode.workspace[event](() => invalidate()));
+    if (vscode.workspace.onDidChangeWorkspaceFolders) subscriptions.push(vscode.workspace.onDidChangeWorkspaceFolders(() => invalidate()));
+    if (vscode.workspace.onDidChangeConfiguration) subscriptions.push(vscode.workspace.onDidChangeConfiguration(event => {
+        if (!event?.affectsConfiguration || ['svtools', 'files.exclude', 'search.exclude', 'files.watcherExclude'].some(key => event.affectsConfiguration(key))) invalidate();
+    }));
     if (vscode.window?.onDidChangeActiveTextEditor) subscriptions.push(vscode.window.onDidChangeActiveTextEditor(() => refreshContext()));
     return { discover, invalidate, refreshContext, onDidChange, dispose() { disposed = true; generation++; cache.clear(); listeners.clear(); subscriptions.forEach(subscription => subscription.dispose()); } };
 }
