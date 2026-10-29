@@ -53,5 +53,13 @@
 | 查看工程 Top 电路（Vivado） | — | `svtools.circuit.fromVivado` |
 | 停止电路生成 | — | `svtools.circuit.stop` |
 | 查看当前文件电路（Vivado） | — | `svtools.circuit.fromVivadoFile` |
+| 追踪信号驱动 | — | `svtools.circuit.traceDrivers` |
+| 追踪信号负载 | — | `svtools.circuit.traceLoads` |
+| SV Tools：选择工程 | — | `svtools.project.choose` |
+| SV Tools：创建工程 | — | `svtools.project.create` |
+| SV Tools：添加文件 | — | `svtools.project.add` |
+| 添加到SV Tools工程 | — | `svtools.project.addToProject` |
+| 在工程中追踪信号 | — | `svtools.project.trace` |
+| 刷新SV Tools工程 | — | `svtools.project.refresh` |
 
 波形和电路视图内部的手势与按键见[波形](https://github.com/JayceVane/SV-Tools/wiki/Waveforms)和[电路](https://github.com/JayceVane/SV-Tools/wiki/Circuits)页面。

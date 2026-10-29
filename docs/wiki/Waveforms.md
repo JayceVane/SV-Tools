@@ -72,7 +72,7 @@ FP8 E3M4 使用本项目约定的偏置 3，全 1 指数保留为 Inf/NaN；它�
 
 ![A/B区间与图片导出选项](https://raw.githubusercontent.com/wiki/JayceVane/SV-Tools/images/waveform-export-dialog.png)
 
-点击 **导出图片**，选择“文档黑白线稿”或“当前界面主题”，输出 SVG/PNG。有效且不同的 A/B 默认决定导出时间区间，否则使用当前时间视口。可选择全部已添加信号或仅所选行，保留分组/展开状态和 Analog 行高。
+点击 **导出图片**，选择“文档黑白线稿”或“当前界面主题”，输出 SVG/PNG；也可直接复制 2× PNG 到系统剪贴板。有效且不同的 A/B 默认决定导出时间区间，否则使用当前时间视口。可选择全部已添加信号或仅所选行，保留分组/展开状态和 Analog 行高。
 
 SVG 适合技术文档与后续编辑。PNG 按图幅预算调整分辨率；超预算时改用 SVG、减少信号或缩短区间，不静默裁剪。密集跳变有明确标记，不伪造未分辨的脉冲。
 
@@ -82,4 +82,4 @@ SVG 适合技术文档与后续编辑。PNG 按图幅预算调整分辨率；超
 
 缩小后出现密集区时应放大再判断窄脉冲。A/B 精确读值和真实边沿导航仍可用于核对。
 
-[详细行为、容量与测量条件](https://github.com/JayceVane/SV-Tools/blob/v4.0.0/docs/WAVEFORM.md)
+[详细行为、容量与测量条件](https://github.com/JayceVane/SV-Tools/blob/v4.1.0/docs/WAVEFORM.md)

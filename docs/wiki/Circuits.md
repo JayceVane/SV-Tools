@@ -54,7 +54,7 @@ Yosys 保留可用模块层级；Vivado 当前提供平坦 RTL 详细化结果�
 
 布局在后台 worker 执行，拖动/滚轮按帧合并，视口外对象按需挂载，缩小时简化文字细节。放大恢复细节，搜索仍可定位屏外对象。超预算时选择更小子模块或调整源文件/Top，不将“没有画出全部”误认为逻辑已不存在。
 
-点击 **导出图片**，选黑白技术文档风或当前主题，再选 SVG/PNG。导出当前模块完整布局，包含屏幕外节点；切到所需子模块后再导出。超出 PNG 图幅预算时改用 SVG。
+点击 **导出图片**，选黑白技术文档风或当前主题，再选 SVG/PNG。导出当前模块完整布局，包含屏幕外节点；切到所需子模块后再导出。超出 PNG 图幅预算时改用 SVG。需要直接贴到文档时，点“复制到剪贴板”会生成 2× PNG。
 
 ## 数据含义与错误日志
 
@@ -62,4 +62,4 @@ Yosys 保留可用模块层级；Vivado 当前提供平坦 RTL 详细化结果�
 
 日志在 `<工作区>/.svtools/circuit/<任务>/`；错误摘要尽量映射回原文件行列。先看具体缺模块/类型/语法错误，通用的 `Design elaboration failed` 只是总结。必要时提供完整 `01-yosys.log` 或 `01-vivado.log`。
 
-[Top 策略](https://github.com/JayceVane/SV-Tools/wiki/Vivado) · [详细配置与容量边界](https://github.com/JayceVane/SV-Tools/blob/v4.0.0/docs/CIRCUIT.md)
+[Top 策略](https://github.com/JayceVane/SV-Tools/wiki/Vivado) · [详细配置与容量边界](https://github.com/JayceVane/SV-Tools/blob/v4.1.0/docs/CIRCUIT.md)

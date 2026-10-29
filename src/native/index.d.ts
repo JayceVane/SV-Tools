@@ -111,3 +111,5 @@ export declare function generateHeader(template: string, fileName: string, tabSi
 export declare function extractSymbols(text: string): ParseResult
 /** Find symbols by name (for hover / goto definition). */
 export declare function findSymbolByName(text: string, name: string): Array<SvSymbol>
+/** 将有界PNG复制为系统图片。解码失败不触碰剪贴板，成功后数据由系统持有。 */
+export declare function writeClipboardPng(png: Buffer): Promise<unknown>

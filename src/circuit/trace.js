@@ -39,6 +39,9 @@ class TraceQuery {
     constructor({ design, module, index, request }) {
         this.design = design; this.module = module; this.index = index;
         this.budget = limits(request); this.origin = index.resolveOrigin(request.origin);
+        // 端点种子模式：从单元引脚本身继续追踪，不展开同网络的其它负载分支。
+        this.endpointSeed = request.endpointSeed === true;
+        if (this.endpointSeed && this.origin.kind !== 'cell-port') throw new TypeError('端点展开只支持单元引脚');
         this.context = contextFor(design, module, request.instancePath);
         this.direction = request.direction;
         if (!['drivers', 'loads'].includes(this.direction)) throw new TypeError('追踪方向必须为drivers或loads');
@@ -203,6 +206,13 @@ class TraceQuery {
 
     run() {
         for (const item of this.origin.bits) {
+            // 端点种子直接把该引脚交给 walkEndpoint：边界展开只沿所在分支继续，
+            // 同网络其它兄弟分支的边界保留，交由用户按分支逐级展开。
+            if (this.endpointSeed) {
+                this.enqueueEndpoint(this.index.occurrence(this.origin.objectId, item.position),
+                    { depth: 0, path: [], precision: 'bit', seed: true });
+                continue;
+            }
             const point = this.origin.kind === 'signal' ? { ...item, objectId: this.origin.objectId }
                 : this.index.endpoint(this.index.occurrence(this.origin.objectId, item.position));
             this.queue.push({ kind: 'wire', point, bit: item.bit, depth: 0, path: [], precision: 'bit', seed: true });

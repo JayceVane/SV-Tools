@@ -22,6 +22,8 @@ function createTraceController(deps) {
         cursor = history.length - 1;
     }
     function notify() { return send({ type: 'trace-state', navigation: navigation() }); }
+    // 结束 busy 状态并通知页面；面板已关闭时无需通知。仅用于当前有效操作失败或被非追踪导航取代的场景。
+    async function settleBusy() { if (!busy) return; busy = false; if (!closed) await notify(); }
     async function render(entry, { replace = false, historyIndex, update = 'start' } = {}) {
         if (closed || !descriptor()) return;
         const ticket = beginOperation(), traceTicket = ++operation; busy = true; await notify();
@@ -38,7 +40,7 @@ function createTraceController(deps) {
             return result;
         } catch (error) {
             if (!current(ticket) || closed || traceTicket !== operation) return;
-            busy = false; await notify();
+            await settleBusy();
             await send({ type: 'notice', message: error.message }); onError(error);
             return { error: error.message };
         }
@@ -63,9 +65,11 @@ function createTraceController(deps) {
         if (!descriptor()) return;
         const selecting = ++operation, identity = descriptor();
         const selected = origin || await chooseSignal?.({ session, snapshot: snapshot(), moduleId });
-        if (!selected) return;
-        const target = await context(moduleId, instancePath); if (!target) return;
         if (closed || selecting !== operation || descriptor() !== identity) return;
+        if (!selected) return settleBusy();
+        const target = await context(moduleId, instancePath);
+        if (closed || selecting !== operation || descriptor() !== identity) return;
+        if (!target) return settleBusy();
         return render({ mode: 'trace', request: { moduleId, direction: direction || 'drivers', origin: selected,
             instancePath: target.instancePath, branches: [] }, focus: [] });
     }
@@ -103,7 +107,8 @@ function createTraceController(deps) {
         const entry = copy(history[target]);
         if (entry.mode === 'trace') return render(entry, { historyIndex: target, update: 'history' });
         const selecting = ++operation, result = await displayModule(entry.path, true);
-        if (!result?.ok || selecting !== operation || closed) return;
+        if (selecting !== operation || closed) return;
+        if (!result?.ok) return settleBusy();
         cursor = target; busy = false; await notify();
     }
     async function focus(selection) {
@@ -134,7 +139,7 @@ function createTraceController(deps) {
             await send({ type: 'notice', message: error.message }); onError(error); return { error: error.message };
         }
     }]));
-    return { handlers, begin, expand, collapse, go, focus, cancel, moduleShown, navigation, reset,
+    return { handlers, begin, expand, collapse, go, focus, cancel, moduleShown, settleBusy, navigation, reset,
         state: () => ({ cursor, history: copy(history), busy }),
         dispose() { closed = true; reset(); } };
 }

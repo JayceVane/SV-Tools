@@ -36,6 +36,7 @@
         }
     }
     function render() {
+        closeMenu();
         const focusedId = document.activeElement?.dataset?.nodeId;
         const project = snapshot.project, local = currentState();
         tree.replaceChildren();
@@ -163,7 +164,19 @@
             tree.append(empty);
         }
     }
+    function closeMenu(restoreFocus = false) {
+        const anchor = menuAnchor;
+        menu.hidden = true;
+        menuAnchor = undefined;
+        if (anchor?.getAttribute('aria-haspopup') === 'menu') anchor.setAttribute('aria-expanded', 'false');
+        if (restoreFocus) anchor?.focus?.();
+    }
+    function toggleMenu(commandList, anchor = document.getElementById('actions')) {
+        if (!menu.hidden && menuAnchor === anchor) closeMenu(true);
+        else showMenu(undefined, commandList, anchor);
+    }
     function showMenu(node, commandList, anchor = document.getElementById('actions')) {
+        closeMenu();
         menuAnchor = anchor;
         menu.replaceChildren();
         const commands = commandList || (node ? node.actions : [...(snapshot.actions || []), ...(snapshot.issues?.length ? [{ id: 'diagnostics', label: currentState().diagnostics ? '收起分析提示' : '查看分析提示' }] : [])]);
@@ -173,7 +186,7 @@
             button.setAttribute('role', 'menuitem');
             button.textContent = action.label;
             button.addEventListener('click', () => {
-                menu.hidden = true;
+                closeMenu(true);
                 if (action.id === 'diagnostics') {
                     currentState().diagnostics = !currentState().diagnostics;
                     document.getElementById('diagnostics').open = true;
@@ -186,6 +199,8 @@
             menu.append(button);
         }
         menu.hidden = !menu.childElementCount;
+        if (menu.hidden) { closeMenu(); return; }
+        if (anchor.getAttribute('aria-haspopup') === 'menu') anchor.setAttribute('aria-expanded', 'true');
         if (!menu.hidden && menu.getBoundingClientRect) {
             const bounds = menu.getBoundingClientRect(), origin = anchor.getBoundingClientRect();
             const top = origin.bottom + 4 + bounds.height <= window.innerHeight - 8 ? origin.bottom + 4 : origin.top - bounds.height - 4;
@@ -196,7 +211,7 @@
     }
     for (const id of ['choose', 'add', 'refresh', 'pin', 'clear'])
         document.getElementById(id).addEventListener('click', () => send(id));
-    document.getElementById('actions').addEventListener('click', () => showMenu());
+    document.getElementById('actions').addEventListener('click', () => toggleMenu());
     document.getElementById('addVivado').addEventListener('click', () => send('add'));
     document.getElementById('toggleTools').addEventListener('click', () => {
         currentState().toolsExpanded = currentState().toolsExpanded === false;
@@ -208,7 +223,7 @@
         remember();
         render();
     });
-    document.getElementById('toolReports').addEventListener('click', () => showMenu(null, (snapshot.toolActions || []).filter(action => action.group === 'reports'), document.getElementById('toolReports')));
+    document.getElementById('toolReports').addEventListener('click', () => toggleMenu((snapshot.toolActions || []).filter(action => action.group === 'reports'), document.getElementById('toolReports')));
     for (const projection of ['files', 'instances'])
         document.getElementById(projection).addEventListener('click', () => {
             currentState().projection = projection;
@@ -216,13 +231,12 @@
             send('projection', { projection });
         });
     document.addEventListener('keydown', event => {
-        if (event.key === 'Escape') {
-            menu.hidden = true;
-            menuAnchor?.focus?.();
-        }
+        if (event.key === 'Escape' && !menu.hidden) closeMenu(true);
     });
     document.addEventListener('pointerdown', event => {
-        if (!menu.hidden && !menu.contains(event.target)) menu.hidden = true;
+        // 按钮的click负责切换；不能在先到达的pointerdown里关闭后，又被click重新打开。
+        const onTrigger = menuAnchor?.getAttribute('aria-haspopup') === 'menu' && menuAnchor.contains(event.target);
+        if (!menu.hidden && !menu.contains(event.target) && !onTrigger) closeMenu();
     });
     menu.addEventListener('keydown', event => {
         if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
@@ -242,7 +256,6 @@
             return;
         }
         snapshot = event.data;
-        menu.hidden = true;
         render();
     });
     send('ready', { state });

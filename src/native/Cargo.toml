@@ -1,6 +1,6 @@
 [package]
 name = "svtools"
-version = "4.1.0-beta.4"
+version = "4.1.0"
 edition = "2021"
 description = "SystemVerilog formatter and tools (VSCode extension + CLI)"
 license = "Apache-2.0"
@@ -21,6 +21,9 @@ serde_json = "1"
 chrono = "0.4"
 tree-sitter = "0.25"
 tree-sitter-systemverilog = "0.3"
+
+[target.'cfg(windows)'.dependencies]
+png = "=0.18.0"
 
 [build-dependencies]
 napi-build = "2"

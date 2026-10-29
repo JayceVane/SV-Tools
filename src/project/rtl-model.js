@@ -285,12 +285,12 @@ function createRTLIndex(documents, { defines = [] } = {}) {
                         }
                     }
                 }
-                let inherited, previousEnd = -1;
+                let inherited, previousIndex = -1;
                 for (const symbol of symbols.filter(symbol => SIGNAL_KINDS.has(symbol.kind))) {
                     if (document.conditional(symbol.start) || symbol.array) {
                         issue(name + '.' + symbol.name + '：条件宏或非打包数组未展开');
                         inherited = undefined;
-                        previousEnd = symbol.end;
+                        previousIndex = document.positions.get(symbol.start) ?? -1;
                         continue;
                     }
                     const index = document.positions.get(symbol.start);
@@ -307,9 +307,12 @@ function createRTLIndex(documents, { defines = [] } = {}) {
                             ranges.push(prefix.slice(cursor + 1, end));
                             cursor = end;
                         }
-                    const between = document.text.slice(previousEnd, symbol.start);
-                    const canInherit = !prefix.length && between.trim().endsWith(',') && !between.includes(';'), previousRange = inherited;
-                    previousEnd = symbol.end;
+                    // 注释已从 tokens 中剔除，位宽继承必须按 token 而不是原始文本判断：
+                    // 逗号后夹注释（或注释文本含分号）时按文本判断会误判为不能继承，
+                    // 把合法的打包声明静默降级成1位标量且不产生任何提示。
+                    const between = previousIndex < 0 ? [] : document.tokens.slice(previousIndex + 1, index);
+                    const canInherit = !prefix.length && between.at(-1)?.value === ',' && !between.some(token => token.value === ';'), previousRange = inherited;
+                    previousIndex = index;
                     inherited = undefined;
                     let range, width, upto = false, offset = 0;
                     if (ranges.length > 1) {
@@ -345,7 +348,6 @@ function createRTLIndex(documents, { defines = [] } = {}) {
                         range = { width: SCALAR_WIDTHS[base], offset: 0, upto: false };
                     }
                     inherited = range;
-                    previousEnd = symbol.end;
                     ({ width, offset, upto } = range);
                     if (width < 1 || width > MAX_WIDTH) {
                         issue(name + '.' + symbol.name + '：位宽超过4096位');

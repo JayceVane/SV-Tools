@@ -22,6 +22,7 @@ pub mod tokenizer;
 // host 绑定由 napi 注册，Rust 单测不会直接调用这些入口。
 #[cfg_attr(test, allow(dead_code))]
 mod bindings;
+mod clipboard;
 use config::FormatOptions;
 
 /// 完整格式化：`` `pragma protect `` 加密区原样透传（BASE64 行长是编码

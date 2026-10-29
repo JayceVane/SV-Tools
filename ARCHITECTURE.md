@@ -53,6 +53,10 @@ ModuleInst与Testbench继续共用同一实例构造器。Testbench仅跳过已�
 
 `vivado/script-task.js`统一选择工作区任务根并准备脚本。编辑器与工程面板只提交带工程校验回调的生成描述，Vivado运行器先取得任务所有权，再在该目录写Tcl和日志；两次上下文校验覆盖异步准备。所有Vivado动作共用`.svtools/vivado/tasks/vivado-*`的保留预算，不再按每次随机action目录拆散。用户已有Tcl保持原路径和cwd，生成记录在任务结束后整套保留，再由完成协议淘汰；未标记旧目录不迁移、不推测可删除。
 
+### 波形方向元数据
+
+波形方向刷新仍由宿主持有源码清单和页面生命周期。`source-roles.js`区分清单临时失效与容量不足，发现阶段有界重试；后续变化经宿主合并，在现有VCD Worker的`roles`请求中重新匹配。页面只更新角色元数据，事件存储、窗口查询和视图状态独立；每次异步刷新核对宿主世代，关闭时取消重试并释放订阅。
+
 ### 公开发布与本地自用构建
 
 统一仿真入口使用`toolchains/simulation-engines.js`管理会话内注册、菜单快照和回调派发；Vivado组合层注册内置引擎并暴露注册/只读列表边界，自用包装入口按需注册额外引擎。取消和选择期间失效的注册不会回退到另一工具，注销不移除同ID的后续注册。工具业务仍由各runner拥有。
@@ -84,6 +88,9 @@ ModuleInst与Testbench继续共用同一实例构造器。Testbench仅跳过已�
 | `src/workspace/source-policy.js` | 源码发现、定义检索、补全缓存与lint/诊断共享的目录排除规则 | 任务目录创建、语义解析 |
 | `src/circuit/model.js` 与 `adapters/*` | 工具无关领域合同、Yosys/Vivado 方言转换与验证 | 布局坐标、Webview、工具进程 |
 | `src/circuit/register-symbol.js` | 已知Yosys字级时序单元的纯展示语义与参数极性 | 改写网表、猜测未知单元/工具的引脚功能 |
+| `src/circuit/symbol-library.js` | 屏显与布局共享的标准门、功能块、紧凑接口几何、固定锚点及标签槽位 | RTL解析、猜测未知工具时序语义、改写位序 |
+| `src/circuit/route-geometry.js` | 独立路由归一、受限圆角和同源同位网络的真实分叉点 | 按屏幕交叉连接不同网络、重新综合布线 |
+| `src/circuit/minimap.js` | 缓存简化图形位图、绘制视口和图坐标导航 | 复制完整SVG、每相机帧遍历网表、重新布局 |
 | `src/circuit/bus-routing.js` | 由端口实际位序及成员网络生成纯展示拼接/拆分、重复/重排映射 | 更改领域位序、推断RTL声明范围、添加硬件单元 |
 | `src/circuit/projection.js` 与 `layout.js` | 当前模块连接投影、有界总线合并、ELK 几何 | 领域位序改写、文件读取、编辑器状态 |
 | `src/circuit/worker.js` 与 `session.js` | UTF-8 JSON 读取、模型、布局、RPC 容量/超时/销毁 | VS Code API、外部工具启动 |
@@ -339,6 +346,10 @@ renderer持有静态与覆盖画布，client区分静态失效和游标/读值�
 
 
 beta.8以graphics/image-export组合风格选项、SVG封装和PNG转换，以image-files隔离宿主保存对话框和字节预算。
+图片复制由`graphics/clipboard.js`惰性复用同一NAPI加载器。`native/clipboard`在工作线程中有界
+解码PNG，并向Win32剪贴板提交原始PNG和标准CF_DIB；采用非空消息窗口owner、可移动内存
+所有权转移和有界占用重试。写入路径不创建子进程或临时文件，未知／旧原生模块明确提示重载。
+`png`仅作为Windows目标的固定版本解码依赖，不参与格式化规则；解码／尺寸检查完成前不清空剪贴板。
 waveform/image-export拥有独立AB查询与导出状态，svg-canvas仅适配当前renderer使用的1:1 Canvas命令，
 避免另写整数/浮点/位投影/模拟量绘图规则。原renderer增加显式导出几何和配色，交互画布合同不变。
 circuit/image-export从完整graph创建独立场景，解析样式为实际值，再序列化；不复制已裁剪的现场DOM，

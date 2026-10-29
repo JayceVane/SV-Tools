@@ -67,4 +67,4 @@ endtask
 .\svtools.exe --help
 ```
 
-精确规则以[格式化规范](https://github.com/JayceVane/SV-Tools/blob/v4.0.0/docs/FORMAT_SPEC.md)为准；[example](https://github.com/JayceVane/SV-Tools/tree/v4.0.0/example)保存输入和人工期望 golden。
+精确规则以[格式化规范](https://github.com/JayceVane/SV-Tools/blob/v4.1.0/docs/FORMAT_SPEC.md)为准；[example](https://github.com/JayceVane/SV-Tools/tree/v4.1.0/example)保存输入和人工期望 golden。

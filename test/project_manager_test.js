@@ -118,3 +118,21 @@ test('不覆盖同名工程、错误schema或任意JSON，拒绝无效名称', a
     await assert.rejects(f.projects.update({ kind: 'svtools', path: path.join(f.root, 'package.json') }, () => {
     }));
 });
+
+test('移出跟随目录会移除整棵子树，刷新与新增文件不会重新进入工程', async (t) => {
+    const f = await fixture(t);
+    const rtl = path.join(f.root, 'rtl'), sub = path.join(rtl, 'sub');
+    await fs.mkdir(sub, { recursive: true });
+    await fs.writeFile(path.join(rtl, 'a.sv'), 'module a; endmodule');
+    await fs.writeFile(path.join(sub, 'b.sv'), 'module b; endmodule');
+    const project = await f.projects.create(f.root, 'tree');
+    await f.projects.update(project, config => { config.folders.push({ path: '.', fileset: 'sources' }); });
+    assert.equal((await f.projects.current()).sets[0].files.length, 2);
+    await f.projects.remove(project, rtl);
+    const removed = await f.projects.current();
+    assert.deepEqual(removed.sets[0].files, []);
+    assert.ok(removed.config.exclude.includes('rtl'));
+    assert.ok(await fs.stat(path.join(rtl, 'a.sv')));
+    await fs.writeFile(path.join(rtl, 'new.sv'), 'module n; endmodule');
+    assert.deepEqual((await f.projects.current()).sets[0].files, []);
+});

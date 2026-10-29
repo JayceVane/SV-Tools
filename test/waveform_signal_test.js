@@ -104,6 +104,42 @@ const { VcdStore } = require('../src/waveform/store');
 const { VcdSession } = require('../src/waveform/session');
 const { readSignalRoles, collectSourceContext } = require('../src/waveform/source-roles');
 
+test('仅一个RTL文件的清单连续失效后有界重试，恢复方向而非误报超预算', async t => {
+    const { createSourceCatalog } = require('../src/workspace/source-catalog');
+    const { root, file } = await sourceFixture(t);
+    let calls = 0, catalog;
+    const folder = { uri: { fsPath: root } };
+    const vscode = { Uri: { file: fsPath => ({ fsPath }) }, RelativePattern: class {}, workspace: {
+        workspaceFolders: [folder], textDocuments: [], getWorkspaceFolder: () => folder,
+        async findFiles() { const call = ++calls; await new Promise(resolve => setImmediate(resolve)); if (call <= 2) catalog.invalidate(); return [{ fsPath: file }]; }
+    } };
+    catalog = createSourceCatalog({ vscode }); t.after(() => catalog.dispose());
+    const context = await collectSourceContext(vscode, path.join(root, 'a.vcd'), catalog);
+    assert.equal(context.truncated, false); assert.deepEqual(context.files, [file]); assert.ok(calls >= 3 && calls <= 8);
+});
+
+test('持续变化与真实超预算分别说明，关闭时终止方向清单重试', async () => {
+    const controller = new AbortController(); controller.abort();
+    await assert.rejects(collectSourceContext({}, 'wave.vcd', null, null, { signal: controller.signal }), { name: 'AbortError' });
+    const vars = [bus()];
+    const transient = await readSignalRoles(vars, { roots: ['any'], files: [], invalidated: true, truncated: true });
+    assert.match(transient.sourceRoleNote, /正在变化/); assert.doesNotMatch(transient.sourceRoleNote, /预算/);
+    const budget = await readSignalRoles(vars, { roots: ['any'], files: [], truncated: true });
+    assert.match(budget.sourceRoleNote, /预算/);
+});
+
+test('方向更新保留波形窗口、游标、分组和展开位，仅替换方向元数据', async () => {
+    const h = clientHarness(undefined, { vars: [{ ...bus(), changeCount: 3 }] }); await h.flush();
+    h.contextMenu('tb.ctrl').items.find(item => item.id === 'expand-bus').action(); await h.flush();
+    h.state.view = { start: 20, span: 40 }; h.state.cursorA = 25; h.state.cursorB = 45;
+    const before = { selected: [...h.state.selected], rows: h.state.rows, view: h.state.view, groups: h.state.groups, queries: h.messages.length };
+    h.windowListeners.message({ data: { type: 'roles', roles: [{ path: 'tb.ctrl', role: 'output', roleSource: 'RTL' }], sourceRoleNote: 'RTL方向匹配 1/1' } });
+    assert.deepEqual([...h.state.selected], before.selected); assert.equal(h.state.rows, before.rows);
+    assert.equal(h.state.view, before.view); assert.equal(h.state.groups, before.groups);
+    assert.equal(h.state.cursorA, 25); assert.equal(h.state.cursorB, 45); assert.equal(h.messages.length, before.queries);
+    assert.ok([...h.state.signals.values()].every(signal => signal.role === 'output'));
+});
+
 test('无空格内嵌范围仍使用正确RTL下标，转义标识符的括号原样保留', () => {
     const inline = {...bus(),range:undefined,name:'ctrl[7:4]',path:'tb.ctrl[7:4]'};
     assert.equal(D.bitSignals(inline)[0].name,'ctrl[7]');

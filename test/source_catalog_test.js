@@ -84,3 +84,14 @@ test('真实XPR上下文按仿真入口收窄，保留设计集，手工打开VC
     assert.deepEqual((await provider({root,file:path.join(root,'wave.vcd')})).files,[design,a,b]);
     assert.equal(await provider({root,file:path.join(root,'alternate.sv')}),null);
 });
+
+test('空HDL清单的工程上下文回落工作区发现，不把空清单当作有效成员',async()=>{
+    const vscode={Uri:{file:uri},workspace:{async findFiles(){return [uri('/p/workspace.sv')];}}};
+    const provider=createProjectSourceProvider({vscode,projects:{current:async()=>({root:'/p',key:'empty',sets:[{type:'DesignSrcs',files:[]},{type:'SimulationSrcs',files:[]}]})}});
+    assert.equal(await provider({root:'/p'}),null);
+    const catalog=createSourceCatalog({vscode,getPreferred:provider});
+    const result=await catalog.discover({file:'/p/top.sv'});
+    assert.deepEqual(result.uris.map(item=>item.fsPath),['/p/workspace.sv']);
+    assert.equal(result.provenance,'workspace');
+    catalog.dispose();
+});

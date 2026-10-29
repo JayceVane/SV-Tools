@@ -246,3 +246,21 @@ test('最多缓存四个模块，LRU淘汰后重新构建，模块局部位ID不
     tracer.trace({ moduleId: 'm0', direction: 'drivers', origin: { objectId: 'm0/y' } });
     assert.equal(tracer.stats().builds, 6);
 });
+
+test('端点种子从指定引脚继续，不展开同网络的其它负载分支', () => {
+    const f = fixture({ ports: [port('a', 'input', [n(1)]), port('y', 'output', [n(9)])], cells: [
+        cell('drv', '$pos', 'logic', { A: ['input', [n(1)]], Y: ['output', [n(5)]] }),
+        cell('n1', '$not', 'logic', { A: ['input', [n(5)]], Y: ['output', [n(6)]] }),
+        cell('n2', '$not', 'logic', { A: ['input', [n(5)]], Y: ['output', [n(7)]] }),
+        cell('n3', '$not', 'logic', { A: ['input', [n(6)]], Y: ['output', [n(8)]] }),
+        cell('n4', '$not', 'logic', { A: ['input', [n(7)]], Y: ['output', [n(9)]] })],
+        signals: [{ id: 'sig', name: 'sig', bits: [n(5)] }] });
+    // 从 n1/A 继续：只进入 n1 及其下游 n3，不展开同网络 n:5 的兄弟负载 n2。
+    const seeded = f.run('n1/A', { direction: 'loads', depth: 1, endpointSeed: true });
+    assert.deepEqual(seeded.cells.map(item => item.id), ['n1', 'n3']);
+    assert.deepEqual(boundary(seeded, 'depth').map(item => item.cellId), ['n3']);
+    // 旧行为（不带端点种子）按网络遍历，兄弟分支会一起进入。
+    const wire = f.run('n1/A', { direction: 'loads', depth: 1 });
+    assert.ok(wire.cells.some(item => item.id === 'n2'));
+    assert.throws(() => f.run('sig', { direction: 'loads', endpointSeed: true }), /引脚/);
+});

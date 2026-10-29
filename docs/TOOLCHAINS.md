@@ -1,4 +1,4 @@
-# 4.0 工具链操作与任务边界
+# 4.1 工具链操作与任务边界
 
 ## 编译结果
 
@@ -83,4 +83,6 @@ node scripts/verify-toolchains.js --iverilog <iverilog可执行文件> --vvp <vv
 
 Icarus默认VCD集中在工作区`.svtools/vcd/`，无工作区时使用源码目录下的同一路径。默认文件名区分源文件、Top和引擎，避免不同目录的同名测试台覆盖；重复仿真保持稳定，写入前关闭并等待对应波形读取者退出。
 
-实现使用vvp的默认dumpfile扩展参数，保持源码目录cwd和相对readmem语义，不修改RTL。显式`$dumpfile`及用户`simArgs`中的`-dumpfile=`继续优先，FST/LXT等非VCD格式沿用其原有规则。VCD仍需RTL执行`$dumpvars`，默认路径配置不等于自动启用记录。参数优先级见[Icarus官方说明](https://steveicarus.github.io/iverilog/usage/vvp_flags.html)。
+无显式文件名时使用vvp的默认dumpfile扩展参数直接写入集中目录。源码`$dumpfile`及`simArgs`中的`-dumpfile=`仍决定仿真期间的输出位置；仿真成功后，本轮新生成或变化的VCD统一移动到`.svtools/vcd/`，保留可读文件名并按测试台、Top和原路径区分，随后打开归档文件。已在集中目录的文件保持原位，旧的未变化文件不迁移。写入前关闭原始文件及归档目标的读取者；动态发现的目标在替换前补充保护，归档失败保留原文件并报错。同卷移动不复制波形内容，跨卷先完成临时副本再替换目标。
+
+仿真仍以源码目录为cwd，保持相对`$readmemh`语义，不修改RTL。FST/LXT等非VCD格式沿用其原有规则。VCD仍需RTL执行`$dumpvars`，默认路径配置不等于自动启用记录。

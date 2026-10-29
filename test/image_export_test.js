@@ -46,6 +46,23 @@ test('真实worker导出独立AB时间窗和派生bit，现场缓存/选择/布�
     assert.equal(current.view.start,50);assert.ok(current.series.has('stale'));assert.equal(current.multi.size,1);
     assert.ok(image.width>=1100);assert.equal(image.height,50+35+76+30);
 });
+test('复制到剪贴板只接受严格PNG载荷，非法输入不启动系统剪贴板',async()=>{
+    const files=createImageFiles({vscode:{}});
+    await assert.rejects(files.copy({format:'svg',data:'<svg/>'}),/PNG/);
+    await assert.rejects(files.copy({format:'png',data:'%%%'}),/编码/);
+    await assert.rejects(files.copy({format:'png',data:'abcdef'}),/无效PNG/);
+});
+
+test('图片复制直接交给共享原生写入器，返回成功并保留具体错误',async()=>{
+    const png=Buffer.from([137,80,78,71,13,10,26,10,0]);let called=0;
+    const files=createImageFiles({vscode:{},writeClipboard:async bytes=>{called++;assert.deepEqual(bytes,png);}});
+    assert.equal(await files.copy({format:'png',data:png.toString('base64')}),true);assert.equal(called,1);
+    const failing=createImageFiles({vscode:{},writeClipboard:async()=>{throw new Error('剪贴板正被其它程序占用');}});
+    await assert.rejects(failing.copy({format:'png',data:png.toString('base64')}),/其它程序占用/);
+    await assert.rejects(files.copy({format:'png',data:'A'.repeat(Math.ceil(32*1024*1024/3)*4+1)}),/32 MiB/);
+    assert.equal(called,1);
+});
+
 test('SVG记录器拒绝非有限坐标，PNG超大图明确拒绝而不创建位图',async()=>{
     const context=S.createContext();assert.throws(()=>context.fillRect(NaN,0,1,1),/有限/);
     const I=require('../src/graphics/image-export');await assert.rejects(I.png('<svg/>',20000,20000,{}),/PNG尺寸过大/);

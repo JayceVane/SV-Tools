@@ -46,6 +46,7 @@ test/*
 !test/vscode_critical_audit_host.js
 !test/vscode_release_host.js
 !test/vscode_header_host.js
+!test/vscode_waveform_host.js
 !test/helpers/
 test/helpers/*
 !test/helpers/waveform-client-harness.js
@@ -79,6 +80,7 @@ test_project/
 
 # Local environment notes (machine-specific, do not publish)
 ENVIRONMENT.md
+CONTEXT.md
 
 # Extension simulation artifacts
 .svtools/

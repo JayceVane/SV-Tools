@@ -100,7 +100,8 @@ async function fixture(t, options = {}) {
         requests.delete(root);
         assert.equal(path.dirname(path.resolve(root)), path.resolve(os.tmpdir()));
         assert.ok(path.basename(root).startsWith('svtools-circuit-command-'));
-        await fs.rm(root, { recursive: true, force: true });
+        // Windows 上 Worker/ELK 句柄释放存在时序，清理允许短暂重试，保持清理语义。
+        await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 20 });
     });
     return state;
 }
@@ -184,13 +185,14 @@ test('JSON 导入入口不混入 RTL 子菜单，JSON 编辑器有独立入口',
     assert.match(item.when, /resourceExtname.*json/);
 });
 
-test('标题栏默认Yosys，RTL右键提供文件Vivado，工程面板保留工程top', () => {
+test('标题栏默认Yosys，RTL右键提供文件Vivado，旧树菜单不保留电路入口', () => {
     const { contributes } = require('../package.json');
     assert.ok(contributes.menus['editor/title'].some(item => item.command === 'svtools.circuit.fromSource'));
     assert.ok(!contributes.menus['editor/title'].some(item => item.command === 'svtools.circuit.fromVivadoFile'));
     assert.ok(contributes.menus['svtools.submenu'].some(item => item.command === 'svtools.circuit.fromVivadoFile' && /sv\|v/.test(item.when)));
     assert.ok(contributes.menus['view/title'].some(item => item.command === 'svtools.circuit.fromVivado'));
-    assert.ok(contributes.menus['view/item/context'].some(item => item.command === 'svtools.circuit.fromVivado' && /topModule/.test(item.when)));
+    // P3-9 有意清理旧树视图的 viewItem 菜单：工程入口由命令面板与真实 Worker 用例覆盖，不再保留 view/item/context。
+    assert.ok(!contributes.menus['view/item/context']);
     assert.equal(contributes.commands.find(item => item.command === 'svtools.circuit.fromVivadoFile').icon, '$(circuit-board)');
     assert.equal(contributes.configuration.properties['svtools.circuit.yosysPath'].default, 'bundled');
     assert.equal(contributes.configuration.properties['svtools.circuit.frontend'].default, 'auto');

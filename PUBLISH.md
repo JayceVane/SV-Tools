@@ -1,12 +1,12 @@
-# 4.0 GitHub 发布
+# 4.1 GitHub 发布
 
-当前正式发布版本为 `4.0.0`，用户已确认先发布GitHub Wiki使用指南，再发布GitHub Release。本轮渠道为GitHub，不执行Marketplace或Open VSX发布。
+当前正式发布版本为 `4.1.0`，用户已确认先发布GitHub Wiki使用指南，再发布GitHub Release。本轮渠道为GitHub，不执行Marketplace或Open VSX发布。
 
 Wiki源稿位于 `docs/wiki/`，包含侧栏、页脚和截图；维护方式见 `docs/WIKI.md`。首次Wiki需在GitHub创建Home，之后通过独立Wiki Git仓库同步。发布前核对内部链接、配置/命令、图片来源与公开可访问性。
 
-预览使用 `npm run package:preview`，要求干净源码、六处版本一致、CLI匹配并禁止同号覆盖。正式版将六处版本统一为 `4.0.0`，重建原生模块并重新回归，不能重命名beta包替代正式构建。正式包的本地预检可用 `npm run package -- --target win32-x64 --out bin/svtools-v4.0.0-win32-x64.vsix`，先确认目标不存在。
+预览使用 `npm run package:preview`，要求干净源码、六处版本一致、CLI匹配并禁止同号覆盖。正式版将六处版本统一为 `4.1.0`，重建原生模块并重新回归，不能重命名beta包替代正式构建。正式包的本地预检可用 `npm run package -- --target win32-x64 --out bin/svtools-v4.1.0-win32-x64.vsix`，先确认目标不存在。
 
-通过PR合入master后，将 `v4.0.0` tag指向合并提交；CI从该tag独立构建正式附件。保留所有历史Release和附件，同名附件禁止clobber。发布后下载实际附件，核对SHA256、package/CLI版本并执行解包宿主验收。
+通过PR合入master后，将 `v4.1.0` tag指向合并提交；CI从该tag独立构建正式附件。保留所有历史Release和附件，同名附件禁止clobber。发布后下载实际附件，核对SHA256、package/CLI版本并执行解包宿主验收。
 
 `.github/workflows/release.yml` 校验 tag 与 package.json，构建 Windows x64 原生模块及 VSIX，执行 Node/Rust 回归并上传 SHA256 清单。含 `-` 的 tag 使用 GitHub prerelease，不改变稳定版 Latest。已有同名附件时上传失败，禁止 clobber。发布说明取 `docs/releases/<tag>.md`。
 

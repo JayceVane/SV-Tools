@@ -8,6 +8,7 @@ const { VcdStore } = require('./store');
 const { readSignalRoles } = require('./source-roles');
 
 let store = null;
+let variables = null;
 let loading = false;
 const options = workerData || {};
 const maxFileBytes = options.maxFileBytes || 2 * 1024 * 1024 * 1024;
@@ -37,6 +38,7 @@ async function open(filePath, sourceContext) {
     }
     parser.write(decoder.decode());
     const parsed = parser.finish();
+    variables = parsed.vars;
     const after = await fs.promises.stat(filePath);
     if (after.size !== stat.size || after.mtimeMs !== stat.mtimeMs) throw new Error('VCD读取期间文件已变化，请在仿真结束后重新打开');
     store = candidate;
@@ -48,7 +50,7 @@ async function open(filePath, sourceContext) {
         try { roles = await readSignalRoles(parsed.vars, sourceContext); }
         catch (error) { roles.sourceRoleNote = '方向匹配不可用：' + error.message; }
     }
-    return { ...store.metadata({ ...parsed, ...roles }, bytesRead), fileIdentity: { size: stat.size, mtimeMs: stat.mtimeMs }, parseMs: Date.now() - startedAt,
+    return { ...store.metadata({ ...parsed, ...roles }, bytesRead), sourceRoleRetry: sourceContext?.invalidated === true, fileIdentity: { size: stat.size, mtimeMs: stat.mtimeMs }, parseMs: Date.now() - startedAt,
         workerHeapBytes: process.memoryUsage().heapUsed, workerArrayBufferBytes: process.memoryUsage().arrayBuffers };
 }
 
@@ -59,8 +61,14 @@ parentPort.on('message', async message => {
         if (method === 'open') result = await open(params.filePath, params.sourceContext);
         else {
             if (!store || loading) throw Object.assign(new Error('VCD 尚未完成加载'), { code: 'VCD_NOT_READY' });
-            if (!['window', 'values', 'edge'].includes(method)) throw new Error('未知 VCD 请求：' + method);
-            result = store[method](params);
+            if (method === 'roles') {
+                const roles = await readSignalRoles(variables, params);
+                result = { roles: roles.vars.map(signal => ({ path: signal.path, role: signal.role || 'unknown', roleSource: signal.roleSource })),
+                    sourceRoleNote: roles.sourceRoleNote, sourceRoleRetry: params?.invalidated === true };
+            } else {
+                if (!['window', 'values', 'edge'].includes(method)) throw new Error('未知 VCD 请求：' + method);
+                result = store[method](params);
+            }
         }
         parentPort.postMessage({ requestId, result });
     } catch (error) {

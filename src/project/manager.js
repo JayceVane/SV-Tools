@@ -139,7 +139,10 @@ function createProjectManager({ vscode, state, vivadoSelection, rename = fs.rena
                     continue;
                 }
                 if (entry.isDirectory()) {
-                    await walk(member, fileset, depth + 1);
+                    // 被移出的目录必须整棵剪枝：add() 的文件级排除无法阻止刷新或目录内新增文件重新进入工程。
+                    if (!exclude.has(keyOf(member))) {
+                        await walk(member, fileset, depth + 1);
+                    }
                 }
                 else if (entry.isFile()) {
                     add(member, fileset);
@@ -293,11 +296,17 @@ function createProjectManager({ vscode, state, vivadoSelection, rename = fs.rena
             });
         },
         remove: (project, file) => update(project, (config, root) => {
+            // 目录移出工程应覆盖整棵子树（显式成员与跟随目录都算），仅删除精确项会让刷新后的文件复活。
+            const target = path.resolve(root, file), removed = entry => {
+                const candidate = path.resolve(root, entry);
+                return keyOf(candidate) === keyOf(target) || inside(candidate, target);
+            };
             for (const set of ['sources', 'simulation'])
-                config[set] = config[set].filter(entry => keyOf(path.resolve(root, entry)) !== keyOf(file));
-            config.folders = config.folders.filter(entry => keyOf(path.resolve(root, entry.path)) !== keyOf(file));
-            if (!config.exclude.includes(path.relative(root, file))) {
-                config.exclude.push(path.relative(root, file));
+                config[set] = config[set].filter(entry => !removed(entry));
+            config.folders = config.folders.filter(entry => !removed(entry.path));
+            const relative = path.relative(root, file);
+            if (relative && !config.exclude.includes(relative)) {
+                config.exclude.push(relative);
             }
         }),
         move: (project, file, fileset) => update(project, (config,root) => {

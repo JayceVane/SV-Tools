@@ -7,9 +7,11 @@ const C = require('../src/circuit/client');
 
 class FakeElement {
     constructor(ownerDocument, tagName) {
-        this.ownerDocument = ownerDocument; this.tagName = tagName.toUpperCase(); this.attributes = new Map(); this.children = []; this.parentNode = null; this.dataset = {}; this.listeners = new Map(); this.value = ''; this.disabled = false; this.hidden = false; this.clientWidth = 900; this.clientHeight = 600; this.text = ''; this.captures = new Set();
+        this.ownerDocument = ownerDocument; this.tagName = tagName.toUpperCase(); this.attributes = new Map(); this.children = []; this.parentNode = null; this.dataset = {}; this.style = {}; this.listeners = new Map(); this.value = ''; this.disabled = false; this.hidden = false; this.clientWidth = 900; this.clientHeight = 600; this.text = ''; this.captures = new Set();
         this.classList = { toggle: (name, active) => { const set = new Set((this.getAttribute('class') || '').split(' ').filter(Boolean)); if (active) set.add(name); else set.delete(name); this.setAttribute('class', [...set].join(' ')); }, add: name => this.classList.toggle(name, true), remove: name => this.classList.toggle(name, false), contains: name => (this.getAttribute('class') || '').split(' ').includes(name) };
     }
+    set className(value) { this.setAttribute('class', String(value)); }
+    get className() { return this.getAttribute('class') || ''; }
     set textContent(value) { this.text = String(value); this.children = []; }
     get textContent() { return this.text + this.children.map(child => child.textContent).join(''); }
     set innerHTML(value) { throw new Error(`HTML injection: ${value}`); }
@@ -24,6 +26,8 @@ class FakeElement {
     removeEventListener(type, callback) { this.listeners.get(type)?.delete(callback); }
     dispatch(type, properties = {}) { const event = { type, target: this, preventDefault() { this.defaultPrevented = true; }, ...properties }; for (const listener of this.listeners.get(type) || []) listener(event); return event; }
     getBoundingClientRect() { return { left: 0, top: 0, width: this.clientWidth, height: this.clientHeight }; }
+    click() { this.dispatch('click'); if (typeof this.onclick === 'function') this.onclick({ target: this }); }
+    remove() { this.parentNode?.removeChild(this); }
     setPointerCapture(id) { this.captures.add(id); }
     hasPointerCapture(id) { return this.captures.has(id); }
     releasePointerCapture(id) { this.captures.delete(id); }
@@ -193,7 +197,7 @@ test('页面不内嵌网表，CSP nonce 随页面变化且无需加载 VS Code �
     assert.doesNotMatch(first, /url\(\s*["']?https?:\/\//);
     assert.doesNotMatch(first, /innerHTML\s*=/);
     assert.notEqual(first.match(/nonce-([a-f0-9]+)/)[1], second.match(/nonce-([a-f0-9]+)/)[1]);
-    assert.equal((first.match(/<script nonce=/g) || []).length, 11);
+    assert.equal((first.match(/<script nonce=/g) || []).length, 14);
 });
 
 test('相机适配、缩放锚点及非法持久化数值保持有限', () => {
@@ -204,6 +208,62 @@ test('相机适配、缩放锚点及非法持久化数值保持有限', () => {
     assert.equal((point.y - fit.y) / fit.scale, (point.y - zoom.y) / zoom.scale);
     assert.deepEqual(C.cleanCamera({ x: Infinity, y: NaN, scale: -8 }), { x: 0, y: 0, scale: .0001 });
     assert.equal(C.zoomCamera(fit, 1000, point).scale, 8);
+});
+
+test('适配使用实际绘制边界，窄窗首次保留可读比例，面板开关保持相机并保存偏好', () => {
+    const camera = C.fitCamera({ width: 100000, height: 100000, paintBounds: { left: 100, top: 50, right: 600, bottom: 350 } }, 900, 600);
+    assert.ok(Math.abs(camera.scale - 1.5) < 1e-9);
+    assert.ok(Math.abs(camera.x + 75) < 1e-9);
+    const fit = C.fitCamera({ width: 2000, height: 1000 }, 320, 500), framed = C.frameCamera({ width: 2000, height: 1000 }, 320, 500);
+    assert.ok(Math.abs(fit.scale - .12) < 1e-9); assert.equal(framed.readable, true); assert.ok(framed.camera.scale >= .86);
+    assert.equal(C.frameCamera({ width: 200, height: 100 }, 900, 600).readable, false);
+    const narrow = fakePage(); narrow.ui('circuit').clientWidth = 320; narrow.ui('circuit').clientHeight = 500;
+    narrow.client.receive(graphMessage()); narrow.window.paint();
+    assert.equal(narrow.ui('fitHint').hidden, false);
+    narrow.ui('fit').dispatch('click'); narrow.window.paint();
+    assert.equal(narrow.ui('fitHint').hidden, true); assert.ok(narrow.client.getState().camera.scale < .86);
+    narrow.client.destroy();
+    const page = fakePage(); page.client.receive(graphMessage()); page.window.paint();
+    assert.equal(page.ui('inspector').hidden, true);
+    page.ui('zoomIn').dispatch('click'); page.window.paint(); const before = page.client.getState().camera;
+    page.ui('toggleInspector').dispatch('click'); page.window.paint();
+    assert.equal(page.ui('inspector').hidden, false); assert.deepEqual(page.client.getState().camera, before);
+    assert.equal(page.ui('minimap').hidden, true);
+    page.ui('toggleMinimap').dispatch('click'); assert.equal(page.ui('minimap').hidden, false);
+    assert.equal(page.bridge.saved.inspector, true); assert.equal(page.bridge.saved.minimap, true);
+    page.client.destroy(); assert.equal(page.ui('toggleInspector').listeners.get('click').size, 0);
+});
+
+test('右键菜单提供查看源码，并对空选择禁用不可执行动作', () => {
+    const page = fakePage(); page.client.receive(graphMessage()); page.window.paint();
+    clickObject(page, findData(page, 'data-node-id', 'a'));
+    const node = findData(page, 'data-node-id', 'a');
+    page.ui('circuit').dispatch('contextmenu', { target: node, clientX: 40, clientY: 40 });
+    let menu = page.document.body.children.find(element => element.getAttribute('class') === 'circuitLinkMenu');
+    assert.ok(menu);
+    const buttons = walk(menu).filter(element => element.tagName === 'BUTTON');
+    const source = buttons.find(button => button.textContent === '查看源码');
+    assert.ok(source); assert.equal(source.disabled, false);
+    source.click();
+    assert.equal(page.sent.at(-1).type, 'source'); assert.equal(page.sent.at(-1).cellId, 'cell-a');
+    assert.equal(page.document.body.children.includes(menu), false);
+    page.ui('circuit').dispatch('contextmenu', { target: page.ui('circuit'), clientX: 5, clientY: 5 });
+    menu = page.document.body.children.find(element => element.getAttribute('class') === 'circuitLinkMenu');
+    const blankSource = walk(menu).find(element => element.tagName === 'BUTTON' && element.textContent === '查看源码');
+    assert.equal(blankSource.disabled, true);
+    page.client.destroy();
+});
+
+test('首次选择展开属性面板，手动收起后不再自动弹出', () => {
+    const page = fakePage(); page.client.receive(graphMessage()); page.window.paint();
+    assert.equal(page.ui('inspector').hidden, true);
+    clickObject(page, findData(page, 'data-node-id', 'a')); page.window.paint();
+    assert.equal(page.ui('inspector').hidden, false);
+    page.ui('toggleInspector').dispatch('click'); page.window.paint();
+    assert.equal(page.ui('inspector').hidden, true);
+    clickObject(page, findData(page, 'data-node-id', 'b')); page.window.paint();
+    assert.equal(page.ui('inspector').hidden, true);
+    page.client.destroy();
 });
 
 test('相同模块不同内容 SHA 不共享视图；恢复状态只接受有界相机', () => {
@@ -236,6 +296,37 @@ test('选择网络同时高亮分支、引脚及所有端点单元', () => {
     assert.match(page.ui('properties').textContent, /q_reg.D/);
     page.key({ key: 'Escape' }); assert.equal(page.client.getState().selection, null);
     assert.equal(findData(page, 'data-edge-id', 'e1').classList.contains('selected'), false);
+    page.client.destroy();
+});
+
+test('选中外框沿主体形状绘制，总线只保留主干命中区并居中标签', () => {
+    const page = fakePage(), message = graphMessage();
+    message.graph.nodes.push({ id: 'bus', kind: 'bus', x: 0, y: 400, width: 220, height: 120, label: 'data · 2 bit', ports: [
+        { id: 'bus-in', label: 'data', direction: 'input', x: 0, y: 40, width: 0, height: 0, bits: ['b2', 'b3'] }] });
+    page.client.receive(message); page.window.paint();
+    const outlines = walk(page.ui('circuit')).filter(element => element.classList?.contains('selectionOutline'));
+    assert.equal(outlines.length, 3);
+    const outputOutline = outlines.find(element => element.parentNode?.getAttribute('data-node-id') === 'c');
+    assert.equal(outputOutline.tagName, 'POLYGON');
+    const bus = findData(page, 'data-node-id', 'bus');
+    assert.equal(walk(bus).some(element => element.classList?.contains('selectionOutline')), false);
+    const hit = walk(bus).find(element => element.classList?.contains('busHit'));
+    assert.equal(hit.getAttribute('width'), '20');
+    const label = walk(bus).find(element => element.classList?.contains('cellLabel'));
+    assert.equal(label.getAttribute('x'), '110'); assert.equal(label.getAttribute('text-anchor'), 'middle');
+    page.client.destroy();
+});
+
+test('追踪图把总线节点的内部分支标记为当前驱动或负载方向', () => {
+    const page = fakePage(), message = tracedMessage();
+    message.graph.nodes.push({ id: 'bus', kind: 'bus', x: 0, y: 400, width: 200, height: 120, label: 'data · 2 bit', ports: [] });
+    page.client.receive(message); page.window.paint();
+    let bus = findData(page, 'data-node-id', 'bus');
+    assert.equal(bus.classList.contains('isDriver'), true);
+    const loads = structuredClone(message); loads.graph.nodes.at(-1).id = 'bus-load'; loads.graph.trace.direction = 'loads';
+    page.client.receive(loads); page.window.paint();
+    bus = findData(page, 'data-node-id', 'bus-load');
+    assert.equal(bus.classList.contains('isLoad'), true);
     page.client.destroy();
 });
 
@@ -372,7 +463,11 @@ test('视口虚拟化保持屏外选择、连线和绘制顺序，搜索能够�
     assert.ok(wire.classList.contains('selected')); assert.ok(drawing.ports.get('b-d').element.classList.contains('selected'));
     assert.deepEqual(wire.parentNode.children.map(item => item.getAttribute('data-edge-id')), ['e1', 'e2']);
     assert.equal(JSON.stringify(message.graph), original);
-    page.client.receive(message); page.window.paint(); assert.equal(findData(page, 'data-node-id', 'far'), undefined);
+    page.client.receive(message); page.window.paint();
+    // 初始适配现在包含真实绘制边界；主动放大后再核验屏外裁剪和搜索找回。
+    assert.ok(findData(page, 'data-node-id', 'far'));
+    for (let i = 0; i < 8; i++) page.key({ key: '+' });
+    page.window.paint(); assert.equal(findData(page, 'data-node-id', 'far') === undefined, true);
     page.ui('search').value = 'far_signal'; page.ui('search').dispatch('input'); page.window.flush(); page.window.paint();
     assert.ok(findData(page, 'data-node-id', 'far')); assert.equal(page.ui('selectionName').textContent, 'far_signal');
     page.client.destroy();
@@ -386,6 +481,23 @@ test('选择和搜索只更新发生变化的对象，重复选择不重建详�
     drawing.setSearch('$dff'); drawing.setSearch('$dff'); drawing.setSearch('');
     page.client.receive(message); const target = findData(page, 'data-node-id', 'a'); clickObject(page, target);
     const detail = page.ui('properties').children[0]; clickObject(page, target); assert.equal(page.ui('properties').children[0], detail);
+    page.client.destroy();
+});
+
+test('固定关注沿真实网络保留相邻对象，淡出其它上下文，解除关注恢复全部对象', () => {
+    const page = fakePage(), graph = graphMessage().graph;
+    graph.nodes[0].ports[0].traceOrigin = { objectId: 'pin' };
+    graph.nodes.push({ id: 'other', kind: 'logic', x: 0, y: 0, width: 120, height: 80, ports: [] });
+    const drawing = R.renderGraph(page.ui('circuit'), graph);
+    drawing.setFocus(['pin']);
+    assert.equal(drawing.nodes.get('a').element.classList.contains('traceFocused'), true);
+    assert.equal(drawing.nodes.get('b').element.classList.contains('contextFaded'), false);
+    assert.equal(drawing.nodes.get('other').element.classList.contains('contextFaded'), true);
+    assert.equal(drawing.edges.get('e1').element.classList.contains('contextFaded'), false);
+    drawing.setFocus([]);
+    assert.equal(drawing.nodes.get('other').element.classList.contains('contextFaded'), false);
+    drawing.setFocus(['missing']);
+    assert.equal(drawing.nodes.get('other').element.classList.contains('contextFaded'), false);
     page.client.destroy();
 });
 

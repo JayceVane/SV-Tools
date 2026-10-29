@@ -1,6 +1,7 @@
 'use strict';
 const { createHash } = require('node:crypto');
-const { projectModule } = require('./projection');
+const { projectModule, elkNode } = require('./projection');
+const { prepareNode } = require('./symbol-library');
 const { declaredIndex } = require('./topology');
 
 const MAX_VIEW_CELLS = 512, MAX_VIEW_POSITIONS = 16384, MAX_VIEW_REQUESTS = 16;
@@ -116,8 +117,10 @@ function decorateNodes(projected, { portInfo, constantValues }, markerId) {
             node.label = portInfo.get(node.ports[0].id).label;
             node.width = Math.min(180, Math.max(node.width, node.label.length * 7.3 + 28));
         }
-        const geometry = geometries.get(node.id);
-        geometry.width = node.width; geometry.height = node.height;
+        // 追踪裁剪可能改变常量、起点和端口名称；在同一合同内重新分配锚点。
+        if (constant || node.id === 'node:' + markerId) delete node.symbolKind;
+        Object.assign(node, prepareNode(node));
+        Object.assign(geometries.get(node.id), elkNode(node));
     }
 }
 

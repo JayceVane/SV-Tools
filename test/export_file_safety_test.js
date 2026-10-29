@@ -7,8 +7,9 @@ const S=require('../src/waveform/layout-state');
 const {createLayoutFiles}=require('../src/waveform/layout-files');
 const {createImageFiles}=require('../src/graphics/image-files');
 
-for(const kind of ['layout','image'])test(kind+'导出不能通过硬链接覆盖原始VCD',async()=>{
+for(const kind of ['layout','image'])test(kind+'导出不能通过硬链接覆盖原始VCD',async(t)=>{
     const directory=await fs.mkdtemp(path.resolve('bin/audit-export-'));
+    t.after(()=>fs.rm(directory,{recursive:true,force:true,maxRetries:5,retryDelay:50}));
     const original=path.join(directory,'capture.vcd'),target=path.join(directory,kind==='layout'?'alias.json':'alias.svg');
     const text='$timescale 1ns $end\n';await fs.writeFile(original,text);await fs.link(original,target);
     const vscode={workspace:{fs:{async writeFile(uri,bytes){await fs.writeFile(uri.fsPath,bytes);}}}};

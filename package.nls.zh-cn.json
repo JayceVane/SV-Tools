@@ -63,7 +63,6 @@
   "cmd.vivado_createProject.title": "Vivado: 创建工程",
   "cfg.vivado_path.desc": "Vivado 安装目录（如 D:/Xilinx/Vivado/2022.1，也接受其 bin 目录或 vivado.bat 全路径）。留空 = 从 XILINX_VIVADO、PATH 和常见安装位置自动探测。",
   "cfg.vivado_part.desc": "工程创建向导的默认器件型号（-part，如 xc7a35tcsg324-1）。留空 = 建好后在 Vivado 中选择。",
-  "cfg.vivado_projectDir.desc": "工程创建向导默认的工程输出目录（相对工作区根目录）",
   "cfg.vivado_timeoutMs.desc": "Vivado batch 超时时间（毫秒）；0 = 不限时（可通过命令或状态栏停止）",
   "cfg.vivado_structure.desc": "工程创建向导使用的工程结构模板：按目录 glob 把文件划入 sources / sim / constraints 文件集，并指定 Vivado 工程输出目录。默认遵循 src/sim/prj 布局。",
   "cfg.vivado_structure_sources.desc": "RTL 源文件 glob，加入 sources_1 文件集（如 src、rtl/**）",

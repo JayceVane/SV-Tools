@@ -36,8 +36,9 @@ try {
     $env:ELECTRON_RUN_AS_NODE = $null
     # 仅交互界面验收显示隔离窗口，常规宿主检查继续在后台运行。
     $hostWindowStyle = if ($Visual) { 'Normal' } else { 'Hidden' }
-    $process = Start-Process -FilePath $CodePath -ArgumentList $arguments -WindowStyle $hostWindowStyle -PassThru -Wait `
+    $process = Start-Process -FilePath $CodePath -ArgumentList $arguments -WindowStyle $hostWindowStyle -PassThru `
         -RedirectStandardOutput (Join-Path $testRoot 'stdout.log') -RedirectStandardError (Join-Path $testRoot 'stderr.log')
+    if (-not $process.WaitForExit(60000)) { throw ('波形验收宿主未在60秒内退出：' + $testRoot) }
     if ($process.ExitCode -ne 0) {
         Get-Content -LiteralPath (Join-Path $testRoot 'stdout.log') -Tail 24
         Get-Content -LiteralPath (Join-Path $testRoot 'stderr.log') -Tail 24

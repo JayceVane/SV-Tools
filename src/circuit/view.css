@@ -9,13 +9,15 @@
     --accent: var(--vscode-focusBorder, #63b8ff);
     --button: var(--vscode-button-secondaryBackground, #243646);
     --buttonFg: var(--vscode-button-secondaryForeground, #d9e7f5);
-    --wire: #71899f;
+    --wire: #aebbc6;
+    --symbol: #e1e8ee;
+    --driver: #eebc79;
+    --load: #70d3c3;
+    --search: #f2cf78;
     --diagramActive: #59c9ff;
     --register: #7ccabf;
     --mux: #d3b57e;
-    --logic: #8eafe1;
-    --instance: #b09bd2;
-    --cellBg: #1a2b39;
+    --cellBg: #1f252c;
     --grid: #23313f;
     --error: var(--vscode-errorForeground, #f29595);
 }
@@ -37,10 +39,10 @@
 .cursorValue[data-status=unknown] text { fill:var(--vscode-editorWarning-foreground,#bc8800); }
 .graphLayer[data-detail=overview] .cursorValue { display:none; }
 body.vscode-light, body.vscode-high-contrast-light {
-    --diagramActive: #005fb8; --wire: #758797; --register: #348579; --mux: #a27a32; --logic: #557cad; --instance: #8361a5; --cellBg: #f7fafd; --grid: #e4eaf0;
+    --symbol: #26333f; --driver: #94580a; --load: #08746b; --search: #8a610c; --diagramActive: #0969da; --wire: #52616e; --register: #348579; --mux: #a27a32; --cellBg: #ffffff; --grid: #e4eaf0;
 }
 @media (prefers-color-scheme: light) {
-    body:not(.vscode-dark):not(.vscode-high-contrast) { --bg: var(--vscode-editor-background, #f6f8fb); --fg: var(--vscode-editor-foreground, #243445); --panel: var(--vscode-sideBar-background, #fff); --muted: var(--vscode-descriptionForeground, #66788a); --border: var(--vscode-panel-border, #d7e1e9); --input: var(--vscode-input-background, #fff); --button: var(--vscode-button-secondaryBackground, #e8eff6); --buttonFg: var(--vscode-button-secondaryForeground, #294359); --accent: var(--vscode-focusBorder, #2176bb); --diagramActive: #005fb8; --wire: #758797; --register: #348579; --mux: #a27a32; --logic: #557cad; --instance: #8361a5; --cellBg: #f7fafd; --grid: #e4eaf0; }
+    body:not(.vscode-dark):not(.vscode-high-contrast) { --bg: var(--vscode-editor-background, #f6f8fb); --fg: var(--vscode-editor-foreground, #243445); --panel: var(--vscode-sideBar-background, #fff); --muted: var(--vscode-descriptionForeground, #66788a); --border: var(--vscode-panel-border, #d7e1e9); --input: var(--vscode-input-background, #fff); --button: var(--vscode-button-secondaryBackground, #e8eff6); --buttonFg: var(--vscode-button-secondaryForeground, #294359); --accent: var(--vscode-focusBorder, #2176bb); --symbol: #26333f; --driver: #94580a; --load: #08746b; --search: #8a610c; --diagramActive: #0969da; --wire: #52616e; --register: #348579; --mux: #a27a32; --cellBg: #ffffff; --grid: #e4eaf0; }
 }
 /* 电路对象高亮不复用可能透明或与背景相同的IDE焦点边框。 */
 body.vscode-high-contrast { --diagramActive: #ffff00; }
@@ -48,25 +50,23 @@ body.vscode-high-contrast { --diagramActive: #ffff00; }
 html, body { height: 100%; margin: 0; overflow: hidden; }
 body { background: var(--bg); color: var(--fg); display: flex; flex-direction: column; font: 13px var(--vscode-font-family, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif); }
 button, input, select { font: inherit; color: var(--fg); }
-button { border: 1px solid transparent; border-radius: 5px; padding: 5px 9px; background: var(--button); color: var(--buttonFg); cursor: pointer; white-space: nowrap; }
+button { border: 1px solid transparent; border-radius: 3px; padding: 5px 9px; background: var(--button); color: var(--buttonFg); cursor: pointer; white-space: nowrap; }
 button:hover:not(:disabled) { border-color: var(--accent); filter: brightness(1.08); }
 button:disabled { opacity: .4; cursor: default; }
 button:focus-visible, input:focus-visible, select:focus-visible, svg:focus-visible { outline: 2px solid var(--accent); outline-offset: -1px; }
-input, select { background: var(--input); border: 1px solid var(--border); border-radius: 5px; min-width: 0; padding: 5px 8px; }
+input, select { background: var(--input); border: 1px solid var(--border); border-radius: 3px; min-width: 0; padding: 5px 8px; }
 [hidden] { display: none !important; }
-header { min-height: 65px; padding: 11px 17px; display: flex; gap: 12px; align-items: center; border-bottom: 1px solid var(--border); }
-.brand { color: var(--accent); font-size: 29px; }
+header { min-height: 48px; padding: 8px 14px; display: flex; gap: 12px; align-items: center; border-bottom: 1px solid var(--border); }
 .heading { min-width: 0; flex: 1; }
 h1 { font-size: 16px; font-weight: 600; margin: 0 0 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .muted { color: var(--muted); }
 #provenance { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.previewTag { font-size: 11px; letter-spacing: 1.3px; color: var(--muted); border: 1px solid var(--border); border-radius: 4px; padding: 5px 7px; }
-.toolbar { padding: 9px 12px; display: flex; align-items: center; gap: 6px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+.toolbar { padding: 6px 10px; display: flex; align-items: center; gap: 6px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
 .divider { height: 23px; width: 1px; background: var(--border); margin: 0 3px; }
 .grow { flex: 1; }
 #modules { max-width: 230px; width: 165px; }
 .zoomValue { min-width: 46px; color: var(--muted); font-variant-numeric: tabular-nums; text-align: center; }
-.searchBox { display: flex; align-items: center; border: 1px solid var(--border); background: var(--input); border-radius: 5px; padding-right: 2px; }
+.searchBox { display: flex; align-items: center; border: 1px solid var(--border); background: var(--input); border-radius: 3px; padding-right: 2px; }
 .searchBox input { border: 0; background: transparent; width: 180px; }
 .searchBox button { background: transparent; padding: 3px 7px; }
 #searchCount { color: var(--muted); font-size: 12px; min-width: 25px; text-align: right; }
@@ -75,51 +75,63 @@ h1 { font-size: 16px; font-weight: 600; margin: 0 0 3px; overflow: hidden; text-
 .currentCrumb { color: var(--fg); font-weight: 600; }
 #graphStats { white-space: nowrap; }
 main { min-height: 0; flex: 1; display: flex; }
-#viewport { position: relative; min-width: 0; flex: 1; overflow: hidden; background-image: radial-gradient(var(--grid) .8px, transparent .8px); background-size: 20px 20px; }
+#viewport { position: relative; min-width: 0; flex: 1; overflow: hidden; background-image: radial-gradient(var(--grid) .8px, transparent .8px); background-size: 16px 16px; }
 #circuit { width: 100%; height: 100%; display: block; touch-action: none; user-select: none; cursor: grab; }
 .panning #circuit, .panning .cell, .panning .wire { cursor: grabbing; }
+/* 图形角色保持独立：普通器件、选中、搜索与驱动/负载。 */
 .graphLayer { font-family: var(--vscode-editor-font-family, Consolas, "SFMono-Regular", monospace); }
-.cell { cursor: pointer; --cellAccent: var(--logic); }
-.kind-register { --cellAccent: var(--register); }
-.kind-mux, .kind-constant { --cellAccent: var(--mux); }
-.kind-instance, .kind-memory { --cellAccent: var(--instance); }
-.kind-input, .kind-output, .kind-inout { --cellAccent: var(--wire); }
-.cellBody { fill: var(--cellBg); stroke: var(--cellAccent); stroke-width: 1.4; vector-effect: non-scaling-stroke; }
-.cellSymbol { fill: var(--cellAccent); font-size: 12px; font-weight: 600; pointer-events: none; }
-.cellLabel { fill: var(--fg); font-size: 13px; pointer-events: none; paint-order: stroke; stroke: var(--bg); stroke-width: 3; stroke-linejoin: round; }
-.cellDetail, .pinLabel { fill: var(--muted); font-size: 11px; pointer-events: none; }
-.clockMark { fill: none; stroke: var(--cellAccent); stroke-width: 1.2; vector-effect: non-scaling-stroke; }
-.cell:hover .cellBody, .cell.connected .cellBody { stroke: var(--diagramActive); }
-.cell.selected .cellBody { stroke: var(--diagramActive); stroke-width: 2.5; }
-.cell.searchMatch .cellBody { stroke-dasharray: 4 2; stroke-width: 2; }
+.cell { cursor: pointer; --cellAccent: var(--symbol); }
+.cellBody { fill: var(--cellBg); stroke: var(--cellAccent); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+.cellSymbol { fill: var(--symbol); font-size: 13px; pointer-events: none; }
+.cellLabel { fill: var(--fg); font-size: 13px; pointer-events: none; }
+.pinLabel, .portWidth { fill: var(--muted); font-size: 12px; pointer-events: none; }
+.clockMark, .gateCurve { fill: none; stroke: var(--cellAccent); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+.selectionOutline, .searchCorners { fill: none; stroke-width: 1.5; pointer-events: none; vector-effect: non-scaling-stroke; visibility: hidden; }
+.selectionOutline { stroke: var(--diagramActive); }
+.cell.selected .selectionOutline { stroke-width: 2; }
+.searchCorners { stroke: var(--search); stroke-width: 2; }
+.cell.selected .selectionOutline, .cell.traceFocused .selectionOutline { visibility: visible; }
+.cell.searchMatch .searchCorners { visibility: visible; }
+.cell:hover .cellBody { stroke-width: 2; }
+.kind-unknown .cellBody { stroke-dasharray: 4 3; }
+.cell.connected { --cellAccent: var(--diagramActive); }
+.cell.selected { --cellAccent: var(--diagramActive); }
 .pin { cursor: crosshair; }
 .pinHit { fill: transparent; stroke: transparent; }
-.pinDot, .pinStem { fill: none; stroke: var(--cellAccent); stroke-width: 1.4; stroke-linecap: round; vector-effect: non-scaling-stroke; }
-.polarityBubble { fill: var(--cellBg); stroke: var(--cellAccent); stroke-width: 1.4; vector-effect: non-scaling-stroke; }
-.pin:hover .pinDot, .pin.selected .pinDot,
-.pin:hover .pinStem, .pin.selected .pinStem,
-.pin:hover .polarityBubble, .pin.selected .polarityBubble,
-.pin:hover .clockMark, .pin.selected .clockMark { stroke: var(--diagramActive); }
-.pin.bus .pinDot, .pin.bus .pinStem { stroke-width: 2.8; }
-.busPort .cellBody { stroke-width: 2; }
-.portWidth { fill: var(--muted); font-size: 11px; pointer-events: none; }
-.wire { cursor: pointer; --wireWidth: 1.3; --activeWireWidth: 2.7; }
-.wire.bus { --wireWidth: 2.8; --activeWireWidth: 4.2; }
-.wireLine { fill: none; stroke: var(--wire); stroke-width: var(--wireWidth); vector-effect: non-scaling-stroke; pointer-events: none; }
+.pinDot, .pinStem { fill: none; stroke: var(--cellAccent); stroke-width: 1.25; vector-effect: non-scaling-stroke; }
+.polarityBubble { fill: var(--cellBg); stroke: var(--cellAccent); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+.pin:hover, .pin.selected { --cellAccent: var(--diagramActive); }
+.pin.bus .pinDot, .pin.bus .pinStem { stroke-width: 2.5; }
+.busPort .cellBody { stroke-width: 1.5; }
+.wire { cursor: pointer; --wireWidth: 1.25; --activeWireWidth: 2.5; --routeColor: var(--wire); }
+.wire.bus { --wireWidth: 2.5; --activeWireWidth: 3.5; }
+.wireLine { fill: none; stroke: var(--routeColor); stroke-width: var(--wireWidth); vector-effect: non-scaling-stroke; pointer-events: none; }
 .wireHit { fill: none; stroke: transparent; stroke-width: 12; vector-effect: non-scaling-stroke; }
-.busSlash { fill: none; stroke: var(--wire); stroke-width: 1.5; vector-effect: non-scaling-stroke; pointer-events: stroke; }
-.busWidth { fill: var(--fg); font-size: 12px; font-weight: 600; paint-order: stroke; stroke: var(--bg); stroke-width: 3; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
-.wire:hover .wireLine, .wire.selected .wireLine { stroke: var(--diagramActive); stroke-width: var(--activeWireWidth); }
-.wire:hover .busSlash, .wire.selected .busSlash { stroke: var(--diagramActive); }
-.wire:hover .busWidth, .wire.selected .busWidth { fill: var(--diagramActive); }
-.wire.searchMatch:not(.selected) .wireLine { stroke: var(--mux); stroke-width: var(--activeWireWidth); }
-.wire.searchMatch:not(.selected) .busSlash { stroke: var(--mux); }
-.wire.searchMatch:not(.selected) .busWidth { fill: var(--mux); }
-.canvasLegend { pointer-events: none; position: absolute; bottom: 14px; left: 16px; display: flex; flex-wrap: wrap; gap: 15px; font-size: 11px; color: var(--muted); }
-.canvasLegend span::before { content: ''; display: inline-block; width: 6px; height: 6px; margin-right: 5px; border-radius: 2px; vertical-align: 1px; background: var(--logic); }
-.canvasLegend .legendRegister::before { background: var(--register); }.canvasLegend .legendMux::before { background: var(--mux); }.canvasLegend .legendInstance::before { background: var(--instance); }
-.canvasLegend .legendWire::before, .canvasLegend .legendBus::before { width: 15px; height: 0; border-radius: 0; background: none; border-top: 1.3px solid var(--wire); vertical-align: 3px; }
-.canvasLegend .legendBus::before { border-top-width: 2.8px; }
+.busSlash { fill: none; stroke: var(--routeColor); stroke-width: 1.5; vector-effect: non-scaling-stroke; pointer-events: stroke; }
+.busWidth { fill: var(--routeColor); font-size: 12px; paint-order: stroke; stroke: var(--bg); stroke-width: 3; stroke-linejoin: round; pointer-events: visiblePainted; }
+.junctionDot { fill: var(--routeColor); stroke: none; pointer-events: none; }
+.wire.isDriver { --routeColor: var(--driver); }
+.wire.isLoad { --routeColor: var(--load); }
+.wire.searchMatch { --routeColor: var(--search); }
+.wire:hover .wireLine { stroke-width: var(--activeWireWidth); }
+.wire.selected { --routeColor: var(--diagramActive); }
+.wire.selected .wireLine { stroke-width: var(--activeWireWidth); }
+.directionArrow { fill: var(--routeColor); stroke: none; pointer-events: none; }
+.contextFaded { opacity: .3; }
+.contextFaded.selected, .contextFaded.searchMatch { opacity: 1; }
+body.vscode-high-contrast .contextFaded, body.vscode-high-contrast-light .contextFaded { opacity: .65; }
+body.vscode-high-contrast .contextFaded.selected, body.vscode-high-contrast .contextFaded.searchMatch,
+body.vscode-high-contrast-light .contextFaded.selected, body.vscode-high-contrast-light .contextFaded.searchMatch { opacity: 1; }
+.canvasLegend { position: absolute; bottom: 8px; left: 12px; display: flex; gap: 14px; font-size: 12px; color: var(--muted); pointer-events: none; }
+.canvasLegend span { display: none; }
+.canvasLegend .legendWire, .canvasLegend .legendBus { display: inline; }
+body[data-trace="drivers"] .canvasLegend .legendDriver, body[data-trace="loads"] .canvasLegend .legendLoad { display: inline; }
+.canvasLegend span::before { content: ''; display: inline-block; width: 16px; border-top: 1.25px solid var(--wire); margin-right: 6px; vertical-align: 3px; }
+.canvasLegend .legendBus::before { border-top-width: 2.5px; }
+.canvasLegend .legendDriver::before { border-top-color: var(--driver); }
+.canvasLegend .legendLoad::before { border-top-color: var(--load); }
+.minimap { position: absolute; right: 12px; bottom: 12px; width: 192px; height: 120px; border: 1px solid var(--border); background: var(--bg); touch-action: none; cursor: crosshair; }
+body[data-mode="loading"] .minimap, body[data-mode="error"] .minimap { visibility: hidden; }
 .message { position: absolute; inset: 0; padding: 25px; display: flex; flex-direction: column; gap: 13px; justify-content: center; align-items: center; background: var(--bg); text-align: center; }
 .messageGlyph { color: var(--accent); font-size: 38px; }.message strong { font-size: 17px; font-weight: 600; }.message span { color: var(--muted); white-space: pre-wrap; overflow-wrap: anywhere; max-width: 640px; line-height: 1.6; }
 body[data-mode="error"] .messageGlyph, body[data-mode="error"] .message strong { color: var(--error); }
@@ -127,15 +139,16 @@ body[data-mode="loading"] .messageGlyph { animation: breathe 1.4s ease-in-out in
 body[data-mode="loading"] .canvasLegend, body[data-mode="error"] .canvasLegend { display: none; }
 @keyframes breathe { from { opacity: .35; } to { opacity: 1; } }
 #inspector { width: 270px; flex: 0 0 270px; border-left: 1px solid var(--border); background: var(--panel); overflow: auto; padding: 17px 16px; }
-.panelTitle { font-size: 11px; color: var(--muted); letter-spacing: 1.4px; margin-bottom: 20px; }
+.panelTitle { font-size: 13px; color: var(--muted); margin-bottom: 16px; }
 .selectionEmpty { color: var(--muted); line-height: 1.65; }.selectionEmpty p { margin: 15px 0; }
 .objectKind { color: var(--accent); margin: 4px 0 7px; font-size: 12px; }
 h2 { font: 600 15px/1.5 var(--vscode-editor-font-family, Consolas, monospace); margin: 0 0 20px; overflow-wrap: anywhere; white-space: pre-wrap; }
 dl { margin: 0; }dt { color: var(--muted); font-size: 12px; margin-top: 17px; }dd { margin: 5px 0 0; font-family: var(--vscode-editor-font-family, Consolas, monospace); font-size: 12px; line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 240px; overflow: auto; }
 .selectionActions { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 22px; }.inspectorNote { margin-top: 28px; padding-top: 16px; color: var(--muted); border-top: 1px solid var(--border); font-size: 12px; line-height: 1.65; }
-footer { min-height: 29px; border-top: 1px solid var(--border); display: flex; align-items: center; gap: 15px; padding: 6px 13px; color: var(--muted); font-size: 11px; }
+.fitHint { color: var(--mux); white-space: nowrap; }
+footer { min-height: 29px; border-top: 1px solid var(--border); display: flex; align-items: center; gap: 15px; padding: 6px 13px; color: var(--muted); font-size: 12px; }
 #status { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-@media (max-width: 900px) { #inspector { width: 230px; flex-basis: 230px; padding: 14px 12px; }.keyboardHint { display: none; }.searchBox input { width: 150px; }.previewTag { display: none; }.toolbar .grow { display: none; } }
+@media (max-width: 900px) { #inspector { width: 230px; flex-basis: 230px; padding: 14px 12px; }.keyboardHint { display: none; }.searchBox input { width: 150px; }.toolbar .grow { display: none; } }
 @media (max-width: 600px) { #inspector { width: 190px; flex-basis: 190px; }.contextBar { padding: 7px 10px; }#graphStats { display: none; }#modules { max-width: 150px; width: 125px; }.toolbar { padding: 7px; gap: 4px; }.canvasLegend { display: none; } }
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; } }
 
@@ -153,12 +166,17 @@ footer { min-height: 29px; border-top: 1px solid var(--border); display: flex; a
 /* 总线连接条只表达拼接/拆分，分支粗细仍按各自真实位数。 */
 .kind-bus { --cellAccent: var(--wire); }
 .busHit { fill: transparent; stroke: none; }
-.busSpine { fill: none; stroke-width: 2.8; vector-effect: non-scaling-stroke; }
+.busSpine { fill: none; stroke-width: 2.5; vector-effect: non-scaling-stroke; }
 .busTap { fill: none; stroke: var(--wire); stroke-width: 1.3; vector-effect: non-scaling-stroke; }
-.busTap.bus { stroke-width: 2.8; }
+.busTap.bus { stroke-width: 2.5; }
 .mappingLabel { paint-order: stroke; stroke: var(--bg); stroke-width: 3; stroke-linejoin: round; }
 .graphLayer[data-detail="compact"] .mappingLabel { display: block; }
-.kind-bus.selected .busSpine { stroke-width: 4.2; }
+.kind-bus.isDriver .busSpine, .kind-bus.isDriver .busTap { stroke: var(--driver); }
+.kind-bus.isLoad .busSpine, .kind-bus.isLoad .busTap { stroke: var(--load); }
+.kind-bus.selected .busSpine { stroke: var(--diagramActive); stroke-width: 4.2; }
+.kind-bus.selected .busTap { stroke: var(--diagramActive); }
+.kind-bus.searchMatch .busSpine, .kind-bus.searchMatch .busTap { stroke: var(--search); }
+.kind-bus.traceFocused .busSpine { stroke: var(--search); stroke-dasharray: 5 3; }
 .pin:hover .busTap, .pin.selected .busTap { stroke: var(--diagramActive); }
 .tracePanel { padding: 8px 14px; border-bottom: 1px solid var(--border); background: var(--panel); }
 .tracePanel[hidden], #traceCancel[hidden] { display: none; }
@@ -166,15 +184,20 @@ footer { min-height: 29px; border-top: 1px solid var(--border); display: flex; a
 .traceHeading strong { font-size: 13px; max-width: 60%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.traceBadge { color: var(--register); font-size: 12px; padding: 3px 7px; border: 1px solid var(--border); border-radius: 12px; }
 .traceBadge[data-precision="cell"], #traceLimit { color: var(--mux); }
 .traceBranches, .traceFrontiers { margin-top: 5px; max-height: 80px; overflow: auto; }
-.traceFrontiers button, .traceBranches button { padding: 4px 8px; border-radius: 5px; }
+.traceFrontiers button, .traceBranches button { padding: 4px 8px; border-radius: 3px; }
 .traceBoundary { font-size: 12px; color: var(--muted); }.traceBoundary[data-reason="sequential"] { border-color: var(--register); }
 .traceSelection { border-top: 1px solid var(--border); margin-top: 18px; padding-top: 12px; }
-.traceSelection label { display: block; color: var(--muted); margin-bottom: 6px; }.traceSelection input { width: 100%; padding: 6px 8px; background: var(--input); color: var(--fg); border: 1px solid var(--border); border-radius: 5px; }
+.traceSelection label { display: block; color: var(--muted); margin-bottom: 6px; }.traceSelection input { width: 100%; padding: 6px 8px; background: var(--input); color: var(--fg); border: 1px solid var(--border); border-radius: 3px; }
 .traceSelection .selectionActions { margin-top: 8px; }
 .waveLinkState { max-width: 48%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
 .waveLinkState[data-status='confirmed'] { color: var(--register); }.waveLinkState[data-status='invalid'] { color: var(--mux); }
-.circuitLinkMenu { position: fixed; z-index: 50; min-width: 220px; max-width: 260px; padding: 5px; border: 1px solid var(--border); border-radius: 7px; background: var(--panel); box-shadow: 0 8px 28px #0004; }
-.circuitLinkMenu button { width: 100%; display: block; padding: 8px 10px; text-align: left; border: 0; background: transparent; }
-.circuitLinkMenu button:hover:not(:disabled), .circuitLinkMenu button:focus-visible { background: var(--button); outline: 1px solid var(--accent); }
-.cell.traceNew .cellBody { animation: traceArrival 700ms ease-out; }.cell.traceFocused .cellBody { stroke: var(--diagramActive); stroke-width: 2.5; stroke-dasharray: 5 3; }
+.circuitLinkMenu { position: fixed; z-index: 50; min-width: 220px; max-width: 260px; padding: 5px; border: 1px solid var(--vscode-menu-border, var(--border)); border-radius: 4px; background: var(--vscode-menu-background, var(--panel)); color: var(--vscode-menu-foreground, var(--fg)); box-shadow: 0 8px 28px var(--vscode-widget-shadow, #0004); opacity: 1; }
+.circuitLinkMenu button { width: 100%; display: block; padding: 8px 10px; text-align: left; border: 0; background: transparent; color: inherit; }
+.circuitLinkMenu button:disabled { color: var(--vscode-disabledForeground, var(--muted)); opacity: .75; }
+.circuitLinkMenu button:hover:not(:disabled), .circuitLinkMenu button:focus-visible { background: var(--vscode-menu-selectionBackground, var(--button)); color: var(--vscode-menu-selectionForeground, var(--vscode-menu-foreground, var(--fg))); outline: 1px solid var(--accent); }
+.cell.traceNew .cellBody { animation: traceArrival 700ms ease-out; }.cell.traceFocused .selectionOutline { stroke: var(--search); stroke-dasharray: 5 3; }
 @keyframes traceArrival { from { stroke: var(--diagramActive); stroke-width: 4; } to { stroke-width: 1.3; } }
+
+@media (max-width: 680px) { #inspector { position: absolute; right: 0; top: 0; bottom: 0; z-index: 5; width: min(280px, 85vw); } main { position: relative; } .minimap { width: 144px; height: 90px; right: 8px; bottom: 8px; } .toolbar .searchBox { flex: 1; min-width: 180px; } .searchBox input { min-width: 0; width: 100%; } }
+body.vscode-high-contrast { --symbol: #ffffff; --wire: #ffffff; --cellBg: #000000; --search: #ffdb00; --driver: #ffdb00; --load: #00ffff; }
+body.vscode-high-contrast-light { --symbol: #000000; --wire: #000000; --cellBg: #ffffff; --diagramActive: #005fb8; }

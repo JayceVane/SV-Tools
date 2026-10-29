@@ -59,7 +59,6 @@ function reportNativeMissing() {
  * Activate the extension
  */
 function activate(context) {
-    console.log('SystemVerilog extension is now active!');
 
     const projects = createProjectManager({vscode,state:context.workspaceState,vivadoSelection:createProjectSelection({workspace:vscode.workspace,state:context.workspaceState})});
     context.subscriptions.push(projects);

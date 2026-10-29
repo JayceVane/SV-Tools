@@ -22,7 +22,8 @@ function activateWaveViewer(context, deps) {
         const base = bindWaveformPanel({ filePath: key, panel, channel: deps?.channel, imageFiles: createImageFiles({ vscode, sourcePath: key }), layoutFiles: createLayoutFiles({ vscode, filePath: key }),
             onCircuit:message=>message.type==='circuit-link'?registration?.configure():registration?.trace(message.key,message.direction),
             onCursors:cursor=>registration?.cursors(cursor),
-            getSourceContext: () => collectSourceContext(vscode, key, deps?.sourceCatalog, sourceFile) });
+            onSourceChange: deps?.sourceCatalog?.onDidChange,
+            getSourceContext: ({ signal } = {}) => collectSourceContext(vscode, key, deps?.sourceCatalog, sourceFile, { signal }) });
         registration = deps?.waveLinks?.registerWave({file:key,label:()=>path.basename(key),
             snapshot:()=>base.getMetadata()?{id:key,revision:1}:null,metadata:async()=>{await base.loaded;return base.getMetadata();},
             async validate(){await base.loaded;const metadata=base.getMetadata();if(!metadata)throw new Error('VCD未成功加载或已经关闭');

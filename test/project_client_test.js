@@ -15,17 +15,69 @@ class Element {
     replaceChildren() { this.children=[]; }
     append(...items) { this.children.push(...items); }
     get childElementCount() { return this.children.length; }
+    getBoundingClientRect() { return { left: 8, top: 40, bottom: 64, width: 220, height: 80 }; }
     click() { this.events.click?.({target:this}); }
 }
 function client() {
-    const elements = new Map(['tree','menu','choose','projectName','projectKind','files','instances','add','vivadoTools','tools','toggleTools','addVivado','toolBody','toolActions','toolReports','diagnostics','refresh','actions','trace','traceRoot','pin','clear','message','issues'].map(id=>[id,new Element()]));
-    const messages=[],events={}; let saved;
-    const document={ getElementById:id=>elements.get(id), createElement:tag=>new Element(tag), createElementNS:(_,tag)=>new Element(tag), querySelectorAll:()=>[], addEventListener(){} };
-    const context=vm.createContext({document,window:{addEventListener:(key,fn)=>{events[key]=fn;}},acquireVsCodeApi:()=>({getState:()=>({}),setState:value=>{saved=value;},postMessage:message=>messages.push(message)})});
+    let document;
+    const createElement = tag => { const element = new Element(tag); element.focus = () => { document.activeElement = element; }; return element; };
+    const elements = new Map(['tree','menu','choose','projectName','projectKind','files','instances','add','vivadoTools','tools','toggleTools','addVivado','toolBody','toolActions','toolReports','diagnostics','refresh','actions','trace','traceRoot','pin','clear','message','issues'].map(id=>[id,createElement()]));
+    elements.get('menu').hidden = true;
+    for (const id of ['actions', 'toolReports']) { elements.get(id).setAttribute('aria-haspopup', 'menu'); elements.get(id).setAttribute('aria-expanded', 'false'); }
+    const messages=[],events={},documentEvents={}; let saved;
+    document={ getElementById:id=>elements.get(id), createElement, createElementNS:(_,tag)=>createElement(tag), querySelectorAll:()=>[], addEventListener:(key,fn)=>{documentEvents[key]=fn;} };
+    const context=vm.createContext({document,window:{innerWidth:320,innerHeight:900,addEventListener:(key,fn)=>{events[key]=fn;}},acquireVsCodeApi:()=>({getState:()=>({}),setState:value=>{saved=value;},postMessage:message=>messages.push(message)})});
     vm.runInContext(fs.readFileSync(path.join(__dirname,'../src/project/icons.js'),'utf8'),context);
     vm.runInContext(fs.readFileSync(path.join(__dirname,'../src/project/client.js'),'utf8'),context);
-    return {elements,messages,state:()=>saved,receive:data=>events.message({data:{type:'snapshot',revision:2,project:{id:'p',name:'corelib',kind:'svtools'},nodes:[],projection:'files',...data}})};
+    return {elements,messages,document,state:()=>saved,dispatch:(name,event)=>documentEvents[name](event),
+        pointerClick(element,target=element) { documentEvents.pointerdown({target}); element.events.click?.({target}); },
+        receive:data=>events.message({data:{type:'snapshot',revision:2,project:{id:'p',name:'corelib',kind:'svtools'},nodes:[],projection:'files',...data}})};
 }
+
+function menuSnapshot(c) {
+    c.receive({ project:{id:'v',name:'top',kind:'vivado'}, actions:[{id:'trace',label:'追踪信号'}],
+        toolActions:[{id:'reportTiming',label:'时序报告',group:'reports'},{id:'reportUtilization',label:'资源报告',group:'reports'}] });
+}
+
+test('工程操作和报告按钮再次点击收起，按钮子元素及键盘激活遵循同一开关状态',()=>{
+    const c=client(); menuSnapshot(c);
+    const menu=c.elements.get('menu');
+    for (const id of ['actions','toolReports']) {
+        const trigger=c.elements.get(id),child=new Element('span');trigger.append(child);
+        c.pointerClick(trigger,child);assert.equal(menu.hidden,false);const expanded=trigger.getAttribute('aria-expanded');
+        c.pointerClick(trigger,child);assert.equal(menu.hidden,true);assert.equal(trigger.getAttribute('aria-expanded'),'false');
+        assert.equal(expanded,'true');
+        trigger.click();assert.equal(menu.hidden,false);trigger.click();assert.equal(menu.hidden,true);
+    }
+    assert.equal(c.messages.length,1);
+});
+
+test('共享菜单切换入口、外部关闭、Escape和执行动作都同步展开状态与焦点',()=>{
+    const c=client();menuSnapshot(c);
+    const menu=c.elements.get('menu'),actions=c.elements.get('actions'),reports=c.elements.get('toolReports');
+    c.pointerClick(actions);c.pointerClick(reports);
+    assert.equal(menu.hidden,false);assert.equal(actions.getAttribute('aria-expanded'),'false');assert.equal(reports.getAttribute('aria-expanded'),'true');
+    assert.equal(menu.children[0].textContent,'时序报告');assert.equal(c.document.activeElement,menu.children[0]);
+    c.dispatch('pointerdown',{target:menu.children[0]});assert.equal(menu.hidden,false);
+    menu.children[0].click();assert.equal(menu.hidden,true);assert.equal(reports.getAttribute('aria-expanded'),'false');
+    assert.equal(c.messages.at(-1).command,'reportTiming');assert.equal(c.document.activeElement,reports);
+    reports.click();c.dispatch('keydown',{key:'Escape'});
+    assert.equal(menu.hidden,true);assert.equal(reports.getAttribute('aria-expanded'),'false');assert.equal(c.document.activeElement,reports);
+    reports.click();c.dispatch('pointerdown',{target:c.elements.get('tree')});
+    assert.equal(menu.hidden,true);assert.equal(reports.getAttribute('aria-expanded'),'false');
+    actions.focus();c.dispatch('keydown',{key:'Escape'});assert.equal(c.document.activeElement,actions);
+});
+
+test('快照刷新关闭菜单并清理旧入口，节点右键菜单仍可重复打开且左键点击节点会关闭',()=>{
+    const c=client();menuSnapshot(c);
+    const actions=c.elements.get('actions'),menu=c.elements.get('menu');
+    actions.click();menuSnapshot(c);assert.equal(menu.hidden,true);assert.equal(actions.getAttribute('aria-expanded'),'false');
+    const node={id:'file',label:'top.sv',kind:'file',flags:[],children:[],actions:[{id:'open',label:'打开'}]};
+    c.receive({nodes:[node]});const row=c.elements.get('tree').children[0];
+    row.events.contextmenu({preventDefault(){}});assert.equal(menu.hidden,false);
+    row.events.contextmenu({preventDefault(){}});assert.equal(menu.hidden,false);
+    c.dispatch('pointerdown',{target:row});assert.equal(menu.hidden,true);
+});
 test('真实页面脚本显示节点右侧标记、保留文本和工具提示，清除追踪发送当前世代',()=>{
     const c=client(),node={id:'leaf',label:'leaf.sv',file:'/leaf.sv',kind:'file',flags:[{role:'internal',symbol:'●'},{role:'output',symbol:'→'}],tooltip:'u_tx.r_data[7:0]',children:[],actions:[{id:'remove',label:'移出工程'}]};
     c.receive({tracing:true,traceId:'trace-1',nodes:[{id:'set',label:'sources',kind:'set',flags:[],children:[node]}]});

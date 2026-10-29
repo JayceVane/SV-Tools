@@ -46,9 +46,9 @@ function contextLabel(design, context) {
 function createTraceViews({ design, tracer, sourceLocator, layout = layoutProjection }) {
     let sequence = 0, closed = false, previous, previousRoot;
     function current(ticket) { if (closed || ticket !== sequence) throw new Error('局部电路请求已被新的操作取代'); }
-    function query(request, origin, crossSequential, ownerId) {
+    function query(request, origin, crossSequential, ownerId, endpointSeed = false) {
         const result = tracer.trace({ moduleId: request.moduleId, direction: request.direction, instancePath: request.instancePath,
-            origin, depth: 1, crossSequential: crossSequential === true });
+            origin, depth: 1, crossSequential: crossSequential === true, endpointSeed });
         return { ...result, boundaries: result.boundaries.map(boundary => ({ ...boundary, ownerId })) };
     }
     async function render(request) {
@@ -61,7 +61,8 @@ function createTraceViews({ design, tracer, sourceLocator, layout = layoutProjec
             const frontier = available.find(frontier => frontier.id === branch.id && frontier.kind === 'expand');
             if (!frontier) throw new Error('展开边界已过期，请重新选择分支');
             branches.push({ id: branch.id, parentId: frontier.ownerId, label: frontier.name });
-            results.push(query(request, frontier.origin, frontier.crossSequential, branch.id));
+            // 边界展开从引脚继续，避免连带展开同网络的兄弟负载分支。
+            results.push(query(request, frontier.origin, frontier.crossSequential, branch.id, true));
             merged = mergeTraces(results); available = frontiers(merged);
         }
         const rootKey = hash([request.moduleId, request.direction, request.instancePath, merged.origin.objectId, merged.origin.bits]);

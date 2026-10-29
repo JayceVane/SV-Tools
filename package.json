@@ -2,7 +2,7 @@
   "name": "svtools",
   "displayName": "SystemVerilog Tools",
   "description": "Verilog/SystemVerilog formatter, module instantiation, testbench generation, and productivity tools (Rust native backend)",
-  "version": "4.1.0-beta.4",
+  "version": "4.1.0",
   "publisher": "JayceVane",
   "author": {
     "name": "JayceVane",
@@ -578,88 +578,6 @@
           "when": "view == svtools.vivado.projectTree && svtools.vivado.busy"
         }
       ],
-      "view/item/context": [
-        {
-          "command": "svtools.vivado.tree.addFile",
-          "group": "0_manage@1",
-          "when": "view == svtools.vivado.projectTree && viewItem == orphan"
-        },
-        {
-          "command": "svtools.vivado.tree.removeFile",
-          "group": "0_manage@9",
-          "when": "view == svtools.vivado.projectTree && viewItem =~ /^(file|simFile|module|topModule|constraint)$/"
-        },
-        {
-          "command": "svtools.vivado.tree.setTopSynth",
-          "group": "1_top@1",
-          "when": "view == svtools.vivado.projectTree && viewItem =~ /^(module|topModule)$/"
-        },
-        {
-          "command": "svtools.vivado.tree.setTopSim",
-          "group": "1_top@2",
-          "when": "view == svtools.vivado.projectTree && viewItem =~ /^(module|topModule)$/"
-        },
-        {
-          "command": "svtools.vivado.tree.moveToSim",
-          "group": "1_top@3",
-          "when": "view == svtools.vivado.projectTree && viewItem =~ /^(file|module|topModule)$/"
-        },
-        {
-          "command": "svtools.vivado.tree.moveToSources",
-          "group": "1_top@4",
-          "when": "view == svtools.vivado.projectTree && viewItem == simFile"
-        },
-        {
-          "command": "svtools.vivado.tree.elaborate",
-          "group": "2_run@1",
-          "when": "view == svtools.vivado.projectTree && viewItem =~ /^(module|topModule|referenceModule)$/"
-        },
-        {
-          "command": "svtools.vivado.tree.synthesize",
-          "group": "2_run@2",
-          "when": "view == svtools.vivado.projectTree && viewItem == topModule"
-        },
-        {
-          "command": "svtools.vivado.tree.implement",
-          "group": "2_run@3",
-          "when": "view == svtools.vivado.projectTree && viewItem == topModule"
-        },
-        {
-          "command": "svtools.vivado.tree.bitstream",
-          "group": "2_run@4",
-          "when": "view == svtools.vivado.projectTree && viewItem == topModule"
-        },
-        {
-          "command": "svtools.vivado.tree.reportSynth",
-          "group": "3_report@1",
-          "when": "view == svtools.vivado.projectTree && viewItem == topModule"
-        },
-        {
-          "command": "svtools.vivado.tree.reportImpl",
-          "group": "3_report@2",
-          "when": "view == svtools.vivado.projectTree && viewItem == topModule"
-        },
-        {
-          "command": "svtools.vivado.tree.reportImplUtil",
-          "group": "3_report@3",
-          "when": "view == svtools.vivado.projectTree && viewItem == topModule"
-        },
-        {
-          "command": "svtools.vivado.tree.reportTiming",
-          "group": "3_report@4",
-          "when": "view == svtools.vivado.projectTree && viewItem == topModule"
-        },
-        {
-          "command": "svtools.vivado.tree.addFile",
-          "group": "0_manage@0",
-          "when": "view == svtools.vivado.projectTree && viewItem == setRoot"
-        },
-        {
-          "command": "svtools.circuit.fromVivado",
-          "when": "view == svtools.vivado.projectTree && viewItem == topModule && !svtools.vivado.busy",
-          "group": "2_run@0"
-        }
-      ],
       "editor/context": [
         {
           "command": "svtools.circuit.open",
@@ -762,9 +680,15 @@
       "properties": {
         "svtools.project.traceTrigger": {
           "type": "string",
-          "enum": ["selection", "manual"],
+          "enum": [
+            "selection",
+            "manual"
+          ],
           "default": "selection",
-          "enumDescriptions": ["%cfg.project.traceTrigger.selection%", "%cfg.project.traceTrigger.manual%"],
+          "enumDescriptions": [
+            "%cfg.project.traceTrigger.selection%",
+            "%cfg.project.traceTrigger.manual%"
+          ],
           "description": "%cfg.project.traceTrigger.desc%",
           "scope": "resource"
         },

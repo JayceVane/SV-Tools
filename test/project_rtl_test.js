@@ -66,6 +66,21 @@ test('带初值的网线组保持打包范围，变量初值与过程赋值不�
     assert.deepEqual(signal('first').bits, portOf(top, 'a').bits);
     assert.notDeepEqual(signal('q').bits, portOf(top, 'a').bits);
 });
+// 注释不属于声明语法：逗号后夹行注释/块注释（含分号）时仍应继承打包位宽，而不是静默降级为1位标量。
+test('声明间注释不会切断位宽继承，也不静默降级为标量', () => {
+    const cases = [
+        ['行注释', 'module top(input [7:0] a,output [7:0] y);wire [7:0] first=a, // 逗号后的行注释\nsecond;assign y=first;endmodule', 'second'],
+        ['块注释含分号', 'module top(input [7:0] a,output [7:0] y);wire [7:0] first=a, /* ; */ second;assign y=first;endmodule', 'second'],
+        ['注释在逗号前', 'module top(input [7:0] a,output [7:0] y);wire [7:0] first=a /* 注释 */, second;assign y=first;endmodule', 'second'],
+        ['非ANSI端口', 'module top(a,b,y);input [7:0] a, /* ; */ b;output [7:0] y;assign y=a;endmodule', 'b']
+    ];
+    for (const [label, text, name] of cases) {
+        const built = build(text), top = moduleOf(built, 'top'), signal = top.signals.find(item => item.name === name);
+        assert.ok(signal, label + '：缺少信号 ' + name);
+        assert.equal(signal.bits.length, 8, label);
+        assert.ok(!built.issues.some(issue => issue.includes('声明范围无法确定')), label);
+    }
+});
 test('非ANSI端口按头部顺序连接，不按声明顺序错接时钟或数据', () => {
     const built = build('module leaf(data,clock,result);output result;input clock;input data;assign result=data;endmodule\nmodule top(input a,clk,output y);leaf u_leaf(a,clk,y);endmodule');
     const top = moduleOf(built, 'top'), cell = top.cells[0];

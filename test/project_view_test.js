@@ -88,6 +88,12 @@ test('空工程状态也发送恢复入口，工程文本不插入可执行HTML'
     assert.match(html, /style-src vscode-webview:\/\/test/);
     assert.match(html, /href="\/src\/project\/style.css"/);
     assert.match(html, /src="\/src\/project\/icons.js"/);
+    for (const id of ['actions', 'toolReports']) {
+        const trigger = html.match(new RegExp('<button[^>]*id="' + id + '"[^>]*>'))[0];
+        assert.match(trigger, /aria-haspopup="menu"/);
+        assert.match(trigger, /aria-expanded="false"/);
+        assert.match(trigger, /aria-controls="menu"/);
+    }
     assert.ok(!html.includes('unsafe-inline'));
     const client = fs.readFileSync(path.resolve(__dirname, '../src/project/client.js'), 'utf8');
     assert.ok(!client.includes('innerHTML'));

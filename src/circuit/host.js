@@ -46,6 +46,8 @@ function bindCircuitPanel({ panel, load, onSource, onError = console.error, imag
         try { graph = await session.request('layout', { moduleId: path.at(-1).id }); }
         catch (error) {
             if (closed || version !== generation) return { ok: false };
+            // 追踪计算被模块导航取代或显示失败时，必须结束 busy，避免面板一直停在“正在计算”。
+            await trace.settleBusy();
             if (!restore || !previous) throw error;
             currentGraph = previous; breadcrumbs = previousCrumbs;
             await sendGraph({ type: 'graph', graph: previous, design: descriptor, breadcrumbs, sourceStale, traceNavigation: trace.navigation(), traceUpdate: 'history' });
@@ -96,19 +98,23 @@ function bindCircuitPanel({ panel, load, onSource, onError = console.error, imag
         await display([top]);
     }
 
+    /** @param {object} message 图片请求。 @param {'save'|'copy'} action 保存到文件或写入剪贴板。 */
+    async function respondImage(message, action) {
+        if (!Number.isSafeInteger(message.requestId)) return;
+        try {
+            if (!currentGraph || !imageFiles) throw new Error('电路图片导出尚未就绪');
+            const result = action === 'copy' ? await imageFiles.copy(message.params) : await imageFiles.save(message.params);
+            await send({ type: 'image-result', requestId: message.requestId, result });
+        } catch (error) { await send({ type: 'image-result', requestId: message.requestId, error: error.message }); }
+    }
+
     const handlers = {
         ...trace.handlers,
         ...waveLink.handlers,
         ready: async () => { if (!started) { started = true; clearTimeout(readyTimer); await reload(); } },
         reload,
-        'image-save': async message => {
-            if (!Number.isSafeInteger(message.requestId)) return;
-            try {
-                if (!currentGraph || !imageFiles) throw new Error('电路图片导出尚未就绪');
-                const result = await imageFiles.save(message.params);
-                await send({ type: 'image-result', requestId: message.requestId, result });
-            } catch (error) { await send({ type: 'image-result', requestId: message.requestId, error: error.message }); }
-        },
+        'image-save': message => respondImage(message, 'save'),
+        'image-copy': message => respondImage(message, 'copy'),
         home: () => descriptor && display([descriptor.modules.find(module => module.id === descriptor.top)]),
         back: () => descriptor && breadcrumbs.length > 1 && display(breadcrumbs.slice(0, -1)),
         module: message => {

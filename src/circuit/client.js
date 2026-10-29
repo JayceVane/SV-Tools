@@ -1,12 +1,12 @@
 (function (root, factory) {
     'use strict';
-    if (typeof module === 'object' && module.exports) module.exports = factory(require('./graph-index'), require('./trace-client'), require('./trace-actions'), require('./wave-link-client'),require('./cursor-values-client'));
+    if (typeof module === 'object' && module.exports) module.exports = factory(require('./graph-index'), require('./trace-client'), require('./trace-actions'), require('./wave-link-client'),require('./cursor-values-client'), require('./minimap'));
     else {
-        root.CircuitClient = factory(root.CircuitGraphIndex, root.CircuitTraceClient, root.CircuitTraceActions, root.CircuitWaveLink,root.CircuitCursorValues);
+        root.CircuitClient = factory(root.CircuitGraphIndex, root.CircuitTraceClient, root.CircuitTraceActions, root.CircuitWaveLink,root.CircuitCursorValues, root.CircuitMinimap);
         const bridge = typeof acquireVsCodeApi === 'function' ? acquireVsCodeApi() : { postMessage() {}, getState() { return {}; }, setState() {} };
         root.CircuitClient.createClient(root.document, root, bridge, root.CircuitRenderer);
     }
-})(typeof globalThis === 'object' ? globalThis : this, function (graphIndex, traceClient, traceActions, waveLinkClient,cursorValuesClient) {
+})(typeof globalThis === 'object' ? globalThis : this, function (graphIndex, traceClient, traceActions, waveLinkClient,cursorValuesClient, minimapModule) {
     'use strict';
     const MIN_SCALE = .0001, MAX_SCALE = 8, PADDING = 40, MAX_SAVED_VIEWS = 32;
     const MAX_DETAIL_BITS = 256, MAX_PARAMETERS = 32, MAX_PARAMETER_CHARS = 256;
@@ -19,11 +19,29 @@
         return { x: Math.max(-1e8, Math.min(1e8, finite(camera?.x, 0))), y: Math.max(-1e8, Math.min(1e8, finite(camera?.y, 0))), scale: Math.max(MIN_SCALE, Math.min(MAX_SCALE, finite(camera?.scale, 1))) };
     }
 
-    /** @param {object} graph 已布局尺寸。 @param {number} width 视口宽。 @param {number} height 视口高。 @returns {object} 居中适配相机。 */
-    function fitCamera(graph, width, height) {
-        const graphWidth = Math.max(1, finite(graph?.width, 1)), graphHeight = Math.max(1, finite(graph?.height, 1));
-        const scale = Math.max(MIN_SCALE, Math.min(1.5, Math.max(1, width - PADDING * 2) / graphWidth, Math.max(1, height - PADDING * 2) / graphHeight));
-        return cleanCamera({ x: (width - graphWidth * scale) / 2, y: (height - graphHeight * scale) / 2, scale });
+    /** @param {object} graph 已布局尺寸。 @param {number} width 视口宽。 @param {number} height 视口高。 @returns {object} 完整显示整图的适配相机。 */
+    function fitCamera(graph, width, height, floor = MIN_SCALE) {
+        const bounds = graph?.paintBounds || { left: 0, top: 0, right: graph?.width, bottom: graph?.height };
+        const left = finite(bounds.left, 0), top = finite(bounds.top, 0);
+        const graphWidth = Math.max(1, finite(bounds.right - left, 1)), graphHeight = Math.max(1, finite(bounds.bottom - top, 1));
+        const scale = Math.max(floor,
+            Math.min(1.5, Math.max(1, width - PADDING * 2) / graphWidth, Math.max(1, height - PADDING * 2) / graphHeight));
+        return cleanCamera({ x: (width - graphWidth * scale) / 2 - left * scale, y: (height - graphHeight * scale) / 2 - top * scale, scale });
+    }
+
+    /** @param {object} graph 已布局尺寸。 @param {number} width 视口宽。 @param {number} height 视口高。 @returns {object} 窄窗下保持最小可读字号的相机。 */
+    function readableCamera(graph, width, height) {
+        return fitCamera(graph, width, height, width < 600 && height > 160 ? .86 : MIN_SCALE);
+    }
+
+    /**
+     * 首次进入时在“完整显示”和“可读字号”之间取舍；窄窗需要可读时返回提示标记。
+     * @param {object} graph 已布局尺寸。 @param {number} width 视口宽。 @param {number} height 视口高。
+     * @returns {{camera:object,readable:boolean}} 初始相机及是否因可读比例而裁剪整图。
+     */
+    function frameCamera(graph, width, height) {
+        const fit = fitCamera(graph, width, height), readable = readableCamera(graph, width, height);
+        return readable.scale > fit.scale + 1e-9 ? { camera: readable, readable: true } : { camera: fit, readable: false };
     }
 
     /** @param {object} camera 原相机。 @param {number} factor 缩放倍数。 @param {{x:number,y:number}} point 视口锚点。 @returns {object} 保持锚点图坐标不动的相机。 */
@@ -126,7 +144,7 @@
      * @returns {{receive:function,destroy:function,getState:function}} 生命周期和验收入口。
      */
     function createClient(document, window, bridge, renderer) {
-        const ids = ['designTitle', 'provenance', 'back', 'home', 'modules', 'fit', 'zoomOut', 'zoomIn', 'zoom', 'search', 'searchCount', 'nextMatch', 'reload', 'breadcrumbs', 'graphStats', 'viewport', 'circuit', 'message', 'messageTitle', 'messageDetail', 'selectionEmpty', 'selectionDetails', 'selectionKind', 'selectionName', 'properties', 'enterInstance', 'openSource', 'exportImage', 'status'];
+        const ids = ['designTitle', 'provenance', 'back', 'home', 'modules', 'fit', 'zoomOut', 'zoomIn', 'zoom', 'search', 'searchCount', 'nextMatch', 'reload', 'breadcrumbs', 'graphStats', 'viewport', 'circuit', 'message', 'messageTitle', 'messageDetail', 'selectionEmpty', 'selectionDetails', 'selectionKind', 'selectionName', 'properties', 'enterInstance', 'openSource', 'exportImage', 'status', 'fitHint', 'minimap', 'toggleMinimap', 'toggleInspector', 'inspector'];
         const ui = Object.fromEntries(ids.map(id => [id, document.getElementById(id)]));
         const imageRequests = new Map(); let imageRequestId = 0, exportingImage = false;
         const disposers = [], saved = bridge.getState?.(), views = new Map(Array.isArray(saved?.views) ? saved.views.filter(entry => Array.isArray(entry) && typeof entry[0] === 'string').slice(-MAX_SAVED_VIEWS) : []);
@@ -135,6 +153,16 @@
         const post = message => { if (!isDestroyed) bridge.postMessage(message); };
         const traceControls = traceClient.createTraceControls({ document, post, applyFocus: focus => drawing?.setFocus?.(focus) });
         const waveControls = waveLinkClient.createWaveLinkControls({document,window,post});
+        const minimap = minimapModule.createMinimap(ui.minimap, window, point => {
+            if (!drawing || isLoading) return;
+            const view = size(); camera.x = view.width / 2 - point.x * camera.scale; camera.y = view.height / 2 - point.y * camera.scale;
+            isFit = false; setFitHint(false); applyCamera();
+        });
+        // 小地图默认收起，避免首次进入遮挡右下电路；用户选择会持久化。
+        ui.minimap.hidden = saved?.minimap !== true; ui.inspector.hidden = saved?.inspector !== true;
+        ui.toggleMinimap.setAttribute('aria-pressed', String(!ui.minimap.hidden)); ui.toggleInspector.setAttribute('aria-pressed', String(!ui.inspector.hidden));
+        let inspectorDismissed = saved?.inspector === false;
+        ui.fitHint.hidden = true;
         const valueControls = cursorValuesClient.createCursorValueControls({document,post,getDrawing:()=>drawing});
         function measureViewport() {
             const rect = ui.circuit.getBoundingClientRect();
@@ -151,7 +179,7 @@
             if (!stateKey || !graph) return;
             views.delete(stateKey); views.set(stateKey, { camera: cleanCamera(camera), isFit });
             while (views.size > MAX_SAVED_VIEWS) views.delete(views.keys().next().value);
-            bridge.setState?.({ views: [...views] });
+            bridge.setState?.({ views: [...views], minimap: !ui.minimap.hidden, inspector: !ui.inspector.hidden });
         }
 
         function paintCamera() {
@@ -159,6 +187,7 @@
             if (!drawing || isDestroyed || isLoading) return;
             const view = size();
             drawing.setViewport(camera, view.width, view.height);
+            minimap.update(camera, view.width, view.height);
             drawing.layer.setAttribute('transform', `translate(${camera.x} ${camera.y}) scale(${camera.scale})`);
             const label = `${Math.round(camera.scale * 1000) / 10}%`;
             if (ui.zoom.textContent !== label) ui.zoom.textContent = label;
@@ -174,16 +203,19 @@
             if (cameraFrame === null) cameraFrame = window.requestAnimationFrame(paintCamera);
         }
 
-        function fit() { if (!graph || isLoading) return; const view = size(); camera = fitCamera(graph, view.width, view.height); isFit = true; applyCamera(); }
-        function zoom(factor, point) { if (!drawing || isLoading) return; const view = size(); camera = zoomCamera(camera, factor, point || { x: view.width / 2, y: view.height / 2 }); isFit = false; applyCamera(); }
+        function setFitHint(visible) { ui.fitHint.hidden = !visible; }
+        function fit() { if (!graph || isLoading) return; const view = size(); camera = fitCamera({ ...graph, paintBounds: drawing?.bounds }, view.width, view.height); isFit = true; setFitHint(false); applyCamera(); }
+        function zoom(factor, point) { if (!drawing || isLoading) return; const view = size(); camera = zoomCamera(camera, factor, point || { x: view.width / 2, y: view.height / 2 }); isFit = false; setFitHint(false); applyCamera(); }
 
-        function inspect(value) {
+        function inspect(value, reveal = false) {
             if (selection !== undefined && selection?.type === value?.type && selection?.id === value?.id) return;
             selection = value; selected = describeSelection(graph, value, drawing?.index); drawing?.setSelection(value);
             traceControls.select(value);
             waveControls.select(value);
             ui.selectionEmpty.hidden = !!selected; ui.selectionDetails.hidden = !selected;
-            if (!selected) return;
+            if (!selected) { ui.openSource.disabled = true; ui.enterInstance.hidden = true; return; }
+            // 首次选择自动展开属性，避免高亮后看不到详情和追踪入口；用户手动收起后不再弹开。
+            if (reveal && ui.inspector.hidden && !inspectorDismissed) { ui.inspector.hidden = false; ui.toggleInspector.setAttribute('aria-pressed', 'true'); resize(); }
             ui.selectionKind.textContent = selected.kind; ui.selectionName.textContent = selected.name;
             ui.properties.replaceChildren();
             for (const [label, value] of selected.properties) {
@@ -196,7 +228,7 @@
         }
 
         function focusMatch(value) {
-            inspect(value);
+            inspect(value, true);
             let bounds;
             if (value.type === 'node') bounds = drawing.index.nodes.get(String(value.id));
             else {
@@ -226,7 +258,7 @@
             traceControls.setLoading(isLoading);
             if (isLoading) cancelCameraFrame();
             ui.message.hidden = mode === 'graph'; ui.message.setAttribute('role', mode === 'error' ? 'alert' : 'status');
-            if (mode !== 'graph') { ui.messageTitle.textContent = mode === 'error' ? '无法生成电路视图' : '正在生成电路'; ui.messageDetail.textContent = message || '后台读取网表并计算布局'; ui.status.textContent = message || ui.messageTitle.textContent; }
+            if (mode !== 'graph') { setFitHint(false); ui.messageTitle.textContent = mode === 'error' ? '无法生成电路视图' : '正在生成电路'; ui.messageDetail.textContent = message || '后台读取网表并计算布局'; ui.status.textContent = message || ui.messageTitle.textContent; }
             ui.exportImage.disabled = mode !== 'graph' || exportingImage;
             for (const control of [ui.fit, ui.zoomOut, ui.zoomIn, ui.search]) control.disabled = mode !== 'graph';
             ui.modules.disabled = mode === 'loading' || !design?.modules?.length;
@@ -283,13 +315,14 @@
             if (message.type !== 'graph') return;
             if (!message.graph || !Array.isArray(message.graph.nodes) || !Array.isArray(message.graph.edges)) { setMode('error', '电路数据缺少节点或连接信息'); return; }
             if (drag) finishDrag(true);
+            document.body.dataset.trace = message.graph?.trace?.direction || '';
             const previousGraph = graph, previousCamera = { ...camera }, previousSelection = selection, previousViewport = { ...size() };
             const continuous = ['expand', 'collapse'].includes(message.traceUpdate) && previousGraph?.trace?.rootKey === message.graph.trace?.rootKey;
             cancelCameraFrame(); saveView(); graph = message.graph; sourceStale = message.sourceStale === true;
             const nextDesign = message.design || design || {};
             const moduleId = graph.moduleId || (nextDesign.modules || []).find(module => module.id === graph.id || module.name === graph.name)?.id || graph.id;
             showDesign(nextDesign, moduleId); stateKey = graphStateKey(design, graph);
-            drawing = renderer.renderGraph(ui.circuit, graph); lastClickHit = null; selection = undefined; selected = null;
+            drawing = renderer.renderGraph(ui.circuit, graph); minimap.setGraph(graph, drawing.bounds); lastClickHit = null; selection = undefined; selected = null;
             valueControls.graphReady();
             const crumbs = Array.isArray(message.breadcrumbs) && message.breadcrumbs.length ? message.breadcrumbs : [{ id: graph.id, name: graph.name }];
             showBreadcrumbs(crumbs);
@@ -298,15 +331,17 @@
             traceControls.showGraph(graph, message.traceNavigation);
             const view = measureViewport();
             const restored = views.get(stateKey); isFit = !restored || restored.isFit !== false;
-            camera = isFit ? fitCamera(graph, view.width, view.height) : cleanCamera(restored.camera);
+            let readable = false;
+            if (isFit) { const framed = frameCamera({ ...graph, paintBounds: drawing.bounds }, view.width, view.height); camera = framed.camera; readable = framed.readable; }
+            else camera = cleanCamera(restored.camera);
             if (continuous) {
                 const anchor = graph.trace.anchor;
                 camera = cleanCamera({ ...previousCamera,
                     x: previousCamera.x + (anchor?.previous && anchor.current ? anchor.previous.x - anchor.current.x : 0) * previousCamera.scale + previousViewport.left - view.left,
                     y: previousCamera.y + (anchor?.previous && anchor.current ? anchor.previous.y - anchor.current.y : 0) * previousCamera.scale + previousViewport.top - view.top });
-                isFit = false;
+                isFit = false; readable = false;
             }
-            setMode('graph'); inspect(continuous && describeSelection(graph, previousSelection, drawing.index) ? previousSelection : null); applyCamera(false); updateSearch(false, !continuous && message.traceUpdate !== 'history');
+            setMode('graph'); setFitHint(readable); inspect(continuous && describeSelection(graph, previousSelection, drawing.index) ? previousSelection : null); applyCamera(false); updateSearch(false, !continuous && message.traceUpdate !== 'history');
             ui.status.textContent = sourceStale ? '源码已变化，当前图仍对应生成快照；请刷新后再定位源码'
                 : `${graph.name || graph.id} · ${graph.nodes.length} 节点${graph.nodes.length ? '' : ' · 当前模块没有可显示的电路单元'}`;
         }
@@ -327,27 +362,35 @@
             const current = drag; drag = null; ui.viewport.classList.remove('panning');
             if (ui.circuit.hasPointerCapture?.(current.id)) ui.circuit.releasePointerCapture(current.id);
             if (cancel) { camera = current.camera; isFit = current.isFit; applyCamera(); }
-            else if (!current.moved) { lastClickHit = current.hit; inspect(current.hit); }
+            else if (!current.moved) { lastClickHit = current.hit; inspect(current.hit, true); }
             else saveView();
         }
 
         listen(window, 'message', event => receive(event.data));
+        listen(ui.toggleMinimap, 'click', () => { ui.minimap.hidden = !ui.minimap.hidden; ui.toggleMinimap.setAttribute('aria-pressed', String(!ui.minimap.hidden)); applyCamera(); saveView(); });
+        listen(ui.toggleInspector, 'click', () => { ui.inspector.hidden = !ui.inspector.hidden; inspectorDismissed = ui.inspector.hidden; ui.toggleInspector.setAttribute('aria-pressed', String(!ui.inspector.hidden)); resize(); saveView(); });
+        listen(ui.minimap, 'keydown', event => {
+            const step = { ArrowLeft: [32, 0], ArrowRight: [-32, 0], ArrowUp: [0, 32], ArrowDown: [0, -32] }[event.key];
+            if (event.key === 'Enter') { event.preventDefault(); event.stopPropagation?.(); fit(); }
+            else if (step && drawing && !isLoading) { event.preventDefault(); event.stopPropagation?.(); camera.x += step[0]; camera.y += step[1]; isFit = false; setFitHint(false); applyCamera(); }
+        });
         listen(ui.fit, 'click', fit); listen(ui.zoomIn, 'click', () => zoom(1.25)); listen(ui.zoomOut, 'click', () => zoom(.8));
         listen(ui.back, 'click', () => { if (!ui.back.disabled) post({ type: 'back' }); }); listen(ui.home, 'click', () => { if (!ui.home.disabled) post({ type: 'home' }); });
         listen(ui.modules, 'change', () => { if (!ui.modules.disabled && ui.modules.value !== currentModuleId) post({ type: 'module', moduleId: ui.modules.value }); });
         listen(ui.exportImage, 'click', async () => {
             if (!graph || isLoading || exportingImage) return;
             const options = await window.ImageExport.choose(document, { returnFocus: ui.circuit }); if (!options) return;
-            exportingImage = true; ui.exportImage.disabled = true; ui.status.textContent = graph.trace ? '正在生成当前局部电路图…' : '正在生成完整电路图…';
+            const copying = options.action === 'copy';
+            exportingImage = true; ui.exportImage.disabled = true; ui.status.textContent = copying ? '正在生成并复制电路图…' : graph.trace ? '正在生成当前局部电路图…' : '正在生成完整电路图…';
             try {
                 await new Promise(resolve => window.requestAnimationFrame(resolve));
                 if (isLoading) throw new Error('电路正在切换，请加载完成后重新导出');
                 const image = window.CircuitImageExport.create({ graph, design, options, window, renderer });
-                const params = await window.ImageExport.payload(image, { ...options, name: (graph.name || graph.id) + '-circuit' }, window);
+                const params = await window.ImageExport.payload(image, { ...options, format: copying ? 'png' : options.format, name: (graph.name || graph.id) + '-circuit' }, window);
                 const result = await new Promise((resolve, reject) => { const requestId = ++imageRequestId;
-                    imageRequests.set(requestId, { resolve, reject }); post({ type: 'image-save', requestId, params }); });
-                ui.status.textContent = result ? '电路图片已导出' : '已取消图片导出';
-            } catch (error) { ui.status.textContent = '电路导出失败：' + error.message; }
+                    imageRequests.set(requestId, { resolve, reject }); post({ type: copying ? 'image-copy' : 'image-save', requestId, params }); });
+                ui.status.textContent = result ? (copying ? '电路图片已复制到剪贴板' : '电路图片已导出') : (copying ? '复制已取消' : '已取消图片导出');
+            } catch (error) { ui.status.textContent = (copying ? '电路复制失败：' : '电路导出失败：') + error.message; }
             finally { exportingImage = false; ui.exportImage.disabled = isLoading; }
         });
         listen(ui.reload, 'click', () => { if (!ui.reload.disabled) post({ type: 'reload' }); }); listen(ui.enterInstance, 'click', enter); listen(ui.openSource, 'click', source);
@@ -355,7 +398,7 @@
         listen(ui.search, 'keydown', event => { if (event.key === 'Enter') { event.preventDefault(); window.clearTimeout(searchTimer); updateSearch(true); } });
         listen(ui.nextMatch, 'click', () => updateSearch(true));
         listen(ui.circuit, 'wheel', event => { if (!drawing || isLoading) return; event.preventDefault(); zoom(Math.exp(-Math.max(-300, Math.min(300, event.deltaY)) * .002), eventPoint(event)); }, { passive: false });
-        listen(ui.circuit,'contextmenu',event=>{if(!drawing||isLoading)return;inspect(drawing.hitTarget(event.target));waveControls.contextMenu(event);});
+        listen(ui.circuit,'contextmenu',event=>{if(!drawing||isLoading)return;inspect(drawing.hitTarget(event.target), true);waveControls.contextMenu(event);});
         listen(ui.circuit, 'pointerdown', event => {
             if (isLoading || !drawing || event.button !== 0 || drag) return;
             ui.circuit.focus({ preventScroll: true });
@@ -367,12 +410,12 @@
             const dx = event.clientX - drag.x, dy = event.clientY - drag.y;
             if (!drag.moved && Math.hypot(dx, dy) < 4) return;
             if (!drag.moved) { drag.moved = true; ui.viewport.classList.add('panning'); }
-            isFit = false; camera = { ...drag.camera, x: drag.camera.x + dx, y: drag.camera.y + dy }; applyCamera();
+            isFit = false; setFitHint(false); camera = { ...drag.camera, x: drag.camera.x + dx, y: drag.camera.y + dy }; applyCamera();
         });
         listen(ui.circuit, 'pointerup', event => { if (drag?.id === event.pointerId) finishDrag(false); });
         listen(ui.circuit, 'pointercancel', () => finishDrag(true)); listen(ui.circuit, 'lostpointercapture', () => { if (drag) finishDrag(true); });
-        listen(ui.circuit, 'focusin', event => { const hit = drawing?.hitTarget(event.target); if (!isLoading && hit) inspect(hit); });
-        listen(ui.circuit, 'dblclick', event => { if (isLoading || !drawing) return; const hit = drawing.hitTarget(event.target) || (event.target === ui.circuit ? lastClickHit : null); if (hit?.type === 'node') { inspect(hit); enter(); } else if (!hit) fit(); });
+        listen(ui.circuit, 'focusin', event => { const hit = drawing?.hitTarget(event.target); if (!isLoading && hit) inspect(hit, true); });
+        listen(ui.circuit, 'dblclick', event => { if (isLoading || !drawing) return; const hit = drawing.hitTarget(event.target) || (event.target === ui.circuit ? lastClickHit : null); if (hit?.type === 'node') { inspect(hit, true); enter(); } else if (!hit) fit(); });
         listen(document, 'keydown', event => {
             const isInput = ['INPUT', 'SELECT', 'TEXTAREA'].includes(event.target?.tagName) || event.target?.isContentEditable;
             if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'f') { event.preventDefault(); ui.search.focus(); ui.search.select(); return; }
@@ -384,14 +427,14 @@
             const actions = { f: fit, F: fit, '+': () => zoom(1.25), '=': () => zoom(1.25), '-': () => zoom(.8), Enter: enter, s: source, S: source };
             if (actions[event.key]) { event.preventDefault(); actions[event.key](); return; }
             const movement = { ArrowLeft: [32, 0], ArrowRight: [-32, 0], ArrowUp: [0, 32], ArrowDown: [0, -32] }[event.key];
-            if (movement && drawing) { event.preventDefault(); camera.x += movement[0] * (event.shiftKey ? 4 : 1); camera.y += movement[1] * (event.shiftKey ? 4 : 1); isFit = false; applyCamera(); }
+            if (movement && drawing) { event.preventDefault(); camera.x += movement[0] * (event.shiftKey ? 4 : 1); camera.y += movement[1] * (event.shiftKey ? 4 : 1); isFit = false; setFitHint(false); applyCamera(); }
         });
         if (window.ResizeObserver) { const observer = new window.ResizeObserver(resize); observer.observe(ui.viewport); disposers.push(() => observer.disconnect()); }
         else listen(window, 'resize', resize);
         listen(window, 'blur', () => { if (drag) finishDrag(true); }); listen(window, 'pagehide', saveView);
         setMode('loading', '正在连接电路数据'); post({ type: 'ready' });
-        return { receive, getState: () => ({ graph, selection, camera: { ...camera }, isFit, isLoading }), destroy() { if (isDestroyed) return; if (drag) finishDrag(true); saveView(); isDestroyed = true; traceControls.destroy(); waveControls.destroy(); valueControls.destroy(); for (const pending of imageRequests.values()) pending.resolve(false); imageRequests.clear(); cancelCameraFrame(); window.clearTimeout(searchTimer); window.clearTimeout(saveTimer); for (const dispose of disposers) dispose(); } };
+        return { receive, getState: () => ({ graph, selection, camera: { ...camera }, isFit, isLoading }), destroy() { if (isDestroyed) return; if (drag) finishDrag(true); saveView(); isDestroyed = true; minimap.destroy(); traceControls.destroy(); waveControls.destroy(); valueControls.destroy(); for (const pending of imageRequests.values()) pending.resolve(false); imageRequests.clear(); cancelCameraFrame(); window.clearTimeout(searchTimer); window.clearTimeout(saveTimer); for (const dispose of disposers) dispose(); } };
     }
 
-    return { cleanCamera, fitCamera, zoomCamera, graphStateKey, searchGraph, describeSelection, provenanceText, createClient };
+    return { cleanCamera, fitCamera, readableCamera, frameCamera, zoomCamera, graphStateKey, searchGraph, describeSelection, provenanceText, createClient };
 });

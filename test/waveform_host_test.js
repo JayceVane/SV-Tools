@@ -33,6 +33,27 @@ function metadata(timescale = '10 ps') {
         vars: [{ path: 'tb.clk', name: 'clk', id: '!', width: 1, type: 'wire', scopePath: 'tb', changeCount: 4 }] };
 }
 
+test('方向刷新只更新元数据，旧世代与关闭后的结果不会送到页面', async () => {
+    const page = panelFixture(), pending = [], sourceChanges = [];
+    let openCount = 0, unsubscribed = false;
+    const binding = bindWaveformPanel({ filePath: 'test.vcd', panel: page.panel, getSourceContext: async () => ({}),
+        onSourceChange: callback => { sourceChanges.push(callback); return { dispose() { unsubscribed = true; } }; },
+        createSession: () => ({ open: async () => { openCount++; return metadata(); }, dispose: async () => {},
+            roles() { const request = deferred(); pending.push(request); return request.promise; } }) });
+    page.receive({ type: 'ready' }); await binding.loaded;
+    const until = async predicate => { const deadline = Date.now() + 2000; while (!predicate()) { assert.ok(Date.now() < deadline, '方向刷新未完成'); await new Promise(resolve => setTimeout(resolve, 10)); } };
+    sourceChanges[0](); await until(() => pending.length === 1);
+    sourceChanges[0](); pending[0].resolve({ roles: [{ path: 'tb.clk', role: 'input' }] });
+    await until(() => pending.length === 2);
+    assert.equal(page.sent.filter(message => message.type === 'roles').length, 0);
+    pending[1].resolve({ roles: [{ path: 'tb.clk', role: 'output', roleSource: 'RTL' }], sourceRoleNote: 'current' });
+    await until(() => page.sent.some(message => message.type === 'roles'));
+    assert.equal(binding.getMetadata().vars[0].role, 'output'); assert.equal(openCount, 1);
+    sourceChanges[0](); await until(() => pending.length === 3); await binding.dispose();
+    const count = page.sent.length; pending[2].resolve({ roles: [{ path: 'tb.clk', role: 'input' }] }); await nextTurn();
+    assert.equal(page.sent.length, count); assert.equal(unsubscribed, true);
+});
+
 test('联动游标只接受已加载VCD范围内的时间，读值复用同一Worker并在关闭后拒绝',async()=>{
     const page=panelFixture(),cursors=[],calls=[];
     const binding=bindWaveformPanel({filePath:'test.vcd',panel:page.panel,onCursors:value=>cursors.push(value),
@@ -219,6 +240,18 @@ test('源上下文等待期间取消，不启动迟到worker或覆盖取消错�
     await binding.loaded;assert.equal(opened,0);assert.equal(page.sent.at(-1).type,'error');assert.match(page.sent.at(-1).error,/取消/);binding.dispose();
 });
 
+
+test('波形图片复制请求经宿主剪贴板服务回复，不写入文件',async t=>{
+    const page=panelFixture();let copied=null;
+    const binding=bindWaveformPanel({filePath:path.join(os.tmpdir(),'capture.vcd'),panel:page.panel,
+        imageFiles:{async save(){throw new Error('不应保存文件');},async copy(payload){copied=payload;return true;}},
+        createSession:()=>({async open(){return metadata();},dispose(){}})});t.after(()=>binding.dispose());
+    await binding.loaded;page.receive({type:'ready'});
+    page.receive({type:'image-copy',requestId:5,params:{format:'png',data:'png-data'}});await nextTurn();
+    const response=page.sent.at(-1);
+    assert.equal(response.type,'response');assert.equal(response.requestId,5);assert.equal(response.result,true);
+    assert.deepEqual(copied,{format:'png',data:'png-data'});assert.equal(binding.getStatus().error,null);
+});
 
 test('图片保存只回复对应requestId，取消和磁盘失败不破坏已加载波形',async t=>{
     const page=panelFixture();let outcome=true;

@@ -19,18 +19,24 @@ const { traceSelection, traceCandidates, instanceContexts, keyPath } = require('
 const { sourceHash, sourceMatches, snapshotSources, createSourceLocator } = require('../src/circuit/source-snapshots');
 const { fromYosys } = require('../src/circuit/adapters/yosys');
 
-test('未打开的依赖在磁盘改写后使快照失效，保存相同内容及旧监听响应不误报',async()=>{
+test('未打开的依赖在磁盘改写后使快照失效，保存相同内容及旧监听响应不误报',async t=>{
     const root=await fs.mkdtemp(path.resolve('bin/audit-source-watch-')),file=path.join(root,'dep.sv');
+    // 保持测试临时目录在仓库 bin/ 下的既有约定，并在用例结束后清理，避免历史目录累积。
+    t.after(async()=>{assert.equal(path.dirname(path.resolve(root)),path.resolve('bin'));await fs.rm(root,{recursive:true,force:true,maxRetries:10,retryDelay:20});});
     const body='module dep; endmodule';await fs.writeFile(file,body);
     const callbacks=[],timers=new Map();let next=0,warnings=0,closed=0;
     const observer=createSourceWatch({vscode:{workspace:{textDocuments:[]}},onStale(){warnings++;},
         clock:{setTimeout(callback){timers.set(++next,callback);return next;},clearTimeout(id){timers.delete(id);}},
         watchDirectory(directory,options,callback){assert.equal(directory,keyPath(root));callbacks.push(callback);return{close(){closed++;}};}});
-    const flush=async()=>{const batch=[...timers.values()];timers.clear();for(const callback of batch)callback();await new Promise(resolve=>setTimeout(resolve,30));};
-    observer.replace([{path:file,hash:sourceHash(body)}]);callbacks[0]('change','dep.sv');await flush();assert.equal(warnings,0);
-    await fs.writeFile(file,body+'\n// external');callbacks[0]('change','dep.sv');await flush();assert.equal(warnings,1);
+    // 快照核验是真实异步文件读取：同步触发计时器后按可观察条件轮询，不依赖固定30ms延时。
+    const flush=()=>{const batch=[...timers.values()];timers.clear();for(const callback of batch)callback();};
+    const waitFor=async(condition,description,timeout=2000)=>{const deadline=Date.now()+timeout;
+        while(!condition()){if(Date.now()>deadline)throw new Error('等待超时：'+description);await new Promise(resolve=>setTimeout(resolve,5));}};
+    observer.replace([{path:file,hash:sourceHash(body)}]);callbacks[0]('change','dep.sv');flush();assert.equal(warnings,0);
+    await fs.writeFile(file,body+'\n// external');callbacks[0]('change','dep.sv');flush();
+    await waitFor(()=>warnings===1,'磁盘内容改写后快照应失效');assert.equal(warnings,1);
     observer.replace([{path:file,hash:sourceHash(body+'\n// external')}]);callbacks[0]('change','dep.sv');assert.equal(timers.size,0);
-    callbacks[1]('change','dep.sv');await flush();assert.equal(warnings,1);
+    callbacks[1]('change','dep.sv');flush();assert.equal(warnings,1);
     observer.dispose();callbacks[1]('change','dep.sv');assert.equal(timers.size,0);assert.equal(closed,2);
 });
 

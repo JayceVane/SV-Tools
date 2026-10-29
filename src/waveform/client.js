@@ -442,6 +442,18 @@
         if (message.type === 'response') { const promise = pending.get(message.requestId); if (!promise) return; pending.delete(message.requestId);
             if (message.error) promise.reject(new Error(message.error)); else promise.resolve(message.result); }
         else if (message.type === 'init') initialize(message.metadata);
+        else if (message.type === 'roles' && state.metadata) {
+            const roles = new Map(message.roles.map(item => [item.path, item]));
+            const apply = signal => {
+                const parent = signal.parentKey ? state.signals.get(signal.parentKey) : signal;
+                const role = roles.get(parent?.path);
+                signal.role = role?.role || 'unknown'; signal.roleSource = role?.roleSource;
+            };
+            state.metadata.vars.forEach(apply); state.signals.forEach(apply);
+            state.metadata.sourceRoleNote = message.sourceRoleNote;
+            $('metadata').title = message.sourceRoleNote || '';
+            renderCatalog(); paint();
+        }
         else if (message.type === 'progress') {
             $('progress').max = Math.max(1, message.progress.fileBytes); $('progress').value = message.progress.bytesRead;
             $('loadDetail').textContent = `${(message.progress.bytesRead / 1048576).toFixed(1)} / ${(message.progress.fileBytes / 1048576).toFixed(1)} MiB · ${message.progress.eventCount.toLocaleString()} events`;
@@ -472,12 +484,13 @@
         const options = await window.ImageExport.choose(document, { wave: true, hasAB: state.cursorB !== null && state.cursorA !== state.cursorB,
             selectionCount: state.multi.size, returnFocus: canvas });
         if (!options) return;
-        exportingImage = true; $('exportImage').disabled = true; status('正在生成完整波形图…');
+        const copying = options.action === 'copy';
+        exportingImage = true; $('exportImage').disabled = true; status(copying ? '正在生成并复制波形图…' : '正在生成完整波形图…');
         try {
             const image = await window.WaveImageExport.create({ state, options, request, window, renderer, title: BOOT.fileName });
-            const payload = await window.ImageExport.payload(image, { ...options, name: BOOT.fileName.replace(/\.vcd$/i, '') + '-waveform' }, window);
-            status(await request('image-save', payload) ? '波形图片已导出' : '已取消图片导出');
-        } catch (error) { status('波形导出失败：' + error.message); }
+            const payload = await window.ImageExport.payload(image, { ...options, format: copying ? 'png' : options.format, name: BOOT.fileName.replace(/\.vcd$/i, '') + '-waveform' }, window);
+            status(await request(copying ? 'image-copy' : 'image-save', payload) ? (copying ? '波形图片已复制到剪贴板' : '波形图片已导出') : (copying ? '复制已取消' : '已取消图片导出'));
+        } catch (error) { status((copying ? '波形复制失败：' : '波形导出失败：') + error.message); }
         finally { exportingImage = false; $('exportImage').disabled = false; }
     };
     $('saveLayout').onclick = async () => {
