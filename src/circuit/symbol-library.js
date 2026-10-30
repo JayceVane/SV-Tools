@@ -47,6 +47,7 @@
     function prepareNode(source) {
         const node = { ...source, ports: (source.ports || []).map(port => ({ ...port, width: 0, height: 0 })) };
         const kind = node.symbolKind = kindFor(node), isGate = [...GATES.values()].includes(kind);
+        const header = HEADER + (node.modeLabel ? 16 : 0);
         const inputs = node.ports.filter(port => port.direction !== 'output'), outputs = node.ports.filter(port => port.direction === 'output');
         if (isGate) { node.width = 112; node.height = 96; }
         else if (kind === 'mux') { node.width = Math.max(144, node.width || 0); node.height = 128; }
@@ -60,14 +61,14 @@
         } else {
             const labelWidth = Math.max(0, ...node.ports.map(port => String(port.wireLabel || port.label || '').length * 7.3));
             node.width = grid(Math.max(node.width || 160, Math.min(400, labelWidth * 2 + 96)));
-            node.height = grid(Math.max(node.height || 0, HEADER + PITCH * Math.max(inputs.length, outputs.length, 1) + 16));
+            node.height = grid(Math.max(node.height || 0, header + PITCH * Math.max(inputs.length, outputs.length, 1) + 16));
         }
         for (const [list, side] of [[inputs, 'WEST'], [outputs, 'EAST']]) {
             list.forEach((port, index) => {
                 port.side = side; port.x = side === 'WEST' ? 0 : node.width;
                 port.y = isGate ? inputs.includes(port) ? list.length === 1 ? 40 : 24 + index * 32 : 40
                     : ['input', 'output', 'inout', 'constant', 'junction'].includes(kind) ? node.height / 2
-                    : HEADER + index * PITCH;
+                    : header + index * PITCH;
             });
         }
         if (kind === 'mux') {

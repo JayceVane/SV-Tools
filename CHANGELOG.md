@@ -4,6 +4,10 @@ All notable changes to the SystemVerilog VSCode Extension will be documented in 
 
 ## [Unreleased]
 
+### 电路查看器
+
+- 按Yosys存储器时钟使能参数识别同步/异步读写，隐藏整个端口已明确停用的时钟及其占位连线；存储器增加读写模式说明，属性保留未使用引脚信息。同步、未知和混合端口保留，原始网表及输出寄存器的真实时钟连接保持。
+
 ### Lint 修复与性能
 
 - 停止检查同时撤销尚未启动的防抖任务；手动检查消费旧防抖，同版本自动保存复用正在进行的检查，避免重复启动或打断手动 xelab。

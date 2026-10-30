@@ -116,6 +116,7 @@
         } else if (geometry.kind === 'block' || geometry.kind === 'mux') {
             group.appendChild(element(document, 'text', { x: width / 2, y: height / 2 + 12, 'text-anchor': 'middle', class: 'cellSymbol' }, symbols.functionLabel(node)));
             group.appendChild(element(document, 'text', { x: width / 2, y: 21, 'text-anchor': 'middle', class: 'cellLabel' }, shorten(node.label, width - 44)));
+            if (node.modeLabel) group.appendChild(element(document, 'text', { x: width / 2, y: 38, 'text-anchor': 'middle', class: 'cellMode' }, node.modeLabel));
         } else if (width >= 35) {
             const label = kind === 'constant' && node.ports?.[0]?.bits?.length === 1 && /^c:[01xz]$/i.test(node.ports[0].originalBits?.[0] || node.ports[0].bits[0])
                 ? `1'b${(node.ports[0].originalBits?.[0] || node.ports[0].bits[0]).slice(2)}` : node.label;

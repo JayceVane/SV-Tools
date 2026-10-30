@@ -3,6 +3,7 @@ const { createHash } = require('node:crypto');
 const { projectModule, elkNode } = require('./projection');
 const { prepareNode } = require('./symbol-library');
 const { declaredIndex } = require('./topology');
+const { memorySymbol } = require('./memory-symbol');
 
 const MAX_VIEW_CELLS = 512, MAX_VIEW_POSITIONS = 16384, MAX_VIEW_REQUESTS = 16;
 const idFor = value => createHash('sha256').update(JSON.stringify(value)).digest('hex').slice(0, 24);
@@ -161,7 +162,9 @@ function projectTrace(design, result, viewId) {
     const selected = new Map(result.selections.map(selection => [selection.objectId, selection])), selection = createSelectedPorts(selected);
     const ports = module.ports.map(selection.trim).filter(Boolean), cells = [];
     for (const cell of module.cells) {
-        const ports = cell.ports.map(selection.trim).filter(Boolean);
+        const semantics = memorySymbol(cell);
+        // 在生成独立常量前过滤无效时钟，避免追踪视图留下孤立的X占位节点。
+        const ports = cell.ports.filter(port => !semantics?.ports[port.name]?.hidden).map(selection.trim).filter(Boolean);
         if (ports.length) cells.push({ ...cell, ports });
     }
     if (cells.length > MAX_VIEW_CELLS) throw new RangeError('局部视图端点超过512单元，请收起部分分支');

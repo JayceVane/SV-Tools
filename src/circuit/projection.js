@@ -3,6 +3,7 @@
 const { createHash } = require('crypto');
 const { findModule } = require('./model');
 const { registerSymbol } = require('./register-symbol');
+const { memorySymbol } = require('./memory-symbol');
 const { addBusConnections } = require('./bus-routing');
 const { prepareNode } = require('./symbol-library');
 
@@ -89,15 +90,20 @@ function projectModule(design, moduleId) {
         connect(terminal);
     }
     for (const cell of module.cells) {
-        const semantics = registerSymbol(cell);
-        const ports = cell.ports.map(port => ({ ...graphPort(port), ...semantics?.ports[port.name] }));
+        const semantics = registerSymbol(cell) || memorySymbol(cell);
+        const hiddenPorts = cell.ports.filter(port => semantics?.ports[port.name]?.hidden)
+            .map(port => ({ name: port.name, bits: [...port.bits], description: semantics.ports[port.name].description }));
+        const ports = cell.ports.filter(port => !semantics?.ports[port.name]?.hidden)
+            .map(port => ({ ...graphPort(port), ...semantics?.ports[port.name] }));
         const label = !cell.moduleId && cell.name.startsWith('$')
             ? cell.type.replace(/^\$/, '') + (cell.source?.line ? ' @' + cell.source.line : '') : cell.name;
         const size = nodeSize(label, ports);
-        if (semantics) size.width = Math.max(MIN_REGISTER_WIDTH, size.width);
+        if (semantics && cell.kind === 'register') size.width = Math.max(MIN_REGISTER_WIDTH, size.width);
+        if (semantics?.modeLabel) size.width = Math.max(size.width, semantics.modeLabel.length * 12 + 48);
         addNode({ id: `node:${cell.id}`, cellId: cell.id, moduleId: cell.moduleId, source: cell.source, label, toolName: cell.name,
             detail: cell.type, kind: cell.kind, x: 0, y: 0, ...size,
-            ...(semantics ? { symbol: semantics.symbol, description: semantics.description, parameters: cell.parameters } : {}), ports });
+            ...(semantics ? { symbol: semantics.symbol, description: semantics.description, parameters: cell.parameters,
+                ...(semantics.modeLabel ? { modeLabel: semantics.modeLabel, hiddenPorts } : {}) } : {}), ports });
         ports.forEach(connect);
     }
     for (const [bit, net] of nets) {

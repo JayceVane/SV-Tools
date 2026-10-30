@@ -536,6 +536,20 @@ test('时钟三角与 CLK 端口对齐，低有效气泡与普通直线端点各
     page.client.destroy();
 });
 
+test('存储器模式位于独立标题行，详情解释隐藏引脚，导出使用同一可见文本', () => {
+    const { prepareNode } = require('../src/circuit/symbol-library');
+    const page = fakePage(), message = graphMessage(), source = message.graph.nodes[1];
+    const node = message.graph.nodes[1] = prepareNode({ ...source, label: 'mem', kind: 'memory', symbol: 'MEM', modeLabel: '异步读 · 同步写',
+        description: '读口0：异步读，RD_CLK 未使用', hiddenPorts: [{ name: 'RD_CLK', bits: ['c:x'], description: '异步读，时钟未使用' }] });
+    page.client.receive(message);
+    const group = findData(page, 'data-node-id', node.id), mode = walk(group).find(element => element.classList.contains('cellMode'));
+    assert.equal(mode.textContent, '异步读 · 同步写'); assert.equal(mode.getAttribute('y'), '38');
+    assert.ok(node.ports.every(port => port.y >= 56));
+    clickObject(page, group); assert.match(page.ui('properties').textContent, /未使用引脚.*RD_CLK.*未使用/);
+    assert.equal(walk(group).filter(element => element.classList.contains('cellMode')).length, 1);
+    page.client.destroy();
+});
+
 test('下降沿 CLK 同时包含时钟三角与气泡，未知极性及无时钟寄存器不生成虚假三角', () => {
     for (const polarity of [0, undefined]) {
         const page = fakePage(), message = graphMessage(), node = message.graph.nodes[1];
