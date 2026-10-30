@@ -39,8 +39,10 @@ async function run() {
         return editor.edit(edit => edit.replace(new vscode.Range(childDoc.positionAt(0), childDoc.positionAt(childDoc.getText().length)), text));
     };
     await replace(good); assert.equal(problems(child).length, 0);
-    assert.equal((await manual()).status, 'success'); await childDoc.save();
-    await vscode.window.showTextDocument(topDoc); assert.equal((await manual()).status, 'success');
+    const childCheck = await manual(); assert.equal(childCheck.status, 'success', JSON.stringify(childCheck));
+    assert.equal(await childDoc.save(), true);
+    await vscode.window.showTextDocument(topDoc);
+    const rootCheck = await manual(); assert.equal(rootCheck.status, 'success', JSON.stringify(rootCheck));
     checks.push('跨文件模式显示依赖错误，编辑依赖立即撤销旧诊断，保存后主模块真实编译通过');
     await vscode.window.showTextDocument(childDoc);
     await config.update('lintOnChange', true, vscode.ConfigurationTarget.Workspace); await delay(120);

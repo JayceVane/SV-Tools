@@ -11,6 +11,7 @@ const WORKSPACE_SCAN_MAX_DIRS = 200;
 const WORKSPACE_SCAN_MAX_FILES = 3000;
 const READ_CONCURRENCY = 8;
 const MAX_CACHED_FILES = WORKSPACE_SCAN_MAX_FILES * 2;
+const MAX_SCAN_ATTEMPTS = 4, SCAN_RETRY_DELAY_MS = 25;
 
 /** @param {string} text @returns {string} 屏蔽注释和字符串，保留原文位置与换行。 */
 function maskSourceText(text) {
@@ -88,25 +89,31 @@ function createWorkspaceSourceIndex({ workspace, readFile = fs.promises.readFile
         }
         return { dirs: [...dirs].slice(0, WORKSPACE_SCAN_MAX_DIRS), modules, ...(truncated ? { truncated: true } : {}) };
     }
-    /** 相同代次共享扫描；失效期间的结果不得重新填入有效缓存。 */
-    async function scan(force = false) {
-        if (force && !(pending?.force && pending.revision === generation)) {
-            sourceCatalog?.invalidate(); invalidate();
-        }
-        for (let attempt = 0; attempt < 2; attempt++) {
-            if (cache?.revision === generation && cache.expiresAt > now()) return cache.result;
-            if (!pending || pending.revision !== generation) {
-                const entry = { revision: generation, force };
-                entry.promise = build(entry.revision).then(result => {
-                    if (result && entry.revision === generation) cache = { result, revision: generation, expiresAt: now() + WORKSPACE_SCAN_TTL_MS };
-                    return result;
-                }).finally(() => { if (pending === entry) pending = null; });
-                pending = entry;
+    async function refresh() {
+        for (let attempt = 0; attempt < MAX_SCAN_ATTEMPTS; attempt++) {
+            // 保存和切换编辑器会连续交还多次失效事件，重扫前让事件队列收敛。
+            if (attempt) await new Promise(resolve => setTimeout(resolve, SCAN_RETRY_DELAY_MS));
+            const revision = generation, result = await build(revision);
+            if (result && revision === generation) {
+                cache = { result, revision, expiresAt: now() + WORKSPACE_SCAN_TTL_MS };
+                return result;
             }
-            const result = await pending.promise;
-            if (result) return result;
         }
         throw new Error('源码索引在扫描期间持续变化，请稍后重试');
+    }
+    /** 共享整条刷新链，失效重试不再并行启动新一轮文件读取。 */
+    async function scan(force = false) {
+        if (force && !pending?.force) {
+            sourceCatalog?.invalidate(); invalidate();
+            if (pending) pending.force = true;
+        }
+        if (cache?.revision === generation && cache.expiresAt > now()) return cache.result;
+        if (!pending) {
+            const entry = { force };
+            entry.promise = refresh().finally(() => { if (pending === entry) pending = null; });
+            pending = entry;
+        }
+        return pending.promise;
     }
     return { scan, invalidate };
 }
