@@ -1,60 +1,80 @@
-# SystemVerilog Tools for VSCode
+# SV Tools · Verilog / SystemVerilog 开发工具
 
-一款适用于 Visual Studio Code 的 Verilog/SystemVerilog 格式化与生产力工具插件。
-核心引擎使用 **Rust 原生模块**（napi-rs），无需 Python 依赖；设置界面与命令支持**中英文自动切换**。
+[![Visual Studio Marketplace](https://img.shields.io/badge/VS%20Marketplace-Install-007ACC)](https://marketplace.visualstudio.com/items?itemName=JayceVane.svtools)
+[![Open VSX](https://img.shields.io/open-vsx/v/JayceVane/svtools?label=Open%20VSX&color=C160EF)](https://open-vsx.org/extension/JayceVane/svtools)
+[![Windows x64](https://img.shields.io/badge/platform-Windows%20x64-0078D4)](#系统要求)
+[![Apache-2.0](https://img.shields.io/github/license/JayceVane/SV-Tools)](LICENSE)
 
-改编自 Sublime Text [SystemVerilog](https://github.com/TheClams/SystemVerilog)（格式化）与 [Verilog-Gadget](https://github.com/poucotm/Verilog-Gadget)（生产力工具）插件。
+在 VS Code 中完成 RTL 格式化、代码生成、补全、工程管理、仿真、波形分析和电路信号追踪。核心引擎使用 **Rust 原生模块（napi-rs）**，安装包自带离线 Yosys，无需另外安装 Rust、Python 或 Yosys；设置与命令支持中英文自动切换。
 
-当前正式版本为 **4.1.0**。Windows x64 VSIX与独立CLI从[GitHub Releases](https://github.com/JayceVane/SV-Tools/releases/tag/v4.1.0)获取，安装后重载窗口。[GitHub Wiki使用指南](https://github.com/JayceVane/SV-Tools/wiki)提供配置、仿真、波形、电路及界面截图；源码位于`src/`，构建产物位于`bin/`。
+**当前正式版本：4.1.0 · 正式支持平台：Windows x64。** 各市场版本以其详情页为准，4.1.0 的完整发布附件见 [GitHub Releases](https://github.com/JayceVane/SV-Tools/releases/tag/v4.1.0)。
 
-**4.1以信号追踪为主线**：从RTL信号或电路网络追踪驱动/负载，按实例和位范围逐级展开，支持显式时序边界、前进/返回和源码定位。单侧边栏统一管理Vivado与SV Tools工程，静态工程追踪无需Yosys；电路与VCD可确认实例映射、双向定位，并显示A/B游标精确值和变化位。
+[安装与第一次运行](https://github.com/JayceVane/SV-Tools/wiki/Getting-Started) · [图解使用指南](https://github.com/JayceVane/SV-Tools/wiki/Screenshots) · [4.1 信号追踪](https://github.com/JayceVane/SV-Tools/wiki/Signal-Tracing) · [版本说明](docs/releases/v4.1.0.md) · [反馈问题](https://github.com/JayceVane/SV-Tools/issues)
 
-本版同时完善EDA电路符号、小地图、波形时间导航、原生图片剪贴板、VCD集中目录和工具任务保留。操作与边界见[信号追踪指南](https://github.com/JayceVane/SV-Tools/wiki/Signal-Tracing)、[波形联动](docs/WAVE_LINKS.md)及[版本说明](docs/releases/v4.1.0.md)。
+## 4.1：从信号出发查看设计
 
-格式化只能改变普通空格、Tab、CR、LF；其它字符的内容、次数和顺序必须保持，即使输入
-全部乱码或语法不完整。无法安全提交的布局保留原文，详见 [格式化规范](docs/FORMAT_SPEC.md)。
+在 RTL 中选中信号，工程侧边栏会标出它经过的文件和实例；在电路中查看驱动、负载及位范围，逐级展开并定位源码；关联 VCD 后，可核对 A/B 游标处的精确值与变化位。
 
-4.0 波形查看器采用后台流式加载与按需时间窗，增加双游标 Δt 和信号检索，已实测
-100/500 MiB VCD。操作说明、性能数据与验收范围见 [波形查看器](docs/WAVEFORM.md)。
+| 工作环节 | 能做什么 | 使用指南 |
+|---|---|---|
+| 编写 RTL | 声明、例化、赋值、task 参数对齐；语义补全、跳转和代码生成 | [格式化](https://github.com/JayceVane/SV-Tools/wiki/Formatting)、[补全](https://github.com/JayceVane/SV-Tools/wiki/Completion) |
+| 管理工程 | 单侧边栏切换 Vivado / SV Tools 工程，按文件或实例层级查看信号走向 | [工程与信号追踪](https://github.com/JayceVane/SV-Tools/wiki/Signal-Tracing) |
+| 运行仿真 | Icarus / Vivado xsim 工具链，检查诊断、停止任务并打开 VCD | [仿真](https://github.com/JayceVane/SV-Tools/wiki/Simulation) |
+| 分析波形 | 后台加载大 VCD、A/B 读值、逐位展开、浮点、二维 mem 和布局保存 | [波形与存储器](https://github.com/JayceVane/SV-Tools/wiki/Waveforms) |
+| 查看电路 | 标准 EDA 符号、总线位宽、网络高亮、小地图及局部驱动/负载追踪 | [电路查看器](https://github.com/JayceVane/SV-Tools/wiki/Circuits) |
+| 整理文档 | 波形按 A/B 区间导出；电路导出模块全图；支持黑白线稿、当前主题、SVG / PNG | [界面图解](https://github.com/JayceVane/SV-Tools/wiki/Screenshots) |
 
-4.0 补全使用标准目录、容错语义模型和增量工程索引，支持 Verilog/SystemVerilog 版本选择、UVM 1.2/1800.2、类继承与泛型、端口/参数、数组与二维 mem 成员。配置、覆盖范围及限制见 [代码补全](docs/COMPLETION.md)。
+### 界面预览
 
-波形支持批量背景色、总线逐位展开和RTL方向图标；保存/加载 `.svwave.json` 可在重新仿真后恢复显示布局；操作及边界见[波形说明](docs/WAVEFORM.md)。
+[![4.1 波形工作区：A/B 游标、总线展开与时间导航](https://raw.githubusercontent.com/wiki/JayceVane/SV-Tools/images/waveform-workspace-4.1-light.png)](https://github.com/JayceVane/SV-Tools/wiki/Waveforms)
 
-波形和电路工具栏均有“导出图片”：波形按A/B区间自动调整画幅，也可导出当前时间视口；电路导出当前模块全图。可选黑白线稿/当前主题，以及SVG矢量图/高清PNG。
+[![4.1 电路工作区：网络属性、驱动负载追踪与小地图](https://raw.githubusercontent.com/wiki/JayceVane/SV-Tools/images/circuit-workspace-4.1-light.png)](https://github.com/JayceVane/SV-Tools/wiki/Circuits)
+
+截图使用公开示例数据与实际 Webview，编号对应 [Wiki 图解](https://github.com/JayceVane/SV-Tools/wiki/Screenshots)。更多实例、配置和使用边界见各专题页。
+
+### 格式化的基本约束
+
+格式化只能改变普通空格、Tab、CR、LF；其它字符的内容、次数和顺序必须保持，即使输入全部乱码或语法不完整。无法安全提交的布局保留原文，详见 [格式化规范](docs/FORMAT_SPEC.md)。
 
 ## 功能总览
 
 **格式化**（手动 / 选中区域，`docs/FORMAT_SPEC.md` 为唯一行为规范）
+
 - 端口/信号/参数声明、模块例化端口、赋值、case、always 对齐
 - 单行/多行双轨：单行语句紧凑，显式换行走列对齐；空行规则统一裁决
 - `` `pragma protect `` 加密区（Xilinx/Synopsys IP）逐字节透传，不破坏解密
 - 行内紧凑 / 行间紧凑 / 端口名列间距等可配置，缩进空格或 Tab
 
 **代码智能**
+
 - 语法高亮（TextMate，含例化端口着色）
 - 大纲 / 面包屑（tree-sitter：module、port、parameter、instance 等）
 - Go to Definition（Ctrl+Click 例化跳转，跨文件）
 - Hover 悬浮（模块端口/参数摘要、信号声明详情）
-- 上下文感知补全（4 种代码场景 + 例化端口补全 + 31 个片段）
+- 上下文补全与增量工程索引，支持 Verilog/SystemVerilog 版本、UVM 1.2/1800.2、类成员及端口/参数；[覆盖范围与限制](docs/COMPLETION.md)
 
 **生产力工具**（源自 Verilog-Gadget）
+
 - 模块实例化生成（逐端口同名连接，保留独立时钟/复位域，可附带端口声明）
 - 测试台生成（时钟/复位/波形 dump/init/drive 任务）
 - 代码重复编号（`{:d}`、`{0:03x}` 占位符，行列步进）
 - 代码对齐、文件头插入
 
 **Icarus Verilog 工具链**（可选）
+
 - Lint：输入防抖 / 打开 / 保存自动检查，跨文件模块解析（工作区索引 + `-y`）
 - 仿真：状态栏 ▶ 一键编译运行，输出流式，可停止/超时
-- 内置 VCD 波形查看器（双击 .vcd 打开，多选分组/边沿导航/格式切换，零外部依赖）
+- 默认点击 `.vcd` 打开内置波形查看器；多选分组、背景高亮、总线展开、FP64/FP32/TF32/BF16/FP16/FP8 和二维 mem
+- 后台流式加载与按需时间窗，已实测 100/500 MiB VCD；[性能数据与验收范围](docs/WAVEFORM.md)
 
 **Vivado 集成**（可选）
+
 - 运行 TCL 脚本（工作区选择 / 右键当前文件）
-- ▶ 仿真（Icarus / Vivado xsim 引擎选择）与 ⊕ 工程文件管理按钮
+- ▶ 仿真（Icarus / Vivado xsim 引擎选择）与统一工程侧边栏
 - 工程创建向导（源文件分类、器件选型逐级筛选、顶层识别）+ 工程结构模板
 
 **电路结构查看器**（内置 Yosys，可选本地 Vivado）
+
 - 内置离线 Yosys，无需 Python 或额外安装；从当前 RTL 生成，或导入已有 JSON，支持源文件顺序、顶层、include 和宏
 - 默认自动收集工作区子模块与包依赖，显式 sources 保留编译顺序；错误摘要显示原文件行列
 - 独立电路模型与 ELK.js 正交布局，SVG 平移缩放、搜索、网络高亮、参数化模块下钻和源码定位
@@ -71,22 +91,30 @@
 
 ## 系统要求
 
+- **Windows x64**：当前唯一正式构建、测试和维护的平台；4.x 安装包标记为 `win32-x64`
 - Visual Studio Code 1.106.0+（内置 Yosys 的 WASM 需要新版扩展宿主）
 - 无需 Python；语法检查/仿真需要 [Icarus Verilog](http://iverilog.icarus.com/)（可选），Vivado 功能需要本机 Vivado 安装
 
 ## 安装
 
-**GitHub Releases**：从 [GitHub Releases](https://github.com/JayceVane/SV-Tools/releases) 下载对应版本的 `svtools-<版本>.vsix`，在 VS Code 中选择“从 VSIX 安装…”。当前仅通过 GitHub Releases 分发，暂不通过 VSCode 扩展市场或 Open VSX 发布。
+| 渠道 | 安装方式 |
+|---|---|
+| [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=JayceVane.svtools) | 在 VS Code 扩展市场搜索 **SystemVerilog Tools**，确认发布者为 **JayceVane** |
+| [Open VSX](https://open-vsx.org/extension/JayceVane/svtools) | 在使用 Open VSX 的兼容 IDE 中安装，先确认扩展宿主版本满足要求 |
+| [GitHub Releases](https://github.com/JayceVane/SV-Tools/releases) | 下载 `svtools-v4.1.0-win32-x64.vsix`，执行“扩展：从 VSIX 安装…”；同页提供 CLI 和 SHA256 |
+
+扩展 ID 为 **`JayceVane.svtools`**。安装或更新后重载窗口；市场版本以对应页面为准。完整操作见 [安装指南](https://github.com/JayceVane/SV-Tools/wiki/Getting-Started)。
 
 **源码**：
 
 ```bash
-git clone <本仓库> && cd 02_svtools
+git clone https://github.com/JayceVane/SV-Tools.git
+cd SV-Tools
 npm ci
 npm ci --prefix src/native
 npm run build:native   # 需要 Rust 工具链；产物 .node 与 CLI 自动复制到 bin/
 npm test               # golden、幂等、词法保真、工具运行与 VCD 合同
-npm run package        # 生成 svtools-<版本>.vsix
+npm run package -- --target win32-x64 # 生成 Windows x64 VSIX
 ```
 
 没有 Rust 工具链时，从 GitHub Releases 下载对应 tag 的 `svtools.win32-x64-msvc.node` 放到仓库 bin/ 目录。
@@ -95,16 +123,16 @@ npm run package        # 生成 svtools-<版本>.vsix
 
 打开任意 `.sv` / `.v` 文件即激活；`Shift+Alt+F` 或命令面板“格式化文档”格式化。扩展不会在保存时自动格式化；如需保存即格式化，请在 VS Code 中自行启用 `editor.formatOnSave`（保存事件仅用于可选的保存时 lint 与工程视图刷新）。
 
-| 命令 | 快捷键 (Win/Linux / macOS) |
+| 命令 | 快捷键（Windows） |
 |------|------|
-| 生成模块实例化 | `Ctrl+Shift+C` / `Cmd+Shift+C` |
-| 生成测试台 | `Ctrl+Shift+T` / `Cmd+Shift+T` |
-| 重复代码编号 | `Ctrl+F12` / `Cmd+F12` |
-| 对齐代码 | `Ctrl+Shift+X` / `Cmd+Shift+X` |
-| 插入文件头 | `Ctrl+Shift+Insert` / `Cmd+Shift+Insert` |
+| 生成模块实例化 | `Ctrl+Shift+C` |
+| 生成测试台 | `Ctrl+Shift+T` |
+| 重复代码编号 | `Ctrl+F12` |
+| 对齐代码 | `Ctrl+Shift+X` |
+| 插入文件头 | `Ctrl+Shift+Insert` |
 | Icarus lint / 仿真 / Vivado 命令 | 命令面板搜索 "SystemVerilog Tools" |
 
-全部 55 个命令与 65 项配置见命令面板与设置面板（已按 缩进与空行 → 换行与对齐 → 代码生成 → Icarus Verilog → Vivado 分组）。
+全部命令与配置见命令面板和设置面板；按格式化、代码生成、工具链、工程、波形和电路等功能分组。
 
 ### 核心格式化配置
 
@@ -173,6 +201,7 @@ module alu #(
 
 ## 文档
 
+- [GitHub Wiki](https://github.com/JayceVane/SV-Tools/wiki) — 按操作流程组织的使用指南和界面图解
 - [CHANGELOG](CHANGELOG.md) — 版本历史
 - [docs/FORMAT_SPEC.md](docs/FORMAT_SPEC.md) — 格式化规范（唯一权威）
 - [CONTRIBUTING](CONTRIBUTING.md) / [INSTALL](INSTALL.md) / [PUBLISH](PUBLISH.md) — 参与开发、安装与发布
@@ -184,7 +213,13 @@ module alu #(
 - [poucotm/Verilog-Gadget](https://github.com/poucotm/Verilog-Gadget) — 生产力工具
 - [tree-sitter](https://github.com/tree-sitter/tree-sitter) / [tree-sitter-systemverilog](https://github.com/gmlarumbe/tree-sitter-systemverilog)（MIT）— 符号解析
 
-VSCode 集成封装：[JayceVane](https://github.com/JayceVane)。开发过程有 AI 工具辅助编码与调试（OpenCode、GLM）。
+项目维护与 VS Code 集成：[JayceVane](https://github.com/JayceVane)。项目起源于上述 Sublime Text 插件的移植，并在此基础上持续重构与扩展。
+
+开发过程也有 AI 工具与模型的参与：
+
+- **Codex**：参与 4.x 的功能开发、重构、缺陷排查、测试及文档整理。
+- **DeepSeek（Dsh）**：参与 4.x 部分子功能的开发与测试。
+- **OpenCode、GLM**：辅助代码实现、调试和迭代。
 
 ## 许可证
 

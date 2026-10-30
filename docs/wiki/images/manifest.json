@@ -1,15 +1,6 @@
 {
-  "version": "4.0.0",
-  "method": "当前源码的真实Webview渲染；公开验收VCD或真实Yosys网表；仅截取内容区域，不含IDE外壳。",
-  "uiSources": {
-    "src/waveform/view.js": "787e146806fa6e90e5870a2e053b25da6fc79549956dcbf5b51a4552af5eeaa0",
-    "src/waveform/view.css": "2edeb502f00faffdfb6aa1b568f3e61118323154a57c019eb50b2d45caaf0d12",
-    "src/waveform/client.js": "890b5da5ad7d67c5410377d7fb950de3bec38296001fd907896cefc87e58b8ac",
-    "src/waveform/renderer.js": "636ff58095ce00b28294a6265e00f432d0cb3901e1a662200d68286190fa6d4e",
-    "src/circuit/view.js": "ebd51dc794ee92faeb7ef518e3704aaeb9d5e8902475a946bb109faccc2dddf2",
-    "src/circuit/view.css": "a07c9b6a0178aaba31c0d38ffc6478abd7b7e8548aed7446fd133a3c236fbcc2",
-    "src/circuit/client.js": "b1bd34571c33c656f506beb21255bbd6d495859959df29bbfe2a506122983f65"
-  },
+  "version": "4.1.0",
+  "method": "真实 Webview 与公开验收夹具；4.1 新图在渲染页面中叠加数字标注，未修改插件界面或用生成图片替代截图。",
   "images": [
     {
       "file": "waveform-bits-light.png",
@@ -18,7 +9,8 @@
       "width": 1416,
       "height": 908,
       "bytes": 130054,
-      "sha256": "1e4b3a53945e16b47ac0afe8d39892bff2ac48b3669905be3f13f7ce0f41bc7a"
+      "sha256": "1e4b3a53945e16b47ac0afe8d39892bff2ac48b3669905be3f13f7ce0f41bc7a",
+      "version": "4.0.0"
     },
     {
       "file": "waveform-floats-dark.png",
@@ -27,7 +19,8 @@
       "width": 1416,
       "height": 908,
       "bytes": 159870,
-      "sha256": "6dbf269ace655f498d4d88277f367505c20c3bfe9273392b4c06c8c251323c92"
+      "sha256": "6dbf269ace655f498d4d88277f367505c20c3bfe9273392b4c06c8c251323c92",
+      "version": "4.0.0"
     },
     {
       "file": "memory-matrix-light.png",
@@ -36,7 +29,8 @@
       "width": 1416,
       "height": 908,
       "bytes": 158054,
-      "sha256": "0e999d929ec452a2d1a91cbf29a7f39dc764df69384afed2edac1c1e1b34a878"
+      "sha256": "0e999d929ec452a2d1a91cbf29a7f39dc764df69384afed2edac1c1e1b34a878",
+      "version": "4.0.0"
     },
     {
       "file": "waveform-export-dialog.png",
@@ -45,7 +39,8 @@
       "width": 1416,
       "height": 908,
       "bytes": 161910,
-      "sha256": "bf1c58730ddb637a5ad346ebd829d38901ca2be3c2a911b1b2ccefd3743d55e2"
+      "sha256": "bf1c58730ddb637a5ad346ebd829d38901ca2be3c2a911b1b2ccefd3743d55e2",
+      "version": "4.0.0"
     },
     {
       "file": "circuit-inspector-light.png",
@@ -54,7 +49,8 @@
       "width": 1416,
       "height": 908,
       "bytes": 85536,
-      "sha256": "10983e0a6a47538e8c47ca0546ee00668a768f1788d2462d5149530fb436be2d"
+      "sha256": "10983e0a6a47538e8c47ca0546ee00668a768f1788d2462d5149530fb436be2d",
+      "version": "4.0.0"
     },
     {
       "file": "circuit-overview-dark.png",
@@ -63,7 +59,112 @@
       "width": 1416,
       "height": 908,
       "bytes": 85638,
-      "sha256": "6fb321c88eb0d76da66260aaec91b0b643ee9a89962907f22c1ebb3d9b9fba27"
+      "sha256": "6fb321c88eb0d76da66260aaec91b0b643ee9a89962907f22c1ebb3d9b9fba27",
+      "version": "4.0.0"
+    },
+    {
+      "file": "project-workspace-4.1-light.png",
+      "version": "4.1.0",
+      "caption": "统一工程侧边栏：切换、投影、信号走向及 Vivado 流程",
+      "fixture": "bin/project-panel-preview.js（公开界面夹具，未执行 Vivado 任务）",
+      "annotation": "数字为文档标注，不是插件控件；界面由当前源码真实渲染。",
+      "width": 410,
+      "height": 900,
+      "bytes": 46318,
+      "sha256": "7f967928fc9dfb3b46e0fb69c4365ad12de6c1d8ca885fb1fd0ebcfd5a8e4ea5"
+    },
+    {
+      "file": "waveform-workspace-4.1-light.png",
+      "version": "4.1.0",
+      "caption": "波形工作区：信号目录、A/B、逐位展开、时间导航和导出",
+      "fixture": "scripts/preview-waveform.js --signals（真实 VCD Worker 与公开 RTL）",
+      "annotation": "数字为文档标注，不是插件控件；界面由当前源码真实渲染。",
+      "width": 1440,
+      "height": 900,
+      "bytes": 118797,
+      "sha256": "40b6bcfdc44705bb9aba3102ea17e56f1e34a5da7ee63b1bb61bf794ed3eb86c"
+    },
+    {
+      "file": "waveform-export-4.1-light.png",
+      "version": "4.1.0",
+      "caption": "按 A/B 区间导出：风格、SVG/PNG 与信号范围",
+      "fixture": "scripts/preview-waveform.js --signals",
+      "annotation": "数字为文档标注，不是插件控件；界面由当前源码真实渲染。",
+      "width": 1440,
+      "height": 900,
+      "bytes": 140435,
+      "sha256": "fe5389d3c4f18bd4928a858278b1c5b7dd218ce4b2ccbdeb78061762f1d92f81"
+    },
+    {
+      "file": "circuit-workspace-4.1-light.png",
+      "version": "4.1.0",
+      "caption": "电路工作区：模块导航、网络属性、位范围追踪、导出和小地图",
+      "fixture": "test/fixtures/circuit-demo.sv → 真实内置 Yosys JSON → 当前模型与 ELK",
+      "annotation": "数字为文档标注，不是插件控件；界面由当前源码真实渲染。",
+      "width": 1440,
+      "height": 900,
+      "bytes": 105196,
+      "sha256": "fd7ff3ec21284990ee5be3c53a36b0f1947e32fa4ea9198e8ca65c9fb49bb815"
+    },
+    {
+      "file": "circuit-trace-4.1-light.png",
+      "version": "4.1.0",
+      "caption": "局部驱动追踪：上下文、位范围、边界和返回导航",
+      "fixture": "test/fixtures/circuit-demo.sv → 真实电路追踪与布局 Worker",
+      "annotation": "数字为文档标注，不是插件控件；界面由当前源码真实渲染。",
+      "width": 1440,
+      "height": 900,
+      "bytes": 71828,
+      "sha256": "7d9cdc170d4ef2363cc8ec3be0cdd9c15d2d9d413e5b5ad5bfe2ed9618ecbaa5"
+    },
+    {
+      "file": "project-panel-4.1-light.png",
+      "version": "4.1.0",
+      "caption": "前次发布保留的工程面板示例",
+      "fixture": "bin/project-panel-preview.js；此前 Wiki 提交 cdf00ad",
+      "width": 320,
+      "height": 900,
+      "bytes": 33940,
+      "sha256": "6f0797d75b3cc5755cb84ccaf67f4731674817efc573acb968f56092c5ac2bee"
     }
-  ]
+  ],
+  "captureScript": "bin/capture-wiki41.js（本地文档采集）",
+  "captures": [
+    {
+      "version": "4.1.0",
+      "at": "2026-10-30T03:55:06.725Z",
+      "sourceCommit": "a86a0f6b230542dbade45370963e8e9416264b9f",
+      "uiSources": {
+        "src/project/view.js": "0a3fbb56d5b26bbfebc4dfbdceebd9c4dd0f710ab574ff110e95047bfccd5b71",
+        "src/project/client.js": "92b53828b02818adfb5169669174d88df588b3f4628e940bb6b02c191a341721",
+        "src/project/style.css": "9187be73f2240c17b5590522c1680b9176553c74db1f456670909b35e9986e31",
+        "src/waveform/view.js": "dd44bc570f74d86709b08f8a914ebe4b04ad632fbdaa732e3d3328d1b97d4d6f",
+        "src/waveform/client.js": "75de7c749e67281d2e1bccf5c51bfdd3b42dd1f90fbbba1bb1fc114ea02771a9",
+        "src/waveform/renderer.js": "636ff58095ce00b28294a6265e00f432d0cb3901e1a662200d68286190fa6d4e",
+        "src/waveform/view.css": "2dd4f8d3601a460e79f00a701a6fdd80d2b65667ca0c2dc92c7ee7bf16e46f81",
+        "src/circuit/view.js": "866a7df1dc14b85a1ffada7188a348bbaf744665a06f62368de7c9e23756378d",
+        "src/circuit/client.js": "60eec347e41e691daee1e9fedc100d4b4bc27c97a0f50c853d52bf1e47987630",
+        "src/circuit/view.css": "4bc0be4ce98a6a911da3e5b32a7f046b3decb30c7809812d86f75a7b36e99169"
+      },
+      "images": [
+        "project-workspace-4.1-light.png",
+        "waveform-workspace-4.1-light.png",
+        "waveform-export-4.1-light.png",
+        "circuit-workspace-4.1-light.png",
+        "circuit-trace-4.1-light.png"
+      ]
+    }
+  ],
+  "legacyCapture": {
+    "version": "4.0.0",
+    "uiSources": {
+      "src/waveform/view.js": "787e146806fa6e90e5870a2e053b25da6fc79549956dcbf5b51a4552af5eeaa0",
+      "src/waveform/view.css": "2edeb502f00faffdfb6aa1b568f3e61118323154a57c019eb50b2d45caaf0d12",
+      "src/waveform/client.js": "890b5da5ad7d67c5410377d7fb950de3bec38296001fd907896cefc87e58b8ac",
+      "src/waveform/renderer.js": "636ff58095ce00b28294a6265e00f432d0cb3901e1a662200d68286190fa6d4e",
+      "src/circuit/view.js": "ebd51dc794ee92faeb7ef518e3704aaeb9d5e8902475a946bb109faccc2dddf2",
+      "src/circuit/view.css": "a07c9b6a0178aaba31c0d38ffc6478abd7b7e8548aed7446fd133a3c236fbcc2",
+      "src/circuit/client.js": "b1bd34571c33c656f506beb21255bbd6d495859959df29bbfe2a506122983f65"
+    }
+  }
 }

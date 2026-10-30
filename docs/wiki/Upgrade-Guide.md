@@ -3,7 +3,7 @@
 ## 升级步骤
 
 1. 记录工作区与用户级的 `svtools.*` 自定义设置。
-2. 从[GitHub Releases](https://github.com/JayceVane/SV-Tools/releases)安装4.1.0的Windows x64 VSIX并重载窗口。
+2. 按[安装指南](https://github.com/JayceVane/SV-Tools/wiki/Getting-Started)选择市场渠道，或从 GitHub Releases 安装 4.1.0 的 Windows x64 VSIX，并重载窗口。
 3. 在扩展详情确认版本，检查Verilog/SystemVerilog默认格式化器。
 4. 重新打开VCD、重新生成电路。需要跨仿真复用显示状态时保存`.svwave.json`。
 5. 检查工具路径，完成一次小文件格式化/仿真/电路生成后，再使用大工程。
@@ -24,7 +24,7 @@
 
 ## 当前范围
 
-官方本轮交付为GitHub Release的Windows x64 VSIX和CLI。其他系统需自行构建匹配原生模块，并单独验证宿主和外部工具；不把Windows验收解释为跨平台保证。
+当前只正式构建、测试和维护 Windows x64。市场安装入口为 [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=JayceVane.svtools) 和 [Open VSX](https://open-vsx.org/extension/JayceVane/svtools)，具体版本以各页面为准；GitHub Release 另提供 VSIX、CLI 和校验清单。其他平台暂不纳入正式维护计划。
 
 内置波形只支持VCD；二维mem要求文件保留索引。补全不是完整编译器语义实现。Vivado电路当前是平坦RTL，专门的IP新增/定制面板仍在计划中。超大电路建议按模块查看。
 
