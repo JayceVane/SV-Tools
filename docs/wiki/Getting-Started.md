@@ -2,11 +2,15 @@
 
 ## 安装 4.1.0
 
-1. 在 [Releases](https://github.com/JayceVane/SV-Tools/releases) 下载 Windows x64 的 `svtools-v4.1.0-win32-x64.vsix`。
-2. 使用 VS Code 1.106.0 或更新版本。兼容 IDE 也需满足相同扩展宿主要求。
-3. 打开命令面板，执行 **Extensions: Install from VSIX… / 扩展：从 VSIX 安装**，选择文件。
-4. 执行 **Developer: Reload Window / 开发人员：重新加载窗口**。
-5. 在扩展详情中确认版本为 `4.1.0`，扩展 ID 为 `JayceVane.svtools`。
+先确认系统为 **Windows x64**，使用 VS Code 1.106.0 或更新版本；兼容 IDE 也需满足相同扩展宿主要求。当前正式维护这一平台。
+
+| 安装渠道 | 操作 |
+|---|---|
+| [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=JayceVane.svtools) | 在 VS Code 扩展市场搜索 **SystemVerilog Tools**，确认发布者 **JayceVane** 后安装 |
+| [Open VSX](https://open-vsx.org/extension/JayceVane/svtools) | 在使用 Open VSX 的兼容 IDE 中搜索同一扩展 ID 并安装 |
+| [GitHub Releases](https://github.com/JayceVane/SV-Tools/releases/tag/v4.1.0) | 下载 `svtools-v4.1.0-win32-x64.vsix`，执行 **Extensions: Install from VSIX… / 扩展：从 VSIX 安装** |
+
+市场版本以各详情页为准。本指南按 4.1.0 的界面说明；安装后执行 **Developer: Reload Window / 开发人员：重新加载窗口**，在扩展详情中核对版本和扩展 ID **`JayceVane.svtools`**。
 
 只安装扩展不需要 Node.js、Rust、Python 或系统 PATH 中的 Yosys。发布附件中的 `svtools.exe` 是独立 CLI，使用编辑器扩展时不必单独安装。
 
@@ -68,6 +72,12 @@ endmodule
 ```
 
 成功后默认打开新生成的 VCD。添加 `clk`，点击波形放置 A，按住 Shift 点击放置 B，再用“A ↔ B”适配区间。工具找不到或 Cygwin DLL 缺失时见[故障排查](https://github.com/JayceVane/SV-Tools/wiki/Troubleshooting)。
+
+下面用包含更多信号的公开示例解释同一波形界面；数字依次标出信号搜索、A/B 读值、栏宽边界、时间导航和图片导出。
+
+[![第一次观察波形时要找的五个入口](https://raw.githubusercontent.com/wiki/JayceVane/SV-Tools/images/waveform-workspace-4.1-light.png)](https://github.com/JayceVane/SV-Tools/wiki/Waveforms)
+
+跟随 [波形图解](https://github.com/JayceVane/SV-Tools/wiki/Waveforms)尝试添加信号、展开总线、移动游标和导出，再处理自己的测试台。
 
 ## 查看一次电路
 

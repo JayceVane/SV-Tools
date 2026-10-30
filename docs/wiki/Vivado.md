@@ -11,7 +11,13 @@
 
 使用本机实际 Vivado 路径。4.0 已用 Vivado 2022.1.2 验收，其他版本的 Tcl 属性与导出行为需在本机核对。器件支持和许可来自 Vivado 安装。
 
-打开工程所在文件夹，在 SV Tools 的 Vivado 工程管理面板执行 **选择工程** 或 **刷新工程树**。多 XPR 工作区明确选择当前工程。没有 XPR 时可用 **Vivado: 创建工程** 向导，选择源文件分类、器件和 Top。
+打开工程所在文件夹，在统一的 **SV Tools 工程** 侧边栏顶部选择 Vivado 工程，或刷新工程列表。多 XPR 工作区明确选择当前工程。没有 XPR 时可用 **Vivado: 创建工程** 向导，选择源文件分类、器件和 Top；也可先建立 SV Tools 自管理工程。
+
+<a href="https://raw.githubusercontent.com/wiki/JayceVane/SV-Tools/images/project-workspace-4.1-light.png"><img src="https://raw.githubusercontent.com/wiki/JayceVane/SV-Tools/images/project-workspace-4.1-light.png" alt="统一工程面板和树下方的 Vivado 流程" width="410"></a>
+
+图中 **1** 切换工程，**2** 切换文件 / 实例层级，**3** 固定信号追踪，**4** 显示所选信号的文件角色，**5** 是文件树下方的 Vivado 流程与报告入口。使用同一侧边栏即可在两种工程类型间切换；自管理工程不会显示 Vivado 流程。
+
+图示为公开界面夹具，未执行综合或布局布线。查看报告或“…”菜单展开后，再点同一按钮即可收起；点击外部区域或 Esc 也可关闭。
 
 ## 文件、Top 与运行
 

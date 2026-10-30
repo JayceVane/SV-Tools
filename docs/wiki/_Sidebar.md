@@ -1,7 +1,7 @@
 # SV Tools 4.1
 
 - [首页](https://github.com/JayceVane/SV-Tools/wiki/Home)
-- [界面导览](https://github.com/JayceVane/SV-Tools/wiki/Screenshots)
+- [界面图解与操作入口](https://github.com/JayceVane/SV-Tools/wiki/Screenshots)
 - [安装与第一次运行](https://github.com/JayceVane/SV-Tools/wiki/Getting-Started)
 - [升级指南](https://github.com/JayceVane/SV-Tools/wiki/Upgrade-Guide)
 - [格式化](https://github.com/JayceVane/SV-Tools/wiki/Formatting)
@@ -15,5 +15,7 @@
 - [配置参考](https://github.com/JayceVane/SV-Tools/wiki/Configuration)
 - [命令参考](https://github.com/JayceVane/SV-Tools/wiki/Command-Reference)
 - [故障排查](https://github.com/JayceVane/SV-Tools/wiki/Troubleshooting)
+
+[VS Marketplace](https://marketplace.visualstudio.com/items?itemName=JayceVane.svtools) · [Open VSX](https://open-vsx.org/extension/JayceVane/svtools)
 
 [GitHub Releases](https://github.com/JayceVane/SV-Tools/releases) · [反馈问题](https://github.com/JayceVane/SV-Tools/issues)
