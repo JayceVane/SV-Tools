@@ -148,7 +148,7 @@ function activate(context) {
     // Icarus Verilog lint 与仿真（诊断、命令、状态栏）
     const waveLinks = createWaveLinks({vscode}); context.subscriptions.push(waveLinks);
     const waveViewer = activateWaveViewer(context, { sourceCatalog, waveLinks });
-    activateIverilog(context, { waveViewer, scanWorkspaceSources: force => { if (force) sourceCatalog.invalidate(); return sourceIndex.scan(force); }, invalidateWorkspaceSources: sourceIndex.invalidate });
+    activateIverilog(context, { waveViewer, scanWorkspaceSources: force => sourceIndex.scan(force), invalidateWorkspaceSources: sourceIndex.invalidate });
 
     // Vivado TCL 批处理运行与工程创建
     const circuit = activateCircuitViewer(context, { vivado, sourceCatalog, waveLinks });

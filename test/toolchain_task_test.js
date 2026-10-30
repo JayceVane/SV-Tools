@@ -23,8 +23,8 @@ let file=rest.at(-1),source='';
 if(tool==='xvlog'&&fs.existsSync(prj))file=fs.readFileSync(prj,'utf8').match(/"([^"]+)"/)[1];
 if(file&&fs.existsSync(file))source=fs.readFileSync(file,'utf8');
 if(mode==='slow'||source.includes('SLOW')){fs.writeFileSync('compile-started','yes');console.log('ready');setTimeout(()=>{console.log('ERROR: [VRFC 1] late failure ['+file+':1]');process.exit(2)},3000);return;}
-if(mode==='dep'){if(tool==='iverilog'){console.error(path.join(process.cwd(),'dependency.sv')+':4: error: broken dependency');process.exitCode=1;}
-else console.log('ERROR: [VRFC 1] broken dependency ['+path.join(process.cwd(),'dependency.sv')+':4]');}
+if(mode==='dep'){if(tool==='iverilog'){console.error(path.join(__dirname,'dependency.sv')+':4: error: broken dependency');process.exitCode=1;}
+else console.log('ERROR: [VRFC 1] broken dependency ['+path.join(__dirname,'dependency.sv')+':4]');}
 if(mode==='early'){console.log('ERROR: [VRFC 1] early error ['+file+':2]');process.stdout.write('noise '.repeat(100000)+'\\n');}
 if(mode==='exit'){console.log('unrecognized tool failure');process.exit(7);}
 if(mode==='inspect')console.log('INPUT '+JSON.stringify({cwd:process.cwd(),source}));
@@ -193,7 +193,8 @@ function editorHarness(f, getToolchain, options = {}) {
             onDidChangeActiveTextEditor: disposable, showInformationMessage: () => new Promise(() => {}),
             showErrorMessage: text => { messages.push(text); return Promise.resolve(); }, setStatusBarMessage: text => messages.push(text) },
         workspace: { textDocuments: options.documents || [doc], workspaceFolders: [{ uri: uri(f.root) }], getWorkspaceFolder: () => ({ uri: uri(f.root) }),
-            getConfiguration: (namespace, resource) => configuration(namespace, namespace === 'svtools.iverilog' ? { ...config, ...options.configForUri?.(resource) } : {}), findFiles: async () => [] },
+            getConfiguration: (namespace, resource) => configuration(namespace, namespace === 'svtools.iverilog' ? { ...config, ...options.configForUri?.(resource) }
+                : namespace === 'svtools.lint' ? options.lintConfig || {} : {}), findFiles: async () => [] },
         commands: { registerCommand(name, handler) { commands.set(name, handler); return disposable(); }, executeCommand: async () => {} } };
     for (const name of ['onDidOpenTextDocument','onDidChangeTextDocument','onDidSaveTextDocument','onDidCloseTextDocument','onDidChangeConfiguration','onDidCreateFiles','onDidDeleteFiles','onDidRenameFiles']) {
         vscode.workspace[name] = handler => { handlers.set(name, handler); return disposable(); };
@@ -201,12 +202,96 @@ function editorHarness(f, getToolchain, options = {}) {
     const api = activateIverilog({ subscriptions: [] }, { vscode, resolveToolchain: getToolchain, startProcess: options.startProcess,
         xvlogTools: options.xvlogTools, resolveXvlogBinDir: options.resolveXvlogBinDir,
         scanWorkspaceSources: async () => ({ dirs: [], modules: new Map() }), waveViewer: options.waveViewer || { openWaveform: async file => waves.push(file) } });
-    return { api, doc, config, handlers, commands, messages, waves, bars, problems };
+    return { api, doc, config, handlers, commands, messages, waves, bars, problems, vscode };
 }
 function protocolToolchain(f, mode) {
     return { iverilog: process.execPath, compilePrefix: [f.driver, 'iverilog', mode],
         vvp: process.execPath, vvpPrefix: [f.driver, 'vvp', 'wave'], env: process.env, cygwinDir: null };
 }
+
+function changedConfiguration(...keys) {
+    return { affectsConfiguration: name => keys.some(key => key === name || key.startsWith(name + '.') || name.startsWith(key + '.')) };
+}
+
+test('停止检查会撤销尚未启动的自动防抖任务', async t => {
+    const f = await fixture(t); let probes = 0;
+    const h = editorHarness(f, async () => { probes++; return protocolToolchain(f, 'ok'); }, { config: { lintOnChange: true, lintDebounceMs: 100 } });
+    try {
+        h.doc.version++; h.handlers.get('onDidChangeTextDocument')({ document: h.doc, contentChanges: [{}] });
+        h.commands.get('svtools.lint.stop')(h.doc); await delay(250);
+        assert.equal(probes, 0);
+    } finally { await h.api.dispose(); }
+});
+
+test('显式lint消费旧防抖；自动保存合并同版本正在运行的手动检查', async t => {
+    const f = await fixture(t); let probes = 0;
+    const h = editorHarness(f, async () => { probes++; await delay(250); return protocolToolchain(f, 'ok'); },
+        { config: { lintOnChange: true, lintOnSave: true, lintDebounceMs: 100 } });
+    try {
+        h.doc.version++; h.handlers.get('onDidChangeTextDocument')({ document: h.doc, contentChanges: [{}] });
+        const manual = h.commands.get('svtools.iverilog.lint')(); await waitFor(() => probes === 1);
+        h.doc.isDirty = false; h.handlers.get('onDidSaveTextDocument')(h.doc);
+        assert.equal((await manual).status, 'success'); await delay(150); assert.equal(probes, 1);
+    } finally { await h.api.dispose(); }
+});
+
+test('显式xelab不被旧防抖或同版本保存发起的Icarus检查打断', async t => {
+    const f = await fixture(t); let icarus = 0;
+    const h = editorHarness(f, async () => { icarus++; return protocolToolchain(f, 'ok'); }, {
+        config: { lintOnChange: true, lintOnSave: true, lintDebounceMs: 100 }, resolveXvlogBinDir: () => f.root,
+        xvlogTools: Object.fromEntries(['xvlog', 'xelab'].map(tool => [tool, { command: process.execPath, args: [f.driver, tool, 'ok'] }]))
+    });
+    try {
+        h.doc.version++; h.handlers.get('onDidChangeTextDocument')({ document: h.doc, contentChanges: [{}] });
+        const manual = h.commands.get('svtools.xvlog.elaborate')(h.doc);
+        await delay(20); h.doc.isDirty = false; h.handlers.get('onDidSaveTextDocument')(h.doc);
+        assert.equal((await manual).status, 'success'); await delay(150); assert.equal(icarus, 0);
+    } finally { await h.api.dispose(); }
+});
+
+test('无关Vivado配置不停止Icarus仿真，所有自动开关关闭时不偷偷启动lint', async t => {
+    const f = await fixture(t); let probes = 0, finished = false;
+    const h = editorHarness(f, async () => { probes++; return protocolToolchain(f, 'slow'); });
+    try {
+        const simulation = h.api.runSimulation(h.doc).then(result => { finished = true; return result; });
+        await waitFor(() => h.messages.some(line => line.includes('ready')));
+        h.handlers.get('onDidChangeConfiguration')(changedConfiguration('svtools.vivado.part'));
+        h.handlers.get('onDidChangeConfiguration')(changedConfiguration('svtools.vivado.path'));
+        h.handlers.get('onDidChangeConfiguration')(changedConfiguration('svtools.iverilog.includePaths'));
+        await delay(100); assert.equal(finished, false); assert.equal(probes, 1);
+        h.api.stopSimulation(); assert.equal((await simulation).status, 'cancelled');
+    } finally { await h.api.dispose(); }
+});
+
+for (const engine of ['iverilog', 'xvlog']) test(`当前文件模式隐藏外部诊断但保留依赖失败状态：${engine}`, async t => {
+    const f = await fixture(t);
+    const h = editorHarness(f, async () => protocolToolchain(f, 'dep'), { lintConfig: { engine }, resolveXvlogBinDir: () => f.root,
+        xvlogTools: { xvlog: { command: process.execPath, args: [f.driver, 'xvlog', 'dep'] } } });
+    try {
+        const result = await h.api.lintDocument(h.doc);
+        assert.equal(result.status, 'failed'); assert.equal(result.errorCount, 0); assert.equal(result.totalErrorCount, 1);
+        assert.deepEqual(h.problems.get(path.join(f.root, 'dependency.sv')) || [], []);
+        assert.match(h.problems.get(f.file)[0].message, /依赖文件存在 1 个错误.*完整日志/);
+    } finally { await h.api.dispose(); }
+});
+
+test('修改依赖立即撤销旧错误；依赖未保存时不重新检查读取磁盘的上游', async t => {
+    const f = await fixture(t); let mode = 'dep', probes = 0;
+    const h = editorHarness(f, async () => { probes++; return protocolToolchain(f, mode); },
+        { config: { lintOnChange: true, lintOnSave: true, lintDebounceMs: 100 }, lintConfig: { currentFileOnly: false } });
+    try {
+        await h.api.lintDocument(h.doc);
+        const dependency = document(path.join(f.root, 'dependency.sv'));
+        h.vscode.workspace.textDocuments.push(dependency); dependency.version++;
+        h.handlers.get('onDidChangeTextDocument')({ document: dependency, contentChanges: [{}] });
+        assert.deepEqual(h.problems.get(dependency.uri.fsPath), []);
+        mode = 'ok'; await waitFor(() => probes === 2); await delay(150);
+        assert.equal(probes, 2); // 只检查依赖的缓冲区；上游要等待保存。
+        dependency.isDirty = false; h.handlers.get('onDidSaveTextDocument')(dependency);
+        await waitFor(() => probes >= 4); await delay(150);
+        assert.deepEqual(h.problems.get(dependency.uri.fsPath), []);
+    } finally { await h.api.dispose(); }
+});
 
 test('不同资源配置并发探测时，迟到结果不污染另一个配置的缓存', async t => {
     const f = await fixture(t), directories = [path.join(f.root, 'tool-a'), path.join(f.root, 'tool-b')];
@@ -283,7 +368,7 @@ test('编辑内容变化立即取消lint；关闭文档释放诊断和进程', a
 
 test('诊断按触发文档维护，修复或关闭一个文档不抹掉另一个文档的依赖错误', async t => {
     const f = await fixture(t); let calls = 0;
-    const h = editorHarness(f, async () => protocolToolchain(f, ++calls <= 2 ? 'dep' : 'ok'));
+    const h = editorHarness(f, async () => protocolToolchain(f, ++calls <= 2 ? 'dep' : 'ok'), { lintConfig: { currentFileOnly: false } });
     const other = document(path.join(f.root, 'other.sv'), 'module other; endmodule');
     const first = await h.api.lintDocument(h.doc), second = await h.api.lintDocument(other);
     assert.equal(first.ok, false); assert.equal(first.errorCount, 0); assert.equal(second.totalErrorCount, 1);
@@ -353,7 +438,7 @@ console.error(path.join(process.cwd(),'.svtools','circuit','sources.sv')+':1: er
 console.error(path.join(process.cwd(),'node_modules','sv-lib','real.sv')+':2: error: actual RTL error');
 process.exitCode=1;
 `);
-    const h = editorHarness(f, async () => ({ ...protocolToolchain(f, 'ok'), compilePrefix: [f.driver] }));
+    const h = editorHarness(f, async () => ({ ...protocolToolchain(f, 'ok'), compilePrefix: [f.driver] }), { lintConfig: { currentFileOnly: false } });
     try {
         const result = await h.api.lintDocument(h.doc);
         assert.equal(result.status, 'failed'); assert.equal(result.totalErrorCount, 2);

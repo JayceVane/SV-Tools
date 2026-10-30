@@ -8,14 +8,18 @@ const { summarizeToolResult, resultFindings } = require('./result');
 const { lintWithXvlog, elaborateWithXvlog, resetXvlogCache } = require('./xvlog');
 const { scanWorkspaceSources, invalidateWorkspaceSources } = require('../workspace/sources');
 const { GENERATED_SOURCE_EXCLUDE_GLOB, isGeneratedSourcePath } = require('../workspace/source-policy');
+const { createLintScheduler } = require('./lint-scheduler');
+const { createLintDiagnostics, fileKey } = require('./lint-diagnostics');
 const LANGUAGE_IDS = ['verilog', 'systemverilog', 'system-verilog'];
+const COMPILE_SETTINGS = ['path', 'cygwinPath', 'standard', 'includePaths', 'libraryPaths', 'scanWorkspace', 'lintArgs'];
+const AUTO_SETTINGS = ['lintOnOpen', 'lintOnSave', 'lintOnChange', 'lintDebounceMs'];
 
 /** @param {object} context @param {object} deps 工具规则与可注入的编辑器边界。 @returns {object} 命令流程和释放入口。 */
 function activateIverilog(context, deps) {
     const vscode = deps.vscode || require('vscode');
     const channel = vscode.window.createOutputChannel('SystemVerilog Tools · Icarus Verilog');
     const diagnostics = vscode.languages.createDiagnosticCollection('svtools-iverilog');
-    const output = createBufferedOutput(channel), debounce = new Map(), owners = new Map();
+    const output = createBufferedOutput(channel), editedDocuments = new Set();
     let activeSim = null, disposed = false, toolchainErrorShown = false;
     const simBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 0);
     const elaborateBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 1);
@@ -29,6 +33,10 @@ function activateIverilog(context, deps) {
     const currentEngine = document => vscode.workspace.getConfiguration('svtools.lint', document?.uri).get('engine', 'iverilog');
     const isVerilogDocument = document => !!document && LANGUAGE_IDS.includes(document.languageId) && !isGeneratedSourcePath(document.uri?.fsPath);
     const lintKey = document => 'lint:' + document.uri.toString();
+    const currentFileOnly = document => vscode.workspace.getConfiguration('svtools.lint', document.uri).get('currentFileOnly', true);
+    const problems = createLintDiagnostics({ vscode, collection: diagnostics, currentFileOnly });
+    const scheduler = createLintScheduler({ run: execute, engineOf: currentEngine,
+        debounceMs: document => getConfig(document).get('lintDebounceMs', 800) });
     const runner = createIcarusRunner({ workspace: vscode.workspace, getConfig, scanSources,
         getToolchain: async task => {
             try { return await deps.resolveToolchain(task); }
@@ -36,39 +44,20 @@ function activateIverilog(context, deps) {
         }, compile: deps.compileWithModuleResolution, buildCommonArgs: deps.buildCommonArgs,
         resolvePaths, channel, output, publish: applyDiagnostics, expandFiles,
         prepareWaveforms: options => deps.waveViewer?.prepareForSimulation?.(options),
-        fileOnly: document => vscode.workspace.getConfiguration('svtools.lint', document.uri).get('currentFileOnly', true), showWaveforms });
+        fileOnly: currentFileOnly, showWaveforms });
 
     function resolvePaths(paths, fallback, uri) {
         const base = vscode.workspace.getWorkspaceFolder(uri)?.uri.fsPath || fallback;
         return (paths || []).map(value => path.resolve(base, value));
     }
-    function publishFiles(files) {
-        for (const file of files) {
-            if (isGeneratedSourcePath(file)) { diagnostics.set(vscode.Uri.file(file), []); continue; }
-            const entries = new Map();
-            for (const owner of owners.values()) for (const finding of owner.findings) {
-                if (path.normalize(finding.file) !== file) continue;
-                const line = Math.max(0, finding.line - 1);
-                const range = owner.document?.uri.fsPath === finding.file
-                    ? owner.document.lineAt(Math.min(line, owner.document.lineCount - 1)).range : new vscode.Range(line, 0, line, 0);
-                const diagnostic = new vscode.Diagnostic(range, finding.message,
-                    finding.severity === 'warning' ? vscode.DiagnosticSeverity.Warning : vscode.DiagnosticSeverity.Error);
-                diagnostic.source = finding.source || owner.source;
-                entries.set(JSON.stringify([line, finding.message, finding.severity, diagnostic.source]), diagnostic);
-            }
-            diagnostics.set(vscode.Uri.file(file), [...entries.values()]);
-        }
+    function applyDiagnostics(document, findings, source = 'iverilog', options = {}) {
+        const accepted = problems.publish(document, findings, source, options);
+        // 仿真继续使用启动时的源码；过期诊断不覆盖编辑结果，也不把已完成的仿真改判为取消。
+        if (!accepted && options.task?.kind === 'simulation') return true;
+        if (!accepted) options.task?.cancel('依赖源码已变化');
+        return accepted;
     }
-    function applyDiagnostics(document, findings, source = 'iverilog') {
-        const key = document.uri.toString(), previous = owners.get(key);
-        const sourceFindings = findings.filter(finding => !isGeneratedSourcePath(finding.file));
-        owners.set(key, { document, findings: sourceFindings, source });
-        publishFiles(new Set([document.uri.fsPath, ...(previous?.findings || []).map(f => path.normalize(f.file)), ...findings.map(f => path.normalize(f.file))]));
-    }
-    function removeDiagnostics(document) {
-        const previous = owners.get(document.uri.toString()); owners.delete(document.uri.toString());
-        publishFiles(new Set([document.uri.fsPath, ...(previous?.findings || []).map(f => path.normalize(f.file))]));
-    }
+    const removeDiagnostics = document => problems.remove(document);
     function showToolchainError(message, setting = 'svtools.iverilog.path') {
         if (toolchainErrorShown) return; toolchainErrorShown = true;
         Promise.resolve(vscode.window.showErrorMessage(message, '打开设置')).then(choice => {
@@ -125,6 +114,9 @@ function activateIverilog(context, deps) {
         }
         const task = tasks.start(kind === 'simulation' ? 'simulation' : lintKey(document));
         task.documentUri = document.uri;
+        task.kind = kind; task.engine = kind === 'elaborate' ? 'xvlog' : kind === 'simulation' ? 'iverilog' : currentEngine(document);
+        task.documentVersion = document.version; task.automatic = !!options.automatic;
+        task.sourceRevision = problems.revision();
         if (kind === 'simulation') { activeSim = task; channel.show(true); updateStatusBar(); }
         try {
             await task.waitForPrevious(); task.throwIfCancelled();
@@ -138,7 +130,7 @@ function activateIverilog(context, deps) {
         } catch (error) {
             const summary = summarizeToolResult({ mainFile, result: { ...task.lastResult, code: null, errorMessage: error.message },
                 status: task.signal.aborted || error.code === 'TOOL_CANCELLED' ? 'cancelled' : undefined });
-            if (task.isCurrent()) { applyDiagnostics(document, resultFindings(summary, [], mainFile), 'toolchain'); channel.appendLine(summary.message); }
+            if (task.isCurrent()) { applyDiagnostics(document, resultFindings(summary, [], mainFile), 'toolchain', { since: task.sourceRevision, task }); channel.appendLine(summary.message); }
             else if (!disposed && kind === 'simulation' && activeSim === task) {
                 channel.appendLine('仿真任务已取消：' + (task.reason || summary.message));
                 if (summary.logPath) channel.appendLine('已接收输出的日志：' + summary.logPath);
@@ -155,39 +147,83 @@ function activateIverilog(context, deps) {
             : `${label}：${summary.message || summary.status}`;
         vscode.window.setStatusBarMessage(message, 5000); return summary;
     }
-    function clearDebounce(document) {
-        const key = document.uri.toString(), timer = debounce.get(key); if (timer) clearTimeout(timer); debounce.delete(key);
+    const clearDebounce = document => scheduler.clear(document);
+    const automaticEnabled = document => AUTO_SETTINGS.slice(0, 3).some(name => getConfig(document).get(name));
+    function fireLint(document) { scheduler.request(document, 'lint', { automatic: true }).catch(error => channel.appendLine('检查任务失败：' + error.message)); }
+    function invalidateFile(file, preserve) {
+        const affected = problems.invalidate(file);
+        for (const document of affected) {
+            const task = tasks.current.get(lintKey(document));
+            if (document === preserve && task?.documentVersion === document.version) continue;
+            scheduler.invalidate(document); tasks.cancel(lintKey(document), '依赖源码已变化');
+        }
+        return affected;
     }
-    function fireLint(document) { execute(document).catch(error => channel.appendLine('检查任务失败：' + error.message)); }
+    function scheduleDependents(documents, except) {
+        for (const document of documents) if (document !== except && !document.isClosed && automaticEnabled(document)) scheduler.schedule(document, fireLint);
+    }
+    function configurationChanged(event) {
+        let resetIcarus = false, resetVivado = false;
+        for (const document of vscode.workspace.textDocuments) {
+            if (!isVerilogDocument(document)) continue;
+            const affects = name => event.affectsConfiguration(name, document.uri);
+            const icarus = COMPILE_SETTINGS.some(name => affects('svtools.iverilog.' + name));
+            const vivado = affects('svtools.vivado.path');
+            const common = affects('svtools.lint.engine') || affects('svtools.lint.currentFileOnly');
+            resetIcarus ||= affects('svtools.iverilog.path') || affects('svtools.iverilog.cygwinPath'); resetVivado ||= vivado;
+            const engine = currentEngine(document), task = tasks.current.get(lintKey(document));
+            const xvlogInputs = ['includePaths', 'scanWorkspace'].some(name => affects('svtools.iverilog.' + name));
+            const compileChanged = common || (engine === 'xvlog' ? vivado || xvlogInputs : icarus);
+            if (compileChanged || (task?.engine === 'xvlog' && vivado)) {
+                scheduler.invalidate(document); tasks.cancel(lintKey(document), '检查配置已变化'); removeDiagnostics(document);
+                if (compileChanged && automaticEnabled(document)) fireLint(document);
+            } else if (AUTO_SETTINGS.some(name => affects('svtools.iverilog.' + name))) {
+                scheduler.clear(document);
+                if (!automaticEnabled(document) && task?.automatic) {
+                    scheduler.invalidate(document); tasks.cancel(lintKey(document), '自动检查已关闭');
+                }
+            }
+        }
+        if (resetIcarus) deps.resetToolchain();
+        if (resetVivado) resetXvlogCache();
+        updateStatusBar();
+    }
     const subscribe = (name, callback) => vscode.workspace[name](callback);
     context.subscriptions.push(channel, diagnostics, simBar, elaborateBar, engineBar,
-        subscribe('onDidOpenTextDocument', document => { if (getConfig(document).get('lintOnOpen')) fireLint(document); }),
+        subscribe('onDidOpenTextDocument', document => {
+            if (document.isDirty) editedDocuments.add(document.uri.toString());
+            if (getConfig(document).get('lintOnOpen')) fireLint(document);
+        }),
         subscribe('onDidChangeTextDocument', event => {
             const document = event.document; if (!event.contentChanges.length || !isVerilogDocument(document)) return;
-            tasks.cancel(lintKey(document), '文档内容已变化'); clearDebounce(document);
+            editedDocuments.add(document.uri.toString());
+            const affected = invalidateFile(document.uri.fsPath);
+            if (!document.isDirty) scheduleDependents(affected, document);
+            scheduler.invalidate(document); tasks.cancel(lintKey(document), '文档内容已变化');
             if (!getConfig(document).get('lintOnChange')) return;
-            const timer = setTimeout(() => { debounce.delete(document.uri.toString()); fireLint(document); }, Math.max(100, Number(getConfig(document).get('lintDebounceMs')) || 800));
-            debounce.set(document.uri.toString(), timer);
+            scheduler.schedule(document, fireLint);
         }),
-        subscribe('onDidSaveTextDocument', document => { if (getConfig(document).get('lintOnSave')) { clearDebounce(document); fireLint(document); } }),
-        subscribe('onDidCloseTextDocument', document => { clearDebounce(document); tasks.cancel(lintKey(document), '文档已关闭'); removeDiagnostics(document); }),
-        subscribe('onDidChangeConfiguration', event => {
-            if (!['svtools.iverilog', 'svtools.lint', 'svtools.vivado'].some(name => event.affectsConfiguration(name))) return;
-            tasks.cancelAll('工具配置已变化'); deps.resetToolchain(); resetXvlogCache(); updateStatusBar();
-            for (const document of vscode.workspace.textDocuments) fireLint(document);
+        subscribe('onDidSaveTextDocument', document => {
+            if (!isVerilogDocument(document)) return;
+            const changed = editedDocuments.delete(document.uri.toString());
+            const affected = changed ? invalidateFile(document.uri.fsPath, document) : problems.documentsFor(document.uri.fsPath);
+            scheduleDependents(affected, document);
+            if (getConfig(document).get('lintOnSave')) { clearDebounce(document); fireLint(document); }
         }),
+        subscribe('onDidCloseTextDocument', document => { editedDocuments.delete(document.uri.toString()); scheduler.invalidate(document); tasks.cancel(lintKey(document), '文档已关闭'); removeDiagnostics(document); }),
+        subscribe('onDidChangeConfiguration', configurationChanged),
         subscribe('onDidCreateFiles', invalidateSources), subscribe('onDidDeleteFiles', invalidateSources), subscribe('onDidRenameFiles', invalidateSources),
         vscode.window.onDidChangeActiveTextEditor(updateStatusBar),
-        vscode.commands.registerCommand('svtools.iverilog.lint', async () => { deps.resetToolchainFailure(); return reportSummary(await execute(vscode.window.activeTextEditor?.document), currentEngine(vscode.window.activeTextEditor?.document)); }),
+        vscode.commands.registerCommand('svtools.iverilog.lint', async () => { deps.resetToolchainFailure(); return reportSummary(await scheduler.request(vscode.window.activeTextEditor?.document), currentEngine(vscode.window.activeTextEditor?.document)); }),
         vscode.commands.registerCommand('svtools.iverilog.simulate', () => execute(vscode.window.activeTextEditor?.document, 'simulation')),
         vscode.commands.registerCommand('svtools.iverilog.stopSimulation', () => stopSimulation()),
         vscode.commands.registerCommand('svtools.lint.stop', requested => {
             const document = requested?.uri ? requested : vscode.window.activeTextEditor?.document;
-            if (document) tasks.cancel(lintKey(document), '用户停止检查');
+            if (document) { scheduler.invalidate(document); tasks.cancel(lintKey(document), '用户停止检查'); }
         }),
         vscode.commands.registerCommand('svtools.xvlog.elaborate', async (requestedDocument, options = {}) => {
             const document = requestedDocument?.uri ? requestedDocument : vscode.window.activeTextEditor?.document;
-            return reportSummary(await execute(document, 'elaborate', options), 'xelab');
+            return reportSummary(await scheduler.request(document, 'elaborate', options), 'xelab');
         }),
         vscode.commands.registerCommand('svtools.lint.selectEngine', async () => {
             const engine = currentEngine(vscode.window.activeTextEditor?.document);
@@ -197,12 +233,24 @@ function activateIverilog(context, deps) {
         }));
     async function dispose() {
         if (disposed) return; disposed = true;
-        for (const timer of debounce.values()) clearTimeout(timer); debounce.clear(); tasks.cancelAll();
+        editedDocuments.clear(); scheduler.dispose(); tasks.cancelAll();
         output.dispose(); await tasks.dispose();
     }
     context.subscriptions.push({ dispose });
-    for (const document of vscode.workspace.textDocuments) if (getConfig(document).get('lintOnOpen')) fireLint(document);
+    for (const document of vscode.workspace.textDocuments) {
+        if (document.isDirty) editedDocuments.add(document.uri.toString());
+        if (getConfig(document).get('lintOnOpen')) fireLint(document);
+    }
     updateStatusBar();
-    return { lintDocument: document => execute(document), runSimulation: document => execute(document, 'simulation'), stopSimulation, dispose };
+    if (vscode.workspace.createFileSystemWatcher) {
+        const watcher = vscode.workspace.createFileSystemWatcher('**/*.{v,sv,vh,svh}');
+        const changed = uri => {
+            if (disposed || isGeneratedSourcePath(uri.fsPath)) return;
+            if (vscode.workspace.textDocuments.some(document => fileKey(document.uri.fsPath) === fileKey(uri.fsPath))) return;
+            scheduleDependents(invalidateFile(uri.fsPath));
+        };
+        context.subscriptions.push(watcher, watcher.onDidChange(changed), watcher.onDidCreate(changed), watcher.onDidDelete(changed));
+    }
+    return { lintDocument: document => scheduler.request(document), runSimulation: document => execute(document, 'simulation'), stopSimulation, dispose };
 }
 module.exports = { activateIverilog };

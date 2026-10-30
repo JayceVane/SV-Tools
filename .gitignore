@@ -45,6 +45,7 @@ test/*
 !test/vscode_cursor_values_host.js
 !test/vscode_critical_audit_host.js
 !test/vscode_release_host.js
+!test/vscode_lint_host.js
 !test/vscode_header_host.js
 !test/vscode_waveform_host.js
 !test/helpers/
