@@ -1,18 +1,14 @@
-# 4.1 GitHub 发布
+# SV Tools 发行流程
 
-当前正式发布版本为 `4.1.0`，用户已确认先发布GitHub Wiki使用指南，再发布GitHub Release。本轮渠道为GitHub，不执行Marketplace或Open VSX发布。
+正式版本通过 `.github/workflows/release.yml` 发布。版本号、原生模块和CLI同步后，经PR合入master，将正式tag指向合并提交。工作流构建并验证Windows x64 VSIX，上传GitHub Release，随后通过OIDC发布同版本到VS Code Marketplace；预览tag只发布GitHub附件。
 
-Wiki源稿位于 `docs/wiki/`，包含侧栏、页脚和截图；维护方式见 `docs/WIKI.md`。首次Wiki需在GitHub创建Home，之后通过独立Wiki Git仓库同步。发布前核对内部链接、配置/命令、图片来源与公开可访问性。
+Marketplace的Trusted Publishing策略绑定 `JayceVane/SV-Tools`、`release.yml`，当前不设置Environment。仅发布job具有`id-token: write`；无需PAT。补发使用GitHub Actions的Run workflow入口，选择master并填写与当前版本一致的正式tag。补发读取既有Release及SHA256清单，对照tag源码检查安装包，并同步同版本Changelog；文档一致时安装包字节保持不变。
 
-预览使用 `npm run package:preview`，要求干净源码、六处版本一致、CLI匹配并禁止同号覆盖。正式版将六处版本统一为 `4.1.0`，重建原生模块并重新回归，不能重命名beta包替代正式构建。正式包的本地预检可用 `npm run package -- --target win32-x64 --out bin/svtools-v4.1.0-win32-x64.vsix`，先确认目标不存在。
+发布后从Marketplace公开入口取回VSIX核对SHA256。重复版本仅在公开载荷与本次校验值一致时视为成功；运行记录保存安装包及publication.json。GitHub既有附件不被覆盖。Open VSX仍使用现有发布流程。
 
-通过PR合入master后，将 `v4.1.0` tag指向合并提交；CI从该tag独立构建正式附件。保留所有历史Release和附件，同名附件禁止clobber。发布后下载实际附件，核对SHA256、package/CLI版本并执行解包宿主验收。
+Wiki源稿和界面图解位于`docs/wiki/`，维护方式见`docs/WIKI.md`。发布文案描述实际交付功能、使用步骤和支持范围。
 
-`.github/workflows/release.yml` 校验 tag 与 package.json，构建 Windows x64 原生模块及 VSIX，执行 Node/Rust 回归并上传 SHA256 清单。含 `-` 的 tag 使用 GitHub prerelease，不改变稳定版 Latest。已有同名附件时上传失败，禁止 clobber。发布说明取 `docs/releases/<tag>.md`。
-
-打包前执行根目录与 `src/native` 的 npm audit。netlistsvg 仅用于开发验证，其 JSON5/yargs 安全版本 override 需通过真实 `scripts/verify-circuit.js` 验证；生产视图使用独立模型与 ELK。不要用 `npm audit fix --force` 替代兼容性审查。
-
-3.5.0 历史和稳定版附件继续保留。下文 Marketplace 为独立渠道的旧操作指南，本轮不执行。
+下面保留手动发布参考，自动发布以本节和工作流为准。
 
 ---
 
@@ -269,3 +265,7 @@ vsce publish
 prepublish执行`node scripts/check-public-package.js`检查vsce实际文件表。发布CI还会对生成的每个VSIX执行同一脚本的归档检查：文件路径必须位于发行范围内，扩展清单、运行JS和本地化文本必须与当前源码一致。校验归档时应检出对应版本的源码；不要对另一版本的安装包套用当前清单。
 
 旧`src-rust/`缓存及根目录旧`.node`同样排除。复制/压缩前及最终归档均限制4096文件、256 MiB未压缩大小；当前正式运行资源低于此预算。不要通过移除检查来容纳异常缓存，先查看vsce实际文件树。合法资源增长时单独评估预算。
+
+## OIDC发布工具依赖
+
+vsce固定为4.1.0。针对GHSA-g3hv-75wg-m249，定向将vsce的minimatch覆盖为11.0.1；此项超出上游10.x范围，需要以实际文件表和VSIX打包检查兼容性。Azure Identity及uuid沿用既有约束。开发依赖不进入VSIX；更新工具后重新执行audit及发布载荷核验。
