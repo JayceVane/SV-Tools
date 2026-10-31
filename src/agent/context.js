@@ -41,7 +41,7 @@ async function readOptions(input = {}) {
     try { config = await readConfig(configPath); }
     catch (error) { if (error.code !== 'ENOENT' || input.config) fail('CONFIG_INVALID', 'CLI配置读取失败：' + error.message); }
     if (!config || typeof config !== 'object' || Array.isArray(config)) fail('CONFIG_INVALID','CLI配置必须为JSON对象');
-    const allowed = new Set(['schemaVersion','project','fileset','top','includeDirs','defines','standard','iverilog','cygwin','timeoutMs','format']);
+    const allowed = new Set(['schemaVersion','project','fileset','top','includeDirs','defines','standard','iverilog','cygwin','vivado','timeoutMs','format']);
     if (Object.keys(config).length && (config.schemaVersion !== 1 || Object.keys(config).some(key => !allowed.has(key)))) fail('CONFIG_INVALID', 'CLI配置要求schemaVersion=1，且不能含未知字段');
     const options = { ...config, ...Object.fromEntries(Object.entries(input).filter(([,value]) => value !== undefined)), workspace };
     for (const field of ['project','fileset','file','top','iverilog','cygwin']) if (options[field] !== undefined && options[field] !== null && (typeof options[field] !== 'string' || !options[field] || options[field].length>4096 || /[\0\r\n]/.test(options[field]))) fail('CONFIG_INVALID', field + '必须为不含控制字符的非空字符串');

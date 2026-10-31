@@ -4,6 +4,8 @@ const path = require('node:path');
 const { location } = require('./tasks');
 const { readJson, writeJson } = require('./storage');
 const { lint } = require('./operations');
+const { run: vivadoRun } = require('./vivado');
+const OPERATIONS = { lint, 'vivado.run': vivadoRun };
 const { failure } = require('./protocol');
 const { acquireWorkspaceLease } = require('../toolchains/workspace-lease');
 
@@ -26,11 +28,12 @@ async function main(workspace,id) {
     }
     try {
         const request=await readJson(path.join(folder,'request.json'));
-        if(request.operation!=='lint') throw new Error('后台操作未注册');
+        const operation=OPERATIONS[request.operation];
+        if(!operation) throw new Error('后台操作未注册');
         await publish({state:'starting',pid:process.pid}); await poll();
         timer=setInterval(poll,100);
         let output;
-        try { output=await lint(request.options,{signal:controller.signal,onContext:context=>publish({state:'running',context}),
+        try { output=await operation(request.options,{signal:controller.signal,onContext:context=>publish({state:'running',context}),
             onArtifacts:artifacts=>{publish({artifacts}).catch(stop);}}); }
         catch(error) { output=failure('lint',error); }
         clearInterval(timer);
