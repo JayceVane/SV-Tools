@@ -38,6 +38,8 @@
 
 ## 功能总览
 
+4.2 的开发入口见 [CLI 使用说明](docs/CLI.md)：可在不启动 IDE 的情况下查询工程、格式化源码、运行 Icarus 检查并管理后台任务。Agent 可配合仓库中的 [SV Tools Skill](skills/svtools-agent/SKILL.md) 使用；其余能力按 [4.2 计划](docs/V4_2_PLAN.md)推进。
+
 **格式化**（手动 / 选中区域，`docs/FORMAT_SPEC.md` 为唯一行为规范）
 
 - 端口/信号/参数声明、模块例化端口、赋值、case、always 对齐
