@@ -63,7 +63,7 @@ node src/cli/main.js task logs <task-id> --workspace D:/project --offset 0 --lim
 node src/cli/main.js task cancel <task-id> --workspace D:/project
 ```
 
-`task start` 返回 UUID，调用进程退出后后台工作进程仍可运行。目前只注册 `lint` 后台操作。取消通过所属任务的请求传递给已有进程树终止逻辑，不根据历史 PID 杀进程。工作进程非正常退出且没有可信结果时标记 `lost`，不会推测为通过。
+`task start` 返回 UUID，调用进程退出后后台工作进程仍可运行。目前只注册 `lint` 后台操作。取消通过所属任务的请求传递给已有进程树终止逻辑，不根据历史 PID 杀进程。工作进程非正常退出且没有可信结果时标记 `lost`，不会推测为通过。状态依次为 `queued`、`starting`（进程已接管任务并取得租约）、`running`（工程/源码上下文已固定、工具执行中）与终态 `succeeded`/`failed`/`cancelled`/`lost`；进入 `running` 之前的失败不会伪装成已执行的检查。
 
 同一工作区的 CLI 和使用任务目录的插件工具任务共享两个外部进程槽，排队也可取消；同一文件的 CLI 格式化写入互斥。当前最多 16 个活动后台任务、128 份任务记录。任务记录在 `.svtools/agent/tasks/`，完成运行目录默认保留最近 5 次；已清理的日志返回 `ARTIFACT_EXPIRED`。任务记录需另行归档清理，未知或未完成记录不自动删除。
 

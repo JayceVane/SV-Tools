@@ -55,7 +55,7 @@ test('真实后台任务：占用两个共享槽时仍可查询并取消排队�
     const workspace=await fixture(t), held=[await acquireWorkspaceLease(workspace,'tool-process',{slots:1}),await acquireWorkspaceLease(workspace,'tool-process',{slots:2})];
     t.after(()=>Promise.all(held.map(release=>release())));
     const {data:{id}}=await tasks.start({workspace,file:'top.sv'});
-    assert.equal((await tasks.status({workspace},id)).data.task.state,'running');
+    await until(workspace,id,['running']);
     // 配置被编辑坏了，也必须仍能控制已启动任务。
     await fs.writeFile(path.join(workspace,'.svtools','cli.json'),'{ invalid json');
     assert.equal((await tasks.cancel({workspace},id)).data.accepted,true);

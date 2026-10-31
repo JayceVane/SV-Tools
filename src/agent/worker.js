@@ -27,10 +27,10 @@ async function main(workspace,id) {
     try {
         const request=await readJson(path.join(folder,'request.json'));
         if(request.operation!=='lint') throw new Error('后台操作未注册');
-        await publish({state:'running',pid:process.pid}); await poll();
+        await publish({state:'starting',pid:process.pid}); await poll();
         timer=setInterval(poll,100);
         let output;
-        try { output=await lint(request.options,{signal:controller.signal,onContext:context=>publish({context}),
+        try { output=await lint(request.options,{signal:controller.signal,onContext:context=>publish({state:'running',context}),
             onArtifacts:artifacts=>{publish({artifacts}).catch(stop);}}); }
         catch(error) { output=failure('lint',error); }
         clearInterval(timer);

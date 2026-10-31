@@ -95,7 +95,7 @@ function selectTarget(resolved) {
 }
 /** 将本轮输入复制到隔离目录，工具输出映射回原始源码路径。 */
 async function snapshotInputs(resolved, runDirectory) {
-    const root = path.join(runDirectory,'inputs'), mapped = new Map(), reverse = new Map(), byKey=new Map();
+    const root = path.join(runDirectory,'inputs'), mapped = new Map(), reverse = new Map(), byKey=new Map(), unresolved=new Map();
     const relocate = file => path.join(root,...path.resolve(file).replace(/:/g,'').split(/[\\/]+/).filter(Boolean));
     for (const file of resolved.contents.keys()) { const copy=relocate(file); mapped.set(file,copy); reverse.set(keyOf(copy),file);byKey.set(keyOf(file),copy); }
     const includeDirs=[...new Set([...resolved.context.includeDirs,...resolved.context.files.map(file=>path.dirname(file.path))])];
@@ -107,7 +107,9 @@ async function snapshotInputs(resolved, runDirectory) {
             if(!directive) fail('UNSUPPORTED_INCLUDE','M1要求include使用双引号字面量',{file});
             const name=directive[1], candidates=path.isAbsolute(name)?[name]:[path.resolve(path.dirname(file),name),...includeDirs.map(dir=>path.resolve(dir,name))];
             // 未收录的include改指向快照内的缺失路径，由编译器判断条件分支是否实际需要它。
-            const target=candidates.map(candidate=>byKey.get(keyOf(candidate))).find(Boolean) || path.join(root,'unresolved',hash(name),path.basename(name));
+            const known=candidates.map(candidate=>byKey.get(keyOf(candidate))).find(Boolean);
+            const target=known || path.join(root,'unresolved',hash(name),path.basename(name));
+            if(!known) unresolved.set(target,name);
             // include内容不会经过Windows argv路径转换；相对快照根路径兼容Cygwin预处理器。
             chunks.push(text.slice(offset,match.index),'`include "'+path.relative(root,target).replace(/\\/g,'/')+'"');
             offset=match.index+directive[0].length;
@@ -116,7 +118,21 @@ async function snapshotInputs(resolved, runDirectory) {
         const copy=mapped.get(file); await fs.mkdir(path.dirname(copy),{recursive:true});
         await fs.writeFile(copy,rewritten===text?bytes:rewritten,{flag:'wx'});
     }
-    return {root,mapped,reverse,relocate};
+    return {root,mapped,reverse,relocate,unresolved};
+}
+/** 未解析的include在诊断中还原为源码中的原始名称，不暴露本轮快照目录。 */
+function scrubMissingIncludes(findings, snapshot) {
+    const pairs=[];
+    for (const [target,name] of snapshot.unresolved) {
+        pairs.push([target,name],[target.replace(/\\/g,'/'),name],[path.relative(snapshot.root,target).replace(/\\/g,'/'),name]);
+    }
+    pairs.sort((a,b)=>b[0].length-a[0].length);
+    for (const finding of findings) {
+        if (!finding.message) continue;
+        let message=finding.message;
+        for (const [pattern,replacement] of pairs) message=message.split(pattern).join(replacement);
+        finding.message=message;
+    }
 }
 async function lint(input, {signal,onContext,onArtifacts} = {}) {
     const resolved = await resolveContext(input), {context,options} = resolved;
@@ -145,6 +161,7 @@ async function lint(input, {signal,onContext,onArtifacts} = {}) {
         const inputs=[...new Set([...context.units.filter(unit=>unit.kind==='package').map(unit=>unit.file),target.file])].map(file=>snapshot.mapped.get(file));
         const compiled=await iverilog.compileWithModuleResolution(tool,common,inputs,snapshot.root,{task,timeoutMs:options.timeoutMs,
             mapLine,scanSources:async()=>({modules})});
+        if(snapshot.unresolved.size) scrubMissingIncludes(compiled.result.findings,snapshot);
         task.throwIfCancelled(); await assertCurrent(resolved);
         const summary=summarizeToolResult({result:compiled.result,findings:compiled.result.findings,mainFile:target.file,diagnosticsIncomplete:compiled.result.diagnosticsIncomplete});
         response=result('lint',{...summary,runId:task.id,tool:version,top:target.name,files:compiled.files.map(file=>snapshot.reverse.get(keyOf(file))),

@@ -69,6 +69,15 @@ test('真实Icarus：依赖补入、头文件快照、原路径诊断、失败�
     const bad=await command(workspace,['lint','--file','top.sv','--top','top']);assert.equal(bad.code,1,JSON.stringify(bad));
     assert.equal(bad.json.status,'failed');assert(bad.json.diagnostics.some(d=>d.file===path.join(workspace,'child.sv') && d.line===2));
 });
+test('未解析include的诊断指向原始名称，不泄漏本轮快照路径', {skip:!haveIcarus},async t=>{
+    const workspace=await fixture(t);
+    await fs.writeFile(path.join(workspace,'child.sv'),'`include "missing.svh"\nmodule child(input a,output b);assign b=a;endmodule');
+    const output=await command(workspace,['lint','--file','top.sv','--top','top']);
+    assert.equal(output.code,1,JSON.stringify(output));
+    const text=JSON.stringify(output.json.diagnostics);
+    assert(!/unresolved/.test(text) && !/\.svtools/.test(text), text);
+    assert(/missing\.svh/.test(text), text);
+});
 test('真实Icarus：排队时修改源码使结果失效，取消排队不会运行工具', {skip:!haveIcarus},async t=>{
     const workspace=await fixture(t), held=[await acquireWorkspaceLease(workspace,'tool-process',{slots:1})];
     // 第一槽已占用，第二次以slots=2取得另一槽。
