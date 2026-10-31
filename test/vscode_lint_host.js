@@ -60,7 +60,7 @@ async function run() {
     const after = await taskDirs(); assert.equal([...after].filter(name => !before.has(name)).length, 1);
     checks.push('手动lint消费旧防抖，跨过原定时点后只产生一个真实编译任务目录');
     await config.update('lintOnChange', false, vscode.ConfigurationTarget.Workspace);
-    const result = { version: extension.packageJSON.version, flavor: extension.packageJSON.svtoolsBuildFlavor || 'public', checks, count: checks.length };
+    const result = { version: extension.packageJSON.version, checks, count: checks.length };
     await fs.writeFile(path.join(root, '../lint-host-report.json'), JSON.stringify(result, null, 2));
     console.log(JSON.stringify(result));
 }
