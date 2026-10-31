@@ -4,7 +4,7 @@
 
 Marketplace的Trusted Publishing策略绑定 `JayceVane/SV-Tools`、`release.yml`，当前不设置Environment。仅发布job具有`id-token: write`；无需PAT。补发使用GitHub Actions的Run workflow入口，选择master并填写与当前版本一致的正式tag。补发读取既有Release及SHA256清单，对照tag源码检查安装包，并同步同版本Changelog；文档一致时安装包字节保持不变。
 
-发布后从Marketplace公开入口取回VSIX核对SHA256。重复版本仅在公开载荷与本次校验值一致时视为成功；运行记录保存安装包及publication.json。GitHub既有附件不被覆盖。Open VSX仍使用现有发布流程。
+发布后最多等待10分钟让Marketplace公开入口更新，再取回VSIX核对SHA256；等待期间每分钟报告进度。重复版本仅在公开载荷与本次校验值一致时视为成功；运行记录保存安装包及publication.json。GitHub既有附件不被覆盖。Open VSX仍使用现有发布流程。
 
 Wiki源稿和界面图解位于`docs/wiki/`，维护方式见`docs/WIKI.md`。发布文案描述实际交付功能、使用步骤和支持范围。
 

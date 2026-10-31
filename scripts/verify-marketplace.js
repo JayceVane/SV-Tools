@@ -5,7 +5,7 @@ const { getPublicGalleryAPI } = require('@vscode/vsce/out/util');
 const { ExtensionQueryFlags: Flags } = require('azure-devops-node-api/interfaces/GalleryInterfaces');
 
 /** 发布完成后从公开下载入口复核，重复版本也必须与本次发布载荷一致。 */
-async function verifyMarketplace(report, { attempts = 12, delayMs = 10000 } = {}) {
+async function verifyMarketplace(report, { attempts = 60, delayMs = 10000 } = {}) {
     for (let attempt = 0; attempt < attempts; attempt++) {
         const extension = await getPublicGalleryAPI().getExtension('JayceVane.svtools', [Flags.IncludeVersions, Flags.IncludeFiles, Flags.IncludeVersionProperties]);
         const version = extension?.versions?.find(value => value.version === report.version && value.targetPlatform === report.target);
@@ -26,6 +26,7 @@ async function verifyMarketplace(report, { attempts = 12, delayMs = 10000 } = {}
             if (sha256 !== report.sha256) throw new Error('Marketplace同版本安装包与本次载荷的SHA256不一致');
             return { version: report.version, target: report.target, sha256, bytes, verified: true };
         }
+        if (attempt % 6 === 0) console.log(`等待Marketplace公开版本 ${report.version}（第${attempt + 1}/${attempts}次核验）`);
         if (attempt + 1 < attempts) await new Promise(resolve => setTimeout(resolve, delayMs));
     }
     throw new Error('Marketplace尚未公开本次版本；请检查市场扫描状态后重试核验');
