@@ -456,11 +456,16 @@ function buildVivadoDrcScript({ xprPath, run }) {
     return JSON_HELPERS + [
         'open_project ' + tclQuote(xprPath),
         'if {[catch {open_run ' + run + ' -quiet} error]} { puts "SVTOOLS_ERROR [svtStr $error]"; exit 1 }',
+        // get_drc_violations 只返回“上一次DRC”的对象；必须先完成本次DRC，否则会静默得到空列表。
+        'if {[catch {report_drc -quiet} error]} { puts "SVTOOLS_ERROR [svtStr $error]"; exit 1 }',
         'set items [list]',
         'foreach v [get_drc_violations -quiet] {',
-        '    lappend items [svtObj name [svtText $v NAME] rule [svtText $v RULE] severity [svtText $v SEVERITY]]',
+        '    set drcName ""; catch { set drcName [get_property NAME $v] }',
+        '    set drcRule ""; catch { set drcRule [get_property RULE $v] }',
+        '    if {![string length $drcRule]} { set drcRule [lindex [split $drcName #] 0] }',
+        '    lappend items [svtObj name [svtStr $drcName] rule [svtStr $drcRule] severity [svtText $v SEVERITY]]',
         '}',
-        'puts "SVTOOLS_JSON [svtObj run [svtStr ' + run + '] violations [svtArr $items]]"',
+        'puts "SVTOOLS_JSON [svtObj run [svtStr ' + run + '] checked 1 violations [svtArr $items]]"',
         'close_project',
         'puts "SVTOOLS_DONE"'
     ].join('\n') + '\n';

@@ -35,7 +35,7 @@ async function main(workspace,id) {
         let output;
         try { output=await operation(request.options,{signal:controller.signal,onContext:context=>publish({state:'running',context}),
             onArtifacts:artifacts=>{publish({artifacts}).catch(stop);}}); }
-        catch(error) { output=failure('lint',error); }
+        catch(error) { output=failure(request.operation,error); }
         clearInterval(timer);
         await writeJson(path.join(folder,'result.json'),output);
         await publish({state:output.status==='success'?'succeeded':output.status==='cancelled'?'cancelled':'failed',finishedAt:new Date().toISOString(),artifacts:output.artifacts});

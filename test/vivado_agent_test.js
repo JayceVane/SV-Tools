@@ -5,7 +5,10 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const os = require('node:os');
 const tasks = require('../src/agent/tasks');
-const { status, report, createProject, addFiles, setTop } = require('../src/agent/vivado');
+const { status, report, run, createProject, addFiles, setTop } = require('../src/agent/vivado');
+const { argumentsFor } = require('../src/cli/main');
+const { doctor } = require('../src/agent/operations');
+const { resolveContext } = require('../src/agent/context');
 
 async function fixture(t) {
     const workspace = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'svtools-vivado-agent-')));
@@ -108,6 +111,75 @@ test('工程写操作对Tcl错误与未完成显式失败', async t => {
     await fs.writeFile(path.join(workspace, 'a.sv'), 'module a;endmodule');
     await assert.rejects(addFiles({ workspace, project: 'top.xpr', sources: ['a.sv'] }, { runner: async () => 'SVTOOLS_TCL_ERROR boom\n' }), { code: 'VIVADO_SCRIPT_FAILED' });
     await assert.rejects(addFiles({ workspace, project: 'top.xpr', sources: ['a.sv'] }, { runner: async () => 'SVTOOLS_ADDED a.sv\n' }), { code: 'VIVADO_SCRIPT_FAILED' });
+});
+
+test('--jobs 不被解析器丢弃，数值参数保持', () => {
+    const parsed = argumentsFor(['vivado', 'run', '--jobs', '12', '--timeout', '60000']);
+    assert.equal(parsed.input.jobs, 12);
+    assert.equal(parsed.input.timeoutMs, 60000);
+});
+
+test('工具执行失败（退出码非零）即使有marker也必须报错', async t => {
+    const workspace = await fixture(t);
+    await assert.rejects(status({ workspace, project: 'top.xpr' }, { runner: async () => ({ stdout: 'SVTOOLS_JSON {"version":"2022.1.2","part":"x","tops":{"sources":null,"sim":null},"runs":[]}\nSVTOOLS_DONE\n', exitCode: 7 }) }), { code: 'VIVADO_EXEC_FAILED' });
+});
+
+test('run状态为ERROR时不能返回成功', async t => {
+    const workspace = await fixture(t);
+    await assert.rejects(run({ workspace, project: 'top.xpr', run: 'synth_1' }, { runner: async () => 'SVTOOLS_RUN_STATUS synth_design ERROR 0%\nSVTOOLS_DONE\n' }), { code: 'VIVADO_RUN_FAILED' });
+});
+
+test('取消优先于失败：中止后返回TOOL_CANCELLED而不是脚本失败', async t => {
+    const workspace = await fixture(t);
+    const controller = new AbortController();
+    controller.abort();
+    await assert.rejects(run({ workspace, project: 'top.xpr', run: 'synth_1' }, { signal: controller.signal, runner: async () => 'SVTOOLS_RUN_STATUS synth_design Complete! 100%\nSVTOOLS_DONE\n' }), { code: 'TOOL_CANCELLED' });
+});
+
+test('报告绑定run输入：改源后过期、还原后当前', async t => {
+    const workspace = await fixture(t);
+    const done = async () => 'SVTOOLS_RUN_STATUS synth_design Complete! 100%\nSVTOOLS_DONE\n';
+    await run({ workspace, project: 'top.xpr', run: 'synth_1' }, { runner: done });
+    const table = 'SVTOOLS_UTIL | Instance | Module | Total LUTs | Logic LUTs | LUTRAMs | SRLs | FFs | RAMB36 | RAMB18 | DSP Blocks |\nSVTOOLS_UTIL | (top) | (top) | 10 | 10 | 0 | 0 | 16 | 0 | 0 | 0 |\nSVTOOLS_DONE\n';
+    const fresh = await report({ workspace, project: 'top.xpr', kind: 'utilization', run: 'synth_1' }, { runner: async () => table });
+    assert.equal(fresh.data.stale, false);
+    assert.equal(fresh.data.runInfo.status, 'synth_design Complete! 100%');
+    const file = path.join(workspace, 'top.sv');
+    const original = await fs.readFile(file, 'utf8');
+    await fs.writeFile(file, original + '\n// changed');
+    const stale = await report({ workspace, project: 'top.xpr', kind: 'utilization', run: 'synth_1' }, { runner: async () => table });
+    assert.equal(stale.data.stale, true);
+    assert(stale.data.staleInputs.some(value => value.endsWith('top.sv')), JSON.stringify(stale.data.staleInputs));
+    await fs.writeFile(file, original);
+    const restored = await report({ workspace, project: 'top.xpr', kind: 'utilization', run: 'synth_1' }, { runner: async () => table });
+    assert.equal(restored.data.stale, false);
+});
+
+test('XDC变化改变上下文revision，报告据此可判失效', async t => {
+    const workspace = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'svtools-vivado-xdc-')));
+    t.after(() => fs.rm(workspace, { recursive: true, force: true }));
+    await fs.writeFile(path.join(workspace, 'top.sv'), 'module top(input clk);endmodule');
+    await fs.writeFile(path.join(workspace, 'top.xdc'), 'create_clock -period 10 [get_ports clk]');
+    await fs.writeFile(path.join(workspace, 'design.xpr'), '<Project Version="7"><Configuration><Option Name="Part" Val="xc7z100ffg900-2"/></Configuration><FileSets><FileSet Name="sources_1" Type="DesignSrcs"><File Path="top.sv"/></FileSet><FileSet Name="constrs_1" Type="Constrs"><File Path="top.xdc"/></FileSet><FileSet Name="sim_1" Type="SimulationSrcs"/></FileSets></Project>');
+    const first = await resolveContext({ workspace, project: 'design.xpr' });
+    assert.equal(first.context.constraints.length, 1);
+    assert(first.context.constraints[0].sha256);
+    await fs.writeFile(path.join(workspace, 'top.xdc'), 'create_clock -period 5 [get_ports clk]');
+    const second = await resolveContext({ workspace, project: 'design.xpr' });
+    assert.notEqual(second.context.revision, first.context.revision);
+});
+
+test('doctor能力清单包含工程生命周期命令', async t => {
+    const workspace = await fixture(t);
+    const output = await doctor({ workspace });
+    for (const name of ['project.create', 'project.add', 'project.set-top']) assert(output.data.capabilities.includes(name), name);
+});
+
+test('DRC脚本先执行report_drc再读取违规对象', () => {
+    const tclgen = require('../src/vivado/tclgen');
+    const script = tclgen.buildVivadoDrcScript({ xprPath: 'C:/x/top.xpr', run: 'synth_1' });
+    assert(script.indexOf('report_drc') >= 0);
+    assert(script.indexOf('report_drc') < script.indexOf('get_drc_violations'));
 });
 
 test('后台操作白名单拒绝未知operation', async t => {

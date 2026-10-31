@@ -2,8 +2,8 @@
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const { result, fail, identity } = require('./protocol');
-const { resolveContext, readOptions } = require('./context');
-const { directory } = require('./storage');
+const { resolveContext, readOptions, hash } = require('./context');
+const { directory, writeJson, readJson } = require('./storage');
 const { findVivadoBinDir, normalizeVivadoDir, buildBatchArgs } = require('../vivado/toolchain');
 const { runVivadoBatchTask } = require('../vivado/batch');
 const { createToolTaskManager } = require('../toolchains/job');
@@ -39,7 +39,12 @@ async function execute(options, script, { task, timeoutMs, runner } = {}) {
         const runDirectory = await job.directory(base, 'vivado');
         const scriptPath = path.join(runDirectory, 'script.tcl');
         await fs.writeFile(scriptPath, script, { encoding: 'utf8', flag: 'wx' });
-        if (runner) return { stdout: String(await runner({ script, scriptPath, runDirectory }) || ''), runDirectory, scriptPath, logs: [] };
+        if (runner) {
+            const produced = await runner({ script, scriptPath, runDirectory });
+            const stdout = typeof produced === 'string' ? produced : String(produced?.stdout ?? '');
+            const exitCode = typeof produced === 'string' ? 0 : Number(produced?.exitCode ?? 0);
+            return { summary: { ok: exitCode === 0, exitCode, message: exitCode === 0 ? null : '注入runner退出码' + exitCode, issues: [] }, stdout, runDirectory, scriptPath, logs: [] };
+        }
         const executable = await locateVivado(options);
         const summary = await runVivadoBatchTask({ task: job, executable, args: buildBatchArgs(scriptPath), cwd: runDirectory, scriptPath,
             timeoutMs: timeoutMs || options.timeoutMs });
@@ -65,11 +70,47 @@ function markers(stdout) {
 
 function artifactLogs(logs) { return logs.map(file => ({ kind: 'log', path: file })); }
 
+function tclErrorLine(stdout) {
+    const line = String(stdout || '').split(/\r?\n/).find(value => value.startsWith('SVTOOLS_TCL_ERROR'));
+    return line ? line.slice('SVTOOLS_TCL_ERROR'.length).trim() : null;
+}
+/** 运行器summary.ok/exitCode与Tcl错误都参与判定：只看marker会把失败执行当成功。 */
+function ensureSucceeded(summary, stdout) {
+    if (!summary) return;
+    const tclError = tclErrorLine(stdout);
+    if (summary.ok && !tclError) return;
+    if (tclError) fail('VIVADO_SCRIPT_FAILED', 'Vivado脚本执行失败：' + tclError, { exitCode: summary.exitCode ?? null });
+    fail('VIVADO_EXEC_FAILED', summary.message || 'Vivado执行未成功', { exitCode: summary.exitCode ?? null, issues: (summary.issues || []).slice(0, 5) });
+}
+/** run完成时的输入快照：报告只能对这份快照的源码与约束负责。 */
+function inputSnapshot(context) {
+    return { files: (context.files || []).map(entry => ({ path: entry.path, sha256: entry.sha256 })),
+        constraints: (context.constraints || []).map(entry => ({ path: entry.path, sha256: entry.sha256 })) };
+}
+function manifestFile(base, xpr, run) { return path.join(base, hash(xpr).slice(0, 16) + '-' + run + '.json'); }
+function changedInputs(recorded, current) {
+    const currentMap = new Map([...(current.files || []), ...(current.constraints || [])].map(entry => [entry.path, entry.sha256]));
+    const recordedMap = new Map([...(recorded.files || []), ...(recorded.constraints || [])].map(entry => [entry.path, entry.sha256]));
+    const changed = [];
+    for (const [file, sha] of currentMap) if (recordedMap.get(file) !== sha) changed.push(file);
+    for (const file of recordedMap.keys()) if (!currentMap.has(file)) changed.push(file);
+    return [...new Set(changed)];
+}
+/** 报告与run输入绑定：没有记录时 stale=null（未知），有记录时按当前源码/约束判定过期。 */
+async function runBinding(options, xpr, run, context) {
+    const base = await directory(options.workspace, 'vivado', 'manifests');
+    let manifest = null;
+    try { manifest = await readJson(manifestFile(base, xpr, run)); }
+    catch (error) { if (error.code !== 'ENOENT') throw error; }
+    if (!manifest) return { runInfo: null, stale: null, staleInputs: [] };
+    const staleInputs = changedInputs(manifest.inputs || {}, inputSnapshot(context));
+    return { runInfo: { status: manifest.status || null, completedAt: manifest.completedAt || null, revision: manifest.context?.revision || null }, stale: staleInputs.length > 0, staleInputs };
+}
+
 /** 工程写操作：Tcl错误与未完成都要显式失败；不能只凭退出码或日志尾部判定成功。 */
 function lifecycle(stdout, summary) {
+    ensureSucceeded(summary, stdout);
     const lines = String(stdout || '').split(/\r?\n/);
-    const tclError = lines.find(line => line.startsWith('SVTOOLS_TCL_ERROR'));
-    if (tclError) fail('VIVADO_SCRIPT_FAILED', 'Vivado脚本执行失败：' + tclError.slice('SVTOOLS_TCL_ERROR'.length).trim());
     if (!lines.some(line => line.startsWith('SVTOOLS_DONE'))) fail('VIVADO_SCRIPT_FAILED', (summary && summary.message) || 'Vivado脚本未正常结束', { markers: lines.filter(line => line.startsWith('SVTOOLS_')).slice(0, 5) });
     return lines;
 }
@@ -129,7 +170,8 @@ async function setTop(input, { runner } = {}) {
 
 async function status(input, { runner } = {}) {
     const { options, context, xpr } = await vivadoTarget(input);
-    const { stdout, logs } = await execute(options, tclgen.buildVivadoStatusScript({ xprPath: xpr }), { runner });
+    const { stdout, summary, logs } = await execute(options, tclgen.buildVivadoStatusScript({ xprPath: xpr }), { runner });
+    ensureSucceeded(summary, stdout);
     const [data] = markers(stdout);
     return result('vivado.status', { ...data, project: context.project }, context, [], artifactLogs(logs));
 }
@@ -139,25 +181,30 @@ async function report(input, { runner } = {}) {
     const kind = input.kind || 'timing';
     if (!REPORT_DEFAULT_RUN[kind]) fail('INVALID_ARGUMENT', '报告类型必须为timing、utilization或drc');
     const selected = run || REPORT_DEFAULT_RUN[kind];
+    const binding = async () => runBinding(options, xpr, selected, context);
     if (kind === 'utilization') {
-        const { stdout, logs } = await execute(options, tclgen.buildVivadoUtilizationScript({ xprPath: xpr, run: selected }), { runner });
+        const { stdout, summary: utilSummary, logs } = await execute(options, tclgen.buildVivadoUtilizationScript({ xprPath: xpr, run: selected }), { runner });
+        ensureSucceeded(utilSummary, stdout);
         // batch stdout 同时含 marker 集合与完整日志，整表会出现两遍；按行去重后解析。
         const text = [...new Set(String(stdout).split(/\r?\n/).filter(line => line.startsWith('SVTOOLS_UTIL')).map(line => line.slice('SVTOOLS_UTIL'.length).trimStart()))].join('\n');
         if (!text) markers(stdout);
-        return result('vivado.report', { kind, run: selected, summary: tclgen.parseUtilHierSummary(text), textBytes: Buffer.byteLength(text) }, context, [], artifactLogs(logs));
+        return result('vivado.report', { kind, run: selected, summary: tclgen.parseUtilHierSummary(text), textBytes: Buffer.byteLength(text), ...(await binding()) }, context, [], artifactLogs(logs));
     }
     const script = kind === 'timing'
         ? tclgen.buildVivadoTimingScript({ xprPath: xpr, run: selected, maxPaths: input.maxPaths || 10 })
         : tclgen.buildVivadoDrcScript({ xprPath: xpr, run: selected });
-    const { stdout, logs } = await execute(options, script, { runner });
+    const { stdout, summary: reportSummary, logs } = await execute(options, script, { runner });
+    ensureSucceeded(reportSummary, stdout);
     const [data] = markers(stdout);
-    return result('vivado.report', { kind, ...data }, context, [], artifactLogs(logs));
+    return result('vivado.report', { kind, ...data, ...(await binding()) }, context, [], artifactLogs(logs));
 }
 
 /** 后台操作：launch_runs + wait_on_run（Vivado自有并发与队列），进度由任务状态承载。 */
-async function run(input, { signal, onContext, onArtifacts } = {}) {
+async function run(input, { signal, onContext, onArtifacts, runner } = {}) {
     const { options, context, xpr, run: selected } = await vivadoTarget(input);
     const target = selected || 'synth_1';
+    // 排队请求携带启动时的 revision；工程/源码已变化时不能拿旧上下文跑新任务。
+    if (input.expectedRevision && input.expectedRevision !== context.revision) fail('CONTEXT_CHANGED', '任务启动前工程或源码已经变化，本轮结果失效', {}, 4);
     const manager = createToolTaskManager({ onChange: task => onArtifacts?.(artifactLogs(task.logPaths)) });
     const job = manager.start('cli-vivado-run');
     const cancel = () => job.cancel('CLI请求取消');
@@ -166,12 +213,17 @@ async function run(input, { signal, onContext, onArtifacts } = {}) {
         await onContext?.(identity(context));
         // CLI 的 run 是显式"现在运行"：先 reset，已完成的 run 才会真正重跑。
         const script = tclgen.buildLaunchRunScript({ xprPath: xpr, run: target, jobs: input.jobs || 4, reset: true });
-        const { stdout, summary: runSummary, logs } = await execute(options, script, { task: job, timeoutMs: input.timeoutMs || options.timeoutMs });
+        const { stdout, summary: runSummary, logs } = await execute(options, script, { task: job, timeoutMs: input.timeoutMs || options.timeoutMs, runner });
+        // 取消优先于失败：中止的进程没有完成记录，不能报成脚本失败。
+        if (signal?.aborted || job.signal?.aborted) fail('TOOL_CANCELLED', 'Vivado运行已取消', { run: target, artifacts: artifactLogs(logs) }, 3);
         const lines = lifecycle(stdout, runSummary);
         const line = lines.find(value => value.startsWith('SVTOOLS_RUN_STATUS')) || '';
         const status = line.slice('SVTOOLS_RUN_STATUS'.length).trim();
         if (!status) fail('VIVADO_NO_RESULT', 'Vivado未返回run状态');
-        return result('vivado.run', { run: target, status: status || null }, context, [], artifactLogs(logs));
+        if (/\b(?:ERROR|Failed|Aborted)\b/i.test(status) && !/Complete/i.test(status)) fail('VIVADO_RUN_FAILED', 'Vivado运行未成功：' + status, { run: target, status }, 1);
+        const manifest = { run: target, status, completedAt: new Date().toISOString(), context: identity(context), inputs: inputSnapshot(context) };
+        await writeJson(manifestFile(await directory(options.workspace, 'vivado', 'manifests'), xpr, target), manifest);
+        return result('vivado.run', { run: target, status }, context, [], artifactLogs(logs));
     } finally {
         signal?.removeEventListener('abort', cancel);
         await job.finish({ keepArtifacts: true }); await manager.dispose();

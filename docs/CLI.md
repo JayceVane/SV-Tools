@@ -114,7 +114,8 @@ node src/cli/main.js task cancel <task-id> --workspace D:/project
 | `TASK_LIMIT`、`TASK_RECORD_LIMIT` | 活动任务或任务记录达到上限 | 归档旧任务记录后重试 |
 | `TASK_NOT_FOUND`、`INVALID_TASK_ID`、`LOG_NOT_FOUND` | 任务或日志序号不存在 | 检查 UUID 与 `--log-index` |
 | `LOG_NOT_READY`、`ARTIFACT_EXPIRED` | 日志尚未生成或已被清理 | 先查 `task status`；历史日志不可恢复 |
-| `VIVADO_SCRIPT_FAILED`、`VIVADO_NO_RESULT`、`VIVADO_RESULT_INVALID` | Vivado 未执行到可输出阶段或结果不可解析 | 检查工程可打开与 run 阶段；不得当作空数据通过 |
+| `VIVADO_SCRIPT_FAILED`、`VIVADO_EXEC_FAILED`、`VIVADO_NO_RESULT`、`VIVADO_RESULT_INVALID` | Vivado 脚本/进程失败、未执行到可输出阶段或结果不可解析 | 检查工程可打开与 run 阶段；不得当作空数据通过 |
+| `VIVADO_RUN_FAILED` | run 状态为 ERROR/Failed/Aborted | 读日志定位失败阶段；不得当作完成 |
 | `SERVICE_FAILED` | 未分类失败 | 读 `diagnostics` 与对应日志产物 |
 
 ## Vivado（M2）
@@ -126,9 +127,10 @@ node src/cli/main.js task cancel <task-id> --workspace D:/project
   - 默认 run：timing/drc 用 impl_1，utilization 用 synth_1；
   - `timing`：`paths[]`（name/startpoint/endpoint/slack/pathgroup/logic），数值为 JSON number，不可测属性为 `null`；
   - `utilization`：`summary[]` 分层行摘要与 `textBytes`；
-  - `drc`：`violations[]`（name/rule/severity）；
-  - 工程无法打开或 run 阶段未完成时返回 `VIVADO_SCRIPT_FAILED`，不以空数据代替未执行。
-- `vivado run [--run synth_1|impl_1] [--jobs n]`：后台任务，用 `task status/logs/cancel` 管理。显式 run 表示"现在运行"：先 `reset_run` 再 `launch_runs`，已完成的 run 也会真实重跑；成功时 `data.status` 为 Vivado 的 run 状态文本（如 `synth_design Complete! 100%`）。
+  - `drc`：先执行本次 DRC 再读取违规对象，`checked=1`，`violations[]`（name/rule/severity）；
+  - 报告附带 run 绑定的输入快照：`runInfo`（该 run 的状态/完成时间/revision）与 `stale`/`staleInputs`。`stale=true` 表示源码或约束在该 run 之后变化，结果不能当作当前证据；`stale=null` 表示没有该 run 的记录（未知）。
+  - 工程无法打开、run 阶段未完成或工具执行失败时分别返回 `VIVADO_SCRIPT_FAILED`、`VIVADO_EXEC_FAILED`，不以空数据代替未执行。
+- `vivado run [--run synth_1|impl_1] [--jobs n]`：后台任务，用 `task status/logs/cancel` 管理。显式 run 表示"现在运行"：先 `reset_run` 再 `launch_runs`，已完成的 run 也会真实重跑；成功时 `data.status` 为 Vivado 的 run 状态文本（如 `synth_design Complete! 100%`）；状态含 ERROR/Failed/Aborted 时返回 `VIVADO_RUN_FAILED`。成功后会记录该 run 的输入快照，供后续报告判定 `stale`。
 
 工程写操作：
 

@@ -94,6 +94,14 @@ async function resolveContext(input = {}) {
     const memberMap=new Map(selectedSets.flatMap(set=>set.files).filter(hdl).map(file=>[keyOf(file),file]));
     const members=selected ? [...memberMap.values()] : await walk(workspace,hdl);
     const includeDirs = [...new Set([...(snapshot?.includeDirs || []), ...(options.includeDirs || []).map(dir => path.resolve(workspace,dir))])];
+    // 约束文件同样决定"这一轮结果是否还有效"：变更XDC必须改变revision。
+    const constraintPaths=[...new Set((snapshot?.sets || []).filter(set=>set.type==='Constrs').flatMap(set=>set.files).map(file=>path.resolve(file)))];
+    const constraints=[];
+    for (const file of constraintPaths) {
+        const stat=await fs.stat(file).catch(()=>null);
+        if (!stat?.isFile() || stat.size>MAX_FILE_BYTES) { constraints.push({path:file,sha256:null}); continue; }
+        constraints.push({path:file,sha256:hash(await fs.readFile(file))});
+    }
     const files = new Set(members.map(file => path.resolve(file)));
     for (const directory of includeDirs) for (const file of await walk(directory, file => hdl(file) || /\.(?:inc|h)$/i.test(file))) files.add(file);
     if (files.size > MAX_FILES) fail('SOURCE_LIMIT', '源码和include文件超过4096项');
@@ -126,7 +134,7 @@ async function resolveContext(input = {}) {
     const top = options.top || selected?.top || null;
     const context = { id: hash(JSON.stringify([workspace,project?.path || null,selected?.name || 'workspace'])),
         workspace, project: snapshot ? {kind:snapshot.kind,path:snapshot.path,name:snapshot.name} : null,
-        fileset:selected?.name || 'workspace', top, files:entries, units, includeDirs,
+        fileset:selected?.name || 'workspace', top, files:entries, constraints, units, includeDirs,
         defines:[...(snapshot?.defines || []),...(options.defines || [])], standard:options.standard || 'auto',
         limitations:['设计单元清单为静态声明索引，宏与生成分支的有效性由实际编译器判断。',
             ...(project?.kind==='vivado'?['M1从XPR提取文件集与top；宏和include目录须通过CLI配置提供，暂不还原Vivado完整编译环境。']:[])] };
