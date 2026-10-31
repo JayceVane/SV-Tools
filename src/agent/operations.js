@@ -16,7 +16,7 @@ const { createToolTaskManager } = require('../toolchains/job');
 const { summarizeToolResult, processSucceeded } = require('../toolchains/result');
 const { acquireWorkspaceLease } = require('../toolchains/workspace-lease');
 
-const capabilities = ['doctor','project.list','project.inspect','format.preview','format.check','format.write','lint','task.start','task.list','task.status','task.logs','task.cancel'];
+const capabilities = ['doctor','project.list','project.inspect','format.preview','format.check','format.write','lint','vivado.status','vivado.report','vivado.run','task.start','task.list','task.status','task.logs','task.cancel'];
 async function locateIverilog(options) {
     const executable = process.platform === 'win32' ? 'iverilog.exe' : 'iverilog';
     const configured = options.iverilog ? path.resolve(options.workspace,options.iverilog) : null;

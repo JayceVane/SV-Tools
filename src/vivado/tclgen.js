@@ -138,6 +138,21 @@ function buildRemoveFilesScript(xprPath, file, fileset) {
     ]);
 }
 
+/** 批量加入文件：逐文件报告 SVTOOLS_ADDED 或 SVTOOLS_ALREADY_IN，供幂等调用与审计。 */
+function buildAddFilesBatchScript({ xprPath, files, fileset }) {
+    const body = ['set fs [get_filesets ' + tclQuote(fileset) + ']'];
+    for (const file of files) {
+        body.push('set f ' + tclQuote(file));
+        body.push('if {[llength [get_files -quiet -of $fs $f]] == 0} {');
+        body.push('    add_files -fileset $fs $f');
+        body.push('    puts "SVTOOLS_ADDED $f"');
+        body.push('} else { puts "SVTOOLS_ALREADY_IN $f" }');
+        body.push('if {[string match -nocase *.sv $f]} { catch { set_property file_type SystemVerilog [get_files -of $fs $f] } }');
+    }
+    body.push('update_compile_order -fileset $fs');
+    return wrapProjectScript(xprPath, body);
+}
+
 /**
  * 生成"设置文件集顶层"TCL（sources_1 → 综合顶层；sim_1 → 仿真顶层）。
  * @param {{xprPath:string, fileset:string, top:string}} o
@@ -208,13 +223,22 @@ function buildMoveFileScript(o) {
  */
 function buildLaunchRunScript(o) {
     const step = o.toStep ? ' -to_step ' + o.toStep : '';
+    // reset：显式"重新运行"语义（源已变化的已完成run需重置，否则launch_runs拒绝）。
     return [
-        'open_project ' + tclQuote(o.xprPath),
-        'update_compile_order -fileset sources_1',
-        'launch_runs ' + o.run + step + ' -jobs ' + (o.jobs || 4),
-        'wait_on_run ' + o.run,
-        'set r [get_runs ' + o.run + ']',
-        'puts "SVTOOLS_RUN_STATUS [get_property STATUS $r] [get_property PROGRESS $r]"',
+        'if {[catch {',
+        '    open_project ' + tclQuote(o.xprPath),
+        '    update_compile_order -fileset sources_1',
+        ...(o.reset ? ['    reset_run ' + o.run] : []),
+        '    launch_runs ' + o.run + step + ' -jobs ' + (o.jobs || 4),
+        '    wait_on_run ' + o.run,
+        '    set r [get_runs ' + o.run + ']',
+        '    puts "SVTOOLS_RUN_STATUS [get_property STATUS $r] [get_property PROGRESS $r]"',
+        '} errMsg]} {',
+        '    puts "SVTOOLS_TCL_ERROR $errMsg"',
+        '    catch { close_project }',
+        '    exit 1',
+        '}',
+        'close_project',
         'puts "SVTOOLS_DONE"'
     ].join('\n') + '\n';
 }
@@ -362,10 +386,92 @@ function parseLogicLevelSummary(rptText) {
     return '逻辑级数分布: 无时序路径数据';
 }
 
+// 无 tcllib 依赖的单行 JSON 输出：显式构造已序列化片段，避免 Tcl 列表/字典二义性。
+// svtText 归一化多元素属性（如时序路径 NAME），svtNumProp 让数值属性保持 JSON number。
+const JSON_HELPERS = String.raw`
+proc svtStr {s} {
+    set map [list "\\" "\\\\" "\"" "\\\"" "\n" "\\n" "\r" "\\r" "\t" "\\t"]
+    return "\"[string map $map $s]\""
+}
+proc svtObj {args} {
+    set parts [list]
+    foreach {k v} $args { lappend parts "[svtStr $k]:$v" }
+    return "{[join $parts ,]}"
+}
+proc svtArr {items} { return "\[[join $items ,]\]" }
+proc svtText {obj prop} {
+    if {[catch {get_property $prop $obj} v] || ![string length $v]} { return null }
+    return [svtStr [join $v " "]]
+}
+proc svtNumProp {obj prop} {
+    if {[catch {get_property $prop $obj} v] || ![string length $v]} { return null }
+    if {[string is double -strict $v]} { return $v }
+    return [svtStr [join $v " "]]
+}
+`;
+
+/** 打开工程输出版本/器件/两种top/全部run状态，供无界面状态查询。 */
+function buildVivadoStatusScript({ xprPath }) {
+    return JSON_HELPERS + [
+        'open_project ' + tclQuote(xprPath),
+        'set runs [list]',
+        'foreach r [get_runs -quiet] {',
+        '    lappend runs [svtObj name [svtText $r NAME] status [svtText $r STATUS] progress [svtText $r PROGRESS]]',
+        '}',
+        'set tops [svtObj sources [svtText [get_filesets sources_1] TOP] sim [svtText [get_filesets sim_1] TOP]]',
+        'puts "SVTOOLS_JSON [svtObj version [svtStr [version -short]] part [svtText [current_project] PART] tops $tops runs [svtArr $runs]]"',
+        'close_project',
+        'puts "SVTOOLS_DONE"'
+    ].join('\n') + '\n';
+}
+
+/** 打开指定run并输出结构化时序路径；无路径时保持空数组而不是零错误通过。 */
+function buildVivadoTimingScript({ xprPath, run, maxPaths }) {
+    return JSON_HELPERS + [
+        'open_project ' + tclQuote(xprPath),
+        'if {[catch {open_run ' + run + ' -quiet} error]} { puts "SVTOOLS_ERROR [svtStr $error]"; exit 1 }',
+        'set items [list]',
+        'foreach p [get_timing_paths -max_paths ' + String(Math.max(1, Number(maxPaths) || 10)) + ' -quiet] {',
+        '    lappend items [svtObj name [svtText $p NAME] slack [svtNumProp $p SLACK] startpoint [svtText $p STARTPOINT_PIN] endpoint [svtText $p ENDPOINT_PIN] pathgroup [svtText $p PATH_GROUP] logic [svtNumProp $p LOGIC_LEVELS]]',
+        '}',
+        'puts "SVTOOLS_JSON [svtObj run [svtStr ' + run + '] paths [svtArr $items]]"',
+        'close_project',
+        'puts "SVTOOLS_DONE"'
+    ].join('\n') + '\n';
+}
+
+/** 输出分层资源报告的原始文本行，由 parseUtilHierSummary 解析为摘要。 */
+function buildVivadoUtilizationScript({ xprPath, run }) {
+    return JSON_HELPERS + [
+        'open_project ' + tclQuote(xprPath),
+        'if {[catch {open_run ' + run + ' -quiet} error]} { puts "SVTOOLS_ERROR [svtStr $error]"; exit 1 }',
+        'foreach line [split [report_utilization -hierarchical -return_string -quiet] "\n"] { puts "SVTOOLS_UTIL $line" }',
+        'close_project',
+        'puts "SVTOOLS_DONE"'
+    ].join('\n') + '\n';
+}
+
+/** 输出DRC违规对象（名称/规则/严重级别）。2022.1 的 report_drc 无 -format JSON，故统一走 Tcl 对象属性，缺失属性为 null。 */
+function buildVivadoDrcScript({ xprPath, run }) {
+    return JSON_HELPERS + [
+        'open_project ' + tclQuote(xprPath),
+        'if {[catch {open_run ' + run + ' -quiet} error]} { puts "SVTOOLS_ERROR [svtStr $error]"; exit 1 }',
+        'set items [list]',
+        'foreach v [get_drc_violations -quiet] {',
+        '    lappend items [svtObj name [svtText $v NAME] rule [svtText $v RULE] severity [svtText $v SEVERITY]]',
+        '}',
+        'puts "SVTOOLS_JSON [svtObj run [svtStr ' + run + '] violations [svtArr $items]]"',
+        'close_project',
+        'puts "SVTOOLS_DONE"'
+    ].join('\n') + '\n';
+}
+
 module.exports = {
     tclQuote, tclList, wrapProjectScript,
     buildCreateProjectScript, buildAddFilesScript, buildRemoveFilesScript, buildSimulateScript,
     buildSetTopScript, buildMoveFileScript, buildLaunchRunScript, buildRunReportsScript,
     buildOocReportsScript, parseUtilHierSummary, parseLogicLevelSummary,
+    buildVivadoStatusScript, buildVivadoTimingScript, buildVivadoUtilizationScript, buildVivadoDrcScript,
+    buildAddFilesBatchScript,
     extractVivadoIssues, firstModuleName
 };

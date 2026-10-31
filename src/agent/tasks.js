@@ -10,6 +10,7 @@ const { result, fail } = require('./protocol');
 const { acquireWorkspaceLease } = require('../toolchains/workspace-lease');
 const ID = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/;
 const terminal = new Set(['succeeded','failed','cancelled','lost']);
+const BACKGROUND_OPERATIONS = new Set(['lint','vivado.run']);
 
 async function location(input,id) {
     if (!ID.test(id || '')) fail('INVALID_TASK_ID','任务ID必须为UUID');
@@ -41,6 +42,8 @@ async function status(input,id) {
 }
 async function start(input) {
     const resolved=await resolveContext(input), {options,context}=resolved;
+    const operation=input.operation || 'lint';
+    if(!BACKGROUND_OPERATIONS.has(operation)) fail('INVALID_ARGUMENT','不支持的后台操作：'+operation);
     const release=await acquireWorkspaceLease(options.workspace,'task-create');
     let folder,id;
     try {
@@ -53,13 +56,14 @@ async function start(input) {
         }
         if(active>=16) fail('TASK_LIMIT','同时活动的后台任务上限为16',{},4);
         id=randomUUID(); folder=await directory(options.workspace,'tasks',id);
-        await writeJson(path.join(folder,'request.json'),{operation:'lint',options:{...options,expectedRevision:context.revision}});
-        await writeJson(path.join(folder,'status.json'),{id,state:'queued',operation:'lint',createdAt:new Date().toISOString(),context:{id:context.id,revision:context.revision}});
+        await writeJson(path.join(folder,'request.json'),{operation,options:{...options,expectedRevision:context.revision}});
+        await writeJson(path.join(folder,'status.json'),{id,state:'queued',operation,createdAt:new Date().toISOString(),context:{id:context.id,revision:context.revision}});
         const child=spawn(process.execPath,[path.join(__dirname,'worker.js'),options.workspace,id],{detached:true,windowsHide:true,stdio:'ignore',env:{...process.env,ELECTRON_RUN_AS_NODE:'1'}});
         await new Promise((done,reject)=>{child.once('spawn',done);child.once('error',reject);});
         child.unref();
     } finally { await release(); }
-    const deadline=Date.now()+10000;
+    // 启动确认与租约等待同量级（30s）：Windows 高负载或杀毒扫描会拉长进程启动，超时仍会请求取消。
+    const deadline=Date.now()+30000;
     while(Date.now()<deadline) {
         const state=await readJson(path.join(folder,'status.json'));
         if(state.state!=='queued') return result('task.start',{id,state:state.state},context);

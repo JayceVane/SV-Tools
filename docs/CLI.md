@@ -96,4 +96,46 @@ node src/cli/main.js task cancel <task-id> --workspace D:/project
 
 文件/设计单元列表支持 `--offset`、`--limit`，单页最多 200 项；日志单次最多 65536 字节，`--log-index` 选择某个日志。`nextOffset` 指示后续页。源码最多 4096 份、单文件 8 MiB、合计 64 MiB；目录扫描最多 50000 项、32 层。不会把完整日志或未来的大 VCD 塞入一个 JSON 响应。
 
-Agent 使用入口见 [SV Tools Skill](../skills/svtools-agent/SKILL.md)。Vivado 运行/报告、架构视图、波形查询以及 MCP 当前不属于已实现命令；按 `doctor.data.capabilities` 发现实际接口。
+## 错误码与判定
+
+失败响应的 `diagnostics[0].code` 是稳定判定依据；`message` 只供人读，不要用文本匹配分支。
+
+| code | 含义 | Agent 应做 |
+|---|---|---|
+| `INVALID_ARGUMENT`、`CONFIG_INVALID`、`INVALID_WORKSPACE` | 参数、配置或工作区不合法 | 修正输入后重试，不要猜测替代值 |
+| `AMBIGUOUS_PROJECT`、`AMBIGUOUS_FILESET`、`AMBIGUOUS_SOURCESET`、`AMBIGUOUS_TOP` | 存在多个合法上下文 | 用返回的 `candidates` 显式指定；不要借用其他工程或编辑器的选择 |
+| `FILE_NOT_IN_CONTEXT`、`SOURCE_NOT_FOUND` | 目标文件不属于所选工程/文件集，或源文件不存在 | 先确认 `project`/`fileset` 与路径，再重试 |
+| `TOOL_NOT_FOUND`、`TOOL_UNAVAILABLE`、`VIVADO_NOT_FOUND` | 依赖缺失或无法启动 | 未执行，不是失败结论；安装或指定路径后重跑 |
+| `CONTEXT_CHANGED` | 源码/配置在本轮期间变化，结果失效 | 重新运行；旧结果不得作为当前证据 |
+| `FORMAT_INVARIANT`、`UNSAFE_PATH`、`SOURCE_CHANGED` | 写入被安全规则拒绝 | 不要绕过或手工拼接写入 |
+| `RESOURCE_BUSY`、`WORKER_START_TIMEOUT` | 资源被占用或后台启动超时 | 稍后重试；先检查是否有未清理的并发任务 |
+| `UNSUPPORTED_INCLUDE` | 宏 include 不在 M1 支持范围 | 改用双引号字面量 include，或在上下文外处理 |
+| `SCAN_LIMIT`、`SOURCE_LIMIT` | 工作区或源码规模超出预算 | 缩小 `--workspace` 或用 `--project`/`--fileset` 收敛范围 |
+| `TASK_LIMIT`、`TASK_RECORD_LIMIT` | 活动任务或任务记录达到上限 | 归档旧任务记录后重试 |
+| `TASK_NOT_FOUND`、`INVALID_TASK_ID`、`LOG_NOT_FOUND` | 任务或日志序号不存在 | 检查 UUID 与 `--log-index` |
+| `LOG_NOT_READY`、`ARTIFACT_EXPIRED` | 日志尚未生成或已被清理 | 先查 `task status`；历史日志不可恢复 |
+| `VIVADO_SCRIPT_FAILED`、`VIVADO_NO_RESULT`、`VIVADO_RESULT_INVALID` | Vivado 未执行到可输出阶段或结果不可解析 | 检查工程可打开与 run 阶段；不得当作空数据通过 |
+| `SERVICE_FAILED` | 未分类失败 | 读 `diagnostics` 与对应日志产物 |
+
+## Vivado（M2）
+
+`--project` 指向 `.xpr`；`--vivado`（安装根目录、bin 目录或 vivado.bat）或 CLI 配置中的 `vivado` 指定安装位置。
+
+- `vivado status`：Vivado 版本、器件、sources/sim 两种 top、全部 run 的状态与进度。
+- `vivado report timing|utilization|drc [--run synth_1|impl_1] [--max-paths n]`：
+  - 默认 run：timing/drc 用 impl_1，utilization 用 synth_1；
+  - `timing`：`paths[]`（name/startpoint/endpoint/slack/pathgroup/logic），数值为 JSON number，不可测属性为 `null`；
+  - `utilization`：`summary[]` 分层行摘要与 `textBytes`；
+  - `drc`：`violations[]`（name/rule/severity）；
+  - 工程无法打开或 run 阶段未完成时返回 `VIVADO_SCRIPT_FAILED`，不以空数据代替未执行。
+- `vivado run [--run synth_1|impl_1] [--jobs n]`：后台任务，用 `task status/logs/cancel` 管理。显式 run 表示"现在运行"：先 `reset_run` 再 `launch_runs`，已完成的 run 也会真实重跑；成功时 `data.status` 为 Vivado 的 run 状态文本（如 `synth_design Complete! 100%`）。
+
+工程写操作：
+
+- `project create --name <n> [--dir <d>] [--part <p>] [--top <t>] [--sim-top <t>]`：同名工程已存在时打开而非重建，返回 `created` 布尔与工程身份；
+- `project add --source <file> [--source <file>...] [--target-fileset sources_1|constrs_1|sim_1]`：按扩展名推断目标文件集（`.xdc` → `constrs_1`，其余 `sources_1`），返回 `added`/`already` 绝对路径列表；文件不存在报 `SOURCE_NOT_FOUND`；
+- `project set-top [--top <t>] [--sim-top <t>]`：分别写入 `sources_1`/`sim_1` 顶层，返回 `applied`。
+
+三者返回的 `context` 是写操作完成后的重新解析结果，可直接作为后续命令的版本依据。
+
+Agent 使用入口见 [SV Tools Skill](../skills/svtools-agent/SKILL.md)。架构视图、波形查询与 MCP 当前不属于已实现命令；按 `doctor.data.capabilities` 发现实际接口。

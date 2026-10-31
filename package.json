@@ -60,7 +60,7 @@
     "vscode:prepublish": "npm test && node scripts/check-public-package.js",
     "check": "node scripts/check-js.js",
     "cli": "node src/cli/main.js",
-    "test:agent": "node --test test/agent_context_test.js test/agent_service_test.js test/agent_task_test.js",
+    "test:agent": "node --test --test-concurrency=1 test/agent_storage_test.js test/agent_context_test.js test/agent_service_test.js test/agent_task_test.js test/vivado_agent_test.js test/vivado_real_test.js test/cli_doc_test.js",
     "test:retention": "node --test test/task_retention_test.js",
     "build:circuit": "node scripts/build-circuit-assets.js",
     "test:circuit": "npm run build:circuit && node scripts/test-circuit.js"
