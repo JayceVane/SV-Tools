@@ -45,6 +45,8 @@ node src/cli/main.js lint --workspace D:/project --file src/top.sv --top top
 
 未知配置字段、无效类型和超预算会明确失败。CLI 不读取编辑器设置或未保存缓冲区。重复 `--include` 和 `--define` 可分别指定目录与宏。
 
+输入预算按类别独立，可在配置中用 `budget` 覆盖（单位 MiB，括号内为当前默认，待真实工程基准后定稿）：`textMiB`（64）文本总量、`textFileMiB`（8）单个文本、`initMiB`（64）初始化数据总量、`initFileMiB`（64）单个初始化文件、`binaryMiB`（2048）二进制输入总量、`binaryFileMiB`（2048）单个二进制、`cacheMiB`（8192）内容寻址缓存上限。二进制输入以流式复制并计算哈希，不占用文本预算；相同内容按哈希去重，只落一份缓存对象。缓存按最近成功构建的引用集合剪枝（构建目录保留最近 5 次，与磁盘总量分开管理）。
+
 ## 格式化与检查
 
 `format` 默认只返回最多 32768 字符的预览，不写源码。`--check` 在有格式差异时退出 1；`--write` 才会写入，并在替换前复核源码和工程身份。除普通空格、Tab、CR、LF 外，其余字符值、数量和顺序必须保持；不满足时拒绝写入。只接受严格 UTF-8 输入。
@@ -139,6 +141,15 @@ node src/cli/main.js task cancel <task-id> --workspace D:/project
 当前隔离适配覆盖普通RTL、字面量include、显式数据文件和常规XDC。IP/BD、显式增量DCP、外部Tcl运行钩子、宏include及XDC中的动态外部读取暂返回 `SNAPSHOT_UNSUPPORTED`，不会声称这些依赖已被完整捕获。工具自动生成的增量缓存不复制，隔离副本执行完整重建。
 
 没有Agent构建记录的既有工程仍可读取原run的报告，包括已有IP工程；此时返回 `stale=null`、`runInfo=null`，仅表示报告读取成功，不构成对当前源码的验证。输入隔离的限制针对新建可信构建绑定，不阻止已有报告查询。
+
+`vivado run` 与 `vivado report` 的结果同时给出四个**互不合并**的证据轴：
+
+- `execution`：工具是否真的跑完（run/status/runId/toolVersion）；
+- `inputs`：输入是否被完整捕获（`completeness`、`fingerprint`、各类 `used`）；
+- `regeneration`：能否由源配置重建（`source` 可重建；`artifact` 仅绑定产物；`unknown`）；
+- `verification`：验证做到哪一步（`checks[]`、`acceptance`）。当前 `acceptance=false` 表示只有构建/检查，**不代表功能验证通过**。
+
+Agent 不得把 `execution.success` 当作 `inputs.complete`，也不得把任一轴当作 `verification.acceptance`。
 
 工程写操作：
 

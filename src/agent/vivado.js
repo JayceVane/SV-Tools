@@ -9,7 +9,7 @@ const { runVivadoBatchTask } = require('../vivado/batch');
 const { createToolTaskManager } = require('../toolchains/job');
 const { acquireWorkspaceLease } = require('../toolchains/workspace-lease');
 const { keyOf, inside } = require('../project/model');
-const { captureInputs, materialize, verifyCopies, checkpoints, fileIdentity } = require('./vivado-inputs');
+const { captureInputs, materialize, verifyCopies, checkpoints, fileIdentity, pruneCache } = require('./vivado-inputs');
 const tclgen = require('../vivado/tclgen');
 
 const RUN_NAME = /^(?:synth|impl)_\d+$/;
@@ -105,7 +105,7 @@ async function runBinding(options, xpr, run, capture) {
     const staleInputs=[...new Set([...manifest.inputs,...captured.inputs].filter(file=>old.get(keyOf(file.path))!==now.get(keyOf(file.path))).map(file=>file.path))];
     const configChanged=JSON.stringify(manifest.config)!==JSON.stringify(captured.config);
     return {project:real,captured,data:{runInfo:{id:manifest.runId,status:manifest.status,completedAt:manifest.completedAt,revision:manifest.context.revision,project:real,toolVersion:manifest.toolVersion},
-        stale:configChanged || staleInputs.length>0,staleInputs,configurationChanged:configChanged}};
+        evidence:manifest.evidence || null,stale:configChanged || staleInputs.length>0,staleInputs,configurationChanged:configChanged}};
 }
 
 /** 工程写操作：Tcl错误与未完成都要显式失败；不能只凭退出码或日志尾部判定成功。 */
@@ -256,11 +256,20 @@ async function run(input, { signal, onContext, onArtifacts, runner } = {}) {
         await verifyCopies(snapshot);
         const outputs=await checkpoints(snapshot,tagged(lines,'SVTOOLS_CHECKPOINT'));
         const current=await ensureInputsCurrent(resolved,target,captured);
+        const toolVersion = tagged(lines,'SVTOOLS_RUN_VERSION')[0] || null;
+        // 四轴分开表达：能运行/输入已捕获/可否重建/验证做到哪一步，不合并成单一“可信”。
+        const evidence = {
+            execution: { run: target, status, runId: job.id, toolVersion },
+            inputs: { completeness: 'complete', fingerprint: captured.fingerprint, used: captured.used },
+            regeneration: { mode: 'source' },
+            verification: { checks: [target.startsWith('impl_') ? 'synth+impl' : 'synth'], acceptance: false }
+        };
         const manifest = {schemaVersion:2,state:'complete',runId:job.id,run:target,status,project:snapshot.project,
-            toolVersion:tagged(lines,'SVTOOLS_RUN_VERSION')[0] || null,completedAt:new Date().toISOString(),context:identity(current),inputs:captured.inputs,copies:snapshot.copies,config:captured.config,checkpoints:outputs};
+            toolVersion,completedAt:new Date().toISOString(),context:identity(current),inputs:captured.inputs,copies:snapshot.copies,config:captured.config,checkpoints:outputs,evidence};
         await writeJson(path.join(buildDirectory,'manifest.json'),manifest);
         await writeJson(pointer,manifest);
-        return result('vivado.run', { run:target,status,runId:job.id,project:snapshot.project,inputFingerprint:captured.fingerprint }, current, [], artifactLogs(logs).concat([{kind:'manifest',path:path.join(buildDirectory,'manifest.json')} ]));
+        await pruneCache(options.workspace).catch(()=>{});
+        return result('vivado.run', { run:target,status,runId:job.id,project:snapshot.project,inputFingerprint:captured.fingerprint,evidence }, current, [], artifactLogs(logs).concat([{kind:'manifest',path:path.join(buildDirectory,'manifest.json')} ]));
     } catch(error) {
         if(!(error instanceof Error)) error=new Error(String(error));
         if(job.signal.aborted) {error.code='TOOL_CANCELLED';error.exitCode=3;}

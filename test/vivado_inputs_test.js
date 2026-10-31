@@ -98,6 +98,50 @@ test('后台结果当前性包含初始化数据，不能仅比较RTL上下文re
     assert.equal((await report({...input,kind:'timing'},{runner:timing})).data.stale,true);
 });
 
+
+test('预算按输入类别独立：二进制大文件不受文本单文件上限约束',async t=>{
+    const input=await fixture(t);
+    const big=Buffer.alloc(20*1024*1024,0x41);
+    await fs.writeFile(path.join(input.workspace,'big.dat'),big);
+    await fs.writeFile(path.join(input.workspace,'top.xpr'),configuration().replace('<File Path="$PPRDIR/top.sv"/>','<File Path="$PPRDIR/top.sv"/><File Path="$PPRDIR/big.dat"/>'));
+    const resolved=await resolveContext(input),captured=await captureInputs(resolved,'synth_1');
+    const binary=captured.inputs.find(entry=>entry.path.endsWith('big.dat'));
+    assert.equal(binary.kind,'binary');assert.equal(binary.size,big.length);
+    assert(captured.used.binary>=big.length);
+    await assert.rejects(captureInputs(await resolveContext({...input,budget:{binaryFileMiB:1}}),'synth_1'),{code:'SOURCE_LIMIT'});
+});
+
+test('文本文件按单文件预算拒绝，且错误给出实测大小',async t=>{
+    const input=await fixture(t);
+    await fs.writeFile(path.join(input.workspace,'top.sv'),'// '+('x'.repeat(2*1024*1024))+'\nmodule top;endmodule');
+    await assert.rejects(resolveContext({...input,budget:{textFileMiB:1}}),error=>error.code==='SOURCE_LIMIT' && error.details.limit===1024*1024);
+});
+
+test('相同内容按哈希去重：两个文件只落一份缓存对象',async t=>{
+    const input=await fixture(t),shared='module shared;endmodule';
+    await fs.writeFile(path.join(input.workspace,'a.sv'),shared);
+    await fs.writeFile(path.join(input.workspace,'b.sv'),shared);
+    await fs.writeFile(path.join(input.workspace,'top.xpr'),configuration().replace('<File Path="$PPRDIR/top.sv"/>','<File Path="$PPRDIR/top.sv"/><File Path="$PPRDIR/a.sv"/><File Path="$PPRDIR/b.sv"/>'));
+    const captured=await captureInputs(await resolveContext(input),'synth_1');
+    const both=captured.inputs.filter(entry=>/a\.sv$|b\.sv$/.test(entry.path));
+    assert.equal(both.length,2);assert.equal(both[0].sha256,both[1].sha256);
+    const cache=path.join(input.workspace,'.svtools','agent','vivado','cache');
+    const objects=[];for(const bucket of await fs.readdir(cache)) for(const name of await fs.readdir(path.join(cache,bucket))) if(!name.startsWith('.tmp-')) objects.push(name);
+    assert.equal(objects.length,new Set(captured.inputs.map(entry=>entry.sha256)).size);
+});
+
+test('结果分四轴表达：执行/输入/可重建/验证不合并为单一可信',async t=>{
+    const input=await fixture(t);
+    const output=await run(input,{runner:completed});
+    const evidence=output.data.evidence;
+    assert.equal(evidence.execution.status,'synth_design Complete! 100%');assert.equal(evidence.execution.toolVersion,'test');
+    assert.equal(evidence.inputs.completeness,'complete');assert(evidence.inputs.fingerprint);
+    assert.equal(evidence.regeneration.mode,'source');
+    assert.deepEqual(evidence.verification.checks,['synth']);assert.equal(evidence.verification.acceptance,false);
+    const reportOut=await report({...input,kind:'timing'},{runner:timing});
+    assert.equal(reportOut.data.evidence.regeneration.mode,'source');assert.equal(reportOut.data.stale,false);
+});
+
 test('没有绑定的既有IP工程仍可查询报告，但只能返回来源未知',async t=>{
     const input=await fixture(t),xpr=path.join(input.workspace,'top.xpr');
     await fs.writeFile(xpr,configuration().replace('<File Path="$PPRDIR/top.sv"/>','<File Path="$PPRDIR/top.sv"/><File Path="$PPRDIR/ip.xci"/>'));

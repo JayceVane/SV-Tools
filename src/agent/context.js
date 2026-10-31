@@ -42,12 +42,19 @@ async function readOptions(input = {}) {
     try { config = await readConfig(configPath); }
     catch (error) { if (error.code !== 'ENOENT' || input.config) fail('CONFIG_INVALID', 'CLI配置读取失败：' + error.message); }
     if (!config || typeof config !== 'object' || Array.isArray(config)) fail('CONFIG_INVALID','CLI配置必须为JSON对象');
-    const allowed = new Set(['schemaVersion','project','fileset','top','includeDirs','defines','standard','iverilog','cygwin','vivado','timeoutMs','format']);
+    const allowed = new Set(['schemaVersion','project','fileset','top','includeDirs','defines','standard','iverilog','cygwin','vivado','timeoutMs','format','budget']);
     if (Object.keys(config).length && (config.schemaVersion !== 1 || Object.keys(config).some(key => !allowed.has(key)))) fail('CONFIG_INVALID', 'CLI配置要求schemaVersion=1，且不能含未知字段');
     const options = { ...config, ...Object.fromEntries(Object.entries(input).filter(([,value]) => value !== undefined)), workspace };
     for (const field of ['project','fileset','file','top','iverilog','cygwin']) if (options[field] !== undefined && options[field] !== null && (typeof options[field] !== 'string' || !options[field] || options[field].length>4096 || /[\0\r\n]/.test(options[field]))) fail('CONFIG_INVALID', field + '必须为不含控制字符的非空字符串');
     for (const field of ['includeDirs','defines']) if (options[field] !== undefined && (!Array.isArray(options[field]) || options[field].length > MAX_FILES || options[field].some(v => typeof v !== 'string' || /[\0\r\n]/.test(v)))) fail('CONFIG_INVALID', field + '必须为字符串数组');
     if (options.timeoutMs !== undefined && (!Number.isSafeInteger(options.timeoutMs) || options.timeoutMs < 100 || options.timeoutMs > 3600000)) fail('CONFIG_INVALID', 'timeoutMs要求100至3600000毫秒');
+    if (options.budget !== undefined) {
+        const keys = { textMiB: 4096, initMiB: 4096, binaryMiB: 16384, cacheMiB: 65536, textFileMiB: 256, initFileMiB: 1024, binaryFileMiB: 16384 };
+        if (!options.budget || typeof options.budget !== 'object' || Array.isArray(options.budget)) fail('CONFIG_INVALID', 'budget必须为对象');
+        for (const [name, value] of Object.entries(options.budget)) {
+            if (!(name in keys) || !Number.isSafeInteger(value) || value < 1 || value > keys[name]) fail('CONFIG_INVALID', '无效预算项：' + name);
+        }
+    }
     if (options.standard !== undefined && !['auto','default','1995','2001','2005','2005-sv','2009','2012'].includes(options.standard)) fail('CONFIG_INVALID','不支持的语言标准');
     if (options.format !== undefined) {
         const names = ['tabSize','indentStyle','useTab','maxConsecutiveEmptyLines','stripEmptyLine','ignoreTick','oneDeclPerLine','oneBindPerLine','alignComma','paramOneLine','importSameLine','instAlignPort','inlineCompact','blankCompact','portNameGap'];
@@ -74,6 +81,10 @@ async function listProjects(workspace) {
 
 async function resolveContext(input = {}) {
     const { options, configPath, configHash } = await readOptions(input), { workspace } = options;
+    // 文本类预算由配置驱动（默认沿用64MiB/8MiB）；二进制输入使用独立预算，见 vivado-inputs。
+    const budgetBlock = options.budget || {};
+    const fileCap = (Number.isSafeInteger(budgetBlock.textFileMiB) ? budgetBlock.textFileMiB : 8) * 1024 * 1024;
+    const totalCap = (Number.isSafeInteger(budgetBlock.textMiB) ? budgetBlock.textMiB : 64) * 1024 * 1024;
     let project;
     if (options.project) project = { kind: /\.xpr$/i.test(options.project) ? 'vivado' : 'svtools', path: path.resolve(workspace, options.project) };
     else {
@@ -106,7 +117,7 @@ async function resolveContext(input = {}) {
         const handle=await fs.open(file,'r');
         try {
             const stat=await handle.stat();constraintBytes+=stat.size;
-            if(!stat.isFile() || stat.size>MAX_FILE_BYTES || constraintBytes>MAX_SOURCE_BYTES) fail('SOURCE_LIMIT','约束快照超过安全预算',{file});
+            if(!stat.isFile() || stat.size>fileCap || constraintBytes>totalCap) fail('SOURCE_LIMIT','约束快照超过安全预算',{file,size:stat.size,limit:fileCap});
             const buffer=Buffer.alloc(stat.size+1),{bytesRead}=await handle.read(buffer,0,buffer.length,0);
             if(bytesRead!==stat.size) fail('SOURCE_CHANGED','读取期间约束发生变化',{file});
             const bytes=buffer.subarray(0,bytesRead);constraints.push({path:file,sha256:hash(bytes)});auxiliaryContents.set(file,{bytes,text:new TextDecoder('utf-8',{fatal:true,ignoreBOM:true}).decode(bytes)});
@@ -122,8 +133,8 @@ async function resolveContext(input = {}) {
             const index = next++, file = ordered[index], handle = await fs.open(file,'r');
             try {
                 const stat = await handle.stat();
-                if (!stat.isFile() || stat.size > MAX_FILE_BYTES) fail('SOURCE_LIMIT', '源码必须为不超过8MiB的普通文件', {file});
-                totalBytes += stat.size; if (totalBytes > MAX_SOURCE_BYTES) fail('SOURCE_LIMIT','源码快照超过64MiB');
+                if (!stat.isFile() || stat.size > fileCap) fail('SOURCE_LIMIT', '源码超出单文件预算', {file,size:stat.size,limit:fileCap});
+                totalBytes += stat.size; if (totalBytes > totalCap) fail('SOURCE_LIMIT','源码快照超出总预算',{used:totalBytes,limit:totalCap});
                 const buffer = Buffer.alloc(stat.size+1), {bytesRead} = await handle.read(buffer,0,buffer.length,0);
                 if (bytesRead !== stat.size) fail('SOURCE_CHANGED','读取期间源码变化',{file});
                 const bytes = buffer.subarray(0,bytesRead);
@@ -146,7 +157,7 @@ async function resolveContext(input = {}) {
             const handle=await fs.open(file,'r');
             try {
                 const stat=await handle.stat();totalBytes+=stat.size;
-                if(stat.size>MAX_FILE_BYTES || totalBytes>MAX_SOURCE_BYTES) fail('SOURCE_LIMIT','include依赖超过源码预算',{file});
+                if(stat.size>fileCap || totalBytes>totalCap) fail('SOURCE_LIMIT','include依赖超过源码预算',{file,limit:fileCap});
                 const buffer=Buffer.alloc(stat.size+1),{bytesRead}=await handle.read(buffer,0,buffer.length,0);
                 if(bytesRead!==stat.size) fail('SOURCE_CHANGED','读取include期间文件变化',{file});
                 const bytes=buffer.subarray(0,bytesRead),value={bytes,text:new TextDecoder('utf-8',{fatal:true,ignoreBOM:true}).decode(bytes)};
