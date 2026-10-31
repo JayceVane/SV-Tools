@@ -2,7 +2,7 @@
 
 All notable changes to the SystemVerilog VSCode Extension will be documented in this file.
 
-## [Unreleased]
+## [4.1.1] - 2026-10-31
 
 ### 电路查看器
 
