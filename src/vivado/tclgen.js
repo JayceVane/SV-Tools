@@ -427,7 +427,7 @@ function buildVivadoUtilizationScript({ xprPath, run }) {
     ].join('\n') + '\n';
 }
 
-/** 输出DRC违规对象（名称/规则/严重级别），不含文本报告解析。 */
+/** 输出DRC违规对象（名称/规则/严重级别）。2022.1 的 report_drc 无 -format JSON，故统一走 Tcl 对象属性，缺失属性为 null。 */
 function buildVivadoDrcScript({ xprPath, run }) {
     return JSON_HELPERS + [
         'open_project ' + tclQuote(xprPath),

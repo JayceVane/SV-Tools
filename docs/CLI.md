@@ -98,16 +98,15 @@ node src/cli/main.js task cancel <task-id> --workspace D:/project
 
 ## Vivado（M2）
 
-需要 `--project` 指向 `.xpr`，并按需提供 `--vivado`（安装根目录、bin 目录或 vivado.bat）或 CLI 配置中的 `vivado`。
+`--project` 指向 `.xpr`；`--vivado`（安装根目录、bin 目录或 vivado.bat）或 CLI 配置中的 `vivado` 指定安装位置。
 
-- `vivado status`：版本、器件、sources/sim 两种 top、全部 run 的状态与进度。
+- `vivado status`：Vivado 版本、器件、sources/sim 两种 top、全部 run 的状态与进度。
 - `vivado report timing|utilization|drc [--run synth_1|impl_1] [--max-paths n]`：
-  - `timing` 走 Tcl 时序路径对象（SLACK/起终点等），数值保持 JSON number，缺失属性为 null；
-  - `utilization` 取 `report_utilization -return_string` 的分层表并解析为行摘要；
-  - `drc` 取 `get_drc_violations` 对象（名称/规则/严重级别）。
-  - 默认 run：timing/drc 用 impl_1，utilization 用 synth_1；阶段未完成时明确报 `VIVADO_SCRIPT_FAILED`。
-- `vivado run [--run synth_1|impl_1] [--jobs n]`：后台任务（`launch_runs` + `wait_on_run`），用 `task status/logs/cancel` 管理。
+  - 默认 run：timing/drc 用 impl_1，utilization 用 synth_1；
+  - `timing`：`paths[]`（name/startpoint/endpoint/slack/pathgroup/logic），数值为 JSON number，不可测属性为 `null`；
+  - `utilization`：`summary[]` 分层行摘要与 `textBytes`；
+  - `drc`：`violations[]`（name/rule/severity）；
+  - 工程无法打开或 run 阶段未完成时返回 `VIVADO_SCRIPT_FAILED`，不以空数据代替未执行。
+- `vivado run [--run synth_1|impl_1] [--jobs n]`：后台任务，用 `task status/logs/cancel` 管理。
 
-2022.1 实测：`report_drc` 无 `-format JSON`，因此结构化数据一律取自 Tcl 对象查询；Tcl 侧用转义安全的 JSON 片段拼装，错误 marker 优先于结果 marker。
-
-Agent 使用入口见 [SV Tools Skill](../skills/svtools-agent/SKILL.md)。Vivado 运行/报告、架构视图、波形查询以及 MCP 当前不属于已实现命令；按 `doctor.data.capabilities` 发现实际接口。
+Agent 使用入口见 [SV Tools Skill](../skills/svtools-agent/SKILL.md)。架构视图、波形查询与 MCP 当前不属于已实现命令；按 `doctor.data.capabilities` 发现实际接口。
