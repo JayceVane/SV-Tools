@@ -1,17 +1,30 @@
-name: Release 附件
+name: Release 发布
 
 # 原生模块与 vsix 不再进版本库（历史里的 23MB 对象是仓库膨胀的唯一来源），
 # 改为随 tag 发布到 GitHub Releases 供下载与回溯。
 on:
   push:
     tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: '补发到 Marketplace 的正式版本 tag（须与 master 当前版本一致）'
+        required: true
+        type: string
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
 
 jobs:
   assets:
+    if: github.event_name == 'push'
     name: 构建并上传 .node 与 vsix
+    permissions:
+      contents: write
     runs-on: windows-latest
     timeout-minutes: 30
     steps:
@@ -84,3 +97,68 @@ jobs:
           fi
           gh release upload "$TAG" bin/svtools.win32-x64-msvc.node bin/svtools.exe bin/*.vsix bin/SHA256SUMS.txt
         shell: bash
+
+  marketplace:
+    name: 发布到 VS Code Marketplace
+    needs: assets
+    if: >-
+      always() && github.repository == 'JayceVane/SV-Tools' &&
+      ((github.event_name == 'push' && needs.assets.result == 'success' && !contains(github.ref_name, '-')) ||
+       (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master'))
+    runs-on: windows-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 确认正式发布版本
+        id: release
+        env:
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          node -e 'const t=process.env.RELEASE_TAG,p=require("./package.json");if(!/^v\d+\.\d+\.\d+$/.test(t)||t!=="v"+p.version)throw Error("tag与当前正式版本不一致");require("fs").appendFileSync(process.env.GITHUB_OUTPUT,"tag="+t+"\n")'
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.release.outputs.tag }}
+          path: .release-source
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: 安装发布工具与发行资源依赖
+        run: |
+          npm ci
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          npm ci --ignore-scripts --prefix .release-source
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          npm run build:circuit --prefix .release-source
+
+      - name: 获取并核验发行附件
+        id: package
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          gh release download $env:RELEASE_TAG --repo JayceVane/SV-Tools --pattern "svtools-${env:RELEASE_TAG}-win32-x64.vsix" --pattern SHA256SUMS.txt --dir bin/marketplace-release
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node scripts/prepare-marketplace.js $env:RELEASE_TAG .release-source bin/marketplace-release
+
+      - name: 使用 Trusted Publishing 发布
+        env:
+          VSIX_PATH: ${{ steps.package.outputs.vsix }}
+        run: node node_modules/@vscode/vsce/vsce publish --oidc --packagePath $env:VSIX_PATH --skip-duplicate
+
+      - name: 复核 Marketplace 公开下载
+        run: node scripts/verify-marketplace.js bin/marketplace-release/marketplace/publication.json
+
+      - name: 保存发布包与校验记录
+        if: always() && steps.package.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: marketplace-${{ steps.release.outputs.tag }}
+          path: bin/marketplace-release/marketplace/*
+          retention-days: 30
