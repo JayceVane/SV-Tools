@@ -39,7 +39,7 @@ function argumentsFor(argv) {
     try { parsed=parseArgs({args:argv,options,allowPositionals:true,strict:true}); }
     catch(error) { fail('INVALID_ARGUMENT',error.message); }
     const input={...parsed.values};
-    for(const [from,to] of [['timeout','timeoutMs'],['log-index','logIndex'],['max-paths','maxPaths'],['jobs','jobs'],['sim-top','simTop'],['source','sources'],['target-fileset','filesetTarget']]) if(input[from]!==undefined) {input[to]=input[from]; delete input[from];}
+    for(const [from,to] of [['timeout','timeoutMs'],['log-index','logIndex'],['max-paths','maxPaths'],['sim-top','simTop'],['source','sources'],['target-fileset','filesetTarget']]) if(input[from]!==undefined) {input[to]=input[from]; delete input[from];}
     for(const field of ['timeoutMs','offset','limit','logIndex','maxPaths','jobs']) if(input[field]!==undefined) {
         if(!/^\d+$/.test(input[field]) || !Number.isSafeInteger(Number(input[field]))) fail('INVALID_ARGUMENT',field+'必须为非负整数');
         input[field]=Number(input[field]);

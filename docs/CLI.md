@@ -45,6 +45,8 @@ node src/cli/main.js lint --workspace D:/project --file src/top.sv --top top
 
 未知配置字段、无效类型和超预算会明确失败。CLI 不读取编辑器设置或未保存缓冲区。重复 `--include` 和 `--define` 可分别指定目录与宏。
 
+输入预算按类别独立，可在配置中用 `budget` 覆盖（单位 MiB，括号内为当前默认，待真实工程基准后定稿）：`textMiB`（64）文本总量、`textFileMiB`（8）单个文本、`initMiB`（64）初始化数据总量、`initFileMiB`（64）单个初始化文件、`binaryMiB`（2048）二进制输入总量、`binaryFileMiB`（2048）单个二进制、`cacheMiB`（8192）内容寻址缓存上限。二进制输入以流式复制并计算哈希，不占用文本预算；相同内容按哈希去重，只落一份缓存对象。缓存按最近成功构建的引用集合剪枝（构建目录保留最近 5 次，与磁盘总量分开管理）。
+
 ## 格式化与检查
 
 `format` 默认只返回最多 32768 字符的预览，不写源码。`--check` 在有格式差异时退出 1；`--write` 才会写入，并在替换前复核源码和工程身份。除普通空格、Tab、CR、LF 外，其余字符值、数量和顺序必须保持；不满足时拒绝写入。只接受严格 UTF-8 输入。
@@ -114,7 +116,10 @@ node src/cli/main.js task cancel <task-id> --workspace D:/project
 | `TASK_LIMIT`、`TASK_RECORD_LIMIT` | 活动任务或任务记录达到上限 | 归档旧任务记录后重试 |
 | `TASK_NOT_FOUND`、`INVALID_TASK_ID`、`LOG_NOT_FOUND` | 任务或日志序号不存在 | 检查 UUID 与 `--log-index` |
 | `LOG_NOT_READY`、`ARTIFACT_EXPIRED` | 日志尚未生成或已被清理 | 先查 `task status`；历史日志不可恢复 |
-| `VIVADO_SCRIPT_FAILED`、`VIVADO_NO_RESULT`、`VIVADO_RESULT_INVALID` | Vivado 未执行到可输出阶段或结果不可解析 | 检查工程可打开与 run 阶段；不得当作空数据通过 |
+| `VIVADO_SCRIPT_FAILED`、`VIVADO_EXEC_FAILED`、`VIVADO_NO_RESULT`、`VIVADO_RESULT_INVALID` | Vivado 脚本/进程失败、未执行到可输出阶段或结果不可解析 | 检查工程可打开与 run 阶段；不得当作空数据通过 |
+| `VIVADO_RUN_FAILED` | run 状态为 ERROR/Failed/Aborted | 读日志定位失败阶段；不得当作完成 |
+| `SNAPSHOT_UNSUPPORTED`、`VIVADO_CONTEXT_MISMATCH` | 工程存在尚不能隔离的依赖，或所选源文件集与run不符 | 按返回的文件/属性修正输入；不回退到未绑定的实时源码运行 |
+| `ARTIFACT_INVALID` | 检查点已变化、越界或不可信 | 重新构建，不使用原来的输入绑定 |
 | `SERVICE_FAILED` | 未分类失败 | 读 `diagnostics` 与对应日志产物 |
 
 ## Vivado（M2）
@@ -126,9 +131,25 @@ node src/cli/main.js task cancel <task-id> --workspace D:/project
   - 默认 run：timing/drc 用 impl_1，utilization 用 synth_1；
   - `timing`：`paths[]`（name/startpoint/endpoint/slack/pathgroup/logic），数值为 JSON number，不可测属性为 `null`；
   - `utilization`：`summary[]` 分层行摘要与 `textBytes`；
-  - `drc`：`violations[]`（name/rule/severity）；
-  - 工程无法打开或 run 阶段未完成时返回 `VIVADO_SCRIPT_FAILED`，不以空数据代替未执行。
-- `vivado run [--run synth_1|impl_1] [--jobs n]`：后台任务，用 `task status/logs/cancel` 管理。显式 run 表示"现在运行"：先 `reset_run` 再 `launch_runs`，已完成的 run 也会真实重跑；成功时 `data.status` 为 Vivado 的 run 状态文本（如 `synth_design Complete! 100%`）。
+  - `drc`：先执行本次 DRC 再读取违规对象，`checked=1`，`violations[]`（name/rule/severity）；
+  - 报告优先打开该次隔离构建，附带 `runInfo`（id、状态、完成时间、revision、实际工程与工具版本）、`stale`/`staleInputs` 和 `configurationChanged`。源码、约束、top、器件、宏、include、文件属性或运行策略变化会使记录过期；没有可验证记录时 `stale=null`，不会把旧记录升级为当前证据。
+  - 工程无法打开、run 阶段未完成或工具执行失败时分别返回 `VIVADO_SCRIPT_FAILED`、`VIVADO_EXEC_FAILED`，不以空数据代替未执行。
+- `vivado run [--run synth_1|impl_1] [--jobs n]`：后台任务，用 `task status/logs/cancel` 管理。每轮从捕获的工程设置、源码、头文件与XDC建立独立副本并重新构建；实现run会先构建其综合依赖。只有明确完成且检查点通过校验时才写成功记录。运行前后复核原始输入，变化返回 `CONTEXT_CHANGED`；失败/取消不会继续引用上一次成功报告。
+
+隔离构建位于 `.svtools/agent/vivado/builds/`，默认保留最近5次；原工程的run目录保持独立，`vivado status` 的 `agentRuns` 展示CLI构建。报告校验对应DCP的SHA-256，单份检查点上限512MiB；构建被清理返回 `ARTIFACT_EXPIRED`，检查点被替换返回 `ARTIFACT_INVALID`。输入、配置、源码副本映射与检查点身份记录在每轮 `manifest.json`，结果还提供完整 `inputFingerprint`，后台当前性判断包含初始化数据等非RTL输入。
+
+当前隔离适配覆盖普通RTL、字面量include、显式数据文件和常规XDC。IP/BD、显式增量DCP、外部Tcl运行钩子、宏include及XDC中的动态外部读取暂返回 `SNAPSHOT_UNSUPPORTED`，不会声称这些依赖已被完整捕获。工具自动生成的增量缓存不复制，隔离副本执行完整重建。
+
+没有Agent构建记录的既有工程仍可读取原run的报告，包括已有IP工程；此时返回 `stale=null`、`runInfo=null`，仅表示报告读取成功，不构成对当前源码的验证。输入隔离的限制针对新建可信构建绑定，不阻止已有报告查询。
+
+`vivado run` 与 `vivado report` 的结果同时给出四个**互不合并**的证据轴：
+
+- `execution`：工具是否真的跑完（run/status/runId/toolVersion）；
+- `inputs`：输入是否被完整捕获（`completeness`、`fingerprint`、各类 `used`）；
+- `regeneration`：能否由源配置重建（`source` 可重建；`artifact` 仅绑定产物；`unknown`）；
+- `verification`：验证做到哪一步（`checks[]`、`acceptance`）。当前 `acceptance=false` 表示只有构建/检查，**不代表功能验证通过**。
+
+Agent 不得把 `execution.success` 当作 `inputs.complete`，也不得把任一轴当作 `verification.acceptance`。
 
 工程写操作：
 
