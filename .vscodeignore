@@ -16,6 +16,8 @@ test/**
 .github/**
 scripts/**
 docs/**
+skills/**
+pr-body-*.md
 convert_svg.py
 verify_keywords.py
 test*.js

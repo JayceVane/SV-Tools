@@ -9,7 +9,7 @@ const ROOT = path.resolve(__dirname, '..');
 const RELEASE_MANIFEST = require('../package.json');
 const ROOT_FILES = new Set(['authors', 'changelog.md', 'extension.js', 'icon.png', 'icon.svg', 'language-configuration.json', 'license', 'license.txt', 'notice', 'package.json', 'package.nls.json', 'package.nls.zh-cn.json', 'readme.md']);
 const VSIX_FILES = new Set(['extension.vsixmanifest', '[content_types].xml']);
-const SOURCE_PATH = /^src\/(?:circuit|debug|editor|graphics|project|toolchains|vivado|waveform|workspace)\//;
+const SOURCE_PATH = /^src\/(?:agent|cli|circuit|debug|editor|graphics|project|toolchains|vivado|waveform|workspace)\//;
 
 /** @param {object} manifest @returns {void} 发行清单必须与当前检出的源码一致。 */
 function assertPublicManifest(manifest, expectedManifest = RELEASE_MANIFEST) {

@@ -5,6 +5,7 @@ const path = require('node:path');
 const { randomUUID } = require('node:crypto');
 const { startProcess } = require('./process');
 const { createTaskDirectory, pruneTaskDirectories, MAX_RETAINED_RUNS } = require('./task-retention');
+const { acquireWorkspaceLease, workspaceFromDirectory } = require('./workspace-lease');
 const MAX_CONCURRENT_PROCESSES = 2;
 const DEFAULT_RETAINED_RUNS = 5;
 
@@ -67,16 +68,19 @@ class ToolTask {
         const directory = this.directories.values().next().value || await this.directory(path.join(os.tmpdir(), 'svtools-tasks'));
         const logPath = path.join(directory, String(++this.sequence).padStart(2, '0') + '-' + stage.replace(/[^a-z0-9-]/gi, '_') + '.log');
         this.logPaths.push(logPath);
+        this.manager.changed(this);
         const guarded = callback => callback && ((...params) => { if (this.isCurrent()) callback(...params); });
         const release = await this.manager.acquire(this.signal);
-        let run;
+        let run, releaseWorkspace;
         try {
+            const workspace = workspaceFromDirectory(directory);
+            if (workspace) releaseWorkspace = await acquireWorkspaceLease(workspace,'tool-process',{signal:this.signal,slots:MAX_CONCURRENT_PROCESSES});
             this.throwIfCancelled();
             run = this.manager.startProcess(command, args, { ...options, logPath, signal: this.signal,
                 onStdout: guarded(options.onStdout), onStderr: guarded(options.onStderr) });
             this.pending.add(run.completion);
             const result = await run.completion; this.lastResult = result; return result;
-        } finally { if (run) this.pending.delete(run.completion); release(); }
+        } finally { if (run) this.pending.delete(run.completion); try { await releaseWorkspace?.(); } finally { release(); } }
     }
 
     /** 只清理本任务创建的目录内容，完整日志与显式保留的仿真产物留供复查。 */
