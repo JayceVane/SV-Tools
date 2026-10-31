@@ -138,6 +138,21 @@ function buildRemoveFilesScript(xprPath, file, fileset) {
     ]);
 }
 
+/** 批量加入文件：逐文件报告 SVTOOLS_ADDED 或 SVTOOLS_ALREADY_IN，供幂等调用与审计。 */
+function buildAddFilesBatchScript({ xprPath, files, fileset }) {
+    const body = ['set fs [get_filesets ' + tclQuote(fileset) + ']'];
+    for (const file of files) {
+        body.push('set f ' + tclQuote(file));
+        body.push('if {[llength [get_files -quiet -of $fs $f]] == 0} {');
+        body.push('    add_files -fileset $fs $f');
+        body.push('    puts "SVTOOLS_ADDED $f"');
+        body.push('} else { puts "SVTOOLS_ALREADY_IN $f" }');
+        body.push('if {[string match -nocase *.sv $f]} { catch { set_property file_type SystemVerilog [get_files -of $fs $f] } }');
+    }
+    body.push('update_compile_order -fileset $fs');
+    return wrapProjectScript(xprPath, body);
+}
+
 /**
  * 生成"设置文件集顶层"TCL（sources_1 → 综合顶层；sim_1 → 仿真顶层）。
  * @param {{xprPath:string, fileset:string, top:string}} o
@@ -448,5 +463,6 @@ module.exports = {
     buildSetTopScript, buildMoveFileScript, buildLaunchRunScript, buildRunReportsScript,
     buildOocReportsScript, parseUtilHierSummary, parseLogicLevelSummary,
     buildVivadoStatusScript, buildVivadoTimingScript, buildVivadoUtilizationScript, buildVivadoDrcScript,
+    buildAddFilesBatchScript,
     extractVivadoIssues, firstModuleName
 };

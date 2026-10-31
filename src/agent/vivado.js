@@ -2,7 +2,7 @@
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const { result, fail, identity } = require('./protocol');
-const { resolveContext } = require('./context');
+const { resolveContext, readOptions } = require('./context');
 const { directory } = require('./storage');
 const { findVivadoBinDir, normalizeVivadoDir, buildBatchArgs } = require('../vivado/toolchain');
 const { runVivadoBatchTask } = require('../vivado/batch');
@@ -65,6 +65,68 @@ function markers(stdout) {
 
 function artifactLogs(logs) { return logs.map(file => ({ kind: 'log', path: file })); }
 
+/** 工程写操作：Tcl错误与未完成都要显式失败；不能只凭退出码或日志尾部判定成功。 */
+function lifecycle(stdout, summary) {
+    const lines = String(stdout || '').split(/\r?\n/);
+    const tclError = lines.find(line => line.startsWith('SVTOOLS_TCL_ERROR'));
+    if (tclError) fail('VIVADO_SCRIPT_FAILED', 'Vivado脚本执行失败：' + tclError.slice('SVTOOLS_TCL_ERROR'.length).trim());
+    if (!lines.some(line => line.startsWith('SVTOOLS_DONE'))) fail('VIVADO_SCRIPT_FAILED', (summary && summary.message) || 'Vivado脚本未正常结束', { markers: lines.filter(line => line.startsWith('SVTOOLS_')).slice(0, 5) });
+    return lines;
+}
+/** batch运行器的stdout同时含marker集合与完整输出，同一marker会出现两次；按值去重保留首次顺序。 */
+function tagged(lines, prefix) { return [...new Set(lines.filter(line => line.startsWith(prefix)).map(line => line.slice(prefix.length).trim()).filter(Boolean))]; }
+
+async function createProject(input, { runner } = {}) {
+    const { options } = await readOptions(input);
+    const name = input.name;
+    if (!name || !/^[A-Za-z_][\w.-]{0,63}$/.test(name)) fail('INVALID_ARGUMENT', '工程名必须以字母或下划线开头，且不超过64字符');
+    const dir = path.resolve(options.workspace, input.dir || '.');
+    const xpr = path.join(dir, name + '.xpr');
+    const existed = !!(await fs.stat(xpr).catch(() => null));
+    const script = tclgen.buildCreateProjectScript({ name, dir, part: input.part || '', sources: [], sims: [], constraints: [], top: input.top || '', simTop: input.simTop || '' });
+    const { stdout, summary, logs } = await execute(options, script, { runner });
+    const lines = String(stdout || '').split(/\r?\n/);
+    const tclError = lines.find(line => line.startsWith('SVTOOLS_TCL_ERROR'));
+    if (tclError) fail('VIVADO_SCRIPT_FAILED', 'Vivado脚本执行失败：' + tclError.slice('SVTOOLS_TCL_ERROR'.length).trim());
+    // 创建脚本以 PROJECT_READY 作为完成信号（它不走 wrapProjectScript 的 DONE 约定）。
+    if (!lines.some(line => line.startsWith('SVTOOLS_PROJECT_READY'))) fail('VIVADO_SCRIPT_FAILED', (summary && summary.message) || 'Vivado未报告工程就绪', { markers: lines.filter(line => line.startsWith('SVTOOLS_')).slice(0, 5) });
+    const stat = await fs.stat(xpr).catch(() => null);
+    if (!stat?.isFile()) fail('VIVADO_NO_RESULT', '工程文件未生成：' + xpr, { xpr });
+    const resolved = await resolveContext({ workspace: options.workspace, project: xpr });
+    return result('project.create', { project: resolved.context.project, created: !existed, part: input.part || null, top: input.top || null, simTop: input.simTop || null }, resolved.context, [], artifactLogs(logs));
+}
+
+async function addFiles(input, { runner } = {}) {
+    const { options, xpr } = await vivadoTarget(input);
+    const sources = (input.sources || []).map(file => path.resolve(options.workspace, file));
+    if (!sources.length) fail('FILE_REQUIRED', 'project add 需要至少一个 --source');
+    for (const file of sources) {
+        const stat = await fs.stat(file).catch(() => null);
+        if (!stat?.isFile()) fail('SOURCE_NOT_FOUND', '源文件不存在：' + file, { file });
+    }
+    // --target-fileset 与上下文的 --fileset 分开，避免"选择哪个文件集加入"和"用哪个文件集作上下文"混为一谈。
+    const fileset = input.filesetTarget || (sources.every(file => /\.xdc$/i.test(file)) ? 'constrs_1' : 'sources_1');
+    if (!['sources_1', 'constrs_1', 'sim_1'].includes(fileset)) fail('INVALID_ARGUMENT', '目标文件集必须为sources_1、constrs_1或sim_1');
+    const { stdout, summary, logs } = await execute(options, tclgen.buildAddFilesBatchScript({ xprPath: xpr, files: sources, fileset }), { runner });
+    const lines = lifecycle(stdout, summary);
+    const resolved = await resolveContext({ ...options, project: xpr });
+    return result('project.add', { fileset, added: tagged(lines, 'SVTOOLS_ADDED'), already: tagged(lines, 'SVTOOLS_ALREADY_IN') }, resolved.context, [], artifactLogs(logs));
+}
+
+async function setTop(input, { runner } = {}) {
+    const { options, xpr } = await vivadoTarget(input);
+    if (!input.top && !input.simTop) fail('INVALID_ARGUMENT', 'project set-top 需要 --top 或 --sim-top');
+    const applied = [];
+    for (const [fileset, value] of [['sources_1', input.top], ['sim_1', input.simTop]]) {
+        if (!value) continue;
+        const { stdout, summary } = await execute(options, tclgen.buildSetTopScript({ xprPath: xpr, fileset, top: value }), { runner });
+        for (const top of tagged(lifecycle(stdout, summary), 'SVTOOLS_TOP_SET')) applied.push({ fileset, top });
+    }
+    const resolved = await resolveContext({ ...options, project: xpr });
+    return result('project.set-top', { applied }, resolved.context, []);
+}
+
+
 async function status(input, { runner } = {}) {
     const { options, context, xpr } = await vivadoTarget(input);
     const { stdout, logs } = await execute(options, tclgen.buildVivadoStatusScript({ xprPath: xpr }), { runner });
@@ -113,4 +175,4 @@ async function run(input, { signal, onContext, onArtifacts } = {}) {
     }
 }
 
-module.exports = { status, report, run, locateVivado, vivadoTarget };
+module.exports = { status, report, run, createProject, addFiles, setTop, locateVivado, vivadoTarget };

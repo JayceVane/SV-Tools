@@ -5,7 +5,7 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const os = require('node:os');
 const tasks = require('../src/agent/tasks');
-const { status, report } = require('../src/agent/vivado');
+const { status, report, createProject, addFiles, setTop } = require('../src/agent/vivado');
 
 async function fixture(t) {
     const workspace = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'svtools-vivado-agent-')));
@@ -63,6 +63,49 @@ test('错误marker优先于结果，缺结果与非法输入明确失败', async
     t.after(() => fs.rm(plain, { recursive: true, force: true }));
     await fs.writeFile(path.join(plain, 'top.sv'), 'module top;endmodule');
     await assert.rejects(status({ workspace: plain }), { code: 'VIVADO_PROJECT_REQUIRED' });
+});
+
+test('工程创建幂等：已存在时返回created=false并绑定工程上下文', async t => {
+    const workspace = await fixture(t);
+    const runner = async () => { await fs.writeFile(path.join(workspace, 'cap.xpr'), '<Project/>'); return 'SVTOOLS_PROJECT_READY\n'; };
+    const first = await createProject({ workspace, name: 'cap', part: 'xc7z020clg400-1' }, { runner });
+    assert.equal(first.status, 'success');
+    assert.equal(first.data.created, true);
+    assert.equal(first.context.project.kind, 'vivado');
+    const second = await createProject({ workspace, name: 'cap' }, { runner });
+    assert.equal(second.data.created, false);
+});
+
+test('工程加文件按类型推断文件集，并区分新增与已存在', async t => {
+    const workspace = await fixture(t);
+    await fs.writeFile(path.join(workspace, 'a.sv'), 'module a;endmodule');
+    await fs.writeFile(path.join(workspace, 'p.xdc'), 'create_clock -period 10 [get_ports clk]');
+    const added = await addFiles({ workspace, project: 'top.xpr', sources: ['a.sv'] }, { runner: async () => 'SVTOOLS_ADDED a.sv\nSVTOOLS_DONE\n' });
+    assert.equal(added.data.fileset, 'sources_1');
+    assert.deepEqual(added.data.added, ['a.sv']);
+    const constrs = await addFiles({ workspace, project: 'top.xpr', sources: ['p.xdc'], filesetTarget: 'constrs_1' }, { runner: async () => 'SVTOOLS_ALREADY_IN p.xdc\nSVTOOLS_DONE\n' });
+    assert.equal(constrs.data.fileset, 'constrs_1');
+    assert.deepEqual(constrs.data.already, ['p.xdc']);
+    await assert.rejects(addFiles({ workspace, project: 'top.xpr', sources: ['missing.sv'] }, { runner: async () => '' }), { code: 'SOURCE_NOT_FOUND' });
+    await assert.rejects(addFiles({ workspace, project: 'top.xpr', sources: ['a.sv'], filesetTarget: 'nope' }, { runner: async () => '' }), { code: 'INVALID_ARGUMENT' });
+    await assert.rejects(addFiles({ workspace, project: 'top.xpr' }, { runner: async () => '' }), { code: 'FILE_REQUIRED' });
+});
+
+test('设置两种top按文件集分别执行并返回应用结果', async t => {
+    const workspace = await fixture(t);
+    const calls = [];
+    const runner = async ({ script }) => { calls.push(/sources_1/.test(script) ? 'sources_1' : 'sim_1'); return 'SVTOOLS_TOP_SET top\nSVTOOLS_DONE\n'; };
+    const output = await setTop({ workspace, project: 'top.xpr', top: 'top', simTop: 'tb' }, { runner });
+    assert.equal(output.data.applied.length, 2);
+    assert.deepEqual(calls, ['sources_1', 'sim_1']);
+    await assert.rejects(setTop({ workspace, project: 'top.xpr' }, { runner }), { code: 'INVALID_ARGUMENT' });
+});
+
+test('工程写操作对Tcl错误与未完成显式失败', async t => {
+    const workspace = await fixture(t);
+    await fs.writeFile(path.join(workspace, 'a.sv'), 'module a;endmodule');
+    await assert.rejects(addFiles({ workspace, project: 'top.xpr', sources: ['a.sv'] }, { runner: async () => 'SVTOOLS_TCL_ERROR boom\n' }), { code: 'VIVADO_SCRIPT_FAILED' });
+    await assert.rejects(addFiles({ workspace, project: 'top.xpr', sources: ['a.sv'] }, { runner: async () => 'SVTOOLS_ADDED a.sv\n' }), { code: 'VIVADO_SCRIPT_FAILED' });
 });
 
 test('后台操作白名单拒绝未知operation', async t => {

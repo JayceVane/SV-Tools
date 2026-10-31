@@ -104,7 +104,7 @@ node src/cli/main.js task cancel <task-id> --workspace D:/project
 |---|---|---|
 | `INVALID_ARGUMENT`、`CONFIG_INVALID`、`INVALID_WORKSPACE` | 参数、配置或工作区不合法 | 修正输入后重试，不要猜测替代值 |
 | `AMBIGUOUS_PROJECT`、`AMBIGUOUS_FILESET`、`AMBIGUOUS_SOURCESET`、`AMBIGUOUS_TOP` | 存在多个合法上下文 | 用返回的 `candidates` 显式指定；不要借用其他工程或编辑器的选择 |
-| `FILE_NOT_IN_CONTEXT` | 目标文件不属于所选工程/文件集 | 先确认 `project`/`fileset`，再重试 |
+| `FILE_NOT_IN_CONTEXT`、`SOURCE_NOT_FOUND` | 目标文件不属于所选工程/文件集，或源文件不存在 | 先确认 `project`/`fileset` 与路径，再重试 |
 | `TOOL_NOT_FOUND`、`TOOL_UNAVAILABLE`、`VIVADO_NOT_FOUND` | 依赖缺失或无法启动 | 未执行，不是失败结论；安装或指定路径后重跑 |
 | `CONTEXT_CHANGED` | 源码/配置在本轮期间变化，结果失效 | 重新运行；旧结果不得作为当前证据 |
 | `FORMAT_INVARIANT`、`UNSAFE_PATH`、`SOURCE_CHANGED` | 写入被安全规则拒绝 | 不要绕过或手工拼接写入 |
@@ -129,5 +129,13 @@ node src/cli/main.js task cancel <task-id> --workspace D:/project
   - `drc`：`violations[]`（name/rule/severity）；
   - 工程无法打开或 run 阶段未完成时返回 `VIVADO_SCRIPT_FAILED`，不以空数据代替未执行。
 - `vivado run [--run synth_1|impl_1] [--jobs n]`：后台任务，用 `task status/logs/cancel` 管理。
+
+工程写操作：
+
+- `project create --name <n> [--dir <d>] [--part <p>] [--top <t>] [--sim-top <t>]`：同名工程已存在时打开而非重建，返回 `created` 布尔与工程身份；
+- `project add --source <file> [--source <file>...] [--target-fileset sources_1|constrs_1|sim_1]`：按扩展名推断目标文件集（`.xdc` → `constrs_1`，其余 `sources_1`），返回 `added`/`already` 绝对路径列表；文件不存在报 `SOURCE_NOT_FOUND`；
+- `project set-top [--top <t>] [--sim-top <t>]`：分别写入 `sources_1`/`sim_1` 顶层，返回 `applied`。
+
+三者返回的 `context` 是写操作完成后的重新解析结果，可直接作为后续命令的版本依据。
 
 Agent 使用入口见 [SV Tools Skill](../skills/svtools-agent/SKILL.md)。架构视图、波形查询与 MCP 当前不属于已实现命令；按 `doctor.data.capabilities` 发现实际接口。

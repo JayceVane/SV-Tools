@@ -9,6 +9,9 @@ const { fail, failure } = require('../agent/protocol');
 const help=`SV Tools headless CLI (API 1)
   doctor
   project list|inspect
+  project create --name <n> [--dir <d>] [--part <p>] [--top <t>] [--sim-top <t>]
+  project add --source <file> [--source <file>...] [--target-fileset sources_1|constrs_1|sim_1]
+  project set-top [--top <t>] [--sim-top <t>]
   format --file <path> [--check|--write]
   lint [--file <path>] [--top <module>]
   vivado status
@@ -28,15 +31,15 @@ Output:  JSON on stdout; --help and --version return text.
 Node.js >=22. The existing Rust formatter CLI remains available in bin/.
 `;
 function argumentsFor(argv) {
-    const strings=['workspace','config','project','fileset','file','top','iverilog','cygwin','vivado','standard','run','timeout','offset','limit','log-index','max-paths','jobs'];
+    const strings=['workspace','config','project','fileset','file','top','iverilog','cygwin','vivado','standard','run','timeout','offset','limit','log-index','max-paths','jobs','name','dir','part','sim-top','target-fileset'];
     const options=Object.fromEntries(strings.map(name=>[name,{type:'string'}]));
     for(const name of ['help','version','json','write','check']) options[name]={type:'boolean'};
-    options.include={type:'string',multiple:true}; options.define={type:'string',multiple:true};
+    options.include={type:'string',multiple:true}; options.define={type:'string',multiple:true}; options.source={type:'string',multiple:true};
     let parsed;
     try { parsed=parseArgs({args:argv,options,allowPositionals:true,strict:true}); }
     catch(error) { fail('INVALID_ARGUMENT',error.message); }
     const input={...parsed.values};
-    for(const [from,to] of [['timeout','timeoutMs'],['log-index','logIndex'],['max-paths','maxPaths'],['jobs','jobs']]) if(input[from]!==undefined) {input[to]=input[from]; delete input[from];}
+    for(const [from,to] of [['timeout','timeoutMs'],['log-index','logIndex'],['max-paths','maxPaths'],['jobs','jobs'],['sim-top','simTop'],['source','sources'],['target-fileset','filesetTarget']]) if(input[from]!==undefined) {input[to]=input[from]; delete input[from];}
     for(const field of ['timeoutMs','offset','limit','logIndex','maxPaths','jobs']) if(input[field]!==undefined) {
         if(!/^\d+$/.test(input[field]) || !Number.isSafeInteger(Number(input[field]))) fail('INVALID_ARGUMENT',field+'必须为非负整数');
         input[field]=Number(input[field]);
@@ -57,6 +60,9 @@ async function run(argv) {
         operation=command==='project' || command==='task'?command+'.'+action:command;
         if(command==='doctor' && !action) output=await services.doctor(input);
         else if(command==='project' && !id && ['list','inspect'].includes(action)) output=await services[action==='list'?'projects':'inspect'](input);
+        else if(command==='project' && action==='create' && !id) output=await vivado.createProject(input);
+        else if(command==='project' && action==='add' && !id) output=await vivado.addFiles(input);
+        else if(command==='project' && action==='set-top' && !id) output=await vivado.setTop(input);
         else if(command==='format' && !action) output=await services.format(input);
         else if(command==='vivado' && action==='status' && !id) output=await vivado.status(input);
         else if(command==='vivado' && action==='report' && ['timing','utilization','drc'].includes(id)) output=await vivado.report({...input,kind:id});
