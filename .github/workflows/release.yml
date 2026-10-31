@@ -51,7 +51,7 @@ jobs:
           npm run package -- --target win32-x64 --out "bin/svtools-$TAG-win32-x64.vsix"
         shell: bash
 
-      - name: 验证公开安装包排除自用功能
+      - name: 验证发行安装包与清单一致
         run: Get-ChildItem bin/*.vsix | ForEach-Object { node scripts/check-public-package.js $_.FullName; if ($LASTEXITCODE -ne 0) { throw '公开安装包检查失败' } }
         shell: pwsh
 

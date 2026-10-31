@@ -264,10 +264,8 @@ vsce publish
 本轮在devDependencies图中将Identity精确约束为4.13.0，使用未受该通告影响的MSAL3分支，并将该子树的uuid约束为含边界修复且仍支持CommonJS的11.1.1。
 这是显式兼容override，低于vsce声明的Identity范围；已检查其实际使用的6个Credential接口、模块导入、MSAL本地构造/缓存及uuid v4，并以真实VSIX打包验证。本轮不执行Azure/Marketplace认证，不能把本轮结果当作该认证路径验收。
 构建依赖不进入VSIX；后续vsce/Azure发布兼容修复时应优先回到上游依赖范围，再重验打包。不要用强制升级MSAL主版本或忽略audit替代验证。
-# 自用构建隔离
+## 发行文件校验
 
-`src/private/`只供本机叠加构建，Git与公开VSIX均排除。自用安装包和源码备份位于`bin/private-dist/`，公开发布上传清单只选择公开打包步骤的产物，不递归收集该目录。
-
-公开prepublish执行`node scripts/check-public-package.js`检查实际文件表；发布CI还会对生成的每个VSIX执行同一脚本的归档检查，确认没有私有源文件、构建标识、专用配置/命令或包装入口。自用包应被公开检查拒绝。任何自用功能的更新都不需要改写公开`package.json`或`extension.js`。
+prepublish执行`node scripts/check-public-package.js`检查vsce实际文件表。发布CI还会对生成的每个VSIX执行同一脚本的归档检查：文件路径必须位于发行范围内，扩展清单、运行JS和本地化文本必须与当前源码一致。校验归档时应检出对应版本的源码；不要对另一版本的安装包套用当前清单。
 
 旧`src-rust/`缓存及根目录旧`.node`同样排除。复制/压缩前及最终归档均限制4096文件、256 MiB未压缩大小；当前正式运行资源低于此预算。不要通过移除检查来容纳异常缓存，先查看vsce实际文件树。合法资源增长时单独评估预算。
