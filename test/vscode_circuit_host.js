@@ -28,6 +28,23 @@ async function run() {
         assert.ok(loaded.graph.width > 0);
         checks.push('Webview nonce脚本真实握手并显示Worker/ELK数据');
     } finally { binding.dispose(); }
+    await fs.writeFile(jsonPath, JSON.stringify({ modules: { memory_top: { ports: {
+        clk_rd: { direction: 'input', bits: [2] }, clk_wr: { direction: 'input', bits: [3] }, q: { direction: 'output', bits: [5] },
+    }, cells: {
+        mem: { type: '$mem_v2', parameters: { RD_PORTS: 1, WR_PORTS: 1, RD_CLK_ENABLE: '0', RD_CLK_POLARITY: '1', WR_CLK_ENABLE: '1', WR_CLK_POLARITY: '1' },
+            port_directions: { RD_CLK: 'input', WR_CLK: 'input', RD_DATA: 'output' }, connections: { RD_CLK: ['x'], WR_CLK: [3], RD_DATA: [4] } },
+        output_ff: { type: '$dff', parameters: { CLK_POLARITY: '1', WIDTH: 1 }, port_directions: { CLK: 'input', D: 'input', Q: 'output' },
+            connections: { CLK: [2], D: [4], Q: [5] } },
+    }, netnames: {} } } }));
+    const memory = await circuit.openNetlist(vscode.Uri.file(jsonPath));
+    try {
+        const loaded = await memory.loaded; assert.ok(loaded.ok, loaded.error);
+        const mem = loaded.graph.nodes.find(node => node.toolName === 'mem'), ff = loaded.graph.nodes.find(node => node.toolName === 'output_ff');
+        assert.match(mem.modeLabel, /异步读.*同步写/);
+        assert.ok(!mem.ports.some(port => port.label === 'RD_CLK'));
+        assert.deepEqual(ff.ports.find(port => port.label === 'CLK').bits, ['n:2']);
+        checks.push('真实Webview/Worker加载存储器模式，隐藏无效X时钟并保留外部读寄存器CLK');
+    } finally { memory.dispose(); }
     await fs.writeFile(jsonPath, JSON.stringify({ schemaVersion: 1, engine: 'vivado', version: '2022.1',
         stage: 'elaborated-rtl', view: 'flat', top: 'top', ports: [], cells: [], signals: [] }));
     const imported = await circuit.openNetlist(vscode.Uri.file(jsonPath));

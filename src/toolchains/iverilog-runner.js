@@ -78,7 +78,9 @@ function createIcarusRunner(deps) {
         const summary = summarizeToolResult({ result, findings: result.findings || [], mainFile: document.uri.fsPath,
             diagnosticsIncomplete: result.diagnosticsIncomplete });
         if (task.isCurrent()) {
-            publish(document, resultFindings(summary, result.findings || [], document.uri.fsPath), 'iverilog');
+            const accepted = publish(document, resultFindings(summary, result.findings || [], document.uri.fsPath), 'iverilog', {
+                sourceFiles: result.sourceFiles, since: task.sourceRevision, documentVersion: task.documentVersion, logPath: summary.logPath, task });
+            if (accepted === false) return summarizeToolResult({ result, findings: result.findings || [], mainFile: document.uri.fsPath, status: 'cancelled' });
             channel.appendLine(summary.ok ? '[工具任务] 通过' : '[工具任务] ' + summary.message);
             if (summary.logPath) channel.appendLine('完整日志：' + summary.logPath);
         }
@@ -95,9 +97,9 @@ function createIcarusRunner(deps) {
             includePaths: [fileDir, ...resolvePaths(config.get('includePaths'), fileDir, document.uri), ...dirs],
             libraryPaths: [fileDir, ...resolvePaths(config.get('libraryPaths'), fileDir, document.uri), ...dirs],
             extraArgs: ['-Y', '.sv', ...config.get('lintArgs', [])] })];
-        const { result } = await compile(toolchain, args, [target], fileDir, { task, scanSources, timeoutMs: COMPILE_TIMEOUT_MS,
+        const { result, files } = await compile(toolchain, args, [target], fileDir, { task, scanSources, timeoutMs: COMPILE_TIMEOUT_MS,
             mapLine: line => line.split(target).join(filePath) });
-        task.throwIfCancelled(); return complete(task, document, result);
+        task.throwIfCancelled(); return complete(task, document, { ...result, sourceFiles: (files || [target]).map(file => file === target ? filePath : file) });
     }
     async function prepareSimulation(task, document) {
         const directory = await task.directory(taskRoot(document), 'iverilog-sim');

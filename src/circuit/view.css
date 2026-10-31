@@ -84,6 +84,7 @@ main { min-height: 0; flex: 1; display: flex; }
 .cellBody { fill: var(--cellBg); stroke: var(--cellAccent); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
 .cellSymbol { fill: var(--symbol); font-size: 13px; pointer-events: none; }
 .cellLabel { fill: var(--fg); font-size: 13px; pointer-events: none; }
+.cellMode { fill: var(--muted); font-size: 12px; pointer-events: none; }
 .pinLabel, .portWidth { fill: var(--muted); font-size: 12px; pointer-events: none; }
 .clockMark, .gateCurve { fill: none; stroke: var(--cellAccent); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
 .selectionOutline, .searchCorners { fill: none; stroke-width: 1.5; pointer-events: none; vector-effect: non-scaling-stroke; visibility: hidden; }
@@ -158,6 +159,7 @@ footer { min-height: 29px; border-top: 1px solid var(--border); display: flex; a
 .graphLayer[data-detail="overview"] .busMark,
 .graphLayer[data-detail="overview"] .portWidth,
 .graphLayer[data-detail="overview"] .cellLabel,
+.graphLayer[data-detail="overview"] .cellMode,
 .graphLayer[data-detail="overview"] .cellSymbol,
 .graphLayer[data-detail="overview"] .clockMark,
 .graphLayer[data-detail="overview"] .pin { display: none; }

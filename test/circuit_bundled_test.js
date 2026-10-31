@@ -9,6 +9,39 @@ const { prepareSourceRequest } = require('../src/circuit/source-request');
 const { runYosysCircuit } = require('../src/circuit/yosys-runner');
 const { CircuitSession } = require('../src/circuit/session');
 
+test('真实Slang保留异步存储器与外部读寄存器，展示隐藏无效RD_CLK而保留真实读时钟', { timeout: 30000 }, async t => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'svtools-memory-clock-'));
+    assert.equal(path.dirname(root), path.resolve(os.tmpdir())); assert.ok(path.basename(root).startsWith('svtools-memory-clock-'));
+    const original = path.join(root, 'memory_clock.sv'), outputBase = path.join(root, 'tasks');
+    const text = `module memory_clock(input clk_rd, clk_wr, rst_rd_n, read_en, write_en,
+        input [1:0] addr, input [7:0] data, output reg [7:0] q);
+        reg [7:0] mem [0:3]; reg [1:0] read_addr;
+        always @(posedge clk_wr) if (write_en) mem[addr] <= data;
+        always @(posedge clk_rd or negedge rst_rd_n)
+            if (!rst_rd_n) read_addr <= 0;
+            else begin read_addr <= addr; if (read_en) q <= mem[read_addr]; end
+        endmodule\n`;
+    await fs.writeFile(original, text);
+    const manager = createToolTaskManager(), task = manager.start('memory-clock-test'), session = new CircuitSession();
+    t.after(async () => {
+        session.dispose(); task.cancel(); await task.finish({ keepArtifacts: true }); await manager.dispose();
+        await fs.rm(root, { recursive: true, force: true });
+    });
+    const request = await prepareSourceRequest({ task, root, top: 'memory_clock', config: {}, outputBase,
+        document: { uri: { fsPath: original }, isDirty: false } });
+    const generated = await runYosysCircuit({ ...request, task, outputBase });
+    const raw = JSON.parse(await fs.readFile(generated.filePath, 'utf8')).modules.memory_clock;
+    const memory = Object.values(raw.cells).find(cell => cell.type === '$mem_v2');
+    assert.equal(parseInt(memory.parameters.RD_CLK_ENABLE, 2), 0); assert.deepEqual(memory.connections.RD_CLK, ['x']);
+    const descriptor = await session.request('load', { ...generated, top: 'memory_clock', stage: 'rtl' });
+    const graph = await session.request('layout', { moduleId: descriptor.top }), mem = graph.nodes.find(node => node.kind === 'memory');
+    assert.match(mem.modeLabel, /异步读.*同步写/); assert.ok(!mem.ports.some(port => port.label === 'RD_CLK'));
+    const qBits = raw.ports.q.bits.map(bit => 'n:' + bit), clk = 'n:' + raw.ports.clk_rd.bits[0];
+    const ff = graph.nodes.find(node => node.kind === 'register' && node.ports.some(port => port.label === 'Q' && port.bits.some(bit => qBits.includes(bit))));
+    assert.ok(ff); assert.deepEqual(ff.ports.find(port => port.label === 'CLK').bits, [clk]);
+    assert.equal(await fs.readFile(original, 'utf8'), text);
+});
+
 for (const frontend of ['verilog', 'slang']) test(`内置 ${frontend} 无 PATH 工具完成含空格/中文路径、宏、相对 readmem 和脏正文回映射`, { timeout: 30000 }, async t => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'svtools-bundled-'));
     const workspace = path.join(root, 'workspace'), sources = path.join(root, 'RTL space 中文');

@@ -18,6 +18,7 @@ test('工具快照和依赖目录被明确排除，防止重复设计单元污�
 /** 以内存源码模拟多根工作区；扫描、读文件和时钟均由外部边界注入。 */
 function workspaceHarness(sources, { enabled = true, folders = [{ uri: { fsPath: __dirname } }] } = {}) {
     const searches = [];
+    const snapshots = new Map(), versions = new Map();
     let timestamp = 100;
     const workspace = {
         workspaceFolders: folders,
@@ -31,7 +32,12 @@ function workspaceHarness(sources, { enabled = true, folders = [{ uri: { fsPath:
             return [...sources.keys()].filter(file => file.endsWith(extension)).map(fsPath => ({ fsPath }));
         }
     };
-    const index = createWorkspaceSourceIndex({ workspace, readFileSync: file => sources.get(file), now: () => timestamp });
+    const index = createWorkspaceSourceIndex({ workspace, readFile: async file => sources.get(file), now: () => timestamp,
+        stat: async file => {
+            const text = sources.get(file);
+            if (snapshots.get(file) !== text) { snapshots.set(file, text); versions.set(file, (versions.get(file) || 0) + 1); }
+            return { size: text.length, mtimeMs: versions.get(file) };
+        } });
     return { index, searches, advance: milliseconds => { timestamp += milliseconds; } };
 }
 
@@ -94,7 +100,8 @@ test('单个文件或 glob 失败时保留其他结果，并报告具体上下�
         }
     };
     const index = createWorkspaceSourceIndex({ workspace, onError: message => errors.push(message),
-        readFileSync: file => {
+        stat: async () => ({ size: 10, mtimeMs: 1 }),
+        readFile: async file => {
             if (file === brokenPath) throw new Error('file denied');
             return file === validPath ? 'module still_present;\nendmodule\n' : 'package included;\nendpackage\n';
         } });
@@ -155,8 +162,125 @@ test('工作区扫描对返回结果再次过滤，生成文件不读取、不�
     const reads = [];
     const index = createWorkspaceSourceIndex({ workspace: { workspaceFolders: [{}],
         getConfiguration: () => ({ get: () => true }), findFiles: async () => [{ fsPath: internal }, { fsPath: normal }] },
-        readFileSync: file => { reads.push(file); return file === internal ? 'module wrong; endmodule' : 'module top; endmodule'; } });
+        stat: async () => ({ size: 10, mtimeMs: 1 }),
+        readFile: async file => { reads.push(file); return file === internal ? 'module wrong; endmodule' : 'module top; endmodule'; } });
     const result = await index.scan();
     assert.equal(result.modules.has('wrong'), false); assert.equal(result.modules.get('top'), normal);
     assert.ok(reads.every(file => file === normal));
+});
+
+test('共享清单下两个并发冷扫描只读取3000个文件一次，暖缓存不再读取', async () => {
+    const { createSourceCatalog } = require('../src/workspace/source-catalog');
+    let searches = 0, reads = 0;
+    const uris = Array.from({ length: 3000 }, (_, i) => ({ fsPath: path.join(__dirname, 'virtual', 'u' + i + '.sv') }));
+    const workspace = { workspaceFolders: [{}], getConfiguration: () => ({ get: () => true }),
+        findFiles: async () => { searches++; await new Promise(resolve => setImmediate(resolve)); return uris; } };
+    const catalog = createSourceCatalog({ vscode: { workspace } });
+    const index = createWorkspaceSourceIndex({ workspace, sourceCatalog: catalog,
+        stat: async () => ({ size: 20, mtimeMs: 1 }),
+        readFile: async file => { reads++; return 'module ' + path.basename(file, '.sv') + '; endmodule'; } });
+    const [a, b] = await Promise.all([index.scan(), index.scan()]);
+    assert.equal(searches, 1); assert.equal(reads, 3000); assert.equal(a, b); assert.equal(a.modules.size, 3000);
+    await index.scan(); assert.equal(reads, 3000); catalog.dispose();
+});
+
+test('TTL和上下文失效复用未改动文件，仅重读发生变化的源码', async () => {
+    const files = [path.join(__dirname, 'incremental-a.sv'), path.join(__dirname, 'incremental-b.sv')];
+    const texts = new Map([[files[0], 'module alpha; endmodule'], [files[1], 'module beta; endmodule']]);
+    const versions = new Map(files.map(file => [file, 1]));
+    let now = 0, reads = 0;
+    const index = createWorkspaceSourceIndex({ now: () => now,
+        workspace: { workspaceFolders: [{}], getConfiguration: () => ({ get: () => true }),
+            findFiles: async pattern => pattern === '**/*.sv' ? files.map(fsPath => ({ fsPath })) : [] },
+        stat: async file => ({ size: texts.get(file).length, mtimeMs: versions.get(file) }),
+        readFile: async file => { reads++; return texts.get(file); } });
+    await index.scan(); assert.equal(reads, 2);
+    now += 10001; await index.scan(); assert.equal(reads, 2);
+    index.invalidate(); await index.scan(); assert.equal(reads, 2);
+    versions.set(files[0], 2); texts.set(files[0], 'module gamma; endmodule');
+    index.invalidate({ uri: { fsPath: files[0] } });
+    const result = await index.scan(); assert.equal(reads, 3); assert.deepEqual([...result.modules.keys()], ['gamma', 'beta']);
+});
+
+test('有界异步读取按发现顺序解决重名，I/O完成顺序不改变优先级', async () => {
+    const files = Array.from({ length: 32 }, (_, i) => path.join(__dirname, 'bounded-' + i + '.sv'));
+    let active = 0, peak = 0;
+    const index = createWorkspaceSourceIndex({ sourceCatalog: { discover: async () => ({ uris: files.map(fsPath => ({ fsPath })) }) },
+        workspace: { workspaceFolders: [{}], getConfiguration: () => ({ get: () => true }) },
+        stat: async () => ({ size: 20, mtimeMs: 1 }),
+        readFile: async file => {
+            peak = Math.max(peak, ++active);
+            await new Promise(resolve => setTimeout(resolve, file === files[0] ? 30 : 1)); active--;
+            return 'module shared; endmodule';
+        } });
+    const result = await index.scan();
+    assert.equal(result.modules.get('shared'), files[0]); assert.ok(peak > 1 && peak <= 8);
+});
+
+test('扫描期间失效不会复活旧缓存，等待者获取新代次结果', async () => {
+    let release, calls = 0;
+    const gate = new Promise(resolve => { release = resolve; });
+    const oldFile = path.join(__dirname, 'old.sv'), newFile = path.join(__dirname, 'new.sv');
+    const index = createWorkspaceSourceIndex({ workspace: { workspaceFolders: [{}], getConfiguration: () => ({ get: () => true }) },
+        sourceCatalog: { async discover() { calls++; return calls === 1 ? gate : { uris: [{ fsPath: newFile }] }; } },
+        stat: async () => ({ size: 20, mtimeMs: 1 }), readFile: async file => 'module ' + path.basename(file, '.sv') + '; endmodule' });
+    const pending = index.scan(); index.invalidate(); release({ uris: [{ fsPath: oldFile }] });
+    const result = await pending;
+    assert.deepEqual([...result.modules.keys()], ['new']); assert.equal((await index.scan()), result); assert.equal(calls, 2);
+});
+
+test('保存及切换编辑器的连续失效收敛后，扫描仍返回稳定的新代次', async () => {
+    let calls = 0;
+    const file = path.join(__dirname, 'burst.sv');
+    const index = createWorkspaceSourceIndex({ workspace: { workspaceFolders: [{}], getConfiguration: () => ({ get: () => true }) },
+        sourceCatalog: { async discover() {
+            if (++calls <= 2) index.invalidate();
+            return { uris: [{ fsPath: file }] };
+        } }, stat: async () => ({ size: 20, mtimeMs: 1 }), readFile: async () => 'module settled; endmodule' });
+    const a = await index.scan();
+    assert.equal(a.modules.get('settled'), file);
+    assert.equal(calls, 3); assert.equal(await index.scan(), a);
+});
+
+test('失效中的并发扫描共享重试链，旧代次读取结束前不叠加新一轮I/O', async () => {
+    let release, reads = 0, discovers = 0;
+    const gate = new Promise(resolve => { release = resolve; });
+    const file = path.join(__dirname, 'shared-retry.sv');
+    const index = createWorkspaceSourceIndex({ workspace: { workspaceFolders: [{}], getConfiguration: () => ({ get: () => true }) },
+        sourceCatalog: { async discover() { discovers++; return { uris: [{ fsPath: file }] }; } },
+        stat: async () => ({ size: 20, mtimeMs: 1 }), readFile: async () => {
+            if (++reads === 1) await gate;
+            return 'module settled; endmodule';
+        } });
+    const first = index.scan();
+    while (!reads) await new Promise(resolve => setImmediate(resolve));
+    index.invalidate(); const second = index.scan();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(reads, 1); assert.equal(discovers, 1);
+    release(); const [a, b] = await Promise.all([first, second]);
+    assert.equal(a, b); assert.equal(a.modules.get('settled'), file); assert.equal(reads, 2);
+});
+
+test('持续失效的扫描有重试上限，失败后可以重新获取稳定结果', async () => {
+    let calls = 0, changing = true;
+    const file = path.join(__dirname, 'continuous.sv');
+    const index = createWorkspaceSourceIndex({ workspace: { workspaceFolders: [{}], getConfiguration: () => ({ get: () => true }) },
+        sourceCatalog: { async discover() {
+            calls++; if (changing) index.invalidate();
+            return { uris: [{ fsPath: file }] };
+        } }, stat: async () => ({ size: 20, mtimeMs: 1 }), readFile: async () => 'module settled; endmodule' });
+    await assert.rejects(index.scan(), /持续变化/); assert.equal(calls, 4);
+    changing = false; assert.equal((await index.scan()).modules.get('settled'), file);
+});
+
+test('并发强制刷新共享一次发现，可重新尝试上次读取失败的文件', async () => {
+    const file = path.join(__dirname, 'retry.sv'); let discovers = 0, reads = 0, invalidates = 0;
+    const index = createWorkspaceSourceIndex({ workspace: { workspaceFolders: [{}], getConfiguration: () => ({ get: () => true }) },
+        sourceCatalog: { invalidate() { invalidates++; }, async discover() { discovers++; await new Promise(resolve => setImmediate(resolve)); return { uris: [{ fsPath: file }] }; } },
+        onError() {}, stat: async () => ({ size: 20, mtimeMs: 1 }),
+        readFile: async () => { if (++reads === 1) throw Error('temporarily locked'); return 'module recovered; endmodule'; } });
+    assert.equal((await index.scan()).modules.size, 0);
+    const [a, b] = await Promise.all([index.scan(true), index.scan(true)]);
+    assert.equal(a, b); assert.equal(a.modules.get('recovered'), file);
+    assert.equal(reads, 2); assert.equal(discovers, 2); assert.equal(invalidates, 1);
 });

@@ -102,6 +102,7 @@
             const properties = [['类型', KINDS[node.kind] || node.kind]];
             if (node.detail) properties.push(['说明', node.detail]);
             if (node.description) properties.push(['时序语义', node.description]);
+            if (node.hiddenPorts?.length) properties.push(['未使用引脚', node.hiddenPorts.map(port => `${port.name} · ${port.bits.length} bit · ${port.description}`).join('\n')]);
             if (node.parameters) {
                 const entries = Object.entries(node.parameters);
                 properties.push(['工具参数', entries.slice(0, MAX_PARAMETERS).map(([name, value]) => `${name}: ${parameterText(value)}`).join('\n') + (entries.length > MAX_PARAMETERS ? `\n…（仅显示前 ${MAX_PARAMETERS} 项，共 ${entries.length} 项）` : '')]);

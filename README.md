@@ -7,9 +7,9 @@
 
 在 VS Code 中完成 RTL 格式化、代码生成、补全、工程管理、仿真、波形分析和电路信号追踪。核心引擎使用 **Rust 原生模块（napi-rs）**，安装包自带离线 Yosys，无需另外安装 Rust、Python 或 Yosys；设置与命令支持中英文自动切换。
 
-**当前正式版本：4.1.0 · 正式支持平台：Windows x64。** 各市场版本以其详情页为准，4.1.0 的完整发布附件见 [GitHub Releases](https://github.com/JayceVane/SV-Tools/releases/tag/v4.1.0)。
+**当前正式版本：4.1.1 · 正式支持平台：Windows x64。** 各市场版本以其详情页为准，4.1.1 的完整发布附件见 [GitHub Releases](https://github.com/JayceVane/SV-Tools/releases/tag/v4.1.1)。
 
-[安装与第一次运行](https://github.com/JayceVane/SV-Tools/wiki/Getting-Started) · [图解使用指南](https://github.com/JayceVane/SV-Tools/wiki/Screenshots) · [4.1 信号追踪](https://github.com/JayceVane/SV-Tools/wiki/Signal-Tracing) · [版本说明](docs/releases/v4.1.0.md) · [反馈问题](https://github.com/JayceVane/SV-Tools/issues)
+[安装与第一次运行](https://github.com/JayceVane/SV-Tools/wiki/Getting-Started) · [图解使用指南](https://github.com/JayceVane/SV-Tools/wiki/Screenshots) · [4.1 信号追踪](https://github.com/JayceVane/SV-Tools/wiki/Signal-Tracing) · [版本说明](docs/releases/v4.1.1.md) · [反馈问题](https://github.com/JayceVane/SV-Tools/issues)
 
 ## 4.1：从信号出发查看设计
 
@@ -101,7 +101,7 @@
 |---|---|
 | [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=JayceVane.svtools) | 在 VS Code 扩展市场搜索 **SystemVerilog Tools**，确认发布者为 **JayceVane** |
 | [Open VSX](https://open-vsx.org/extension/JayceVane/svtools) | 在使用 Open VSX 的兼容 IDE 中安装，先确认扩展宿主版本满足要求 |
-| [GitHub Releases](https://github.com/JayceVane/SV-Tools/releases) | 下载 `svtools-v4.1.0-win32-x64.vsix`，执行“扩展：从 VSIX 安装…”；同页提供 CLI 和 SHA256 |
+| [GitHub Releases](https://github.com/JayceVane/SV-Tools/releases) | 下载 `svtools-v4.1.1-win32-x64.vsix`，执行“扩展：从 VSIX 安装…”；同页提供 CLI 和 SHA256 |
 
 扩展 ID 为 **`JayceVane.svtools`**。安装或更新后重载窗口；市场版本以对应页面为准。完整操作见 [安装指南](https://github.com/JayceVane/SV-Tools/wiki/Getting-Started)。
 

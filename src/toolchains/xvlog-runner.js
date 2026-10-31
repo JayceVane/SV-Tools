@@ -75,7 +75,7 @@ async function lint(prep) {
         const additions = rules.resolveUnitFiles(result.missingUnits, modules, files);
         if (!additions.length) break; files = [...new Set([...additions, ...files])];
     }
-    return result;
+    return { ...result, sourceFiles: files.map(file => file === prep.lintTarget ? prep.filePath : file) };
 }
 
 async function elaborate(prep) {
@@ -93,7 +93,7 @@ async function elaborate(prep) {
         const additions = rules.resolveUnitFiles(result.missingUnits, modules, files);
         if (!additions.length) break; files = [...new Set([...additions, ...files])];
     }
-    return result;
+    return { ...result, sourceFiles: files.map(file => file === prep.lintTarget ? prep.filePath : file) };
 }
 
 function publish(document, ctx, task, result, status) {
@@ -101,7 +101,9 @@ function publish(document, ctx, task, result, status) {
     const summary = summarizeToolResult({ result, findings, mainFile: document.uri.fsPath, status,
         diagnosticsIncomplete: result?.diagnosticsIncomplete });
     if (task.isCurrent() && summary.status !== 'cancelled' && summary.status !== 'skipped') {
-        ctx.applyDiagnostics(document, resultFindings(summary, findings, document.uri.fsPath), 'xvlog');
+        const accepted = ctx.applyDiagnostics(document, resultFindings(summary, findings, document.uri.fsPath), 'xvlog', {
+            sourceFiles: result?.sourceFiles, since: task.sourceRevision, documentVersion: task.documentVersion, logPath: summary.logPath, task });
+        if (accepted === false) return summarizeToolResult({ result, findings, mainFile: document.uri.fsPath, status: 'cancelled' });
         ctx.channel.appendLine(`[${ctx.elaborate ? 'xvlog+xelab' : 'xvlog'}] ${summary.ok ? '通过' : summary.message}`);
         if (summary.logPath) ctx.channel.appendLine('完整日志：' + summary.logPath);
     }
