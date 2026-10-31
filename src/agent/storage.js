@@ -14,9 +14,19 @@ async function directory(workspace, ...parts) {
     }
     return current;
 }
+/** Windows 上目标文件被读者打开时 rename 会瞬时EPERM/EACCES/EBUSY；有限重试后仍失败才放弃。 */
+async function commit(temporary, file) {
+    for (let attempt = 1; ; attempt++) {
+        try { await fs.rename(temporary, file); return; }
+        catch (error) {
+            if (attempt >= 5 || !['EPERM', 'EACCES', 'EBUSY'].includes(error.code)) throw error;
+            await new Promise(resolve => setTimeout(resolve, 10 * attempt));
+        }
+    }
+}
 async function writeJson(file, value) {
     const temporary = file + '.' + randomUUID() + '.tmp';
-    try { await fs.writeFile(temporary,JSON.stringify(value,null,2)+'\n',{flag:'wx'}); await fs.rename(temporary,file); }
+    try { await fs.writeFile(temporary,JSON.stringify(value,null,2)+'\n',{flag:'wx'}); await commit(temporary,file); }
     finally { await fs.rm(temporary,{force:true}); }
 }
 async function readJson(file, maxBytes = 2*1024*1024) {

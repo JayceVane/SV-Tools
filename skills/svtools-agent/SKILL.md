@@ -15,6 +15,8 @@ description: 使用 SV Tools CLI 在无 IDE 环境中查询 RTL 工程与源码�
 
 RTL 修改后运行 `lint --file <path> --top <module>`。这属于编译/详细化检查，不能代替功能仿真、时序或 CDC 验证。使用结果中的源码位置定位问题，并保留原始日志和 manifest 引用，不因没有解析到诊断就声称检查通过。
 
+Vivado 工程（M2）：`vivado status` 查版本/器件/tops/runs；`vivado report timing|utilization|drc` 取结构化报告（默认 run：timing/drc 用 impl_1，utilization 用 synth_1，可用 `--run` 覆盖）；`vivado run` 作为后台任务执行 launch_runs + wait_on_run。报告阶段未完成时返回 `VIVADO_SCRIPT_FAILED`，这表示未执行，不是零错误；不要把空数组当作“无问题证据”。
+
 耗时操作可用 `task start lint`，保存返回的 UUID，再通过 `task status`、`task logs`、`task cancel` 管理。查询命令退出 0 只表示查询成功；检查 `data.result.status` 与 `data.sourceCurrent`。源码变化后重新验证，`CONTEXT_CHANGED`、`lost`、缺失结果或未知当前性都不能作为当前交付的通过证据。
 
 报告实际运行的命令、工程/源码版本、工具版本、结论和仍未验证的部分。原始日志按需分页读取，避免将整份日志交给模型。

@@ -96,4 +96,18 @@ node src/cli/main.js task cancel <task-id> --workspace D:/project
 
 文件/设计单元列表支持 `--offset`、`--limit`，单页最多 200 项；日志单次最多 65536 字节，`--log-index` 选择某个日志。`nextOffset` 指示后续页。源码最多 4096 份、单文件 8 MiB、合计 64 MiB；目录扫描最多 50000 项、32 层。不会把完整日志或未来的大 VCD 塞入一个 JSON 响应。
 
+## Vivado（M2）
+
+需要 `--project` 指向 `.xpr`，并按需提供 `--vivado`（安装根目录、bin 目录或 vivado.bat）或 CLI 配置中的 `vivado`。
+
+- `vivado status`：版本、器件、sources/sim 两种 top、全部 run 的状态与进度。
+- `vivado report timing|utilization|drc [--run synth_1|impl_1] [--max-paths n]`：
+  - `timing` 走 Tcl 时序路径对象（SLACK/起终点等），数值保持 JSON number，缺失属性为 null；
+  - `utilization` 取 `report_utilization -return_string` 的分层表并解析为行摘要；
+  - `drc` 取 `get_drc_violations` 对象（名称/规则/严重级别）。
+  - 默认 run：timing/drc 用 impl_1，utilization 用 synth_1；阶段未完成时明确报 `VIVADO_SCRIPT_FAILED`。
+- `vivado run [--run synth_1|impl_1] [--jobs n]`：后台任务（`launch_runs` + `wait_on_run`），用 `task status/logs/cancel` 管理。
+
+2022.1 实测：`report_drc` 无 `-format JSON`，因此结构化数据一律取自 Tcl 对象查询；Tcl 侧用转义安全的 JSON 片段拼装，错误 marker 优先于结果 marker。
+
 Agent 使用入口见 [SV Tools Skill](../skills/svtools-agent/SKILL.md)。Vivado 运行/报告、架构视图、波形查询以及 MCP 当前不属于已实现命令；按 `doctor.data.capabilities` 发现实际接口。
