@@ -43,8 +43,10 @@ test('时序报告保持数值与null语义，不伪造字段', async t => {
 
 test('资源报告按分层表解析为行摘要并给出文本字节预算', async t => {
     const workspace = await fixture(t);
-    const markers = ['SVTOOLS_UTIL | Instance | Module | Total LUTs | Logic LUTs | LUTRAMs | SRLs | FFs | RAMB36 | RAMB18 | DSP Blocks |',
-        'SVTOOLS_UTIL | (top) | (top) | 12 | 10 | 0 | 0 | 24 | 0 | 0 | 0 |', 'SVTOOLS_DONE', ''].join('\n');
+    const table = ['SVTOOLS_UTIL | Instance | Module | Total LUTs | Logic LUTs | LUTRAMs | SRLs | FFs | RAMB36 | RAMB18 | DSP Blocks |',
+        'SVTOOLS_UTIL | (top) | (top) | 12 | 10 | 0 | 0 | 24 | 0 | 0 | 0 |'];
+    // 与真实 batch stdout 一致：同一批 marker 出现两遍，解析必须去重。
+    const markers = [...table, 'SVTOOLS_DONE', '', ...table, 'SVTOOLS_DONE', ''].join('\n');
     const output = await report({ workspace, project: 'top.xpr', kind: 'utilization', run: 'synth_1' }, { runner: async () => markers });
     assert.equal(output.data.kind, 'utilization');
     assert.equal(output.data.run, 'synth_1');

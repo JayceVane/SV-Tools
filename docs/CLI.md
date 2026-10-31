@@ -128,7 +128,7 @@ node src/cli/main.js task cancel <task-id> --workspace D:/project
   - `utilization`：`summary[]` 分层行摘要与 `textBytes`；
   - `drc`：`violations[]`（name/rule/severity）；
   - 工程无法打开或 run 阶段未完成时返回 `VIVADO_SCRIPT_FAILED`，不以空数据代替未执行。
-- `vivado run [--run synth_1|impl_1] [--jobs n]`：后台任务，用 `task status/logs/cancel` 管理。
+- `vivado run [--run synth_1|impl_1] [--jobs n]`：后台任务，用 `task status/logs/cancel` 管理。显式 run 表示"现在运行"：先 `reset_run` 再 `launch_runs`，已完成的 run 也会真实重跑；成功时 `data.status` 为 Vivado 的 run 状态文本（如 `synth_design Complete! 100%`）。
 
 工程写操作：
 

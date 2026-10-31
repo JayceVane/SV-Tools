@@ -141,7 +141,8 @@ async function report(input, { runner } = {}) {
     const selected = run || REPORT_DEFAULT_RUN[kind];
     if (kind === 'utilization') {
         const { stdout, logs } = await execute(options, tclgen.buildVivadoUtilizationScript({ xprPath: xpr, run: selected }), { runner });
-        const text = String(stdout).split(/\r?\n/).filter(line => line.startsWith('SVTOOLS_UTIL')).map(line => line.slice('SVTOOLS_UTIL'.length).trimStart()).join('\n');
+        // batch stdout 同时含 marker 集合与完整日志，整表会出现两遍；按行去重后解析。
+        const text = [...new Set(String(stdout).split(/\r?\n/).filter(line => line.startsWith('SVTOOLS_UTIL')).map(line => line.slice('SVTOOLS_UTIL'.length).trimStart()))].join('\n');
         if (!text) markers(stdout);
         return result('vivado.report', { kind, run: selected, summary: tclgen.parseUtilHierSummary(text), textBytes: Buffer.byteLength(text) }, context, [], artifactLogs(logs));
     }
@@ -163,11 +164,13 @@ async function run(input, { signal, onContext, onArtifacts } = {}) {
     if (signal?.aborted) cancel(); else signal?.addEventListener('abort', cancel, { once: true });
     try {
         await onContext?.(identity(context));
-        const script = tclgen.buildLaunchRunScript({ xprPath: xpr, run: target, jobs: input.jobs || 4 });
-        const { stdout, logs } = await execute(options, script, { task: job, timeoutMs: input.timeoutMs || options.timeoutMs });
-        const line = String(stdout).split(/\r?\n/).find(value => value.startsWith('SVTOOLS_RUN_STATUS')) || '';
+        // CLI 的 run 是显式"现在运行"：先 reset，已完成的 run 才会真正重跑。
+        const script = tclgen.buildLaunchRunScript({ xprPath: xpr, run: target, jobs: input.jobs || 4, reset: true });
+        const { stdout, summary: runSummary, logs } = await execute(options, script, { task: job, timeoutMs: input.timeoutMs || options.timeoutMs });
+        const lines = lifecycle(stdout, runSummary);
+        const line = lines.find(value => value.startsWith('SVTOOLS_RUN_STATUS')) || '';
         const status = line.slice('SVTOOLS_RUN_STATUS'.length).trim();
-        if (!status) markers(stdout);
+        if (!status) fail('VIVADO_NO_RESULT', 'Vivado未返回run状态');
         return result('vivado.run', { run: target, status: status || null }, context, [], artifactLogs(logs));
     } finally {
         signal?.removeEventListener('abort', cancel);

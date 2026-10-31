@@ -223,13 +223,22 @@ function buildMoveFileScript(o) {
  */
 function buildLaunchRunScript(o) {
     const step = o.toStep ? ' -to_step ' + o.toStep : '';
+    // reset：显式"重新运行"语义（源已变化的已完成run需重置，否则launch_runs拒绝）。
     return [
-        'open_project ' + tclQuote(o.xprPath),
-        'update_compile_order -fileset sources_1',
-        'launch_runs ' + o.run + step + ' -jobs ' + (o.jobs || 4),
-        'wait_on_run ' + o.run,
-        'set r [get_runs ' + o.run + ']',
-        'puts "SVTOOLS_RUN_STATUS [get_property STATUS $r] [get_property PROGRESS $r]"',
+        'if {[catch {',
+        '    open_project ' + tclQuote(o.xprPath),
+        '    update_compile_order -fileset sources_1',
+        ...(o.reset ? ['    reset_run ' + o.run] : []),
+        '    launch_runs ' + o.run + step + ' -jobs ' + (o.jobs || 4),
+        '    wait_on_run ' + o.run,
+        '    set r [get_runs ' + o.run + ']',
+        '    puts "SVTOOLS_RUN_STATUS [get_property STATUS $r] [get_property PROGRESS $r]"',
+        '} errMsg]} {',
+        '    puts "SVTOOLS_TCL_ERROR $errMsg"',
+        '    catch { close_project }',
+        '    exit 1',
+        '}',
+        'close_project',
         'puts "SVTOOLS_DONE"'
     ].join('\n') + '\n';
 }
