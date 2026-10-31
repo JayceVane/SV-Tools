@@ -2,7 +2,7 @@
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const { createHash } = require('node:crypto');
-const { parseXprText } = require('../vivado/xpr');
+const { parseXprText, inspectXprText } = require('../vivado/xpr');
 const { isExcludedSourcePath } = require('../workspace/source-policy');
 const MAX_FILES = 4096, MAX_CONFIG_BYTES = 2 * 1024 * 1024;
 const keyOf = file => process.platform === 'win32' ? path.resolve(file).toLowerCase() : path.resolve(file);
@@ -42,7 +42,7 @@ function validateConfig(config) {
 }
 
 /** 无编辑器依赖的工程成员快照，界面与CLI使用相同文件集规则。 */
-async function readProjectSnapshot(project, { workspaceRoot } = {}) {
+async function readProjectSnapshot(project, { workspaceRoot, withDocument = false } = {}) {
     if (!project || !['vivado', 'svtools'].includes(project.kind) || typeof project.path !== 'string') {
         throw new Error('工程身份无效');
     }
@@ -65,11 +65,13 @@ async function readProjectSnapshot(project, { workspaceRoot } = {}) {
         if (bytes.length > 8 * 1024 * 1024) {
             throw new Error('XPR工程读取期间超出8MiB');
         }
-        const parsed = parseXprText(new TextDecoder('utf-8', { fatal: true }).decode(bytes), file);
+        const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+        const document = withDocument ? inspectXprText(text,file) : null;
+        const parsed = document?.parsed || parseXprText(text,file);
         const root = workspaceRoot || parsed.dir;
         return { ...project, path: file, id: keyOf(file), root, name: path.basename(file, '.xpr'), sets: parsed.sets,
             top: parsed.sets.find(set => set.type === 'DesignSrcs')?.top || '', includeDirs: [], defines: [],
-            key: createHash('sha256').update(bytes).digest('hex'), parsed };
+            key: createHash('sha256').update(bytes).digest('hex'), parsed, ...(document ? {document} : {}) };
     }
     const config = validateConfig(await readConfig(file)), root = path.resolve(path.dirname(file), config.root);
     const exclude = new Set(config.exclude.map(entry => keyOf(path.resolve(root, entry))));

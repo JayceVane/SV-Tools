@@ -5,6 +5,7 @@ const { createHash } = require('node:crypto');
 const { readProjectSnapshot, readConfig, keyOf } = require('../project/model');
 const { extractDesignUnits, maskSourceText } = require('../workspace/sources');
 const { isExcludedSourcePath } = require('../workspace/source-policy');
+const { resolveXprPath } = require('../vivado/xpr');
 const { fail } = require('./protocol');
 const MAX_FILES = 4096, MAX_FILE_BYTES = 8 * 1024 * 1024, MAX_SOURCE_BYTES = 64 * 1024 * 1024;
 const hash = value => createHash('sha256').update(value).digest('hex');
@@ -80,7 +81,7 @@ async function resolveContext(input = {}) {
         if (candidates.length > 1) fail('AMBIGUOUS_PROJECT', '工作区存在多个工程，请显式指定--project', { candidates });
         project = candidates[0];
     }
-    const snapshot = project ? await readProjectSnapshot(project, { workspaceRoot: workspace }) : null;
+    const snapshot = project ? await readProjectSnapshot(project, { workspaceRoot: workspace, withDocument:true }) : null;
     const sets = snapshot?.sets.filter(set => ['DesignSrcs','SimulationSrcs'].includes(set.type)) || [];
     let selected;
     if (sets.length) {
@@ -93,19 +94,28 @@ async function resolveContext(input = {}) {
     const selectedSets=selected ? selected.type==='DesignSrcs'?[selected]:[...designSets,selected] : [];
     const memberMap=new Map(selectedSets.flatMap(set=>set.files).filter(hdl).map(file=>[keyOf(file),file]));
     const members=selected ? [...memberMap.values()] : await walk(workspace,hdl);
-    const includeDirs = [...new Set([...(snapshot?.includeDirs || []), ...(options.includeDirs || []).map(dir => path.resolve(workspace,dir))])];
+    const selectedNames=new Set(selectedSets.map(set=>set.name));
+    const projectOptions=(snapshot?.document?.elements || []).filter(element=>!element.closing && element.parents.some(parent=>parent.name==='FileSet' && selectedNames.has(parent.attrs.Name)));
+    const projectDirs=projectOptions.filter(element=>element.name==='Option' && element.attrs.Name==='VerilogDir').map(element=>resolveXprPath(element.attrs.Val,path.dirname(snapshot.path),path.basename(snapshot.path,'.xpr')));
+    const projectDefines=projectOptions.filter(element=>element.name==='Define').map(element=>element.attrs.Name+(element.attrs.Val?'='+element.attrs.Val:''));
+    const includeDirs = [...new Set([...(snapshot?.includeDirs || []), ...projectDirs, ...(options.includeDirs || []).map(dir => path.resolve(workspace,dir))])];
     // 约束文件同样决定"这一轮结果是否还有效"：变更XDC必须改变revision。
     const constraintPaths=[...new Set((snapshot?.sets || []).filter(set=>set.type==='Constrs').flatMap(set=>set.files).map(file=>path.resolve(file)))];
-    const constraints=[];
+    const constraints=[], auxiliaryContents=new Map();let constraintBytes=0;
     for (const file of constraintPaths) {
-        const stat=await fs.stat(file).catch(()=>null);
-        if (!stat?.isFile() || stat.size>MAX_FILE_BYTES) { constraints.push({path:file,sha256:null}); continue; }
-        constraints.push({path:file,sha256:hash(await fs.readFile(file))});
+        const handle=await fs.open(file,'r');
+        try {
+            const stat=await handle.stat();constraintBytes+=stat.size;
+            if(!stat.isFile() || stat.size>MAX_FILE_BYTES || constraintBytes>MAX_SOURCE_BYTES) fail('SOURCE_LIMIT','约束快照超过安全预算',{file});
+            const buffer=Buffer.alloc(stat.size+1),{bytesRead}=await handle.read(buffer,0,buffer.length,0);
+            if(bytesRead!==stat.size) fail('SOURCE_CHANGED','读取期间约束发生变化',{file});
+            const bytes=buffer.subarray(0,bytesRead);constraints.push({path:file,sha256:hash(bytes)});auxiliaryContents.set(file,{bytes,text:new TextDecoder('utf-8',{fatal:true,ignoreBOM:true}).decode(bytes)});
+        } finally {await handle.close();}
     }
     const files = new Set(members.map(file => path.resolve(file)));
     for (const directory of includeDirs) for (const file of await walk(directory, file => hdl(file) || /\.(?:inc|h)$/i.test(file))) files.add(file);
-    if (files.size > MAX_FILES) fail('SOURCE_LIMIT', '源码和include文件超过4096项');
-    const contents = new Map(), entries = new Array(files.size), units = []; let totalBytes = 0, next = 0;
+    if (files.size+constraints.length > MAX_FILES) fail('SOURCE_LIMIT', '源码和include/约束文件超过4096项');
+    const contents = new Map(), entries = new Array(files.size), units = []; let totalBytes = constraintBytes, next = 0;
     const ordered = [...files];
     await Promise.all(Array.from({length: Math.min(8,ordered.length)}, async () => {
         while (next < ordered.length) {
@@ -122,6 +132,28 @@ async function resolveContext(input = {}) {
             } finally { await handle.close(); }
         }
     }));
+    // Vivado允许不显式加入工程的字面量include；这些依赖也必须参与身份和隔离输入。
+    const known=new Set([...contents.keys()].map(keyOf)), queue=[...contents.keys()];
+    for(let cursor=0;cursor<queue.length;cursor++) {
+        const parent=queue[cursor],text=contents.get(parent).text,masked=maskSourceText(text);
+        for(const match of masked.matchAll(/`include\b/g)) {
+            const directive=/^`include[ \t]+"([^"\r\n]+)"/.exec(text.slice(match.index));if(!directive) continue;
+            const name=directive[1],candidates=path.isAbsolute(name)?[name]:[path.resolve(path.dirname(parent),name),...includeDirs.map(dir=>path.resolve(dir,name))];
+            let file;
+            for(const candidate of candidates) if((await fs.stat(candidate).catch(error=>{if(error.code!=='ENOENT') throw error;}))?.isFile()) {file=candidate;break;}
+            if(!file || known.has(keyOf(file))) continue;
+            if(contents.size+constraints.length>=MAX_FILES) fail('SOURCE_LIMIT','include依赖超过4096项');
+            const handle=await fs.open(file,'r');
+            try {
+                const stat=await handle.stat();totalBytes+=stat.size;
+                if(stat.size>MAX_FILE_BYTES || totalBytes>MAX_SOURCE_BYTES) fail('SOURCE_LIMIT','include依赖超过源码预算',{file});
+                const buffer=Buffer.alloc(stat.size+1),{bytesRead}=await handle.read(buffer,0,buffer.length,0);
+                if(bytesRead!==stat.size) fail('SOURCE_CHANGED','读取include期间文件变化',{file});
+                const bytes=buffer.subarray(0,bytesRead),value={bytes,text:new TextDecoder('utf-8',{fatal:true,ignoreBOM:true}).decode(bytes)};
+                contents.set(file,value);entries.push({path:file,bytes:bytes.length,sha256:hash(bytes)});known.add(keyOf(file));queue.push(file);
+            } finally {await handle.close();}
+        }
+    }
     for (const file of members) {
         const text = contents.get(path.resolve(file)).text, code = maskSourceText(text); let line = 1, offset = 0;
         for (const unit of extractDesignUnits(text)) {
@@ -135,11 +167,11 @@ async function resolveContext(input = {}) {
     const context = { id: hash(JSON.stringify([workspace,project?.path || null,selected?.name || 'workspace'])),
         workspace, project: snapshot ? {kind:snapshot.kind,path:snapshot.path,name:snapshot.name} : null,
         fileset:selected?.name || 'workspace', top, files:entries, constraints, units, includeDirs,
-        defines:[...(snapshot?.defines || []),...(options.defines || [])], standard:options.standard || 'auto',
+        defines:[...(snapshot?.defines || []),...projectDefines,...(options.defines || [])], standard:options.standard || 'auto',
         limitations:['设计单元清单为静态声明索引，宏与生成分支的有效性由实际编译器判断。',
             ...(project?.kind==='vivado'?['M1从XPR提取文件集与top；宏和include目录须通过CLI配置提供，暂不还原Vivado完整编译环境。']:[])] };
     context.revision = hash(JSON.stringify([context, snapshot?.key, configHash]));
-    return {context,contents,options:{...options,file},configPath};
+    return {context,contents,auxiliaryContents,project:snapshot,options:{...options,file},configPath};
 }
 async function assertCurrent(resolved) {
     const next = await resolveContext(resolved.options);

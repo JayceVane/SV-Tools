@@ -20,6 +20,10 @@ async function fixture(t) {
 // 与真实2022.1.2输出同构：版本/器件/tops/runs、时序路径数值与null。
 const statusMarkers = 'SVTOOLS_JSON {"version":"2022.1.2","part":"xc7z100ffg900-2","tops":{"sources":"sfifo","sim":null},"runs":[{"name":"synth_1","status":"synth_design Complete!","progress":"100%"}]}\nSVTOOLS_DONE\n';
 const timingMarkers = 'SVTOOLS_JSON {"run":"impl_1","paths":[{"name":"a/C --> b/D","slack":0.123,"startpoint":"a/C","endpoint":"b/D","pathgroup":null,"logic":3}]}\nSVTOOLS_DONE\n';
+async function completedRun({snapshot}) {
+    const checkpoint=path.join(snapshot.root,'mock.dcp');await fs.writeFile(checkpoint,'isolated checkpoint');
+    return 'SVTOOLS_RUN_STATUS synth_design Complete! 100%\nSVTOOLS_RUN_VERSION 2022.1.2\nSVTOOLS_CHECKPOINT '+checkpoint+'\nSVTOOLS_DONE\n';
+}
 
 test('状态查询解析真实marker结构并绑定工程上下文', async t => {
     const workspace = await fixture(t);
@@ -124,6 +128,11 @@ test('工具执行失败（退出码非零）即使有marker也必须报错', as
     await assert.rejects(status({ workspace, project: 'top.xpr' }, { runner: async () => ({ stdout: 'SVTOOLS_JSON {"version":"2022.1.2","part":"x","tops":{"sources":null,"sim":null},"runs":[]}\nSVTOOLS_DONE\n', exitCode: 7 }) }), { code: 'VIVADO_EXEC_FAILED' });
 });
 
+test('创建工程即使已有XPR和READY标记也不接受失败退出码', async t => {
+    const workspace = await fixture(t);
+    await assert.rejects(createProject({ workspace, name: 'top' }, { runner: async () => ({ stdout: 'SVTOOLS_PROJECT_READY\n', exitCode: 7 }) }), { code: 'VIVADO_EXEC_FAILED' });
+});
+
 test('run状态为ERROR时不能返回成功', async t => {
     const workspace = await fixture(t);
     await assert.rejects(run({ workspace, project: 'top.xpr', run: 'synth_1' }, { runner: async () => 'SVTOOLS_RUN_STATUS synth_design ERROR 0%\nSVTOOLS_DONE\n' }), { code: 'VIVADO_RUN_FAILED' });
@@ -138,7 +147,7 @@ test('取消优先于失败：中止后返回TOOL_CANCELLED而不是脚本失败
 
 test('报告绑定run输入：改源后过期、还原后当前', async t => {
     const workspace = await fixture(t);
-    const done = async () => 'SVTOOLS_RUN_STATUS synth_design Complete! 100%\nSVTOOLS_DONE\n';
+    const done = completedRun;
     await run({ workspace, project: 'top.xpr', run: 'synth_1' }, { runner: done });
     const table = 'SVTOOLS_UTIL | Instance | Module | Total LUTs | Logic LUTs | LUTRAMs | SRLs | FFs | RAMB36 | RAMB18 | DSP Blocks |\nSVTOOLS_UTIL | (top) | (top) | 10 | 10 | 0 | 0 | 16 | 0 | 0 | 0 |\nSVTOOLS_DONE\n';
     const fresh = await report({ workspace, project: 'top.xpr', kind: 'utilization', run: 'synth_1' }, { runner: async () => table });
