@@ -2,6 +2,7 @@
 
 // design scaffold：按规格生成 packed struct 虚拟接口、空模块与顶层连线，用于“先定架构、后填实现”。
 // 生成物是源级骨架；struct 接口避免 SV interface，Yosys 会摊平为 m0.addr 等端口。
+// m_/s_ 端口命名是 Skill 建议，不在程序里强制，只通过 suggestions[] 提示。
 const { fail } = require('../agent/protocol');
 
 const IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/;
@@ -86,6 +87,7 @@ function validateSpec(spec) {
         }
         busNames.add(bus.name);
     }
+    const suggestions = [];
     const modules = arrayOf(spec.modules, 'modules').map((raw, index) => {
         const item = objectOf(raw, 'modules[' + index + ']');
         const name = identifierOf(item.name, 'modules[' + index + '].name');
@@ -101,8 +103,9 @@ function validateSpec(spec) {
             }
             const expected = value.role === 'master' ? 'm_' : 's_';
             if (!portName.startsWith(expected)) {
-                fail('NAMING_VIOLATION', 'design scaffold 模块 ' + name + ' 端口 ' + portName + ' 违反 ' + value.role
-                    + ' 命名约定：必须以 ' + expected + ' 开头', { module: name, port: portName, role: value.role });
+                const label = value.role === 'master' ? '主设备' : '从设备';
+                suggestions.push({ code: 'PORT_NAMING', module: name, port: portName,
+                    message: '建议' + label + '端口以 ' + expected + ' 开头（Skill 约定，不强制）' });
             }
             const direction = value.direction || 'input';
             if (!DIRECTIONS.has(direction)) {
@@ -164,7 +167,7 @@ function validateSpec(spec) {
         }
         instanceNames.add(instance.name);
     }
-    return { typedefs, buses, modules, top: { name: topName, instances } };
+    return { typedefs, buses, modules, suggestions, top: { name: topName, instances } };
 }
 
 /** @param {object} spec 已校验规格。 @returns {string} SystemVerilog 骨架文本。 */

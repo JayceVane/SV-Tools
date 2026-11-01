@@ -171,8 +171,8 @@ node src/cli/main.js design arch --workspace D:/project --top top --depth 1 --sa
 `data` 关键字段：
 
 - `schemaVersion`、`stage`（`source`）、`top{name,moduleId,file}`、`designId`、`modelSha256`（=`archSha256` 的明确映射）、`archSha256`、`contextRevision`、`sourceFiles[]{path,sha256}`（工作区源码/头文件的内容身份）；
-- `modules[]`：架构用到的模块接口表，`id`、`name`（`$paramod\...` 还原为基础模块名+参数摘要）、`file`、`blackbox`、`parameters`、`ports[]{name,direction,width,source}`、`bundles[]`；
-- `instances[]`：顶层实例表，`name`、`module`、`moduleId`、`implementation`（`blackbox`|`collapsed`）、`status`（`resolved`|`unresolved`）、`ports[]`、`bundles[]`、`source`；
+- `modules[]`：架构用到的模块接口表，`id`、`name`（`$paramod\...` 还原为基础模块名+参数摘要）、`file`、`blackbox`、`empty`、`blackboxSource`（`yosys`|`structure`）、`parameters`、`ports[]{name,direction,width,source}`、`bundles[]`；
+- `instances[]`：顶层实例表，`name`、`module`、`moduleId`、`implementation`（`blackbox`|`collapsed`）、`empty`、`blackboxSource`（`yosys`|`structure`）、`status`（`resolved`|`unresolved`）、`ports[]`、`bundles[]`、`source`；`implementation=blackbox` 既包括 Yosys blackbox 属性，也包括结构空模块（无 cells/processes/memories，如 packed struct 端口的骨架模块），后者 `blackboxSource=structure`；含 assign/always_ff 等逻辑的模块为 `collapsed`；
 - `bundles[]`（模块/实例均含，additive，端口事实不变；**仅 opt-in 渲染使用**）：`name`、`prefix`、`direction`（`input`|`output`|`inout`）、`bits`、`members[]{name,width,direction}`。按端口名第一个 `_` 前的 token 建桶（如 `m`、`s0`、`s`、`ddr`），桶内先算公共前缀（去掉末尾 `_`）；**仅当前缀比桶键更长，或前缀与桶键等长且桶键长度≥2 时折叠**，否则桶内成员逐一保留为单成员端口（成员守恒）。因此 `m_axi_araddr`/`m_axi_rdata` 折叠为 `m_axi`，同桶的 `m_valid` 单独成束；`s0_*`/`m0_*`/`ddr_*` 正常折叠；单字母桶 `s_awaddr`/`s_wdata`（key=`s`，前缀=`s`）不折叠。成员方向混合时 `direction="inout"`；`clk_*`/`rst_*` 等时钟复位端口保持独立单成员，避免 `clk_sys`/`clk_pix` 误合并；
 - `interfaces[]`：架构接口束（渲染默认使用），`id`、`from{kind,name}`、`to{kind,name}`、`direction`（`forward`|`bidirectional`）、`bits`、`label`、`signals[]{name,width,direction}`、`fromPorts[]`/`toPorts[]`（端点实际端口名，供折叠端口定位）。实例↔实例先把双向连接合并为 `bidirectional`，再把同源实例、源端口集合相同的多目标连接合并为一条扇出接口（`to.name` 用 `+` 连接多个实例，如 `u_a+u_b+u_c`）；实例↔边界按顶层端口前缀（如 `uart*`、`spi*`、`vin*`）聚合，`clk_in`/`rst_n_in`/`gpio` 等保留为独立束。多端名称用 `+` 连接（如扇出 `u_buf+u_sink`）；`label` 优先取时钟/复位语义（`clk`/`rst`/`clk/rst`），其次成员信号公共前缀（如 `m_axi_*`），否则用最多两个信号名摘要（如 `alpha, beta`），长度不超过 48 字符；完整成员在 `signals[]` 与 SVG `<title>`；
 - `unresolved[]`：工作区未声明的子模块，逐条带 `source`，不伪造端口表（图上为无端口盒，结构检查属 D2）；
@@ -181,7 +181,7 @@ node src/cli/main.js design arch --workspace D:/project --top top --depth 1 --sa
 
 `--depth` 当前固定按顶层实例投影（大于 1 尚未展开子层，在 `limitations[]` 说明）。`--save <name>` 把架构 JSON 写入 `.svtools/agent/design/<name>.json`，供后续 `design diff` 使用。
 
-`design scaffold --spec <json|file> [--out <dir>] [--force]` 按 schemaVersion=1 规格生成架构骨架（默认 `rtl/<top>.sv`）：`typedef struct packed {...} <type>_t;` 虚拟接口、只含 struct 端口的空模块、顶层 struct 总线 wire 与实例化连线。`--spec` 可为规格 JSON 文件路径或内联 JSON；`--out` 必须位于工作区内；目标文件已存在且无 `--force` 时返回 `FILE_EXISTS`，主设备端口未以 `m_`/从设备未以 `s_` 开头返回 `NAMING_VIOLATION`，其余规格问题返回 `INVALID_ARGUMENT`。规格结构：
+`design scaffold --spec <json|file> [--out <dir>] [--force]` 按 schemaVersion=1 规格生成架构骨架（默认 `rtl/<top>.sv`）：`typedef struct packed {...} <type>_t;` 虚拟接口、只含 struct 端口的空模块、顶层 struct 总线 wire 与实例化连线。`--spec` 可为规格 JSON 文件路径或内联 JSON；`--out` 必须是工作区内的目录（创建后按 realpath 复核，拒绝 symlink/junction 逃逸）；目标文件已存在且无 `--force` 时返回 `FILE_EXISTS`，`--out` 指向已有普通文件或非法路径返回 `INVALID_ARGUMENT`，写入失败返回 `DESIGN_FAILED`。主设备 `m_`/从设备 `s_` 命名是 Skill 建议而非门禁：不合建议时生成照常成功，并在 `data.suggestions[]` 返回 `{code:"PORT_NAMING",module,port,message}`，不产生 error diagnostics；其余规格问题返回 `INVALID_ARGUMENT`。规格结构：
 
 ```json
 {

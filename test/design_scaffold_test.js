@@ -48,13 +48,17 @@ test('design scaffold 生成 packed struct 接口、空模块与顶层，并可�
     assert.equal(doctor.output.data.capabilities.includes('design.scaffold'), true);
 });
 
-test('design scaffold 违反主/从命名约定返回 NAMING_VIOLATION 且不落盘', async t => {
+test('design scaffold 非 m_/s_ 命名仍成功，只返回 PORT_NAMING 建议', async t => {
     const directory = await workspace(t);
     const response = await run(['design', 'scaffold', '--workspace', directory, '--spec', NAMING, '--out', 'rtl']);
-    assert.equal(response.exitCode, 2);
-    assert.equal(response.output.status, 'failed');
-    assert.equal(response.output.diagnostics[0].code, 'NAMING_VIOLATION');
-    assert.equal(fs.existsSync(path.join(directory, 'rtl', 'bad_top.sv')), false);
+    assert.equal(response.exitCode, 0, JSON.stringify(response.output));
+    assert.equal(response.output.status, 'success');
+    assert.equal(response.output.diagnostics.length, 0);
+    assert.equal(fs.existsSync(path.join(directory, 'rtl', 'bad_top.sv')), true);
+    assert.equal(response.output.data.suggestions.length, 1);
+    assert.equal(response.output.data.suggestions[0].code, 'PORT_NAMING');
+    assert.equal(response.output.data.suggestions[0].port, 'axi');
+    assert.match(response.output.data.suggestions[0].message, /建议主设备端口以 m_ 开头/);
 });
 
 test('design scaffold 已存在文件需 --force 覆盖', async t => {
@@ -69,4 +73,113 @@ test('design scaffold 已存在文件需 --force 覆盖', async t => {
     const forced = await run(['design', 'scaffold', '--workspace', directory, '--spec', VALID, '--out', 'rtl', '--force']);
     assert.equal(forced.exitCode, 0);
     assert.equal(await fsp.readFile(file, 'utf8'), before);
+});
+
+const BASE_SPEC = {
+    schemaVersion: 1,
+    interfaces: [{ type: 'axi4_lite', members: [{ name: 'awaddr', width: 32 }] }],
+    buses: [{ name: 'm0', type: 'axi4_lite' }],
+    modules: [{ name: 'cpu', ports: [{ name: 'm_axi', type: 'axi4_lite', role: 'master', direction: 'output' }] }],
+    top: { name: 'soc_top', instances: [{ name: 'u_cpu', module: 'cpu', connections: { m_axi: 'm0' } }] }
+};
+
+/** @param {object} value @returns {object} 深拷贝。 */
+function copy(value) {
+    return JSON.parse(JSON.stringify(value));
+}
+
+/** @param {string} directory 工作区。 @param {object} spec 规格。 @param {string} [out] 输出目录。 @param {boolean} [force] 覆盖。 @returns {Promise<object>} CLI 结果。 */
+function inlineScaffold(directory, spec, out = 'rtl', force = false) {
+    const args = ['design', 'scaffold', '--workspace', directory, '--spec', JSON.stringify(spec), '--out', out];
+    if (force) {
+        args.push('--force');
+    }
+    return run(args);
+}
+
+test('design scaffold 支持以 { 开头的内联 JSON 规格', async t => {
+    const directory = await workspace(t);
+    const response = await inlineScaffold(directory, BASE_SPEC, 'rtl-inline');
+    assert.equal(response.exitCode, 0, JSON.stringify(response.output.diagnostics));
+    assert.equal(fs.existsSync(path.join(directory, 'rtl-inline', 'soc_top.sv')), true);
+});
+
+test('design scaffold 规格错误返回 INVALID_ARGUMENT 且不落盘', async t => {
+    const directory = await workspace(t);
+    const cases = [
+        ['schemaVersion', { ...copy(BASE_SPEC), schemaVersion: 2 }],
+        ['type', Object.assign(copy(BASE_SPEC), { interfaces: [{ type: 'bad-type', members: [{ name: 'awaddr', width: 32 }] }] })],
+        ['width', Object.assign(copy(BASE_SPEC), { interfaces: [{ type: 'axi4_lite', members: [{ name: 'awaddr', width: 0 }] }] })],
+        ['bus', Object.assign(copy(BASE_SPEC), { top: { name: 'soc_top', instances: [{ name: 'u_cpu', module: 'cpu', connections: { m_axi: 'missing' } }] } })],
+        ['mismatch', (() => {
+            const spec = copy(BASE_SPEC);
+            spec.interfaces.push({ type: 'other_bus', members: [{ name: 'data', width: 8 }] });
+            spec.buses.push({ name: 'other', type: 'other_bus' });
+            spec.top.instances[0].connections = { m_axi: 'other' };
+            return spec;
+        })()]
+    ];
+    for (const [name, spec] of cases) {
+        const response = await inlineScaffold(directory, spec, 'bad-' + name);
+        assert.equal(response.exitCode, 2, name);
+        assert.equal(response.output.status, 'failed', name);
+        assert.equal(response.output.diagnostics[0].code, 'INVALID_ARGUMENT', name + ': ' + response.output.diagnostics[0].message);
+        assert.equal(fs.existsSync(path.join(directory, 'bad-' + name, 'soc_top.sv')), false, name);
+    }
+});
+
+test('design scaffold --out 越界、普通文件目标与目标目录返回稳定错误码', async t => {
+    const directory = await workspace(t);
+    const outside = await inlineScaffold(directory, BASE_SPEC, path.join(os.tmpdir(), 'svtools-scaffold-outside-' + process.pid));
+    assert.equal(outside.exitCode, 2);
+    assert.equal(outside.output.diagnostics[0].code, 'INVALID_ARGUMENT');
+    const parentEscape = await inlineScaffold(directory, BASE_SPEC, '../outside-' + process.pid);
+    assert.equal(parentEscape.exitCode, 2);
+    assert.equal(parentEscape.output.diagnostics[0].code, 'INVALID_ARGUMENT');
+    await fsp.writeFile(path.join(directory, 'blocked'), 'x');
+    const blocked = await inlineScaffold(directory, BASE_SPEC, 'blocked');
+    assert.equal(blocked.exitCode, 2);
+    assert.equal(blocked.output.diagnostics[0].code, 'INVALID_ARGUMENT');
+    await fsp.mkdir(path.join(directory, 'rtl', 'soc_top.sv'), { recursive: true });
+    const directoryTarget = await inlineScaffold(directory, BASE_SPEC, 'rtl');
+    assert.equal(directoryTarget.exitCode, 2);
+    assert.equal(directoryTarget.output.diagnostics[0].code, 'INVALID_ARGUMENT');
+    const unrepresentable = await inlineScaffold(directory, BASE_SPEC, 'x'.repeat(300));
+    assert.equal(unrepresentable.exitCode, 2);
+    assert.equal(unrepresentable.output.diagnostics[0].code, 'DESIGN_FAILED');
+});
+
+test('design scaffold 拒绝 junction 目录逃逸', async t => {
+    const directory = await workspace(t);
+    const outside = await fsp.mkdtemp(path.join(os.tmpdir(), 'svtools-scaffold-link-'));
+    t.after(() => fsp.rm(outside, { recursive: true, force: true }));
+    try {
+        await fsp.symlink(outside, path.join(directory, 'escape'), 'junction');
+    } catch (error) {
+        t.skip('当前环境不支持创建 junction：' + error.code);
+        return;
+    }
+    const escaped = await inlineScaffold(directory, BASE_SPEC, path.join('escape', 'rtl'));
+    assert.equal(escaped.exitCode, 2);
+    assert.equal(escaped.output.diagnostics[0].code, 'INVALID_ARGUMENT');
+    assert.equal(fs.existsSync(path.join(outside, 'rtl', 'soc_top.sv')), false);
+});
+
+test('design scaffold 拒绝覆盖符号链接目标', async t => {
+    const directory = await workspace(t);
+    const outside = await fsp.mkdtemp(path.join(os.tmpdir(), 'svtools-scaffold-file-link-'));
+    t.after(() => fsp.rm(outside, { recursive: true, force: true }));
+    const target = path.join(outside, 'target.sv');
+    await fsp.writeFile(target, 'original');
+    await fsp.mkdir(path.join(directory, 'rtl'), { recursive: true });
+    try {
+        await fsp.symlink(target, path.join(directory, 'rtl', 'soc_top.sv'), 'file');
+    } catch (error) {
+        t.skip('当前环境不支持文件 symlink：' + error.code);
+        return;
+    }
+    const linked = await inlineScaffold(directory, BASE_SPEC, 'rtl', true);
+    assert.equal(linked.exitCode, 2);
+    assert.equal(linked.output.diagnostics[0].code, 'INVALID_ARGUMENT');
+    assert.equal(await fsp.readFile(target, 'utf8'), 'original');
 });

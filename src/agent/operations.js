@@ -5,7 +5,7 @@ const { randomUUID } = require('node:crypto');
 const { readOptions, resolveContext, listProjects, assertCurrent, page, hash } = require('./context');
 const { maskSourceText } = require('../workspace/sources');
 const { keyOf } = require('../project/model');
-const { result, fail, identity } = require('./protocol');
+const { result, fail, identity, ServiceError } = require('./protocol');
 const { directory, writeJson } = require('./storage');
 const { createNativeLoader } = require('../native-loader');
 const { buildFormatOptions } = require('../configuration');
@@ -165,6 +165,9 @@ function parseBundleNames(values = []) {
 }
 /** @param {string} workspace @param {string} value 规格路径或内联 JSON。 @returns {Promise<{text:string,source:string|null}>} 规格文本。 */
 async function readSpec(workspace, value) {
+    if (typeof value === 'string' && value.trimStart().startsWith('{')) {
+        return { text: value, source: null };
+    }
     const candidate = path.resolve(workspace, value);
     try {
         return { text: await fs.readFile(candidate, 'utf8'), source: candidate };
@@ -193,12 +196,45 @@ async function scaffold(input) {
     }
     const text = generateScaffold(validated);
     const file = path.join(outputDirectory, validated.top.name + '.sv');
-    await fs.mkdir(outputDirectory, { recursive: true });
+    let phase = 'mkdir';
     try {
+        await fs.mkdir(outputDirectory, { recursive: true });
+        // 目录创建后按真实路径复核，防止 symlink/junction 把 --out 逃逸到工作区外。
+        const realWorkspace = await fs.realpath(workspace);
+        const realOutput = await fs.realpath(outputDirectory);
+        const containment = path.relative(realWorkspace, realOutput);
+        if (containment.startsWith('..') || path.isAbsolute(containment)) {
+            fail('INVALID_ARGUMENT', 'design scaffold 的 --out 通过符号链接逃逸出工作区', { out: input.out || 'rtl' });
+        }
+        let existing = null;
+        try {
+            existing = await fs.lstat(file);
+        } catch (error) {
+            if (error.code !== 'ENOENT') throw error;
+        }
+        if (existing) {
+            if (existing.isSymbolicLink()) {
+                fail('INVALID_ARGUMENT', 'design scaffold 拒绝覆盖符号链接：' + file, { file });
+            }
+            if (!existing.isFile()) {
+                fail('INVALID_ARGUMENT', 'design scaffold 目标路径不是普通文件：' + file, { file });
+            }
+            if (!input.force) {
+                fail('FILE_EXISTS', 'design scaffold 目标文件已存在，使用 --force 覆盖：' + file, { file });
+            }
+        }
+        phase = 'write';
         await fs.writeFile(file, text, { flag: input.force ? 'w' : 'wx' });
     } catch (error) {
-        if (error.code === 'EEXIST') {
+        if (error instanceof ServiceError) throw error;
+        if (error.code === 'EEXIST' && phase === 'write') {
             fail('FILE_EXISTS', 'design scaffold 目标文件已存在，使用 --force 覆盖：' + file, { file });
+        }
+        if (['EEXIST', 'ENOTDIR', 'EISDIR', 'EINVAL'].includes(error.code)) {
+            fail('INVALID_ARGUMENT', 'design scaffold 的 --out 必须是工作区内的目录：' + (input.out || 'rtl'), { out: input.out || 'rtl' });
+        }
+        if (error.code === 'EACCES' || error.code === 'EPERM') {
+            fail('DESIGN_FAILED', 'design scaffold 没有写入权限：' + file, { file });
         }
         fail('DESIGN_FAILED', 'design scaffold 写入失败：' + error.message, { file });
     }
@@ -206,6 +242,7 @@ async function scaffold(input) {
     return result('design.scaffold', {
         workspace, out: relative.split(path.sep).join('/') || '.', file: relativeFile,
         top: validated.top.name,
+        suggestions: validated.suggestions,
         interfaces: validated.typedefs.map(item => ({ type: item.type, typedef: item.typedefName, members: item.members })),
         buses: validated.buses, modules: validated.modules, instances: validated.top.instances.length,
         source: source.source ? path.relative(workspace, source.source).split(path.sep).join('/') : null
