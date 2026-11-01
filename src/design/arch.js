@@ -391,27 +391,58 @@ function addSignal(map, name, width, direction) {
     map.set(name, { name, width, direction });
 }
 
+/** @param {object[]} signals @returns {string|null} 时钟/复位类信号的语义标签（如 clk/rst）；混入其他信号返回 null。 */
+function clockResetLabel(signals) {
+    const kinds = new Set();
+    for (const signal of signals) {
+        if (/^(?:clk|clock)/i.test(signal.name)) {
+            kinds.add('clk');
+        } else if (/^(?:rst|reset|nrst|arst|srst)/i.test(signal.name)) {
+            kinds.add('rst');
+        } else {
+            return null;
+        }
+    }
+    return kinds.size ? ['clk', 'rst'].filter(kind => kinds.has(kind)).join('/') : null;
+}
+
+/** @param {object[]} signals @returns {string} 接口标签（不含位宽）：语义标签 > 信号公共前缀 > 最多两个信号名摘要。 */
+function labelForSignals(signals) {
+    const semantic = clockResetLabel(signals);
+    if (semantic) {
+        return semantic;
+    }
+    const names = signals.map(signal => signal.name);
+    const prefix = commonSignalPrefix(names);
+    if (prefix) {
+        return prefix + '*';
+    }
+    const unique = [...new Set(names)];
+    return unique.length > 2 ? unique.slice(0, 2).join(', ') + '…' : unique.join(', ');
+}
+
 /**
  * 把信号级端口连接抽象为架构接口束。
- * 实例↔实例按无序实例对分组；实例↔边界按顶层端口前缀分组并支持扇出；inout 端口按顶层连接补齐为双向。
+ * 实例↔实例先合并双向对；同源实例且源端口集合相同的多目标连接合并为扇出接口；实例↔边界按顶层端口前缀分组。
+ * inout 端口按顶层连接补齐为双向。
  * @param {object} module 顶层模块。 @param {object[]} nodes 架构节点。 @param {object[]} edges 信号级连边。
  * @returns {object[]} 接口束列表；多端名称用 '+' 连接。
  */
 function buildInterfaces(module, nodes, edges) {
     const kinds = new Map(nodes.filter(node => node.kind === 'instance' || node.kind === 'boundary').map(node => [node.id, node.kind]));
-    const pairs = new Map();
+    const directed = new Map();
     const boundaryGroups = new Map();
-    function pairGroup(source, target) {
-        const names = [source, target].sort();
-        const key = names.join('\u0000');
-        if (!pairs.has(key)) {
-            pairs.set(key, { names, signals: new Map() });
+    function directedGroup(source, target) {
+        const key = source + '\u0000' + target;
+        if (!directed.has(key)) {
+            directed.set(key, { source, target, ports: new Map(), signals: new Map() });
         }
-        return pairs.get(key);
+        return directed.get(key);
     }
     function boundaryGroup(portName) {
         const prefix = boundaryPrefix(portName);
-        const key = prefix || portName;
+        // 前缀束与精确端口分属不同命名空间，避免 gpio 与 gpio_a 被合并。
+        const key = prefix ? 'prefix:' + prefix : 'port:' + portName;
         if (!boundaryGroups.has(key)) {
             boundaryGroups.set(key, { prefix, boundaryPorts: new Set(), instances: new Set(), signals: new Map() });
         }
@@ -428,8 +459,9 @@ function buildInterfaces(module, nodes, edges) {
             if (source === target) {
                 continue;
             }
-            const group = pairGroup(source, target);
-            addSignal(group.signals, signalName, edge.width, source === group.names[0] ? 'forward' : 'reverse');
+            const group = directedGroup(source, target), sourcePort = splitEndpoint(edge.source).portName;
+            group.ports.set(sourcePort, Math.max(group.ports.get(sourcePort) || 0, edge.width));
+            addSignal(group.signals, signalName, edge.width, 'forward');
         } else if (sourceKind === 'boundary' && targetKind === 'instance') {
             const group = boundaryGroup(splitEndpoint(edge.source).portName);
             group.instances.add(endpointName(edge.targetNode));
@@ -442,34 +474,77 @@ function buildInterfaces(module, nodes, edges) {
             addSignal(group.signals, splitEndpoint(edge.target).portName, edge.width, 'output');
         }
     }
-    // inout 顶层端口在信号级连边中方向未知，按顶层模块连接补齐为双向接口。
+    // inout 顶层端口在信号级连边中方向未知，仅按用户模块实例连接补齐为双向接口。
     for (const port of module.ports.filter(item => item.direction === 'inout')) {
+        const matched = module.cells.filter(isUserInstance)
+            .filter(cell => cell.ports.some(item => item.bits.some(bit => port.bits.includes(bit))));
+        if (!matched.length) {
+            continue;
+        }
         const group = boundaryGroup(port.name);
-        for (const cell of module.cells) {
-            if (cell.ports.some(item => item.bits.some(bit => port.bits.includes(bit)))) {
-                group.instances.add(cell.name);
-                group.boundaryPorts.add(port.name);
-                addSignal(group.signals, port.name, port.bits.length, 'inout');
-            }
+        for (const cell of matched) {
+            group.instances.add(cell.name);
+            group.boundaryPorts.add(port.name);
+            addSignal(group.signals, port.name, port.bits.length, 'inout');
         }
     }
     const interfaces = [];
-    for (const group of pairs.values()) {
-        const signals = signalList(group.signals);
-        const directions = new Set(signals.map(signal => signal.direction));
-        const bidirectional = directions.has('forward') && directions.has('reverse');
-        const forward = directions.has('forward') || !directions.has('reverse');
-        const fromName = bidirectional || forward ? group.names[0] : group.names[1];
-        const toName = fromName === group.names[0] ? group.names[1] : group.names[0];
+    const consumed = new Set();
+    // 双向实例对：A→B 与 B→A 的成员合并为一个双向接口。
+    for (const [key, group] of directed) {
+        if (consumed.has(key)) {
+            continue;
+        }
+        const reverse = directed.get(group.target + '\u0000' + group.source);
+        if (!reverse) {
+            continue;
+        }
+        consumed.add(key);
+        consumed.add(group.target + '\u0000' + group.source);
+        const names = [group.source, group.target].sort();
+        const from = { kind: 'instance', name: names[0] }, to = { kind: 'instance', name: names[1] };
+        const combined = new Map();
+        for (const item of [group, reverse]) {
+            for (const signal of item.signals.values()) {
+                addSignal(combined, signal.name, signal.width, item.source === from.name ? 'forward' : 'reverse');
+            }
+        }
+        const signals = signalList(combined);
         const bits = signals.reduce((total, signal) => total + signal.width, 0);
-        const prefix = commonSignalPrefix(signals.map(signal => signal.name));
-        const summary = prefix ? prefix + '*' : `${group.names[0]}.${signals[0].name}${signals.length > 1 ? '…' : ''}`;
-        const from = { kind: 'instance', name: fromName }, to = { kind: 'instance', name: toName };
-        interfaces.push({ id: interfaceId(from, to), from, to, direction: bidirectional ? 'bidirectional' : 'forward',
-            bits, label: trimLabel(summary), signals });
+        interfaces.push({ id: interfaceId(from, to), from, to, direction: 'bidirectional', bits,
+            label: trimLabel(labelForSignals(signals)), signals });
+    }
+    // 单向连接：同源实例且源端口集合相同的多目标连接合并为一条扇出接口。
+    const fanout = new Map();
+    for (const [key, group] of directed) {
+        if (consumed.has(key)) {
+            continue;
+        }
+        const signature = [...group.ports.entries()].sort(([left], [right]) => left < right ? -1 : 1)
+            .map(([port, width]) => port + ':' + width).join(',');
+        const fanoutKey = group.source + '\u0000' + signature;
+        if (!fanout.has(fanoutKey)) {
+            fanout.set(fanoutKey, { source: group.source, ports: group.ports, targets: new Set(), signals: new Map() });
+        }
+        const entry = fanout.get(fanoutKey);
+        entry.targets.add(group.target);
+        for (const signal of group.signals.values()) {
+            addSignal(entry.signals, signal.name, signal.width, 'forward');
+        }
+    }
+    for (const group of fanout.values()) {
+        const targets = [...group.targets].sort();
+        const from = { kind: 'instance', name: group.source }, to = { kind: 'instance', name: targets.join('+') };
+        const signals = signalList(group.signals);
+        const bits = signals.reduce((total, signal) => total + signal.width, 0);
+        interfaces.push({ id: interfaceId(from, to), from, to, direction: 'forward', bits,
+            label: trimLabel(labelForSignals(signals)), signals });
     }
     for (const group of boundaryGroups.values()) {
         const signals = signalList(group.signals);
+        if (!signals.length || !group.instances.size) {
+            continue;
+        }
         const directions = new Set(signals.map(signal => signal.direction));
         const bidirectional = directions.has('bidirectional') || directions.has('inout') || (directions.has('input') && directions.has('output'));
         const boundaryName = [...group.boundaryPorts].sort().join('+');
@@ -705,7 +780,11 @@ async function buildArchitecture({ workspace, files, top, includeDirs = [], defi
     }
     const data = projectArchitecture(design, { workspace, depth, budget: limits });
     data.contextRevision = contextRevision || null;
+    data.sourceFiles = files.map(file => ({ path: relativePosix(workspace, file.path), sha256: hashText(file.text) }))
+        .sort((left, right) => left.path < right.path ? -1 : left.path > right.path ? 1 : 0);
+    data.designId = 'design:' + hashText(stableStringify([design.top, data.sourceFiles])).slice(0, 16);
     data.archSha256 = archHash(data);
+    data.modelSha256 = data.archSha256;
     await fs.rm(runDirectory, { recursive: true, force: true }).catch(() => {});
     return data;
 }

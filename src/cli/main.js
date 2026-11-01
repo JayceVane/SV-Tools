@@ -18,7 +18,7 @@ const help=`SV Tools headless CLI (API 1)
   vivado report timing|utilization|drc [--run synth_1|impl_1]
   vivado run [--run synth_1|impl_1] [--jobs <n>]
   design arch --top <module> [--depth <n>] [--save <name>]
-  design render --top <module> [--format svg] [--out <dir>] [--title <t>]
+  design render --top <module> [--format svg] [--style document|presentation] [--out <dir>] [--title <t>]
   task start lint [lint options]
   task list|status|logs|cancel [task-id]
 
@@ -33,7 +33,7 @@ Output:  JSON on stdout; --help and --version return text.
 Node.js >=22. The existing Rust formatter CLI remains available in bin/.
 `;
 function argumentsFor(argv) {
-    const strings=['workspace','config','project','fileset','file','top','iverilog','cygwin','vivado','standard','run','timeout','offset','limit','log-index','max-paths','jobs','name','dir','part','sim-top','target-fileset','depth','save','format','out','title'];
+    const strings=['workspace','config','project','fileset','file','top','iverilog','cygwin','vivado','standard','run','timeout','offset','limit','log-index','max-paths','jobs','name','dir','part','sim-top','target-fileset','depth','save','format','out','title','style'];
     const options=Object.fromEntries(strings.map(name=>[name,{type:'string'}]));
     for(const name of ['help','version','json','write','check']) options[name]={type:'boolean'};
     options.include={type:'string',multiple:true}; options.define={type:'string',multiple:true}; options.source={type:'string',multiple:true};

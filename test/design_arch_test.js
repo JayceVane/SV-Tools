@@ -265,3 +265,36 @@ test('Yosys 语法错误返回 DESIGN_FAILED 并附日志，8MiB 超限仍是 SO
     assert.equal(limited.exitCode, 2);
     assert.equal(limited.output.diagnostics[0].code, 'SOURCE_LIMIT');
 });
+
+test('inout 补全只使用用户实例，未连接 inout 不产出接口', async t => {
+    const leakDirectory = await workspace(t, 'inout-leak');
+    const leak = await run(['design', 'arch', '--workspace', leakDirectory, '--top', 'inout_leak_top']);
+    assert.equal(leak.exitCode, 0);
+    const data = leak.output.data;
+    assert.deepEqual(data.instances.map(instance => instance.name), ['u_pad']);
+    assert.equal(data.graph.nodes.some(node => String(node.name).startsWith('$')), false);
+    assert.equal(data.interfaces.length, 1);
+    assert.deepEqual(data.interfaces[0].from, { kind: 'boundary', name: 'io' });
+    assert.deepEqual(data.interfaces[0].to, { kind: 'instance', name: 'u_pad' });
+    assert.equal(data.interfaces[0].direction, 'bidirectional');
+    for (const item of data.interfaces) {
+        assert.equal([item.from.name, item.to.name].some(name => name.includes('$')), false);
+    }
+    const emptyDirectory = await workspace(t, 'inout-empty');
+    for (const top of ['inout_empty', 'gpio_empty']) {
+        const response = await run(['design', 'arch', '--workspace', emptyDirectory, '--top', top]);
+        assert.equal(response.exitCode, 0, top);
+        assert.deepEqual(response.output.data.interfaces, [], top);
+    }
+});
+
+test('边界前缀使用命名空间，gpio 与 gpio_a 不合并', async t => {
+    const directory = await workspace(t, 'boundary-collision');
+    const response = await run(['design', 'arch', '--workspace', directory, '--top', 'collision_top']);
+    assert.equal(response.exitCode, 0);
+    const interfaces = response.output.data.interfaces;
+    assert.equal(interfaces.length, 2);
+    assert.deepEqual(interfaces.map(item => item.from.name).sort(), ['gpio', 'gpio_a']);
+    assert.equal(interfaces.some(item => item.from.name.includes('+')), false);
+    assert.deepEqual(interfaces.map(item => item.to.name).sort(), ['u_a', 'u_b']);
+});

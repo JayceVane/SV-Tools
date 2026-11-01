@@ -13,19 +13,50 @@ const { fail } = require('../agent/protocol');
 const DEFAULT_RENDER_BUDGET = Object.freeze({ nodes: 2000, edges: 6000, ports: 16384 });
 const LAYOUT_OPTIONS = Object.freeze({
     'elk.algorithm': 'layered', 'elk.direction': 'RIGHT', 'elk.edgeRouting': 'ORTHOGONAL',
-    'elk.spacing.nodeNode': '36', 'elk.layered.spacing.nodeNodeBetweenLayers': '72',
-    'elk.spacing.edgeNode': '18', 'elk.spacing.edgeEdge': '14',
-    'elk.layered.spacing.edgeNodeBetweenLayers': '18', 'elk.layered.spacing.edgeEdgeBetweenLayers': '14',
+    'elk.aspectRatio': '1.5',
+    'elk.layered.crossingMinimization.strategy': 'LAYER_SWEEP',
+    'elk.layered.crossingMinimization.greedySwitch.type': 'TWO_SIDED',
+    'elk.layered.nodePlacement.strategy': 'NETWORK_SIMPLEX',
+    'elk.layered.nodePlacement.favorStraightEdges': 'true',
+    'elk.layered.thoroughness': '7',
+    'elk.spacing.nodeNode': '44', 'elk.layered.spacing.nodeNodeBetweenLayers': '200',
+    'elk.spacing.edgeNode': '20', 'elk.spacing.edgeEdge': '16',
+    'elk.layered.spacing.edgeNodeBetweenLayers': '20', 'elk.layered.spacing.edgeEdgeBetweenLayers': '16',
     'elk.padding': '[top=32,left=32,bottom=32,right=32]'
-});
-const PALETTE = Object.freeze({
-    background: '#111923', panel: '#17222e', cellBg: '#1f252c', border: '#2c3a49', fg: '#d7e1ec', muted: '#9aaabc',
-    wire: '#aebbc6', accent: '#63b8ff', blackbox: '#d3b57e', collapsed: '#7ccabf', input: '#eebc79', output: '#70d3c3',
-    error: '#f29595', grid: '#23313f'
 });
 const FONT_MONO = "Consolas, 'SFMono-Regular', 'Courier New', monospace";
 const FONT_UI = "-apple-system, 'Segoe UI', Roboto, sans-serif";
-const PADDING = 40, HEADER = 64, FOOTER = 52, PORT_PITCH = 22, HEADER_BAND = 58, GRID = 8;
+const PADDING = 40, HEADER = 64, FOOTER = 52, PORT_PITCH = 17, HEADER_BAND = 54, GRID = 8;
+const THEMES = Object.freeze({
+    document: Object.freeze({
+        background: '#ffffff', panel: '#ffffff', cellBg: '#ffffff', border: '#111111', fg: '#111111', muted: '#333333',
+        wire: '#111111', accent: '#111111', blackbox: '#111111', collapsed: '#111111', input: '#111111', output: '#111111',
+        error: '#111111', grid: null, titleStrip: '#f5f5f5', font: FONT_UI, labelFont: FONT_UI, badgeFill: '#ffffff',
+        strokeWidth: 1.2, blackboxDash: '6 4', unresolvedDash: '2 3', gridBackground: false, busWidth: 1.8, wireWidth: 1
+    }),
+    presentation: Object.freeze({
+        background: '#111923', panel: '#17222e', cellBg: '#1f252c', border: '#2c3a49', fg: '#d7e1ec', muted: '#9aaabc',
+        wire: '#aebbc6', accent: '#63b8ff', blackbox: '#d3b57e', collapsed: '#7ccabf', input: '#eebc79', output: '#70d3c3',
+        error: '#f29595', grid: '#23313f', titleStrip: null, font: FONT_MONO, labelFont: FONT_MONO, badgeFill: '#17222e',
+        strokeWidth: 1.5, blackboxDash: '4 3', unresolvedDash: '4 3', gridBackground: true, busWidth: 2.4, wireWidth: 1.25
+    })
+});
+const STYLES = Object.freeze(Object.keys(THEMES));
+
+/** @param {string} [style] 风格名。 @returns {'document'|'presentation'} 归一后的风格；ui 是 presentation 的别名。 */
+function normalizeStyle(style) {
+    if (style === undefined || style === null || style === '') {
+        return 'document';
+    }
+    const value = String(style).toLowerCase();
+    if (value === 'ui') {
+        return 'presentation';
+    }
+    if (!Object.hasOwn(THEMES, value)) {
+        fail('INVALID_ARGUMENT', '不支持的--style：' + style + '（可选 document|presentation）');
+    }
+    return value;
+}
 
 /** @param {string} svg SVG 文本。 @returns {string} SHA-256。 */
 function sha256(svg) {
@@ -257,7 +288,8 @@ function buildRenderProjection(arch, { budget = {} } = {}) {
     };
     return { id: 'graph:arch', moduleId: arch.top ? arch.top.moduleId : null, name: arch.top ? arch.top.name : 'architecture',
         input, nodes, edges, signals: [], parameters: null,
-        stats: { nodes: nodes.length, edges: edges.length, ports: portTotal, interfaces: interfaces.length } };
+        stats: { nodes: nodes.length, edges: edges.length, ports: portTotal, interfaces: interfaces.length,
+            junctions: nodes.filter(node => node.kind === 'junction').length } };
 }
 
 /**
@@ -271,20 +303,27 @@ async function layoutArchitecture(arch, options = {}) {
     return { projection, layout };
 }
 
-/** @param {object} node 布局节点。 @param {object[]} parts SVG片段。 @returns {void} 追加实例盒。 */
-function drawInstance(node, parts) {
-    const accent = node.status === 'unresolved' ? PALETTE.error : node.implementation === 'blackbox' ? PALETTE.blackbox : PALETTE.collapsed;
-    const dash = node.status === 'unresolved' || node.implementation === 'blackbox' ? ' stroke-dasharray="4 3"' : '';
+/** @param {object} node 布局节点。 @param {object[]} parts SVG片段。 @param {object} theme 风格。 @returns {void} 追加实例盒。 */
+function drawInstance(node, parts, theme) {
+    const accent = node.status === 'unresolved' ? theme.error : node.implementation === 'blackbox' ? theme.blackbox : theme.collapsed;
+    const dash = node.status === 'unresolved' ? ' stroke-dasharray="' + theme.unresolvedDash + '"'
+        : node.implementation === 'blackbox' ? ' stroke-dasharray="' + theme.blackboxDash + '"' : '';
     parts.push('<g data-model-id="' + escape(node.id) + '" data-kind="instance" data-implementation="' + escape(node.implementation || 'collapsed') + '">');
     parts.push('<rect x="' + number(node.x) + '" y="' + number(node.y) + '" width="' + number(node.width) + '" height="' + number(node.height)
-        + '" rx="3" fill="' + PALETTE.cellBg + '" stroke="' + accent + '" stroke-width="1.5"' + dash + '/>');
-    parts.push('<text x="' + number(node.x + 12) + '" y="' + number(node.y + 21) + '" fill="' + PALETTE.fg + '" font-family="' + FONT_MONO + '" font-size="13" font-weight="600">'
+        + '" rx="3" fill="' + theme.cellBg + '" stroke="' + accent + '" stroke-width="' + theme.strokeWidth + '"' + dash + '/>');
+    if (theme.titleStrip) {
+        parts.push('<rect x="' + number(node.x) + '" y="' + number(node.y) + '" width="' + number(node.width) + '" height="44" fill="'
+            + theme.titleStrip + '"/>');
+        parts.push('<line x1="' + number(node.x) + '" y1="' + number(node.y + 44) + '" x2="' + number(node.x + node.width) + '" y2="'
+            + number(node.y + 44) + '" stroke="' + theme.border + '" stroke-width="0.6"/>');
+    }
+    parts.push('<text x="' + number(node.x + 12) + '" y="' + number(node.y + 21) + '" fill="' + theme.fg + '" font-family="' + theme.font + '" font-size="13" font-weight="600">'
         + escape(shorten(node.label, node.width - node.badgeWidth - 24, 13)) + '</text>');
-    parts.push('<text x="' + number(node.x + 12) + '" y="' + number(node.y + 38) + '" fill="' + PALETTE.muted + '" font-family="' + FONT_MONO + '" font-size="11">'
+    parts.push('<text x="' + number(node.x + 12) + '" y="' + number(node.y + 38) + '" fill="' + theme.muted + '" font-family="' + theme.font + '" font-size="11">'
         + escape(shorten(node.detail || '', node.width - node.badgeWidth - 24, 11)) + '</text>');
     const badge = node.badge, badgeWidth = node.badgeWidth;
     parts.push('<rect x="' + number(node.x + node.width - badgeWidth - 8) + '" y="' + number(node.y + 9) + '" width="' + number(badgeWidth)
-        + '" height="16" rx="8" fill="' + PALETTE.panel + '" stroke="' + accent + '" stroke-width="1"/>');
+        + '" height="16" rx="8" fill="' + theme.badgeFill + '" stroke="' + accent + '" stroke-width="1"/>');
     parts.push('<text x="' + number(node.x + node.width - badgeWidth / 2 - 8) + '" y="' + number(node.y + 20.5) + '" fill="' + accent
         + '" font-family="' + FONT_UI + '" font-size="9" text-anchor="middle">' + escape(badge) + '</text>');
     for (const port of node.ports) {
@@ -294,13 +333,13 @@ function drawInstance(node, parts) {
         parts.push('<g data-model-id="' + escape(port.id) + '" data-kind="port" data-direction="' + escape(port.direction) + '">');
         parts.push('<title>' + escape(port.label + ' · ' + port.direction + ' · ' + port.width + ' bit' + (port.width === 1 ? '' : 's')) + '</title>');
         parts.push('<line x1="' + number(side === 'WEST' ? px - 8 : px) + '" y1="' + number(py) + '" x2="' + number(side === 'WEST' ? px : px + 8)
-            + '" y2="' + number(py) + '" stroke="' + PALETTE.wire + '" stroke-width="1.25"/>');
-        parts.push('<circle cx="' + number(px) + '" cy="' + number(py) + '" r="2" fill="' + PALETTE.cellBg + '" stroke="' + PALETTE.wire + '" stroke-width="1.25"/>');
+            + '" y2="' + number(py) + '" stroke="' + theme.wire + '" stroke-width="1.25"/>');
+        parts.push('<circle cx="' + number(px) + '" cy="' + number(py) + '" r="2" fill="' + theme.cellBg + '" stroke="' + theme.wire + '" stroke-width="1.25"/>');
         if (side === 'WEST') {
-            parts.push('<text x="' + number(node.x + 10) + '" y="' + number(py + 4) + '" fill="' + PALETTE.muted + '" font-family="' + FONT_MONO
+            parts.push('<text x="' + number(node.x + 10) + '" y="' + number(py + 4) + '" fill="' + theme.fg + '" font-family="' + theme.labelFont
                 + '" font-size="11" text-anchor="start">' + escape(shorten(label, node.width / 2 - 18, 11)) + '</text>');
         } else {
-            parts.push('<text x="' + number(node.x + node.width - 10) + '" y="' + number(py + 4) + '" fill="' + PALETTE.muted + '" font-family="' + FONT_MONO
+            parts.push('<text x="' + number(node.x + node.width - 10) + '" y="' + number(py + 4) + '" fill="' + theme.fg + '" font-family="' + theme.labelFont
                 + '" font-size="11" text-anchor="end">' + escape(shorten(label, node.width / 2 - 18, 11)) + '</text>');
         }
         parts.push('</g>');
@@ -308,16 +347,16 @@ function drawInstance(node, parts) {
     parts.push('</g>');
 }
 
-/** @param {object} node 布局节点。 @param {object[]} parts SVG片段。 @returns {void} 追加边界条。 */
-function drawBoundary(node, parts) {
-    const accent = node.direction === 'output' ? PALETTE.output : PALETTE.input;
+/** @param {object} node 布局节点。 @param {object[]} parts SVG片段。 @param {object} theme 风格。 @returns {void} 追加边界条。 */
+function drawBoundary(node, parts, theme) {
+    const accent = theme.border;
     parts.push('<g data-model-id="' + escape(node.id) + '" data-kind="boundary" data-direction="' + escape(node.direction) + '">');
     parts.push('<rect x="' + number(node.x) + '" y="' + number(node.y) + '" width="' + number(node.width) + '" height="' + number(node.height)
-        + '" rx="3" fill="' + PALETTE.panel + '" stroke="' + PALETTE.border + '" stroke-width="1"/>');
+        + '" rx="3" fill="' + theme.panel + '" stroke="' + theme.border + '" stroke-width="' + theme.strokeWidth + '"/>');
     parts.push('<rect x="' + number(node.direction === 'output' ? node.x + node.width - 4 : node.x) + '" y="' + number(node.y) + '" width="4" height="'
         + number(node.height) + '" fill="' + accent + '"/>');
-    parts.push('<text x="' + number(node.x + node.width / 2) + '" y="' + number(node.y + node.height / 2 + 4) + '" fill="' + PALETTE.fg
-        + '" font-family="' + FONT_MONO + '" font-size="12" text-anchor="middle">' + escape(node.label) + '</text>');
+    parts.push('<text x="' + number(node.x + node.width / 2) + '" y="' + number(node.y + node.height / 2 + 4) + '" fill="' + theme.fg
+        + '" font-family="' + theme.labelFont + '" font-size="12" text-anchor="middle">' + escape(node.label) + '</text>');
     for (const port of node.ports) {
         const px = node.x + port.x, py = node.y + port.y;
         parts.push('<g data-model-id="' + escape(port.id) + '" data-kind="port" data-direction="' + escape(port.direction) + '">');
@@ -329,18 +368,18 @@ function drawBoundary(node, parts) {
     parts.push('</g>');
 }
 
-/** @param {object} node 布局节点。 @param {object[]} parts SVG片段。 @returns {void} 追加接口汇合节点。 */
-function drawJunction(node, parts) {
+/** @param {object} node 布局节点。 @param {object[]} parts SVG片段。 @param {object} theme 风格。 @returns {void} 追加接口汇合节点。 */
+function drawJunction(node, parts, theme) {
     parts.push('<g data-model-id="' + escape(node.id) + '" data-kind="junction">');
     parts.push('<rect x="' + number(node.x) + '" y="' + number(node.y) + '" width="' + number(node.width) + '" height="' + number(node.height)
-        + '" rx="11" fill="' + PALETTE.panel + '" stroke="' + PALETTE.wire + '" stroke-width="1.5"/>');
-    parts.push('<text x="' + number(node.x + node.width / 2) + '" y="' + number(node.y + node.height / 2 + 4) + '" fill="' + PALETTE.fg
-        + '" font-family="' + FONT_MONO + '" font-size="11" text-anchor="middle">' + escape(shorten(node.label, node.width - 18, 11)) + '</text>');
+        + '" rx="11" fill="' + theme.panel + '" stroke="' + theme.wire + '" stroke-width="' + theme.strokeWidth + '"/>');
+    parts.push('<text x="' + number(node.x + node.width / 2) + '" y="' + number(node.y + node.height / 2 + 4) + '" fill="' + theme.fg
+        + '" font-family="' + theme.labelFont + '" font-size="11" text-anchor="middle">' + escape(shorten(node.label, node.width - 18, 11)) + '</text>');
     for (const port of node.ports) {
         parts.push('<g data-model-id="' + escape(port.id) + '" data-kind="port">');
         parts.push('<line x1="' + number(node.x + (port.side === 'WEST' ? 0 : node.width)) + '" y1="' + number(node.y + port.y)
             + '" x2="' + number(node.x + (port.side === 'WEST' ? -4 : node.width + 4)) + '" y2="' + number(node.y + port.y)
-            + '" stroke="' + PALETTE.wire + '" stroke-width="1.5"/>');
+            + '" stroke="' + theme.wire + '" stroke-width="1.5"/>');
         parts.push('</g>');
     }
     parts.push('</g>');
@@ -356,9 +395,9 @@ function sectionPoints(section) {
     return points;
 }
 
-/** @param {number} width 位宽。 @returns {{stroke:string,width:number}} 边样式。 */
-function edgeStyle(width) {
-    return { stroke: PALETTE.wire, width: width > 1 ? 2.4 : 1.25 };
+/** @param {number} width 位宽。 @param {object} theme 风格。 @returns {{stroke:string,width:number}} 边样式。 */
+function edgeStyle(width, theme) {
+    return { stroke: theme.wire, width: width > 1 ? theme.busWidth : theme.wireWidth };
 }
 
 /** @param {object} edge 布局连边。 @returns {string} 端点标记属性：双向边双箭头，正向边仅终点箭头。 */
@@ -382,10 +421,11 @@ function labelAnchor(points) {
 /**
  * 渲染架构 SVG（纯 Node 字符串）。
  * @param {object} arch design arch 数据。 @param {object} layoutResult layoutArchitecture 结果。
- * @param {{title?:string}} [options]
+ * @param {{title?:string, style?:string}} [options] style 默认 document；presentation（ui 别名）保持深色展示主题。
  * @returns {{svg:string,sha256:string,bytes:number,width:number,height:number,evidence:object,stats:object}} 图像与证据。
  */
-function renderArchitectureSvg(arch, layoutResult, { title } = {}) {
+function renderArchitectureSvg(arch, layoutResult, { title, style } = {}) {
+    const styleName = normalizeStyle(style), theme = THEMES[styleName];
     const { layout, projection } = layoutResult;
     const width = Math.ceil(layout.width + PADDING * 2);
     const height = Math.ceil(HEADER + layout.height + FOOTER);
@@ -395,22 +435,30 @@ function renderArchitectureSvg(arch, layoutResult, { title } = {}) {
         + ' · interfaces ' + projection.stats.interfaces + ' · source-level';
     const parts = [];
     const evidence = {
+        designId: arch.designId || (arch.archSha256 ? 'design:' + String(arch.archSha256).slice(0, 16) : null),
+        modelSha256: arch.modelSha256 || arch.archSha256 || null,
         archSha256: arch.archSha256 || null, contextRevision: arch.contextRevision || null,
         top: arch.top ? { name: arch.top.name, moduleId: arch.top.moduleId } : null,
+        sourceFiles: Array.isArray(arch.sourceFiles) ? arch.sourceFiles.map(file => ({ path: file.path, sha256: file.sha256 })) : [],
         layout: { engine: 'elk', engineVersion: 'bundled' },
-        export: { format: 'svg', style: 'ui', width, height, title: heading,
-            nodeCount: projection.stats.nodes, portCount: projection.stats.ports, edgeCount: projection.stats.edges, interfaceCount: projection.stats.interfaces }
+        export: { format: 'svg', style: styleName, width, height, title: heading,
+            nodeCount: projection.stats.nodes, portCount: projection.stats.ports, edgeCount: projection.stats.edges,
+            interfaceCount: projection.stats.interfaces, junctionCount: projection.stats.junctions }
     };
     parts.push('<metadata id="svtools-evidence">' + escape(JSON.stringify(evidence)) + '</metadata>');
     parts.push('<defs>');
     parts.push('<marker id="arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse">'
-        + '<path d="M 0 0 L 8 4 L 0 8 z" fill="' + PALETTE.wire + '"/></marker>');
-    parts.push('<pattern id="arch-grid" width="20" height="20" patternUnits="userSpaceOnUse"><circle cx="1" cy="1" r="0.8" fill="' + PALETTE.grid + '"/></pattern>');
+        + '<path d="M 0 0 L 8 4 L 0 8 z" fill="' + theme.wire + '"/></marker>');
+    if (theme.gridBackground) {
+        parts.push('<pattern id="arch-grid" width="20" height="20" patternUnits="userSpaceOnUse"><circle cx="1" cy="1" r="0.8" fill="' + theme.grid + '"/></pattern>');
+    }
     parts.push('</defs>');
-    parts.push('<rect width="100%" height="100%" fill="url(#arch-grid)"/>');
-    parts.push('<text x="' + PADDING + '" y="28" fill="' + PALETTE.fg + '" font-family="' + FONT_UI + '" font-size="17" font-weight="600">'
+    if (theme.gridBackground) {
+        parts.push('<rect width="100%" height="100%" fill="url(#arch-grid)"/>');
+    }
+    parts.push('<text x="' + PADDING + '" y="28" fill="' + theme.fg + '" font-family="' + FONT_UI + '" font-size="17" font-weight="600">'
         + escape(shorten(heading, width - PADDING * 2, 17)) + '</text>');
-    parts.push('<text x="' + PADDING + '" y="48" fill="' + PALETTE.muted + '" font-family="' + FONT_UI + '" font-size="12">' + escape(subtitle) + '</text>');
+    parts.push('<text x="' + PADDING + '" y="48" fill="' + theme.muted + '" font-family="' + FONT_UI + '" font-size="12">' + escape(subtitle) + '</text>');
     parts.push('<g transform="translate(' + PADDING + ' ' + HEADER + ')">');
     for (const edge of layout.edges) {
         const item = edge.interface;
@@ -422,62 +470,64 @@ function renderArchitectureSvg(arch, layoutResult, { title } = {}) {
         for (const point of points.slice(1)) {
             d += ' L ' + number(point[0]) + ' ' + number(point[1]);
         }
-        const style = edgeStyle(item.bits);
+        const styleNameForEdge = edgeStyle(item.bits, theme);
         parts.push('<g data-interface-id="' + escape(item.id) + '" data-kind="interface">');
         parts.push('<title>' + escape(item.label + ' (' + item.bits + ' bits) · ' + item.from.kind + ':' + item.from.name + ' → '
             + item.to.kind + ':' + item.to.name + ' · signals: ' + item.signals.map(signal => signal.name + '[' + signal.width + ']').join(', ')) + '</title>');
-        parts.push('<path d="' + d + '" fill="none" stroke="' + style.stroke + '" stroke-width="' + style.width
+        parts.push('<path d="' + d + '" fill="none" stroke="' + styleNameForEdge.stroke + '" stroke-width="' + styleNameForEdge.width
             + '" stroke-linejoin="round"' + markerAttributes(edge) + '/>');
         const anchor = labelAnchor(points);
         if (anchor && !edge.junction) {
             const label = item.label + ' (' + item.bits + ' bits)';
             const transform = anchor.angle ? ' transform="rotate(-90 ' + number(anchor.x) + ' ' + number(anchor.y - 6) + ')"' : '';
-            parts.push('<text x="' + number(anchor.x) + '" y="' + number(anchor.y - 6) + '"' + transform + ' fill="' + PALETTE.wire
-                + '" font-family="' + FONT_MONO + '" font-size="10" text-anchor="middle" paint-order="stroke" stroke="' + PALETTE.background
+            parts.push('<text x="' + number(anchor.x) + '" y="' + number(anchor.y - 6) + '"' + transform + ' fill="' + theme.fg
+                + '" font-family="' + theme.labelFont + '" font-size="10" text-anchor="middle" paint-order="stroke" stroke="' + theme.background
                 + '" stroke-width="3.5" stroke-linejoin="round">' + escape(label) + '</text>');
         }
         parts.push('</g>');
     }
     for (const node of layout.nodes) {
         if (node.kind === 'boundary') {
-            drawBoundary(node, parts);
+            drawBoundary(node, parts, theme);
         } else if (node.kind === 'junction') {
-            drawJunction(node, parts);
+            drawJunction(node, parts, theme);
         } else {
-            drawInstance(node, parts);
+            drawInstance(node, parts, theme);
         }
     }
     parts.push('</g>');
     const legendY = HEADER + layout.height + 26;
     const legends = [
-        ['blackbox', PALETTE.blackbox, 'dash'], ['collapsed', PALETTE.collapsed, 'solid'],
-        ['bus', PALETTE.wire, 'bus'], ['boundary', PALETTE.input, 'boundary']
+        ['blackbox', theme.blackbox, 'dash'], ['collapsed', theme.collapsed, 'solid'],
+        ['bus', theme.wire, 'bus'], ['boundary', theme.border, 'boundary']
     ];
     let legendX = PADDING;
     for (const [label, color, kind] of legends) {
         if (kind === 'bus') {
-            parts.push('<line x1="' + legendX + '" y1="' + legendY + '" x2="' + (legendX + 26) + '" y2="' + legendY + '" stroke="' + color + '" stroke-width="2.4"/>');
+            parts.push('<line x1="' + legendX + '" y1="' + legendY + '" x2="' + (legendX + 26) + '" y2="' + legendY + '" stroke="' + color + '" stroke-width="' + theme.busWidth + '"/>');
             parts.push('<line x1="' + (legendX + 13) + '" y1="' + (legendY - 4) + '" x2="' + (legendX + 17) + '" y2="' + (legendY + 4) + '" stroke="' + color + '" stroke-width="1.5"/>');
         } else if (kind === 'boundary') {
-            parts.push('<rect x="' + legendX + '" y="' + (legendY - 7) + '" width="26" height="14" rx="2" fill="' + PALETTE.panel + '" stroke="' + PALETTE.border + '"/>');
+            parts.push('<rect x="' + legendX + '" y="' + (legendY - 7) + '" width="26" height="14" rx="2" fill="' + theme.panel + '" stroke="' + theme.border + '"/>');
             parts.push('<rect x="' + legendX + '" y="' + (legendY - 7) + '" width="3" height="14" fill="' + color + '"/>');
         } else {
-            parts.push('<rect x="' + legendX + '" y="' + (legendY - 7) + '" width="26" height="14" rx="2" fill="' + PALETTE.cellBg + '" stroke="' + color
-                + '" stroke-width="1.5"' + (kind === 'dash' ? ' stroke-dasharray="4 3"' : '') + '/>');
+            parts.push('<rect x="' + legendX + '" y="' + (legendY - 7) + '" width="26" height="14" rx="2" fill="' + theme.cellBg + '" stroke="' + color
+                + '" stroke-width="' + theme.strokeWidth + '"' + (kind === 'dash' ? ' stroke-dasharray="' + theme.blackboxDash + '"' : '') + '/>');
         }
-        parts.push('<text x="' + (legendX + 33) + '" y="' + (legendY + 4) + '" fill="' + PALETTE.muted + '" font-family="' + FONT_UI
+        parts.push('<text x="' + (legendX + 33) + '" y="' + (legendY + 4) + '" fill="' + theme.muted + '" font-family="' + FONT_UI
             + '" font-size="11">' + label + '</text>');
         legendX += 108;
     }
     const body = parts.join('');
-    const svg = svgDocument({ width, height, title: heading, detail: subtitle, body, background: PALETTE.background });
+    const svg = svgDocument({ width, height, title: heading, detail: subtitle, body, background: theme.background });
     return { svg, sha256: sha256(svg), bytes: Buffer.byteLength(svg, 'utf8'), width, height, evidence,
         stats: { ...projection.stats } };
 }
 
-/** @param {string} title @param {object} arch @returns {string} 默认输出文件名。 */
-function defaultFileName(arch) {
-    return safeName((arch.top && arch.top.name) || 'architecture') + '-' + String(arch.archSha256 || '0').slice(0, 8) + '.svg';
+/** @param {object} arch @param {string} [style] @returns {string} 默认输出文件名（含风格后缀）。 */
+function defaultFileName(arch, style = 'document') {
+    const suffix = normalizeStyle(style);
+    return safeName((arch.top && arch.top.name) || 'architecture') + '-' + String(arch.archSha256 || '0').slice(0, 8) + '-' + suffix + '.svg';
 }
 
-module.exports = { buildRenderProjection, layoutArchitecture, renderArchitectureSvg, defaultFileName, DEFAULT_RENDER_BUDGET, netLabel };
+module.exports = { buildRenderProjection, layoutArchitecture, renderArchitectureSvg, defaultFileName, normalizeStyle,
+    DEFAULT_RENDER_BUDGET, netLabel, STYLES };

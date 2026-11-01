@@ -16,7 +16,7 @@ const { createToolTaskManager } = require('../toolchains/job');
 const { summarizeToolResult, processSucceeded } = require('../toolchains/result');
 const { acquireWorkspaceLease } = require('../toolchains/workspace-lease');
 const { buildArchitecture } = require('../design/arch');
-const { layoutArchitecture, renderArchitectureSvg, defaultFileName } = require('../design/svg');
+const { layoutArchitecture, renderArchitectureSvg, defaultFileName, normalizeStyle } = require('../design/svg');
 
 const capabilities = ['doctor','project.list','project.inspect','project.create','project.add','project.set-top','format.preview','format.check','format.write','lint','vivado.status','vivado.report','vivado.run','task.start','task.list','task.status','task.logs','task.cancel','design.arch','design.render'];
 async function locateIverilog(options) {
@@ -158,15 +158,16 @@ async function render(input) {
     const format = input.format || 'svg';
     if (format === 'png') fail('EXPORT_UNSUPPORTED','PNG需要栅格化宿主，M3当前只交付SVG；请使用--format svg',{format:'png'});
     if (format !== 'svg') fail('INVALID_ARGUMENT','不支持的--format：' + format);
+    const style = normalizeStyle(input.style);
     const { options, context, contents } = await resolveContext(input);
     const files = [...contents].map(([file, value]) => ({ path: file, text: value.text }));
     const arch = await buildArchitecture({ workspace: options.workspace, files, top: input.top, includeDirs: context.includeDirs,
         defines: context.defines, depth: input.depth ?? 1, timeoutMs: options.timeoutMs, contextRevision: context.revision });
     const layoutResult = await layoutArchitecture(arch);
-    const image = renderArchitectureSvg(arch, layoutResult, { title: typeof input.title === 'string' ? input.title : undefined });
+    const image = renderArchitectureSvg(arch, layoutResult, { title: typeof input.title === 'string' ? input.title : undefined, style });
     const outputDirectory = input.out ? path.resolve(options.workspace, input.out) : await directory(options.workspace,'design','render');
     await fs.mkdir(outputDirectory,{recursive:true});
-    const file = path.join(outputDirectory,defaultFileName(arch)), temporary = file + '.' + randomUUID() + '.tmp';
+    const file = path.join(outputDirectory,defaultFileName(arch, style)), temporary = file + '.' + randomUUID() + '.tmp';
     try {
         await fs.writeFile(temporary,image.svg,{flag:'wx'});
         await fs.rename(temporary,file);
@@ -175,7 +176,7 @@ async function render(input) {
         fail('DESIGN_FAILED','写入架构图失败：' + error.message,{file});
     }
     const artifact = { kind:'image', format:'svg', path:file, sha256:image.sha256, bytes:image.bytes, width:image.width, height:image.height };
-    return result('design.render',{ format:'svg', path:file, sha256:image.sha256, bytes:image.bytes, width:image.width, height:image.height,
+    return result('design.render',{ format:'svg', style, path:file, sha256:image.sha256, bytes:image.bytes, width:image.width, height:image.height,
         title: image.evidence.export.title, stats:image.stats, evidence:image.evidence },context,[],[artifact]);
 }
 async function lint(input, {signal,onContext,onArtifacts} = {}) {
