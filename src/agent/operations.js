@@ -15,8 +15,9 @@ const { runProcess } = require('../toolchains/process');
 const { createToolTaskManager } = require('../toolchains/job');
 const { summarizeToolResult, processSucceeded } = require('../toolchains/result');
 const { acquireWorkspaceLease } = require('../toolchains/workspace-lease');
+const { buildArchitecture } = require('../design/arch');
 
-const capabilities = ['doctor','project.list','project.inspect','project.create','project.add','project.set-top','format.preview','format.check','format.write','lint','vivado.status','vivado.report','vivado.run','task.start','task.list','task.status','task.logs','task.cancel'];
+const capabilities = ['doctor','project.list','project.inspect','project.create','project.add','project.set-top','format.preview','format.check','format.write','lint','vivado.status','vivado.report','vivado.run','task.start','task.list','task.status','task.logs','task.cancel','design.arch'];
 async function locateIverilog(options) {
     const executable = process.platform === 'win32' ? 'iverilog.exe' : 'iverilog';
     const configured = options.iverilog ? path.resolve(options.workspace,options.iverilog) : null;
@@ -134,6 +135,22 @@ function scrubMissingIncludes(findings, snapshot) {
         finding.message=message;
     }
 }
+/** 用内置Yosys链接空模块并投影顶层架构；可选落盘供后续比较。 */
+async function arch(input) {
+    if (!input.top) fail('INVALID_ARGUMENT','design arch需要--top');
+    const { options, context, contents } = await resolveContext(input);
+    const files = [...contents].map(([file, value]) => ({ path: file, text: value.text }));
+    const data = await buildArchitecture({ workspace: options.workspace, files, top: input.top, includeDirs: context.includeDirs,
+        defines: context.defines, depth: input.depth ?? 1, timeoutMs: options.timeoutMs, contextRevision: context.revision });
+    let snapshot;
+    if (input.save !== undefined) {
+        if (typeof input.save !== 'string' || !/^[\w.-]+$/.test(input.save)) fail('INVALID_ARGUMENT','--save名称只能包含字母、数字、下划线、点和短横线');
+        const directoryPath = await directory(options.workspace,'design'), file = path.join(directoryPath,input.save + '.json');
+        await writeJson(file,data);
+        snapshot = { name: input.save, path: file, sha256: data.archSha256 };
+    }
+    return result('design.arch',{ ...data, ...(snapshot ? { snapshot } : {}) },context);
+}
 async function lint(input, {signal,onContext,onArtifacts} = {}) {
     const resolved = await resolveContext(input), {context,options} = resolved;
     if (input.expectedRevision && input.expectedRevision!==context.revision) fail('CONTEXT_CHANGED','任务启动前工程或源码已经变化',{},4);
@@ -178,4 +195,4 @@ async function lint(input, {signal,onContext,onArtifacts} = {}) {
     }
     return response;
 }
-module.exports={doctor,projects,inspect,format,lint,capabilities};
+module.exports={doctor,projects,inspect,format,arch,lint,capabilities};

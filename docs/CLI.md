@@ -159,4 +159,26 @@ Agent 不得把 `execution.success` 当作 `inputs.complete`，也不得把任�
 
 三者返回的 `context` 是写操作完成后的重新解析结果，可直接作为后续命令的版本依据。
 
-Agent 使用入口见 [SV Tools Skill](../skills/svtools-agent/SKILL.md)。架构视图、波形查询与 MCP 当前不属于已实现命令；按 `doctor.data.capabilities` 发现实际接口。
+## 架构（M3，进行中）
+
+```powershell
+node src/cli/main.js design arch --workspace D:/project --top top
+node src/cli/main.js design arch --workspace D:/project --top top --depth 1 --save arch-1
+```
+
+`design arch` 用内置 Yosys 链接空模块：`read_verilog -sv` → `hierarchy -top <top>` → `proc` → `write_json`，不跑 `prep`/`opt`（避免优化掉未连接的实例）。架构图节点为顶层实例（空模块 blackbox 与已实现模块统一折叠为盒），顶层端口为边界节点（输入在左、输出在右），边为经顶层 `netnames` 合并的端口到端口总线连接；子模块内部实现不入图。模型是源级结构事实，不能当作综合、时序或功能验证证据。
+
+`data` 关键字段：
+
+- `schemaVersion`、`stage`（`source`）、`top{name,moduleId,file}`、`archSha256`、`contextRevision`；
+- `modules[]`：架构用到的模块接口表，`id`、`name`（`$paramod\...` 还原为基础模块名+参数摘要）、`file`、`blackbox`、`parameters`、`ports[]{name,direction,width,source}`；
+- `instances[]`：顶层实例表，`name`、`module`、`moduleId`、`implementation`（`blackbox`|`collapsed`）、`status`（`resolved`|`unresolved`）、`ports[]`、`source`；
+- `unresolved[]`：工作区未声明的子模块，逐条带 `source`，不伪造端口表（图上为无端口盒，结构检查属 D2）；
+- `graph`：`nodes[]`（`boundary` 顶层端口边界 / `instance` 实例盒，含 `label`、`ports`）、`edges[]`（`source`/`target`、`sourceNode`/`sourcePort`、`targetNode`/`targetPort`、`width`、`netNames`）与 `stats`（实例、边界、边与位宽统计、`depth`）；
+- `limitations[]`：静态结构边界（未综合、不展开子层、IP/BD 等）。
+
+`--depth` 当前固定按顶层实例投影（大于 1 尚未展开子层，在 `limitations[]` 说明）。`--save <name>` 把架构 JSON 写入 `.svtools/agent/design/<name>.json`，供后续 `design diff` 使用。
+
+错误码：`AMBIGUOUS_MODULE`（工作区同名模块声明，`data.candidates[]` 给出全部 `{name,file,line}`，exit 2）、`MODULE_NOT_FOUND`（`--top` 未命中）、`DESIGN_LIMIT`（模块 4096、实例 20000、边 50000；超出不产出部分模型）、`TOOL_NOT_FOUND`（内置 Yosys 资源缺失或不可加载）；其余 Yosys 失败返回 `DESIGN_FAILED` 并附日志 artifact。
+
+Agent 使用入口见 [SV Tools Skill](../skills/svtools-agent/SKILL.md)。架构建模（`design arch`）已提供；架构检查/渲染/比较（`design check/render/diff`）、波形查询与 MCP 尚未实现。按 `doctor.data.capabilities` 发现实际接口。

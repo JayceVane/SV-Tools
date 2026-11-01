@@ -64,6 +64,11 @@ test/fixtures/codegen/*
 !test/fixtures/circuit-enum/
 test/fixtures/circuit-enum/*
 !test/fixtures/circuit-enum/*.sv
+!test/fixtures/design/
+test/fixtures/design/*
+!test/fixtures/design/*/
+test/fixtures/design/*/*
+!test/fixtures/design/*/*.sv
 
 # OS
 .DS_Store

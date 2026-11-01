@@ -17,6 +17,7 @@ const help=`SV Tools headless CLI (API 1)
   vivado status
   vivado report timing|utilization|drc [--run synth_1|impl_1]
   vivado run [--run synth_1|impl_1] [--jobs <n>]
+  design arch --top <module> [--depth <n>] [--save <name>]
   task start lint [lint options]
   task list|status|logs|cancel [task-id]
 
@@ -31,7 +32,7 @@ Output:  JSON on stdout; --help and --version return text.
 Node.js >=22. The existing Rust formatter CLI remains available in bin/.
 `;
 function argumentsFor(argv) {
-    const strings=['workspace','config','project','fileset','file','top','iverilog','cygwin','vivado','standard','run','timeout','offset','limit','log-index','max-paths','jobs','name','dir','part','sim-top','target-fileset'];
+    const strings=['workspace','config','project','fileset','file','top','iverilog','cygwin','vivado','standard','run','timeout','offset','limit','log-index','max-paths','jobs','name','dir','part','sim-top','target-fileset','depth','save'];
     const options=Object.fromEntries(strings.map(name=>[name,{type:'string'}]));
     for(const name of ['help','version','json','write','check']) options[name]={type:'boolean'};
     options.include={type:'string',multiple:true}; options.define={type:'string',multiple:true}; options.source={type:'string',multiple:true};
@@ -40,7 +41,7 @@ function argumentsFor(argv) {
     catch(error) { fail('INVALID_ARGUMENT',error.message); }
     const input={...parsed.values};
     for(const [from,to] of [['timeout','timeoutMs'],['log-index','logIndex'],['max-paths','maxPaths'],['sim-top','simTop'],['source','sources'],['target-fileset','filesetTarget']]) if(input[from]!==undefined) {input[to]=input[from]; delete input[from];}
-    for(const field of ['timeoutMs','offset','limit','logIndex','maxPaths','jobs']) if(input[field]!==undefined) {
+    for(const field of ['timeoutMs','offset','limit','logIndex','maxPaths','jobs','depth']) if(input[field]!==undefined) {
         if(!/^\d+$/.test(input[field]) || !Number.isSafeInteger(Number(input[field]))) fail('INVALID_ARGUMENT',field+'必须为非负整数');
         input[field]=Number(input[field]);
     }
@@ -57,7 +58,7 @@ async function run(argv) {
         const [command,action,id,...extra]=positionals; let output;
         if(extra.length) fail('INVALID_ARGUMENT','位置参数过多');
         if(command!=='format' && (input.write || input.check)) fail('INVALID_ARGUMENT','--write与--check仅用于format');
-        operation=command==='project' || command==='task'?command+'.'+action:command;
+        operation=command==='project' || command==='task' || command==='design'?command+'.'+action:command;
         if(command==='doctor' && !action) output=await services.doctor(input);
         else if(command==='project' && !id && ['list','inspect'].includes(action)) output=await services[action==='list'?'projects':'inspect'](input);
         else if(command==='project' && action==='create' && !id) output=await vivado.createProject(input);
@@ -67,6 +68,7 @@ async function run(argv) {
         else if(command==='vivado' && action==='status' && !id) output=await vivado.status(input);
         else if(command==='vivado' && action==='report' && ['timing','utilization','drc'].includes(id)) output=await vivado.report({...input,kind:id});
         else if(command==='vivado' && action==='run' && !id) output=await tasks.start({...input,operation:'vivado.run'});
+        else if(command==='design' && action==='arch' && !id) output=await services.arch(input);
         else if(command==='lint' && !action) {
             const controller=new AbortController(), cancel=()=>controller.abort();
             process.once('SIGINT',cancel);process.once('SIGTERM',cancel);
