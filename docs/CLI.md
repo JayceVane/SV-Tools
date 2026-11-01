@@ -166,19 +166,31 @@ node src/cli/main.js design arch --workspace D:/project --top top
 node src/cli/main.js design arch --workspace D:/project --top top --depth 1 --save arch-1
 ```
 
-`design arch` 用内置 Yosys 链接空模块：`read_verilog -sv` → `hierarchy -top <top>` → `proc` → `write_json`，不跑 `prep`/`opt`（避免优化掉未连接的实例）。架构图节点为顶层实例（空模块 blackbox 与已实现模块统一折叠为盒），顶层端口为边界节点（输入在左、输出在右），边为经顶层 `netnames` 合并的端口到端口总线连接；子模块内部实现不入图。模型是源级结构事实，不能当作综合、时序或功能验证证据。
+`design arch` 用内置 Yosys 链接空模块：`read_verilog -sv` → `hierarchy -top <top>` → `proc` → `memory_collect` → `write_json`，不跑 `prep`/`opt`（避免优化掉未连接的实例）。只投影用户模块实例：顶层 `assign`/`always_ff`/存储产生的 `$` 单元不绘制为节点。架构图节点为顶层实例（空模块 blackbox 与已实现模块统一折叠为盒），顶层端口为边界节点（输入在左、输出在右），边为经顶层 `netnames` 合并的端口到端口总线连接；子模块内部实现与存储不入图。实例盒标签与端口位宽以实例参数覆盖后的连接为准；模块接口表保留声明默认值。模型是源级结构事实，不能当作综合、时序或功能验证证据。
 
 `data` 关键字段：
 
 - `schemaVersion`、`stage`（`source`）、`top{name,moduleId,file}`、`archSha256`、`contextRevision`；
 - `modules[]`：架构用到的模块接口表，`id`、`name`（`$paramod\...` 还原为基础模块名+参数摘要）、`file`、`blackbox`、`parameters`、`ports[]{name,direction,width,source}`；
 - `instances[]`：顶层实例表，`name`、`module`、`moduleId`、`implementation`（`blackbox`|`collapsed`）、`status`（`resolved`|`unresolved`）、`ports[]`、`source`；
+- `interfaces[]`：架构接口束（渲染默认使用），`id`、`from{kind,name}`、`to{kind,name}`、`direction`（`forward`|`bidirectional`）、`bits`、`label`、`signals[]{name,width,direction}`。实例↔实例按无序实例对分组并把双向连接合并为 `bidirectional`；实例↔边界按顶层端口前缀（如 `uart*`、`spi*`、`vin*`）聚合，`clk_in`/`rst_n_in`/`gpio` 等保留为独立束。多端名称用 `+` 连接（如扇出 `u_buf+u_sink`）；`label` 优先取成员信号公共前缀，长度不超过 48 字符，完整成员在 `signals[]`；
 - `unresolved[]`：工作区未声明的子模块，逐条带 `source`，不伪造端口表（图上为无端口盒，结构检查属 D2）；
 - `graph`：`nodes[]`（`boundary` 顶层端口边界 / `instance` 实例盒，含 `label`、`ports`）、`edges[]`（`source`/`target`、`sourceNode`/`sourcePort`、`targetNode`/`targetPort`、`width`、`netNames`）与 `stats`（实例、边界、边与位宽统计、`depth`）；
 - `limitations[]`：静态结构边界（未综合、不展开子层、IP/BD 等）。
 
 `--depth` 当前固定按顶层实例投影（大于 1 尚未展开子层，在 `limitations[]` 说明）。`--save <name>` 把架构 JSON 写入 `.svtools/agent/design/<name>.json`，供后续 `design diff` 使用。
 
-错误码：`AMBIGUOUS_MODULE`（工作区同名模块声明，`data.candidates[]` 给出全部 `{name,file,line}`，exit 2）、`MODULE_NOT_FOUND`（`--top` 未命中）、`DESIGN_LIMIT`（模块 4096、实例 20000、边 50000；超出不产出部分模型）、`TOOL_NOT_FOUND`（内置 Yosys 资源缺失或不可加载）；其余 Yosys 失败返回 `DESIGN_FAILED` 并附日志 artifact。
+`design render` 用纯 Node 字符串生成自含 SVG（不依赖编辑器 DOM）：
 
-Agent 使用入口见 [SV Tools Skill](../skills/svtools-agent/SKILL.md)。架构建模（`design arch`）已提供；架构检查/渲染/比较（`design check/render/diff`）、波形查询与 MCP 尚未实现。按 `doctor.data.capabilities` 发现实际接口。
+```powershell
+node src/cli/main.js design render --workspace D:/project --top top
+node src/cli/main.js design render --workspace D:/project --top top --out docs/arch --title "SoC 架构"
+```
+
+默认画 `interfaces[]`（无接口束的旧数据回退到 `graph.edges`）：左→右分层，实例与边界盒带端口名与位宽标签，多端接口经总线汇合节点扇出，接口标签为 `label (N bits)` 并保留完整成员名在 `<title>` 中。默认输出 `.svtools/agent/design/render/<top>-<archSha前8位>.svg`，`--out` 指定目录；`data`/`artifacts[]` 返回 `{kind:"image",format:"svg",path,sha256,bytes,width,height}`。SVG 根内 `<metadata id="svtools-evidence">` 含 `archSha256`/`contextRevision`/`top`/`layout.engine`/`export`，节点与端口带 `data-model-id`；同一输入两次渲染的节点坐标与 SVG SHA-256 完全一致。颜色与字体沿用电路视图视觉语言。
+
+渲染预算：节点 2000、接口/连边 6000、端口 16384，超出返回 `DESIGN_LIMIT` 且不落盘；`--format png` 需要宿主栅格化，M3 返回 `EXPORT_UNSUPPORTED` 且不产生半成品。
+
+错误码：`AMBIGUOUS_MODULE`（工作区同名模块声明，`data.candidates[]` 给出全部 `{name,file,line}`，exit 2）、`MODULE_NOT_FOUND`（`--top` 未命中）、`DESIGN_LIMIT`（架构模块 4096、实例 20000、边 50000；渲染节点 2000、接口 6000、端口 16384；超出不产出部分模型或半成品）、`TOOL_NOT_FOUND`（内置 Yosys 资源缺失或不可加载）、`EXPORT_UNSUPPORTED`（PNG 无栅格化宿主）；单源文件 8 MiB 与源码总量属上下文预算，超限返回 `SOURCE_LIMIT`，不映射为 `DESIGN_LIMIT`；其余 Yosys/导出失败返回 `DESIGN_FAILED` 并附日志 artifact。
+
+Agent 使用入口见 [SV Tools Skill](../skills/svtools-agent/SKILL.md)。架构建模（`design arch`）与 SVG 架构图渲染（`design render`）已提供；架构检查/比较（`design check/diff`）、波形查询与 MCP 尚未实现。按 `doctor.data.capabilities` 发现实际接口。

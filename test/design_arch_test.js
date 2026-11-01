@@ -8,7 +8,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const { run } = require('../src/cli/main');
-const { buildArchitecture, DEFAULT_BUDGET } = require('../src/design/arch');
+const { buildArchitecture, DEFAULT_BUDGET, buildArchScript, classifyYosysFailure, blackboxFlag } = require('../src/design/arch');
 
 const ROOT = path.resolve(__dirname, '..');
 const FIXTURES = path.join(__dirname, 'fixtures', 'design');
@@ -186,4 +186,82 @@ test('capabilities 增加 design.arch，CLI 子进程输出单份 JSON', async t
     assert.equal(output.operation, 'design.arch');
     assert.deepEqual(output.data.instances.map(instance => instance.name), ['u_buf', 'u_sink']);
     assert.equal(output.data.graph.edges.length, 6);
+});
+
+test('A1 顶层组合/时序逻辑的 $ 单元不进入架构图', async t => {
+    const directory = await workspace(t, 'toplogic');
+    const response = await run(['design', 'arch', '--workspace', directory, '--top', 'logic_top']);
+    assert.equal(response.exitCode, 0);
+    const data = response.output.data;
+    assert.deepEqual(data.instances.map(instance => instance.name), ['u_child']);
+    for (const node of data.graph.nodes) {
+        assert.equal(node.id.startsWith('instance:$'), false, node.id);
+        assert.equal(String(node.name).startsWith('$'), false, node.name);
+    }
+    assert.equal(data.instances.some(instance => instance.nodeId.includes('$') || instance.module.startsWith('$')), false);
+    assert.equal(data.unresolved.length, 0);
+    assert.equal(data.graph.nodes.filter(node => node.kind === 'instance').length, 1);
+});
+
+test('A2 参数覆盖：实例标签与盒位宽取覆盖值，模块表保留声明默认值', async t => {
+    const directory = await workspace(t, 'override');
+    const response = await run(['design', 'arch', '--workspace', directory, '--top', 'override_top']);
+    assert.equal(response.exitCode, 0);
+    const data = response.output.data;
+    const instance = data.instances[0];
+    assert.equal(instance.name, 'u_child');
+    assert.match(instance.module, /WIDTH\s*=\s*16/);
+    assert.deepEqual(portTriples(instance.ports), [['clk', 'input', 1], ['din', 'input', 16], ['dout', 'output', 16]]);
+    const declared = data.modules.find(module => module.name.startsWith('child'));
+    assert(declared, '接口表应包含声明模块');
+    assert.equal(declared.parameters.WIDTH, 8);
+    assert.deepEqual(portTriples(declared.ports), [['clk', 'input', 1], ['din', 'input', 8], ['dout', 'output', 8]]);
+    assert.equal(data.limitations.some(text => text.includes('参数覆盖')), true);
+});
+
+test('A4 折叠子模块内部存储：proc+memory_collect 可输出且无 $mem 节点', async t => {
+    const directory = await workspace(t, 'memory');
+    const response = await run(['design', 'arch', '--workspace', directory, '--top', 'mem_top']);
+    assert.equal(response.exitCode, 0);
+    const data = response.output.data;
+    assert.deepEqual(data.instances.map(instance => [instance.name, instance.implementation]), [['u_mem', 'collapsed']]);
+    for (const node of data.graph.nodes) {
+        assert.equal(/^\$(?:mem|dff)/.test(String(node.name || '')), false, node.name);
+        assert.equal(String(node.id).includes('$mem'), false, node.id);
+    }
+    assert.equal(data.limitations.some(text => text.includes('存储')), true);
+    const script = buildArchScript(['/source/top.sv'], [], [], 'top', '/task/circuit.json').split('\n');
+    assert.match(script[0], /^read_verilog -sv/);
+    assert.equal(script[1], 'hierarchy -top top');
+    assert.equal(script[2], 'proc');
+    assert.equal(script[3], 'memory_collect');
+    assert.match(script[4], /^write_json /);
+});
+
+test('blackbox 三形态与 Yosys 失败分类', () => {
+    for (const value of [true, 1, '00000000000000000000000000000001']) {
+        assert.equal(blackboxFlag(value), true, String(value));
+    }
+    for (const value of [false, 0, '00000000000000000000000000000000', undefined]) {
+        assert.equal(blackboxFlag(value), false, String(value));
+    }
+    assert.equal(classifyYosysFailure('ERROR: Re-definition of module `\\dup\'').code, 'AMBIGUOUS_MODULE');
+    assert.equal(classifyYosysFailure("ERROR: Module `nosuch' not found!").code, 'MODULE_NOT_FOUND');
+    assert.equal(classifyYosysFailure('内置 Yosys 资源缺失，请重新安装完整 VSIX').code, 'TOOL_NOT_FOUND');
+    assert.equal(classifyYosysFailure('ERROR: syntax error').code, 'DESIGN_FAILED');
+});
+
+test('Yosys 语法错误返回 DESIGN_FAILED 并附日志，8MiB 超限仍是 SOURCE_LIMIT', async t => {
+    const directory = await fsp.realpath(await fsp.mkdtemp(path.join(os.tmpdir(), 'svtools-design-error-')));
+    t.after(() => fsp.rm(directory, { recursive: true, force: true }));
+    await fsp.writeFile(path.join(directory, 'bad.sv'), 'module bad(input logic a; endmodule\n');
+    const failed = await run(['design', 'arch', '--workspace', directory, '--top', 'bad']);
+    assert.equal(failed.exitCode, 2);
+    assert.equal(failed.output.diagnostics[0].code, 'DESIGN_FAILED');
+    assert.equal(fs.existsSync(failed.output.data.logPath), true);
+    assert.equal(failed.output.artifacts[0].kind, 'log');
+    await fsp.writeFile(path.join(directory, 'bad.sv'), 'module big; endmodule\n' + ' '.repeat(8 * 1024 * 1024));
+    const limited = await run(['design', 'arch', '--workspace', directory, '--top', 'big']);
+    assert.equal(limited.exitCode, 2);
+    assert.equal(limited.output.diagnostics[0].code, 'SOURCE_LIMIT');
 });

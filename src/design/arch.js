@@ -180,14 +180,33 @@ function checkModuleBudget(files, budget) {
     }
 }
 
-/** @param {object} module 顶层模块。 @param {object} design 已验证设计。 @param {object} limits 预算。 @returns {object[]} 顶层实例节点。 */
-function buildInstanceNodes(module, design, limits) {
-    if (module.cells.length > limits.instances) {
-        fail('DESIGN_LIMIT', '顶层实例数量超出架构图预算', { kind: 'instances', used: module.cells.length, limit: limits.instances });
+/** @param {object} cell 顶层单元。 @returns {boolean} 是否用户模块实例（工具生成的 $ 单元不进入架构图）。 */
+function isUserInstance(cell) {
+    return Boolean(cell.moduleId) || !String(cell.type || '').startsWith('$');
+}
+
+/** @param {object} cell 顶层单元。 @returns {string} 实例盒标签（参数覆盖优先于声明默认值）。 */
+function instanceModuleLabel(cell) {
+    const pretty = prettifyModuleType(cell.type);
+    const overrides = decodeParameters(cell.parameters);
+    if (pretty.summary) {
+        return pretty.base + ' #(' + pretty.summary + ')';
     }
-    return module.cells.map(cell => {
+    if (overrides) {
+        return pretty.base + ' #(' + Object.entries(overrides).map(([name, value]) => name + '=' + value).join(', ') + ')';
+    }
+    return pretty.base;
+}
+
+/** @param {object} module 顶层模块。 @param {object} design 已验证设计。 @param {object} limits 预算。 @returns {object[]} 顶层实例节点（只含用户模块实例）。 */
+function buildInstanceNodes(module, design, limits) {
+    const cells = module.cells.filter(isUserInstance);
+    if (cells.length > limits.instances) {
+        fail('DESIGN_LIMIT', '顶层实例数量超出架构图预算', { kind: 'instances', used: cells.length, limit: limits.instances });
+    }
+    return cells.map(cell => {
         const target = cell.moduleId ? findModule(design, cell.moduleId) : null;
-        const moduleType = target ? moduleLabel(target) : prettifyModuleType(cell.type).base;
+        const moduleType = instanceModuleLabel(cell);
         const ports = (target ? target.ports : []).map(port => {
             const connection = cell.ports.find(item => item.name === port.name);
             const width = connection && connection.bits.length ? connection.bits.length : port.bits.length;
@@ -306,10 +325,186 @@ function splitEndpoint(endpoint) {
     return { nodeId: endpoint.slice(0, index), portName: endpoint.slice(index + 1) };
 }
 
+/** @param {string} id 节点 id。 @returns {string} 实例或边界节点名。 */
+function endpointName(id) {
+    return id.startsWith('boundary:') ? id.slice('boundary:'.length) : id.slice('instance:'.length);
+}
+
+/** @param {string} name 顶层端口名。 @returns {string|null} 可聚合的边界前缀；clk/rst 等保留名与无下划线端口返回 null。 */
+function boundaryPrefix(name) {
+    const reserved = new Set(['clk', 'rst', 'reset', 'nrst', 'arst', 'srst', 'por']);
+    const index = name.indexOf('_');
+    if (index < 3) {
+        return null;
+    }
+    const prefix = name.slice(0, index);
+    if (!/^[A-Za-z][A-Za-z0-9]{2,}$/.test(prefix) || reserved.has(prefix.toLowerCase())) {
+        return null;
+    }
+    return prefix;
+}
+
+/** @param {string[]} names 信号名。 @returns {string|null} 按最后一个 '_' 截断后的公共前缀（含下划线，长度≥3）。 */
+function commonSignalPrefix(names) {
+    const candidates = names.map(name => {
+        const index = name.lastIndexOf('_');
+        return index >= 0 ? name.slice(0, index + 1) : name;
+    }).filter(name => name.length >= 3);
+    if (!candidates.length) {
+        return null;
+    }
+    let prefix = candidates[0];
+    for (const candidate of candidates.slice(1)) {
+        while (prefix && !candidate.startsWith(prefix)) {
+            prefix = prefix.slice(0, -1);
+        }
+    }
+    return prefix.length >= 3 && prefix.includes('_') ? prefix : null;
+}
+
+/** @param {string} label 已拼接标签。 @returns {string} 不超过48字符的接口标签（不含位宽后缀）。 */
+function trimLabel(label) {
+    return label.length > 48 ? label.slice(0, 47) + '…' : label;
+}
+
+/** @param {{kind:string,name:string}} from @param {{kind:string,name:string}} to @returns {string} 稳定接口 id。 */
+function interfaceId(from, to) {
+    return 'interface:' + hashText(JSON.stringify([from.kind, from.name, to.kind, to.name])).slice(0, 12);
+}
+
+/** @param {Map<string,object>} signals @returns {object[]} 排序后的成员信号。 */
+function signalList(signals) {
+    return [...signals.values()].map(signal => ({ name: signal.name, width: signal.width, direction: signal.direction }))
+        .sort((left, right) => left.name < right.name ? -1 : left.name > right.name ? 1 : 0);
+}
+
+/** @param {Map<string,object>} map @param {string} name @param {number} width @param {string} direction @returns {void} 记录去重后的成员信号。 */
+function addSignal(map, name, width, direction) {
+    const existing = map.get(name);
+    if (existing) {
+        existing.width = Math.max(existing.width, width);
+        if (existing.direction !== direction) {
+            existing.direction = 'bidirectional';
+        }
+        return;
+    }
+    map.set(name, { name, width, direction });
+}
+
+/**
+ * 把信号级端口连接抽象为架构接口束。
+ * 实例↔实例按无序实例对分组；实例↔边界按顶层端口前缀分组并支持扇出；inout 端口按顶层连接补齐为双向。
+ * @param {object} module 顶层模块。 @param {object[]} nodes 架构节点。 @param {object[]} edges 信号级连边。
+ * @returns {object[]} 接口束列表；多端名称用 '+' 连接。
+ */
+function buildInterfaces(module, nodes, edges) {
+    const kinds = new Map(nodes.filter(node => node.kind === 'instance' || node.kind === 'boundary').map(node => [node.id, node.kind]));
+    const pairs = new Map();
+    const boundaryGroups = new Map();
+    function pairGroup(source, target) {
+        const names = [source, target].sort();
+        const key = names.join('\u0000');
+        if (!pairs.has(key)) {
+            pairs.set(key, { names, signals: new Map() });
+        }
+        return pairs.get(key);
+    }
+    function boundaryGroup(portName) {
+        const prefix = boundaryPrefix(portName);
+        const key = prefix || portName;
+        if (!boundaryGroups.has(key)) {
+            boundaryGroups.set(key, { prefix, boundaryPorts: new Set(), instances: new Set(), signals: new Map() });
+        }
+        return boundaryGroups.get(key);
+    }
+    for (const edge of edges) {
+        const sourceKind = kinds.get(edge.sourceNode), targetKind = kinds.get(edge.targetNode);
+        if (!sourceKind || !targetKind) {
+            continue;
+        }
+        const signalName = edge.netNames[0] || splitEndpoint(edge.source).portName;
+        if (sourceKind === 'instance' && targetKind === 'instance') {
+            const source = endpointName(edge.sourceNode), target = endpointName(edge.targetNode);
+            if (source === target) {
+                continue;
+            }
+            const group = pairGroup(source, target);
+            addSignal(group.signals, signalName, edge.width, source === group.names[0] ? 'forward' : 'reverse');
+        } else if (sourceKind === 'boundary' && targetKind === 'instance') {
+            const group = boundaryGroup(splitEndpoint(edge.source).portName);
+            group.instances.add(endpointName(edge.targetNode));
+            group.boundaryPorts.add(splitEndpoint(edge.source).portName);
+            addSignal(group.signals, splitEndpoint(edge.source).portName, edge.width, 'input');
+        } else if (sourceKind === 'instance' && targetKind === 'boundary') {
+            const group = boundaryGroup(splitEndpoint(edge.target).portName);
+            group.instances.add(endpointName(edge.sourceNode));
+            group.boundaryPorts.add(splitEndpoint(edge.target).portName);
+            addSignal(group.signals, splitEndpoint(edge.target).portName, edge.width, 'output');
+        }
+    }
+    // inout 顶层端口在信号级连边中方向未知，按顶层模块连接补齐为双向接口。
+    for (const port of module.ports.filter(item => item.direction === 'inout')) {
+        const group = boundaryGroup(port.name);
+        for (const cell of module.cells) {
+            if (cell.ports.some(item => item.bits.some(bit => port.bits.includes(bit)))) {
+                group.instances.add(cell.name);
+                group.boundaryPorts.add(port.name);
+                addSignal(group.signals, port.name, port.bits.length, 'inout');
+            }
+        }
+    }
+    const interfaces = [];
+    for (const group of pairs.values()) {
+        const signals = signalList(group.signals);
+        const directions = new Set(signals.map(signal => signal.direction));
+        const bidirectional = directions.has('forward') && directions.has('reverse');
+        const forward = directions.has('forward') || !directions.has('reverse');
+        const fromName = bidirectional || forward ? group.names[0] : group.names[1];
+        const toName = fromName === group.names[0] ? group.names[1] : group.names[0];
+        const bits = signals.reduce((total, signal) => total + signal.width, 0);
+        const prefix = commonSignalPrefix(signals.map(signal => signal.name));
+        const summary = prefix ? prefix + '*' : `${group.names[0]}.${signals[0].name}${signals.length > 1 ? '…' : ''}`;
+        const from = { kind: 'instance', name: fromName }, to = { kind: 'instance', name: toName };
+        interfaces.push({ id: interfaceId(from, to), from, to, direction: bidirectional ? 'bidirectional' : 'forward',
+            bits, label: trimLabel(summary), signals });
+    }
+    for (const group of boundaryGroups.values()) {
+        const signals = signalList(group.signals);
+        const directions = new Set(signals.map(signal => signal.direction));
+        const bidirectional = directions.has('bidirectional') || directions.has('inout') || (directions.has('input') && directions.has('output'));
+        const boundaryName = [...group.boundaryPorts].sort().join('+');
+        const instanceName = [...group.instances].sort().join('+');
+        const onlyOutput = !bidirectional && directions.has('output');
+        const from = onlyOutput ? { kind: 'instance', name: instanceName } : { kind: 'boundary', name: boundaryName };
+        const to = onlyOutput ? { kind: 'boundary', name: boundaryName } : { kind: 'instance', name: instanceName };
+        const bits = signals.reduce((total, signal) => total + signal.width, 0);
+        const label = group.prefix ? group.prefix + '*' : signals[0].name;
+        interfaces.push({ id: interfaceId(from, to), from, to, direction: bidirectional ? 'bidirectional' : 'forward',
+            bits, label: trimLabel(label), signals });
+    }
+    interfaces.sort((left, right) => {
+        const leftKey = [left.from.kind, left.from.name, left.to.kind, left.to.name].join('\u0000');
+        const rightKey = [right.from.kind, right.from.name, right.to.kind, right.to.name].join('\u0000');
+        return leftKey < rightKey ? -1 : leftKey > rightKey ? 1 : 0;
+    });
+    return interfaces;
+}
+
+
+/** @param {object} design 已验证设计。 @param {string} id 实例目标模块 id。 @returns {object|null} 接口表引用（$paramod 归一到声明模块）。 */
+function interfaceReference(design, id) {
+    const reference = findModule(design, id);
+    if (!reference) {
+        return null;
+    }
+    const pretty = prettifyModuleType(reference.name);
+    return pretty.summary ? (design.modules.find(module => module.name === pretty.base) || reference) : reference;
+}
+
 /**
  * 把已验证的 Yosys 电路设计投影为顶层架构图与接口表。
  * @param {object} design fromYosys 结果。 @param {{workspace:string, depth?:number, budget?:object}} options
- * @returns {object} 架构模型（modules/instances/unresolved/graph/limitations）。
+ * @returns {object} 架构模型（modules/instances/unresolved/interfaces/graph/limitations）。
  */
 function projectArchitecture(design, { workspace, depth = 1, budget = {} }) {
     const limits = { ...DEFAULT_BUDGET, ...budget };
@@ -337,12 +532,16 @@ function projectArchitecture(design, { workspace, depth = 1, budget = {} }) {
         return { source: edge.source, target: edge.target, sourceNode: source.nodeId, sourcePort: source.portName,
             targetNode: target.nodeId, targetPort: target.portName, width: edge.width, netNames: edge.netNames };
     });
+    const interfaces = buildInterfaces(module, nodes, edges);
     const unresolved = instanceNodes.filter(node => node.status === 'unresolved').map(node => {
         const cell = module.cells.find(item => item.name === node.name);
         const source = relativeSource(cell && cell.source, workspace);
         return { kind: 'instance', name: node.name, module: cell ? cell.type : node.module, instance: node.id, ...(source ? { source } : {}) };
     });
-    const moduleIds = [...new Set([module.id, ...instanceNodes.filter(node => node.moduleId).map(node => node.moduleId)])];
+    const moduleIds = [...new Set([module.id, ...instanceNodes.filter(node => node.moduleId)
+        .map(node => interfaceReference(design, node.moduleId))
+        .filter(Boolean)
+        .map(reference => reference.id)])];
     const interfaceModules = moduleIds.map(id => findModule(design, id)).filter(Boolean).map(reference => ({
         id: reference.id, name: moduleLabel(reference),
         file: reference.source ? relativePosix(workspace, reference.source.path) : null,
@@ -361,7 +560,9 @@ function projectArchitecture(design, { workspace, depth = 1, budget = {} }) {
     });
     const limitations = [
         '架构图是源级结构事实：未综合、未做时序或功能验证，不得作为综合/时序证据。',
-        '只投影顶层实例与顶层端口；子模块内部实现折叠为盒，内部网络不单独入图。',
+        '只投影顶层实例与顶层端口；子模块内部实现折叠为盒，内部网络、寄存器和存储不单独入图。',
+        '仅保留用户模块实例；工具生成的 $ 单元（组合/时序/存储）不绘制为节点。',
+        '参数覆盖以实例连接位宽为准，模块接口表为声明默认值；未连接端口按声明默认位宽。',
         '未连接/多驱动等结构问题在D2检查；本交付只呈现连接关系。',
         '缺失子模块按unresolved展示为无端口盒，不伪造端口表。',
         'IP/BD、动态XDC与宏include不在4.2范围。'
@@ -372,7 +573,7 @@ function projectArchitecture(design, { workspace, depth = 1, budget = {} }) {
     return {
         schemaVersion: SCHEMA_VERSION, stage: STAGE,
         top: { name: module.name, moduleId: module.id, file: module.source ? relativePosix(workspace, module.source.path) : null },
-        modules: interfaceModules, instances, unresolved,
+        modules: interfaceModules, instances, unresolved, interfaces,
         graph: { nodes, edges, stats: { ...connected.stats, modules: interfaceModules.length, instances: instanceNodes.length,
             boundaries: boundaryNodes.length, nodes: nodes.length, edges: edges.length, depth } },
         limitations
@@ -387,7 +588,7 @@ function archHash(data) {
 }
 
 /**
- * 构造架构 Yosys 脚本：hierarchy 后只跑 proc，不跑 prep/opt。
+ * 构造架构 Yosys 脚本：hierarchy 后只跑 proc 与 memory_collect，不跑 prep/opt。
  * @param {string[]} sources guest 源文件。 @param {string[]} includeDirs guest include 目录。
  * @param {string[]} defines 宏定义。 @param {string} top 顶层模块。 @param {string} outputPath guest 输出路径。
  * @returns {string} 脚本内容。
@@ -407,7 +608,7 @@ function buildArchScript(sources, includeDirs, defines, top, outputPath) {
         words.push('-I' + include);
     }
     words.push(...sources.map(source => yosysQuote(source)));
-    return [words.join(' '), 'hierarchy -top ' + top, 'proc', 'write_json ' + yosysQuote(outputPath), ''].join('\n');
+    return [words.join(' '), 'hierarchy -top ' + top, 'proc', 'memory_collect', 'write_json ' + yosysQuote(outputPath), ''].join('\n');
 }
 
 /** @param {string} text Yosys 输出。 @returns {string} 错误摘要。 */
@@ -415,6 +616,25 @@ function errorSummary(text) {
     const value = String(text || '');
     const errors = value.split(/\r?\n/).map(line => line.trim()).filter(line => /ERROR/i.test(line));
     return (errors.length ? errors.join('\n') : value.trim().split(/\r?\n/).slice(-6).join('\n')).slice(-MAX_ERROR_CHARS);
+}
+
+/**
+ * 把 Yosys 失败文本分类为稳定错误码，供调用层附加日志与上下文。
+ * @param {string} logs Yosys stdout/stderr。 @param {{errorMessage?:string, code?:number}} [output] 进程结果。
+ * @returns {{code:string, message:string, details:object}} 分类结果。
+ */
+function classifyYosysFailure(logs, output = {}) {
+    const summary = errorSummary(logs) || output.errorMessage || 'Yosys 未完成架构生成';
+    if (/Re-definition of module/i.test(logs)) {
+        return { code: 'AMBIGUOUS_MODULE', message: 'Yosys报告同名模块重复声明', details: { candidates: [], message: summary } };
+    }
+    if (/Module `[^']*' not found|top module .* not found/i.test(logs)) {
+        return { code: 'MODULE_NOT_FOUND', message: '未找到指定顶层模块', details: { message: summary } };
+    }
+    if (/资源缺失|无法加载内置 Yosys|资源校验失败|ENOENT|WASM/i.test(logs + (output.errorMessage || ''))) {
+        return { code: 'TOOL_NOT_FOUND', message: '内置 Yosys 不可用：' + summary, details: {} };
+    }
+    return { code: 'DESIGN_FAILED', message: 'Yosys 架构生成失败：' + summary, details: { exitCode: output.code } };
 }
 
 /**
@@ -465,18 +685,10 @@ async function buildArchitecture({ workspace, files, top, includeDirs = [], defi
     const logs = [output.stdout, output.stderr].filter(Boolean).join('\n');
     const failed = !processSucceeded(output);
     if (failed) {
-        const summary = errorSummary(logs) || output.errorMessage || 'Yosys 未完成架构生成';
+        const classified = classifyYosysFailure(logs, output);
         // 失败时保留任务目录，日志作为artifact交由调用者读取。
-        if (/Re-definition of module/i.test(logs)) {
-            fail('AMBIGUOUS_MODULE', 'Yosys报告同名模块重复声明', { candidates: [], message: summary, logPath });
-        }
-        if (/Module `[^']*' not found|top module .* not found/i.test(logs)) {
-            fail('MODULE_NOT_FOUND', '未找到指定顶层模块', { top, message: summary, logPath });
-        }
-        if (/资源缺失|无法加载内置 Yosys|资源校验失败|ENOENT|WASM/i.test(logs + (output.errorMessage || ''))) {
-            fail('TOOL_NOT_FOUND', '内置 Yosys 不可用：' + summary, { runDirectory, logPath });
-        }
-        fail('DESIGN_FAILED', 'Yosys 架构生成失败：' + summary, { logPath, exitCode: output.code, artifacts: [{ kind: 'log', path: logPath }] });
+        fail(classified.code, classified.message, { ...classified.details, ...(classified.code === 'MODULE_NOT_FOUND' ? { top } : {}),
+            logPath, artifacts: [{ kind: 'log', path: logPath }] });
     }
     const jsonPath = path.join(runDirectory, path.basename(outputPath));
     let raw;
@@ -506,4 +718,5 @@ async function createRunDirectory(workspace) {
     return runDirectory;
 }
 
-module.exports = { buildArchitecture, projectArchitecture, DEFAULT_BUDGET, SCHEMA_VERSION, buildArchScript, duplicateCandidates };
+module.exports = { buildArchitecture, projectArchitecture, DEFAULT_BUDGET, SCHEMA_VERSION, buildArchScript, duplicateCandidates,
+    classifyYosysFailure, blackboxFlag: flagSet };

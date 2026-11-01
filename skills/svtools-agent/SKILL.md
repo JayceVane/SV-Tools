@@ -17,7 +17,7 @@ RTL 修改后运行 `lint --file <path> --top <module>`。这属于编译/详细
 
 Vivado 工程（M2）：`project create/add/set-top` 管理工程（创建幂等、加文件报告 added/already、两种 top 分开设置）；`vivado status` 查版本/器件/tops/runs；`vivado report timing|utilization|drc` 取结构化报告（默认 run：timing/drc 用 impl_1，utilization 用 synth_1，可用 `--run` 覆盖）；`vivado run` 作为后台任务执行 launch_runs + wait_on_run。报告阶段未完成时返回 `VIVADO_SCRIPT_FAILED`，这表示未执行，不是零错误；不要把空数组当作“无问题证据”。运行与报告的结果分四个互不合并的证据轴：`execution`（是否跑完）、`inputs`（输入是否完整捕获）、`regeneration`（能否由源重建）、`verification`（验证做到哪一步，`acceptance=false` 时不得称为功能验证通过）。报告的 `stale=true` 表示源码/约束在该 run 之后变化，必须先重跑再引用；`stale=null` 表示没有该 run 的记录，不能当作新鲜。`drc` 只有 `checked=1` 的结果才代表本次检查。`vivado run` 状态含 ERROR 时返回 `VIVADO_RUN_FAILED`。
 
-架构建模（M3，进行中）：`design arch --top <module>` 用内置 Yosys（`read_verilog -sv` + `hierarchy` + `proc`，不跑 `prep`/`opt`）把顶层实例投影为架构节点、顶层端口为边界，经 netnames 得到端口到端口的总线连接；空模块自动成为 blackbox，已实现模块统一折叠为盒，子模块内部实现不入图。`--depth` 当前固定按顶层投影，`--save <name>` 落盘到 `.svtools/agent/design/`。架构图是源级结构事实，不得当作综合、时序或功能验证证据；`design check/render/diff` 尚未实现。
+架构建模（M3，进行中）：`design arch --top <module>` 用内置 Yosys（`read_verilog -sv` + `hierarchy` + `proc` + `memory_collect`，不跑 `prep`/`opt`）把顶层用户模块实例投影为架构节点、顶层端口为边界，并把信号级连接聚合为接口束（`interfaces[]`：实例对分组、边界按 `uart*`/`spi*` 等前缀聚合、双向合并）；空模块自动成为 blackbox，已实现模块统一折叠为盒，子模块内部实现与存储不入图。`--depth` 当前固定按顶层投影，`--save <name>` 落盘到 `.svtools/agent/design/`。`design render --top <module> [--out <dir>]` 用纯 Node 生成自含 SVG 架构图用于架构文档（含 evidence 元数据与 `data-model-id`，同一输入渲染确定）；`--format png` 需要栅格化宿主，缺失时返回 `EXPORT_UNSUPPORTED`。架构图是源级结构事实，不得当作综合、时序或功能验证证据；`design check/diff` 尚未实现。
 
 耗时操作可用 `task start lint`，保存返回的 UUID，再通过 `task status`、`task logs`、`task cancel` 管理。查询命令退出 0 只表示查询成功；检查 `data.result.status` 与 `data.sourceCurrent`。源码变化后重新验证，`CONTEXT_CHANGED`、`lost`、缺失结果或未知当前性都不能作为当前交付的通过证据。
 

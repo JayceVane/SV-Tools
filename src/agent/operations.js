@@ -16,8 +16,9 @@ const { createToolTaskManager } = require('../toolchains/job');
 const { summarizeToolResult, processSucceeded } = require('../toolchains/result');
 const { acquireWorkspaceLease } = require('../toolchains/workspace-lease');
 const { buildArchitecture } = require('../design/arch');
+const { layoutArchitecture, renderArchitectureSvg, defaultFileName } = require('../design/svg');
 
-const capabilities = ['doctor','project.list','project.inspect','project.create','project.add','project.set-top','format.preview','format.check','format.write','lint','vivado.status','vivado.report','vivado.run','task.start','task.list','task.status','task.logs','task.cancel','design.arch'];
+const capabilities = ['doctor','project.list','project.inspect','project.create','project.add','project.set-top','format.preview','format.check','format.write','lint','vivado.status','vivado.report','vivado.run','task.start','task.list','task.status','task.logs','task.cancel','design.arch','design.render'];
 async function locateIverilog(options) {
     const executable = process.platform === 'win32' ? 'iverilog.exe' : 'iverilog';
     const configured = options.iverilog ? path.resolve(options.workspace,options.iverilog) : null;
@@ -151,6 +152,32 @@ async function arch(input) {
     }
     return result('design.arch',{ ...data, ...(snapshot ? { snapshot } : {}) },context);
 }
+/** 渲染纯Node SVG架构图；PNG需要宿主栅格化，当前明确拒绝。 */
+async function render(input) {
+    if (!input.top) fail('INVALID_ARGUMENT','design render需要--top');
+    const format = input.format || 'svg';
+    if (format === 'png') fail('EXPORT_UNSUPPORTED','PNG需要栅格化宿主，M3当前只交付SVG；请使用--format svg',{format:'png'});
+    if (format !== 'svg') fail('INVALID_ARGUMENT','不支持的--format：' + format);
+    const { options, context, contents } = await resolveContext(input);
+    const files = [...contents].map(([file, value]) => ({ path: file, text: value.text }));
+    const arch = await buildArchitecture({ workspace: options.workspace, files, top: input.top, includeDirs: context.includeDirs,
+        defines: context.defines, depth: input.depth ?? 1, timeoutMs: options.timeoutMs, contextRevision: context.revision });
+    const layoutResult = await layoutArchitecture(arch);
+    const image = renderArchitectureSvg(arch, layoutResult, { title: typeof input.title === 'string' ? input.title : undefined });
+    const outputDirectory = input.out ? path.resolve(options.workspace, input.out) : await directory(options.workspace,'design','render');
+    await fs.mkdir(outputDirectory,{recursive:true});
+    const file = path.join(outputDirectory,defaultFileName(arch)), temporary = file + '.' + randomUUID() + '.tmp';
+    try {
+        await fs.writeFile(temporary,image.svg,{flag:'wx'});
+        await fs.rename(temporary,file);
+    } catch (error) {
+        await fs.rm(temporary,{force:true});
+        fail('DESIGN_FAILED','写入架构图失败：' + error.message,{file});
+    }
+    const artifact = { kind:'image', format:'svg', path:file, sha256:image.sha256, bytes:image.bytes, width:image.width, height:image.height };
+    return result('design.render',{ format:'svg', path:file, sha256:image.sha256, bytes:image.bytes, width:image.width, height:image.height,
+        title: image.evidence.export.title, stats:image.stats, evidence:image.evidence },context,[],[artifact]);
+}
 async function lint(input, {signal,onContext,onArtifacts} = {}) {
     const resolved = await resolveContext(input), {context,options} = resolved;
     if (input.expectedRevision && input.expectedRevision!==context.revision) fail('CONTEXT_CHANGED','任务启动前工程或源码已经变化',{},4);
@@ -195,4 +222,4 @@ async function lint(input, {signal,onContext,onArtifacts} = {}) {
     }
     return response;
 }
-module.exports={doctor,projects,inspect,format,arch,lint,capabilities};
+module.exports={doctor,projects,inspect,format,arch,render,lint,capabilities};
