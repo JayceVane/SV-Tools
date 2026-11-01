@@ -71,6 +71,40 @@ test('实际控制器批量背景色冻结右键目标，持久化且不重新�
     assert.equal(h.persisted().highlights['tb.a'],'sky'); assert.deepEqual(h.messages.filter(m=>m.requestId).map(m=>m.type),['window','values']);
 });
 
+test('目录中的信号可点击或按键切换添加和移除，批量添加保持幂等', async () => {
+    const h = clientHarness(); await h.flush();
+    h.node('clearSignals').click();
+    const row = () => h.node('catalogSpace').children.find(item => item.title.startsWith('tb.a ·'));
+    row().click(); assert.deepEqual([...h.state.selected], ['tb.a']);
+    row().click(); assert.deepEqual([...h.state.selected], []);
+    assert.deepEqual(h.persisted().selected, []);
+    let prevented = false;
+    row().onkeydown({ key: 'Enter', preventDefault() { prevented = true; } });
+    assert.equal(prevented, true); assert.deepEqual([...h.state.selected], ['tb.a']);
+    row().onkeydown({ key: ' ', preventDefault() {} }); assert.deepEqual([...h.state.selected], []);
+    h.node('addFiltered').click(); h.node('addFiltered').click();
+    assert.deepEqual([...h.state.selected], ['tb.a', 'tb.b', 'tb.c']);
+});
+
+test('目录移除已拆分的总线时同步移除其派生行，其他信号和保存状态保持一致', async () => {
+    const parent = { ...bus(), changeCount: 3 };
+    const keep = { key: 'tb.keep', id: 'keep', name: 'keep', path: 'tb.keep', scopePath: 'tb', type: 'wire', width: 1, changeCount: 1 };
+    const saved = { fileKey: 'test', selected: [parent.key, keep.key] };
+    const h = clientHarness(saved, { vars: [parent, keep] }); await h.flush();
+    h.contextMenu(parent.key).items.find(item => item.id === 'split-bus').submenu.find(item => item.id === 'split-unit').action();
+    h.find('waveSplitWidth0').value = '2'; h.find('waveSplitConfirm').click(); await h.flush();
+    const parts = h.state.rows.filter(row => row.signal.parentKey === parent.key).map(row => row.key);
+    assert.equal(parts.length, 2); h.pointer(parts[0]);
+    h.node('catalogSpace').children.find(item => item.title.startsWith('tb.ctrl[7:4]')).click();
+    assert.deepEqual([...h.state.selected], [keep.key]); assert.equal(h.state.activeKey, keep.key);
+    assert.equal(h.state.multi.size, 0); assert.equal(h.state.bitKeys.size, 0);
+    assert.ok(parts.every(key => !h.state.signals.has(key)));
+    const restored = clientHarness(h.persisted(), { vars: [parent, keep] }); await restored.flush();
+    assert.deepEqual([...restored.state.selected], [keep.key]);
+    restored.node('catalogSpace').children.find(item => item.title.startsWith('tb.ctrl[7:4]')).click();
+    assert.deepEqual([...restored.state.selected], [keep.key, parent.key]);
+});
+
 test('实际控制器展开/收起保持父总线，可单独选择和分组，重载恢复位行和颜色', async () => {
     const h=clientHarness(undefined,{vars:[{...bus(),changeCount:3}]}); await h.flush();
     h.contextMenu('tb.ctrl').items.find(item=>item.id==='expand-bus').action(); await h.flush();
@@ -224,4 +258,133 @@ test('切换活动信号使迟到的位边沿结果失效，不能跳动新目�
     assert.equal(query.params.bitOffset,2);h.pointer('tb.ctrl');
     h.windowListeners.message({data:{type:'response',requestId:query.requestId,result:{time:80,value:'1'}}});
     await moving;assert.equal(h.state.cursorA,0);
+});
+
+test('两段拆分、固定单元余数、升序和负下标均保持原声明位序与绝对偏移', () => {
+    const parent = { ...bus('[15:0]'), width: 16 };
+    const pair = D.splitSignals(parent, 'pair', [4, 12]);
+    assert.deepEqual(pair.map(s => [s.name, s.width, s.sliceOffset]), [['ctrl[15:12]',4,12],['ctrl[11:0]',12,0]]);
+    const again = D.splitSignals(pair[1], 'pair', [4,8]);
+    assert.deepEqual(again.map(s => s.name), ['ctrl[11:8]','ctrl[7:0]']);
+    assert.ok(again.every(s => s.parentKey === parent.key && s.sourceWidth === 16));
+    assert.equal(M.formatValue('1011001000011111', pair[0]), '0xB');
+    assert.equal(M.formatValue('1011001000011111', again[0]), '0x2');
+    assert.equal(M.formatValue('1011', pair[0], 'hex', true), '0xB');
+    assert.deepEqual(D.splitSignals({ ...parent, range: '[0:15]' }, 'unit', [6]).map(s => s.name), ['ctrl[0:3]','ctrl[4:9]','ctrl[10:15]']);
+    assert.deepEqual(D.splitSignals(bus('[-1:-4]'), 'pair', [2,2]).map(s => s.name), ['ctrl[-1:-2]','ctrl[-3:-4]']);
+    assert.equal(D.sliceValue('z1',4,4),'zzzz'); assert.equal(D.sliceValue('1',4,4),'0000');
+    const series = D.projectSeries({ changes:[{t:0,value:'0000'},{t:1,value:'0001'},{t:2,value:'1101'}],dense:[] }, D.splitSignals(bus(), 'pair', [2,2])[0]);
+    assert.deepEqual(series.changes,[{t:0,value:'00'},{t:2,value:'11'}]);
+    for (const args of [['pair',[1,2]],['pair',[0,4]],['unit',[4]],['unit',[0]],['unit',[1.5]]]) assert.throws(()=>D.splitSignals(bus(),...args),RangeError);
+    assert.throws(()=>D.splitSignals({...bus(),width:1000000},'unit',[1]),/2000/);
+});
+
+test('实际拆分对话框校验输入，重复拆分替换原段，同层保存恢复并查询原始总线', async () => {
+    const parent = { ...bus('[15:0]'), width: 16, changeCount: 3 };
+    const h = clientHarness(undefined,{vars:[parent]}); await h.flush();
+    const open = (key,mode) => h.contextMenu(key).items.find(i=>i.id==='split-bus').submenu.find(i=>i.id===mode).action();
+    open(parent.key,'split-pair');
+    h.find('waveSplitWidth0').value='5'; h.find('waveSplitWidth1').value='5'; h.find('waveSplitConfirm').click();
+    assert.match(h.find('waveSplitError').textContent,/之和/); assert.equal(h.state.rows.length,1);
+    h.find('waveSplitWidth0').value='4'; h.find('waveSplitWidth1').value='12'; h.find('waveSplitConfirm').click(); await h.flush();
+    assert.deepEqual(h.state.rows.map(row=>row.signal.width),[16,4,12]);
+    const lower=h.state.rows[2].signal;
+    h.pointer(lower.key);
+    open(lower.key,'split-unit'); h.find('waveSplitWidth0').value='4'; h.find('waveSplitConfirm').click(); await h.flush();
+    assert.deepEqual(h.state.rows.map(row=>row.signal.name),['ctrl','ctrl[15:12]','ctrl[11:8]','ctrl[7:4]','ctrl[3:0]']);
+    assert.ok(h.state.rows.slice(1).every(row=>row.signal.parentKey===parent.key)); assert.ok(!h.state.signals.has(lower.key));
+    assert.deepEqual(h.messages.filter(m=>m.type==='window').map(m=>[...m.params.ids]),[['!']]);
+    const reloaded=clientHarness(h.persisted(),{vars:[parent]}); await reloaded.flush();
+    assert.deepEqual(reloaded.state.rows.map(row=>row.signal.name),h.state.rows.map(row=>row.signal.name));
+    const S=require('../src/waveform/layout-state'), layout=S.capture(h.state), signals=new Map([[parent.key,parent]]);
+    const restored=S.restore(layout,signals,{endTime:100,secondsPerTick:1e-9});
+    assert.deepEqual(restored.selected,[...h.state.selected]);
+    const before=[...h.state.selected];
+    h.contextMenu(parent.key).items.find(i=>i.id==='collapse-bus').action(); assert.equal(h.state.rows.length,1);
+    h.event('pointerdown',12,16); h.event('pointerup',12,16);
+    assert.deepEqual([...h.state.selected],before);
+    const high=h.state.rows[1].signal; h.pointer(high.key); const moving=h.node('nextEdge').onclick(),query=h.messages.findLast(m=>m.type==='edge');
+    assert.equal(query.params.bitOffset,12); assert.equal(query.params.bitWidth,4);
+    h.windowListeners.message({data:{type:'response',requestId:query.requestId,result:{time:40,value:'1'}}}); await moving;
+    assert.equal(h.state.cursorA,40);
+});
+
+test('切片边沿只考虑所选段，忽略其它位跳变，扫描预算可续查且不解码完整向量', () => {
+    const store=edgeStore(4); store.valuesPool.get=()=>assert.fail('不得解码完整向量');
+    assert.deepEqual(store.edge({id:'!',time:0,direction:'next',bitOffset:2,bitWidth:2}),{time:null,value:null,continuation:3});
+    assert.deepEqual(store.edge({id:'!',time:0,direction:'next',bitOffset:2,bitWidth:2,continuation:3}),{time:4,value:'10'});
+    assert.deepEqual(store.edge({id:'!',time:5,direction:'previous',bitOffset:2,bitWidth:2}),{time:4,value:'10'});
+    assert.throws(()=>store.edge({id:'!',time:0,direction:'next',bitOffset:3,bitWidth:2}));
+});
+
+test('Questa逐位dump与重复声明还原为总线，保留真正的bit mem和不同作用域别名', async t => {
+    const {root,file}=await sourceFixture(t),trace=path.join(root,'split.vcd');
+    await fs.writeFile(file,'module top; wire [3:0] data; reg mem[0:1]; child dut(); endmodule module child(input [3:0] data); endmodule');
+    const declarations='$var wire 1 ! data [3] $end $var wire 1 # data [2] $end $var wire 1 $ data [1] $end $var wire 1 % data [0] $end ';
+    await fs.writeFile(trace,'$scope module top $end '+declarations+declarations+'$var reg 1 m mem [0] $end $var reg 1 n mem [1] $end $scope module dut $end '+declarations+'$upscope $end $upscope $end $enddefinitions $end #0 0! 0# x$ z% 0m 1n #3 1! 1# #5 0%');
+    const session=new VcdSession(); t.after(()=>session.dispose());
+    const metadata=await session.open(trace,{roots:[root],files:[file]});
+    const parent=metadata.vars.find(v=>v.path==='top.data'),alias=metadata.vars.find(v=>v.path==='top.dut.data');
+    assert.equal(parent.width,4); assert.equal(parent.range,'[3:0]'); assert.equal(parent.role,'internal'); assert.equal(alias.role,'input'); assert.equal(parent.id,alias.id);
+    assert.equal(metadata.vars.length,4); assert.ok(metadata.vars.some(v=>v.path==='top.mem[0]'));
+    assert.equal((await session.values({ids:[parent.id],time:0})).values[parent.id],'00xz');
+    assert.equal((await session.values({ids:[parent.id],time:3})).values[parent.id],'11xz');
+    const window=await session.window({ids:[parent.id],start:0,end:6,pixels:100});
+    assert.deepEqual(window.series[0].changes,[{t:0,value:'00xz'},{t:3,value:'11xz'},{t:5,value:'11x0'}]);
+    assert.deepEqual(await session.edge({id:parent.id,time:0,direction:'next',bitOffset:2,bitWidth:2}),{time:3,value:'11'});
+    const roles=await session.roles({roots:[root],files:[file]}); assert.equal(roles.roles.find(v=>v.path===parent.path).role,'internal');
+    const initiallyUnknown=new VcdSession(); t.after(()=>initiallyUnknown.dispose());
+    const raw=await initiallyUnknown.open(trace); assert.equal(raw.vars.length,14);
+    const retried=await initiallyUnknown.roles({roots:[root],files:[file]}); assert.equal(retried.vars.length,4);
+    assert.equal((await initiallyUnknown.values({ids:[retried.vars.find(v=>v.path==='top.data').id],time:3})).values[parent.id],'11xz');
+    const h=clientHarness({fileKey:'test',selected:['top.data[3]','top.data[2]']},{vars:metadata.vars}); await h.flush();
+    assert.deepEqual([...h.state.selected],['top.data']);
+});
+
+test('缺RTL、索引空洞和不同ID的重名逐位声明不擅自合并', () => {
+    const { restorePackedBuses }=require('../src/waveform/packed-buses');
+    const vars=[3,2,1,0].map((index)=>({id:String(index),width:1,type:'wire',name:'d['+index+']',path:'top.d['+index+']',scopePath:'top'}));
+    const store={compose(){assert.fail('不应合并');}};
+    assert.deepEqual(restorePackedBuses(vars,store),vars);
+    const marked=vars.map(v=>({...v,packedBit:{name:'d',index:Number(v.id),bounds:{left:3,right:0}}}));
+    assert.deepEqual(restorePackedBuses([marked[0],marked[2]],store),[marked[0],marked[2]]);
+    assert.equal(restorePackedBuses([...marked,{...marked[0],id:'conflict'}],store).length,5);
+});
+
+
+test('逐位VCD恢复总线时依据RTL范围排序，而不是VCD声明顺序', async t => {
+    const cases = [
+        { rtl:'wire [3:0] d;', indices:[0,1,2,3], range:'[3:0]', value:'00x1' },
+        { rtl:'wire [0:3] d;', indices:[3,2,1,0], range:'[0:3]', value:'1x00' },
+        { rtl:'wire [-1:-4] d;', indices:[-4,-2,-1,-3], range:'[-1:-4]', value:'00x1' },
+        { rtl:'wire [WIDTH-1:0] d;', indices:[0,2,3,1], range:'[3:0]', value:'00x1' },
+        { rtl:'wire [0:WIDTH-1] d;', indices:[3,0,2,1], range:'[0:3]', value:'1x00' },
+        { rtl:'wire [3:0] a, d;', indices:[0,2,1,3], range:'[3:0]', value:'00x1' },
+    ];
+    const ids = ['!', '#', '$', '%'];
+    for (const [at, scenario] of cases.entries()) {
+        const {root,file}=await sourceFixture(t),trace=path.join(root, 'order-'+at+'.vcd');
+        await fs.writeFile(file,'module top; parameter WIDTH=4; '+scenario.rtl+' endmodule');
+        const min = Math.min(...scenario.indices);
+        const declarations=scenario.indices.map((index,i)=>'$var wire 1 '+ids[i]+' d ['+index+'] $end').join(' ');
+        const values=scenario.indices.map((index,i)=>(index===min?'1':index===min+1?'x':'0')+ids[i]).join(' ');
+        await fs.writeFile(trace,'$scope module top $end '+declarations+' $upscope $end $enddefinitions $end #0 '+values);
+        const session=new VcdSession(); t.after(()=>session.dispose());
+        const metadata=await session.open(trace,{roots:[root],files:[file]});
+        const signal=metadata.vars.find(item=>item.path==='top.d');
+        assert.ok(signal,scenario.rtl); assert.equal(signal.range,scenario.range,scenario.rtl);
+        assert.equal((await session.values({ids:[signal.id],time:0})).values[signal.id],scenario.value,scenario.rtl);
+    }
+});
+
+test('RTL范围方向未知或VCD位号超出已知范围时不猜测总线位序', async t => {
+    for (const rtl of ['wire [MSB:LSB] d;', 'wire [3:1] d;', 'wire [WIDTH-1:5] d;', 'wire [3:0][1:0] d;', 'wire [3:0] d; reg [0:3] d;']) {
+        const {root,file}=await sourceFixture(t),trace=path.join(root,'ambiguous.vcd');
+        await fs.writeFile(file,'module top; parameter WIDTH=4; '+rtl+' endmodule');
+        const declarations=[0,1,2,3].map((index,i)=>'$var wire 1 '+['!','#','$','%'][i]+' d ['+index+'] $end').join(' ');
+        await fs.writeFile(trace,'$scope module top $end '+declarations+' $upscope $end $enddefinitions $end #0 0! 0# 0$ 0%');
+        const session=new VcdSession(); t.after(()=>session.dispose());
+        const metadata=await session.open(trace,{roots:[root],files:[file]});
+        assert.equal(metadata.vars.length,4,rtl); assert.ok(metadata.vars.every(signal=>signal.width===1),rtl);
+    }
 });

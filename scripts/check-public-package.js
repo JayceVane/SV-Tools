@@ -12,8 +12,8 @@ const VSIX_FILES = new Set(['extension.vsixmanifest', '[content_types].xml']);
 const SOURCE_PATH = /^src\/(?:circuit|debug|editor|graphics|project|toolchains|vivado|waveform|workspace)\//;
 
 /** @param {object} manifest @returns {void} 发行清单必须与当前检出的源码一致。 */
-function assertPublicManifest(manifest) {
-    if (!isDeepStrictEqual(manifest, RELEASE_MANIFEST)) throw new Error('公开包清单与当前源码不一致');
+function assertPublicManifest(manifest, expectedManifest = RELEASE_MANIFEST) {
+    if (!isDeepStrictEqual(manifest, expectedManifest)) throw new Error('公开包清单与当前源码不一致');
 }
 
 /** @param {string[]} files @returns {void} 同时接受构建清单和VSIX条目路径。 */
@@ -46,9 +46,11 @@ async function assertPublicFiles(root, files, { maxBytes = MAX_UNPACKED_BYTES } 
 
 /**
  * @param {string} file VSIX绝对或相对路径。
+ * @param {{sourceRoot?:string}} [options] 可指定发行tag的源码和已生成资源目录。
  * @returns {Promise<{version:string,files:number}>} 对照当前源码验证归档清单、文件路径和运行文本。
  */
-async function verifyPublicVsix(file) {
+async function verifyPublicVsix(file, { sourceRoot = ROOT } = {}) {
+    const expectedManifest = JSON.parse(await fs.readFile(path.join(sourceRoot, 'package.json'), 'utf8'));
     // 复用固定vsce构建依赖的ZIP读取器，不新增运行依赖。
     const yauzl = createRequire(require.resolve('@vscode/vsce'))('yauzl');
     const zip = await new Promise((resolve, reject) => yauzl.open(file, { lazyEntries: true }, (error, value) => error ? reject(error) : resolve(value)));
@@ -82,9 +84,9 @@ async function verifyPublicVsix(file) {
                     if (settled) return;
                     try {
                         const text = Buffer.concat(chunks).toString('utf8');
-                        if (/^extension\/package\.json$/i.test(name)) { manifest = JSON.parse(text); assertPublicManifest(manifest); }
+                        if (/^extension\/package\.json$/i.test(name)) { manifest = JSON.parse(text); assertPublicManifest(manifest, expectedManifest); }
                         else {
-                            const source = await fs.readFile(path.join(ROOT, name.slice('extension/'.length)), 'utf8');
+                            const source = await fs.readFile(path.join(sourceRoot, name.slice('extension/'.length)), 'utf8');
                             if (text.replace(/\r\n/g, '\n') !== source.replace(/\r\n/g, '\n')) throw new Error('公开包运行文本与当前源码不一致：' + name);
                         }
                         zip.readEntry();

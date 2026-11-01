@@ -123,7 +123,8 @@
             else {
                 const row = L.rowAt(state.rows, local.y + tracks.scrollTop), signal = row?.signal;
                 if (signal) canvas.setAttribute('title', signal.path + (signal.range || '') + ' · ' + model.signalDisplay.roleInfo(signal).label
-                    + (Number.isInteger(signal.bitOffset) ? ' · ' + signal.bitIndexSource + '[' + signal.bitIndex + ']' : model.signalDisplay.isBus(signal) ? ' · 点击三角或Enter展开/收起' : ''));
+                    + (Number.isInteger(signal.bitOffset) ? ' · ' + signal.bitIndexSource + '[' + signal.bitIndex + ']'
+                        : signal.parentKey ? ' · 右键继续拆分；Enter按bit拆分' : model.signalDisplay.isBus(signal) ? ' · 点击三角或Enter展开/收起' : ''));
                 else canvas.removeAttribute('title');
             }
         }

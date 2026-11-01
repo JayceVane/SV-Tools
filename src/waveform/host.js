@@ -47,7 +47,7 @@ function bindWaveformPanel({ filePath, panel, channel, createSession = options =
             const result = await session.roles(context);
             if (disposed || cancelled || ticket !== roleVersion) return;
             const roles = new Map(result.roles.map(item => [item.path, item]));
-            metadata.vars = metadata.vars.map(variable => ({ ...variable, role: roles.get(variable.path)?.role || 'unknown', roleSource: roles.get(variable.path)?.roleSource }));
+            metadata.vars = result.vars || metadata.vars.map(variable => ({ ...variable, role: roles.get(variable.path)?.role || 'unknown', roleSource: roles.get(variable.path)?.roleSource }));
             metadata.sourceRoleNote = result.sourceRoleNote; metadata.sourceRoleRetry = result.sourceRoleRetry;
             send({ type: 'roles', ...result });
             if (result.sourceRoleRetry && roleRetries++ < 3) roleDirty = true;
