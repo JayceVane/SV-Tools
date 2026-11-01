@@ -31,13 +31,13 @@ const THEMES = Object.freeze({
     document: Object.freeze({
         background: '#ffffff', panel: '#ffffff', cellBg: '#ffffff', border: '#111111', fg: '#111111', muted: '#333333',
         wire: '#111111', accent: '#111111', blackbox: '#111111', collapsed: '#111111', input: '#111111', output: '#111111',
-        error: '#111111', grid: null, titleStrip: '#f5f5f5', font: FONT_UI, labelFont: FONT_UI, badgeFill: '#ffffff',
+        inout: '#111111', error: '#111111', grid: null, titleStrip: '#f5f5f5', font: FONT_UI, labelFont: FONT_UI, badgeFill: '#ffffff',
         strokeWidth: 1.2, blackboxDash: '6 4', unresolvedDash: '2 3', gridBackground: false, busWidth: 1.8, wireWidth: 1
     }),
     presentation: Object.freeze({
         background: '#111923', panel: '#17222e', cellBg: '#1f252c', border: '#2c3a49', fg: '#d7e1ec', muted: '#9aaabc',
         wire: '#aebbc6', accent: '#63b8ff', blackbox: '#d3b57e', collapsed: '#7ccabf', input: '#eebc79', output: '#70d3c3',
-        error: '#f29595', grid: '#23313f', titleStrip: null, font: FONT_MONO, labelFont: FONT_MONO, badgeFill: '#17222e',
+        inout: '#63b8ff', error: '#f29595', grid: '#23313f', titleStrip: null, font: FONT_MONO, labelFont: FONT_MONO, badgeFill: '#17222e',
         strokeWidth: 1.5, blackboxDash: '4 3', unresolvedDash: '4 3', gridBackground: true, busWidth: 2.4, wireWidth: 1.25
     })
 });
@@ -281,6 +281,14 @@ function buildRenderProjection(arch, { budget = {} } = {}) {
     if (edges.length > limits.edges) {
         fail('DESIGN_LIMIT', '架构图渲染连边数量超出预算', { kind: 'edges', used: edges.length, limit: limits.edges });
     }
+    // 汇合节点与其端口也计入渲染预算。
+    if (nodes.length > limits.nodes) {
+        fail('DESIGN_LIMIT', '架构图渲染节点数量超出预算', { kind: 'nodes', used: nodes.length, limit: limits.nodes });
+    }
+    const renderPorts = nodes.reduce((total, node) => total + node.ports.length, 0);
+    if (renderPorts > limits.ports) {
+        fail('DESIGN_LIMIT', '架构图渲染端口数量超出预算', { kind: 'ports', used: renderPorts, limit: limits.ports });
+    }
     const input = {
         id: 'graph:arch', layoutOptions: LAYOUT_OPTIONS,
         children: nodes.map(elkNode),
@@ -288,7 +296,7 @@ function buildRenderProjection(arch, { budget = {} } = {}) {
     };
     return { id: 'graph:arch', moduleId: arch.top ? arch.top.moduleId : null, name: arch.top ? arch.top.name : 'architecture',
         input, nodes, edges, signals: [], parameters: null,
-        stats: { nodes: nodes.length, edges: edges.length, ports: portTotal, interfaces: interfaces.length,
+        stats: { nodes: nodes.length, edges: edges.length, ports: renderPorts, interfaces: interfaces.length,
             junctions: nodes.filter(node => node.kind === 'junction').length } };
 }
 
@@ -349,7 +357,7 @@ function drawInstance(node, parts, theme) {
 
 /** @param {object} node 布局节点。 @param {object[]} parts SVG片段。 @param {object} theme 风格。 @returns {void} 追加边界条。 */
 function drawBoundary(node, parts, theme) {
-    const accent = theme.border;
+    const accent = node.direction === 'output' ? theme.output : node.direction === 'inout' ? theme.inout : theme.input;
     parts.push('<g data-model-id="' + escape(node.id) + '" data-kind="boundary" data-direction="' + escape(node.direction) + '">');
     parts.push('<rect x="' + number(node.x) + '" y="' + number(node.y) + '" width="' + number(node.width) + '" height="' + number(node.height)
         + '" rx="3" fill="' + theme.panel + '" stroke="' + theme.border + '" stroke-width="' + theme.strokeWidth + '"/>');

@@ -170,7 +170,7 @@ node src/cli/main.js design arch --workspace D:/project --top top --depth 1 --sa
 
 `data` 关键字段：
 
-- `schemaVersion`、`stage`（`source`）、`top{name,moduleId,file}`、`archSha256`、`contextRevision`；
+- `schemaVersion`、`stage`（`source`）、`top{name,moduleId,file}`、`designId`、`modelSha256`（=`archSha256` 的明确映射）、`archSha256`、`contextRevision`、`sourceFiles[]{path,sha256}`（工作区源码/头文件的内容身份）；
 - `modules[]`：架构用到的模块接口表，`id`、`name`（`$paramod\...` 还原为基础模块名+参数摘要）、`file`、`blackbox`、`parameters`、`ports[]{name,direction,width,source}`；
 - `instances[]`：顶层实例表，`name`、`module`、`moduleId`、`implementation`（`blackbox`|`collapsed`）、`status`（`resolved`|`unresolved`）、`ports[]`、`source`；
 - `interfaces[]`：架构接口束（渲染默认使用），`id`、`from{kind,name}`、`to{kind,name}`、`direction`（`forward`|`bidirectional`）、`bits`、`label`、`signals[]{name,width,direction}`。实例↔实例先把双向连接合并为 `bidirectional`，再把同源实例、源端口集合相同的多目标连接合并为一条扇出接口（`to.name` 用 `+` 连接多个实例，如 `u_a+u_b+u_c`）；实例↔边界按顶层端口前缀（如 `uart*`、`spi*`、`vin*`）聚合，`clk_in`/`rst_n_in`/`gpio` 等保留为独立束。多端名称用 `+` 连接（如扇出 `u_buf+u_sink`）；`label` 优先取时钟/复位语义（`clk`/`rst`/`clk/rst`），其次成员信号公共前缀（如 `m_axi_*`），否则用最多两个信号名摘要（如 `alpha, beta`），长度不超过 48 字符；完整成员在 `signals[]` 与 SVG `<title>`；
@@ -187,7 +187,7 @@ node src/cli/main.js design render --workspace D:/project --top top
 node src/cli/main.js design render --workspace D:/project --top top --style presentation --out docs/arch --title "SoC 架构"
 ```
 
-默认 `--style document`（黑白线稿，面向报告）：纯白背景、黑色描边、无渐变/阴影/彩色；collapsed 实线 1.2px、blackbox 虚线（6,4）、unresolved 点线（2,3）并带文字角标；节点标题行浅灰底，端口/接口标签为黑色无衬线文本。`--style presentation`（别名 `ui`）保持电路视图深色展示主题。两种风格共用同一 ELK 布局坐标，仅替换配色与线型，并各自可确定性重渲染。
+默认 `--style document`（黑白线稿，面向报告）：纯白背景、黑色描边、无彩色（黑白灰阶：#000/#111/#333/#fff/#f5f5f5 等 R=G=B）、无渐变/阴影；collapsed 实线 1.2px、blackbox 虚线（6,4）、unresolved 点线（2,3）并带文字角标；节点标题行浅灰底，端口/接口标签为黑色无衬线文本。`--style presentation`（别名 `ui`）保持电路视图深色展示主题，边界输入/输出/双向分别使用 theme input/output/inout 语义色。两种风格共用同一 ELK 布局坐标，仅替换配色与线型，并各自可确定性重渲染。
 
 默认画 `interfaces[]`（无接口束的旧数据回退到 `graph.edges`）：左→右分层，实例与边界盒带端口名与位宽标签，多端接口经总线汇合节点扇出（`stats.junctions` 与 evidence `export.junctionCount`），接口标签为 `label (N bits)` 并保留完整成员名在 `<title>` 中。ELK layered 以 `aspectRatio≈1.5`、交叉最小化与直边优先布局，减少细长画幅并避免节点重叠。默认输出 `.svtools/agent/design/render/<top>-<archSha前8位>-<style>.svg`，`--out` 指定目录；`data`/`artifacts[]` 返回 `{kind:"image",format:"svg",path,sha256,bytes,width,height}`。SVG 根内 `<metadata id="svtools-evidence">` 含 `designId`、`modelSha256`（`archSha256` 的明确映射）、`archSha256`、`contextRevision`、`top`、`sourceFiles[]{path,sha256}`、`layout.engine`、`export`（含 `style` 与 `junctionCount`），`design.render` 的 `data.evidence` 与之一致；节点与端口带 `data-model-id`；同一输入同一风格的两次渲染节点坐标与 SVG SHA-256 完全一致。文本均为可选中 `<text>`。
 

@@ -155,13 +155,53 @@ test('document/presentation 共用布局坐标，各自两次渲染确定', asyn
     assert.equal(presentationA.svg.includes('fill="#111923"'), true);
     assert.equal(presentationA.svg.includes('arch-grid'), true);
     assert.equal(presentationA.svg.includes('stroke-dasharray="4 3"'), true);
+    assert.equal(presentationA.svg.includes('#eebc79'), true, 'presentation 输入边界角色色');
+    assert.equal(presentationA.svg.includes('#70d3c3'), true, 'presentation 输出边界角色色');
     assert.equal(documentA.svg.includes('stroke-dasharray="6 4"'), true);
+    assert.equal(documentA.svg.includes('#eebc79'), false, 'document 无输入角色彩色');
+    assert.equal(documentA.svg.includes('#70d3c3'), false, 'document 无输出角色彩色');
+    assert.equal(/linearGradient|radialGradient/.test(documentA.svg), false, 'document 无渐变');
+    for (const match of documentA.svg.matchAll(/(?:fill|stroke)="([^"]+)"/g)) {
+        const value = match[1].toLowerCase();
+        if (value === 'none') {
+            continue;
+        }
+        assert.equal(value.startsWith('url('), false, 'document 不应引用渐变/图案：' + value);
+        const hex = /^#([0-9a-f]{3}|[0-9a-f]{6})$/.exec(value);
+        assert(hex, 'document 颜色必须为十六进制：' + value);
+        const digits = hex[1].length === 3 ? [...hex[1]].map(char => char + char).join('') : hex[1];
+        assert.equal(digits.slice(0, 2), digits.slice(2, 4), 'document 必须 R=G=B：' + value);
+        assert.equal(digits.slice(2, 4), digits.slice(4, 6), 'document 必须 R=G=B：' + value);
+    }
     assert.throws(() => renderArchitectureSvg(arch, layout, { style: 'neon' }), { code: 'INVALID_ARGUMENT' });
     const unresolvedDirectory = await workspace(t, 'unresolved');
     const unresolvedArch = (await run(['design', 'arch', '--workspace', unresolvedDirectory, '--top', 'ghost_top'])).output.data;
     const unresolvedImage = renderArchitectureSvg(unresolvedArch, await layoutArchitecture(unresolvedArch));
     assert.equal(unresolvedImage.svg.includes('stroke-dasharray="2 3"'), true, 'unresolved 点线 2 3');
     assert.equal(unresolvedImage.svg.includes('>unresolved<'), true);
+});
+
+test('布局门禁：固定夹具宽高比 1.4–1.6、节点不重叠且布局确定', async t => {
+    const directory = await workspace(t, 'layout');
+    const arch = (await run(['design', 'arch', '--workspace', directory, '--top', 'layout_top'])).output.data;
+    assert.equal(arch.instances.length, 8);
+    assert.equal(arch.interfaces.length >= 8, true);
+    const first = await layoutArchitecture(arch);
+    const second = await layoutArchitecture(arch);
+    const ratio = first.layout.width / first.layout.height;
+    assert.equal(ratio > 1.4, true, '布局宽高比应大于1.4，实际 ' + ratio.toFixed(2));
+    assert.equal(ratio < 1.6, true, '布局宽高比应小于1.6，实际 ' + ratio.toFixed(2));
+    assert.equal(first.projection.stats.junctions > 0, true);
+    const boxes = first.layout.nodes.map(node => ({ id: node.id, x: node.x, y: node.y, width: node.width, height: node.height }));
+    for (let left = 0; left < boxes.length; left++) {
+        for (let right = left + 1; right < boxes.length; right++) {
+            const a = boxes[left], b = boxes[right];
+            const overlap = a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
+            assert.equal(overlap, false, a.id + ' 与 ' + b.id + ' 重叠');
+        }
+    }
+    const geometry = layout => layout.nodes.map(node => [node.id, node.x, node.y, node.width, node.height]);
+    assert.deepEqual(geometry(second.layout), geometry(first.layout));
 });
 
 test('PNG 无栅格化宿主返回 EXPORT_UNSUPPORTED 且不落盘', async t => {
@@ -186,6 +226,22 @@ test('渲染预算超限返回 DESIGN_LIMIT', async t => {
     assert.throws(() => buildRenderProjection(arch, { budget: { edges: 1 } }), error => {
         assert.equal(error.code, 'DESIGN_LIMIT');
         assert.equal(error.details.kind, 'edges');
+        return true;
+    });
+    const fanoutDirectory = await workspace(t, 'fanout');
+    const fanoutArch = (await run(['design', 'arch', '--workspace', fanoutDirectory, '--top', 'fanout_top'])).output.data;
+    const projection = buildRenderProjection(fanoutArch);
+    const graphNodes = fanoutArch.graph.nodes.length;
+    const graphPorts = fanoutArch.graph.nodes.reduce((total, node) => total + node.ports.length, 0);
+    assert.equal(projection.nodes.length > graphNodes, true);
+    assert.throws(() => buildRenderProjection(fanoutArch, { budget: { nodes: graphNodes } }), error => {
+        assert.equal(error.code, 'DESIGN_LIMIT');
+        assert.equal(error.details.kind, 'nodes');
+        return true;
+    });
+    assert.throws(() => buildRenderProjection(fanoutArch, { budget: { ports: graphPorts } }), error => {
+        assert.equal(error.code, 'DESIGN_LIMIT');
+        assert.equal(error.details.kind, 'ports');
         return true;
     });
 });
@@ -243,16 +299,6 @@ test('演示项目接口束远少于信号级边，且规模可渲染', { skip: 
     const first = await layoutArchitecture(arch);
     const second = await layoutArchitecture(arch);
     assert.equal(first.projection.stats.junctions, 8);
-    assert.equal(first.layout.width / first.layout.height > 1.4, true, '布局宽高比应大于1.4');
-    assert.equal(first.layout.width / first.layout.height < 1.6, true, '布局宽高比应小于1.6');
-    const boxes = first.layout.nodes.map(node => ({ id: node.id, x: node.x, y: node.y, width: node.width, height: node.height }));
-    for (let left = 0; left < boxes.length; left++) {
-        for (let right = left + 1; right < boxes.length; right++) {
-            const a = boxes[left], b = boxes[right];
-            const overlap = a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
-            assert.equal(overlap, false, a.id + ' 与 ' + b.id + ' 重叠');
-        }
-    }
     const imageA = renderArchitectureSvg(arch, first, { title: 'SoC 顶层架构', style: 'document' });
     const imageB = renderArchitectureSvg(arch, second, { title: 'SoC 顶层架构', style: 'document' });
     const presentationA = renderArchitectureSvg(arch, first, { title: 'SoC 顶层架构', style: 'presentation' });
@@ -261,7 +307,6 @@ test('演示项目接口束远少于信号级边，且规模可渲染', { skip: 
     assert.equal(presentationA.sha256, presentationB.sha256);
     assert.equal(imageA.width, presentationA.width);
     assert.equal(imageA.height, presentationA.height);
-    assert.equal(imageA.width / imageA.height > 1.4, true);
     assert.equal(imageA.evidence.export.junctionCount, 8);
     assert.equal(imageA.evidence.export.style, 'document');
     assert.equal(presentationA.evidence.export.style, 'presentation');

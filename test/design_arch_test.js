@@ -7,6 +7,7 @@ const fsp = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
+const { createHash } = require('node:crypto');
 const { run } = require('../src/cli/main');
 const { buildArchitecture, DEFAULT_BUDGET, buildArchScript, classifyYosysFailure, blackboxFlag } = require('../src/design/arch');
 
@@ -297,4 +298,34 @@ test('边界前缀使用命名空间，gpio 与 gpio_a 不合并', async t => {
     assert.deepEqual(interfaces.map(item => item.from.name).sort(), ['gpio', 'gpio_a']);
     assert.equal(interfaces.some(item => item.from.name.includes('+')), false);
     assert.deepEqual(interfaces.map(item => item.to.name).sort(), ['u_a', 'u_b']);
+});
+
+test('data 含 designId/modelSha256/sourceFiles，sourceFiles 与工作区文件一致', async t => {
+    const directory = await workspace(t, 'skeleton');
+    const response = await run(['design', 'arch', '--workspace', directory, '--top', 'fifo_top']);
+    assert.equal(response.exitCode, 0);
+    const data = response.output.data;
+    assert.match(data.designId, /^design:[0-9a-f]{16}$/);
+    assert.match(data.modelSha256, /^[0-9a-f]{64}$/);
+    assert.equal(data.modelSha256, data.archSha256);
+    const expected = fs.readdirSync(directory).filter(name => name.endsWith('.sv')).sort().map(name => ({
+        path: name, sha256: createHash('sha256').update(fs.readFileSync(path.join(directory, name))).digest('hex')
+    }));
+    assert.deepEqual(data.sourceFiles, expected);
+});
+
+test('实例双向对合并，不同源端口集合不误合并', async t => {
+    const directory = await workspace(t, 'pairing');
+    const response = await run(['design', 'arch', '--workspace', directory, '--top', 'pairing_top']);
+    assert.equal(response.exitCode, 0);
+    const interfaces = response.output.data.interfaces;
+    const pair = interfaces.filter(item => item.from.kind === 'instance' && item.to.kind === 'instance'
+        && [item.from.name, item.to.name].sort().join('|') === 'u_a|u_b');
+    assert.equal(pair.length, 1);
+    assert.equal(pair[0].direction, 'bidirectional');
+    assert.deepEqual(pair[0].signals.map(signal => signal.name).sort(), ['w_ab', 'w_ba']);
+    const fromF = interfaces.filter(item => item.from.name === 'u_f');
+    assert.equal(fromF.length, 2, '不同源端口集合不得合并');
+    assert.deepEqual(fromF.map(item => item.to.name).sort(), ['u_d', 'u_e']);
+    assert.equal(fromF.some(item => item.to.name.includes('+')), false);
 });
