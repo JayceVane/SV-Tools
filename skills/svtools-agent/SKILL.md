@@ -7,7 +7,7 @@ description: 使用 SV Tools CLI 在无 IDE 环境中查询 RTL 工程与源码�
 
 将 `<svtools-root>` 替换为已构建的 SV Tools 目录，以 `node <svtools-root>/src/cli/main.js` 调用；已链接的 Node 包也提供 `svtools-agent`。CLI 的 `--workspace` 明确指向用户的 RTL 工作区，不能把工具安装目录当作被检查工程。
 
-先运行 `doctor --workspace <rtl-workspace>` 查看 `data.capabilities` 和实际工具可用性。缺依赖是未执行，不是零错误通过。M1 仅提供工程查询、格式化、Icarus 检查和后台任务；不要编造 Vivado、架构导出、波形查询或 MCP 命令。
+先运行 `doctor --workspace <rtl-workspace>` 查看 `data.capabilities` 和实际工具可用性。缺依赖是未执行，不是零错误通过。当前 CLI 提供工程查询与写操作、格式化、Icarus 检查、后台任务与 Vivado 工程/运行/报告（M2）；架构导出、波形查询与 MCP 尚未实现，不要编造。IP/BD、外部 Tcl 钩子与动态 XDC 读取暂不支持，遇到 SNAPSHOT_UNSUPPORTED 按未支持处理并停止。
 
 用 `project list`、`project inspect` 确认工程、文件集、top 与文件摘要。歧义时使用返回候选补充 `--project`、`--fileset`、`--file`、`--top`；不要借用另一个工程或编辑器的活动 top。根据任务读取必要的分页，不必一次枚举全部源码。
 
