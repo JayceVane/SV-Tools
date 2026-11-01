@@ -80,7 +80,7 @@ class VcdSession {
     window(params) { return this.query('window', params); }
     /** @param {{ids: string[], time: number}} params @returns {Promise<object>} */
     values(params) { return this.query('values', params); }
-    /** @param {{id: string, time: number, direction: 'next'|'previous'|1|-1, bitOffset?:number, continuation?:number}} params @returns {Promise<object>} */
+    /** @param {{id: string, time: number, direction: 'next'|'previous'|1|-1, bitOffset?:number, bitWidth?:number, continuation?:number}} params @returns {Promise<object>} */
     edge(params) { return this.query('edge', params); }
     /** @param {object} sourceContext 有界RTL清单。 @returns {Promise<object>} 只重算方向，不重新读取VCD或创建事件存储。 */
     roles(sourceContext) { return this.query('roles', sourceContext); }

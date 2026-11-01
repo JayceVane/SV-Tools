@@ -35,32 +35,64 @@
         const info = ROLES[role];
         return { ...info, role, label: info.label + ' · ' + signal.type + (signal.roleSource ? ' · ' + signal.roleSource : ' · 缺少匹配RTL') };
     }
-    /** @param {object} signal @returns {boolean} 只展开多位数字信号，real与派生位不能再展开。 */
-    function isBus(signal) { return !!signal && !Number.isInteger(signal.bitOffset) && signal.width > 1 && !/real|string/i.test(signal.type); }
+    function isDerived(signal) { return Number.isInteger(signal?.bitOffset) || Number.isInteger(signal?.sliceOffset); }
+    /** 多位切片也可继续拆分，所有切片始终引用原始声明。 */
+    function isBus(signal) { return !!signal && signal.width > 1 && !/real|string/i.test(signal.type); }
     /** @param {string|null|undefined} value @param {number} offset LSB起算。@returns {string|null} 常量时间投影，避免为宽向量补齐字符串。 */
     function bitValue(value, offset) {
         if (value === null || value === undefined) return null;
         const raw = String(value), index = raw.length - 1 - offset, first = raw[0]?.toLowerCase();
         return index >= 0 ? raw[index].toLowerCase() : first === 'x' || first === 'z' ? first : '0';
     }
-    function bitSignal(parent, offset) {
-        const key = parent.key || parent.path;
+    function sliceValue(value, offset, width) {
+        if (value === null || value === undefined) return null;
+        const raw = String(value), end = Math.max(0, raw.length - offset), start = Math.max(0, raw.length - offset - width);
+        return raw.slice(start, end).padStart(width, /^[xz]/i.test(raw) ? raw[0].toLowerCase() : '0').toLowerCase();
+    }
+    function projectValue(value, signal) {
+        if (Number.isInteger(signal.bitOffset)) return bitValue(value, signal.bitOffset);
+        return Number.isInteger(signal.sliceOffset) ? sliceValue(value, signal.sliceOffset, signal.width) : value;
+    }
+    function sliceSignal(parent, offset, width) {
+        if (!Number.isSafeInteger(offset) || !Number.isSafeInteger(width) || offset < 0 || width < 1 || offset + width > parent.width) throw new RangeError('拆分范围超出信号位宽');
+        const key = parent.parentKey || parent.key || parent.path;
         const attached = !parent.name.startsWith('\\') && parent.name.match(/\[([+-]?\d+):([+-]?\d+)\]$/);
         const candidate = String(parent.range || (attached ? attached[0] : '')).match(/^\[([+-]?\d+):([+-]?\d+)\]$/);
         const range = candidate && Math.abs(Number(candidate[1]) - Number(candidate[2])) + 1 === parent.width ? candidate : null;
         const suffixLength = !parent.range && attached && range ? attached[0].length : 0;
-        const name = suffixLength ? parent.name.slice(0, -suffixLength) : parent.name;
-        const path = suffixLength ? parent.path.slice(0, -suffixLength) : parent.path;
-        const right = range ? Number(range[2]) : 0, left = range ? Number(range[1]) : parent.width - 1;
-        const index = right + (left >= right ? offset : -offset);
-        return { ...parent, key: JSON.stringify(['$bit', key, offset]), name: name + '[' + index + ']',
-            path: path + '[' + index + ']', range: undefined, width: 1, parentKey: key,
-            bitOffset: offset, bitIndex: index, sourceWidth: parent.width, bitIndexSource: range ? '声明范围' : '位位置' };
+        const name = parent.sourceName ?? (suffixLength ? parent.name.slice(0, -suffixLength) : parent.name);
+        const path = parent.sourcePath ?? (suffixLength ? parent.path.slice(0, -suffixLength) : parent.path);
+        const right = parent.sourceRight ?? (range ? Number(range[2]) : 0), left = parent.sourceLeft ?? (range ? Number(range[1]) : parent.width - 1);
+        const absolute = (parent.sliceOffset ?? parent.bitOffset ?? 0) + offset, direction = left >= right ? 1 : -1;
+        const index = right + direction * absolute, high = right + direction * (absolute + width - 1);
+        const suffix = '[' + (width === 1 ? index : high + ':' + index) + ']';
+        return { ...parent, key: JSON.stringify(width === 1 ? ['$bit', key, absolute] : ['$slice', key, absolute, width]), name: name + suffix,
+            path: path + suffix, range: undefined, width, parentKey: key,
+            bitOffset: width === 1 ? absolute : undefined, sliceOffset: width > 1 ? absolute : undefined, bitIndex: width === 1 ? index : undefined,
+            sourceWidth: parent.sourceWidth ?? parent.width, sourceName: name, sourcePath: path, sourceLeft: left, sourceRight: right,
+            bitIndexSource: parent.bitIndexSource || (range ? '声明范围' : '位位置') };
+    }
+    /** 两段按高位到低位；固定单元从LSB切分，余数留在最高段。 */
+    function splitSignals(parent, mode, widths, limit = MAX_TRACKS) {
+        if (!isBus(parent)) throw new RangeError('请选择多位数字信号');
+        if (!Array.isArray(widths) || widths.some(width => !Number.isSafeInteger(width) || width < 1)) throw new RangeError('拆分位宽必须为正整数');
+        let parts;
+        if (mode === 'pair') {
+            if (widths.length !== 2 || widths[0] + widths[1] !== parent.width) throw new RangeError('两段位宽之和必须等于 ' + parent.width);
+            parts = [{ offset: widths[1], width: widths[0] }, { offset: 0, width: widths[1] }];
+        } else if (mode === 'unit') {
+            if (widths.length !== 1 || widths[0] >= parent.width) throw new RangeError('单元位宽必须小于 ' + parent.width);
+            const count = Math.ceil(parent.width / widths[0]);
+            if (count > limit) throw new RangeError('拆分将超过2000行预算');
+            parts = Array.from({ length: count }, (_, index) => ({ offset: index * widths[0], width: Math.min(widths[0], parent.width - index * widths[0]) })).reverse();
+        } else throw new RangeError('未知拆分模式');
+        if (parts.length > limit) throw new RangeError('拆分将超过2000行预算');
+        return parts.map(part => sliceSignal(parent, part.offset, part.width));
     }
     /** @param {object} parent @param {number} [limit=2000] @returns {object[]} 声明左界到右界；先检查容量，再分配子行。 */
     function bitSignals(parent, limit = MAX_TRACKS) {
         if (!isBus(parent) || parent.width > limit) return [];
-        return Array.from({ length: parent.width }, (_, index) => bitSignal(parent, parent.width - index - 1));
+        return Array.from({ length: parent.width }, (_, index) => sliceSignal(parent, parent.width - index - 1, 1));
     }
     /** @param {string[]} keys @param {Map<string,object>} signals @param {number} limit @returns {void} 按保存的少量键懒恢复，不展开所有总线。 */
     function restoreBits(keys, signals, limit) {
@@ -68,22 +100,22 @@
             if (typeof key !== 'string' || key.length > 131072 || signals.has(key) || key[0] !== '[') continue;
             let tuple;
             try { tuple = JSON.parse(key); } catch { continue; } // 用户旧状态不构成波形解析失败。
-            if (!Array.isArray(tuple) || tuple.length !== 3 || tuple[0] !== '$bit') continue;
-            const parent = signals.get(tuple[1]), offset = tuple[2];
-            if (!isBus(parent) || !Number.isInteger(offset) || offset < 0 || offset >= parent.width) continue;
-            const signal = bitSignal(parent, offset);
+            if (!Array.isArray(tuple) || !(tuple.length === 3 && tuple[0] === '$bit' || tuple.length === 4 && tuple[0] === '$slice')) continue;
+            const parent = signals.get(tuple[1]), offset = tuple[2], width = tuple[0] === '$bit' ? 1 : tuple[3];
+            if (!isBus(parent) || isDerived(parent) || !Number.isSafeInteger(offset) || !Number.isSafeInteger(width) || width < 1 || offset < 0 || offset + width > parent.width) continue;
+            const signal = sliceSignal(parent, offset, width);
             if (signal.key === key) signals.set(key, signal);
         }
     }
     /** @param {object} series 有界窗口。@param {object} signal @returns {object} 位投影合并未变化值，保守保留原密集区；缓存由绘制器限制在当前可见行。 */
     function projectSeries(series, signal) {
-        if (!Number.isInteger(signal.bitOffset)) return series;
+        if (!isDerived(signal)) return series;
         const changes = []; let previous;
         for (const change of series.changes) {
-            const value = bitValue(change.value, signal.bitOffset);
+            const value = projectValue(change.value, signal);
             if (value !== previous) { changes.push({ t: change.t, value }); previous = value; }
         }
         return { changes, dense: series.dense };
     }
-    return { MAX_TRACKS, HIGHLIGHTS, highlightColor, restoreHighlights, roleInfo, isBus, bitValue, bitSignals, restoreBits, projectSeries };
+    return { MAX_TRACKS, HIGHLIGHTS, highlightColor, restoreHighlights, roleInfo, isBus, isDerived, bitValue, sliceValue, projectValue, sliceSignal, splitSignals, bitSignals, restoreBits, projectSeries };
 });

@@ -14,7 +14,7 @@ function createRoleIndex(records) {
     const units = new Map();
     for (const { model } of records) {
         const facts = new Map(model.scopes.map(scope => [scope.id, { name: scope.name, symbols: scope.symbols.map(symbol =>
-            ({ name: symbol.name, kind: symbol.kind, direction: symbol.direction, type: symbol.type })), children: new Map(), instances: new Map() }]));
+            ({ name: symbol.name, kind: symbol.kind, direction: symbol.direction, type: symbol.type, array: symbol.array })), children: new Map(), instances: new Map() }]));
         for (const fact of facts.values()) {
             const symbols = new Map();
             for (const symbol of fact.symbols) { if (!symbols.has(symbol.name)) symbols.set(symbol.name, []); symbols.get(symbol.name).push(symbol); }
@@ -65,7 +65,10 @@ function classifySignals(vars, units) {
         const direction = unique([...directions]);
         const role = DIRECTIONS.has(direction) ? direction : directions.size ? 'unknown'
             : declarations.some(symbol => ['net', 'variable'].includes(symbol.kind)) ? 'internal' : 'unknown';
-        return { ...signal, role, ...(role !== 'unknown' ? { roleSource: 'RTL' } : {}) };
+        const bit = !signal.range && !signal.referenceName && signal.width === 1 && name.match(/^([^\\\[\]]+)\[([+-]?\d+)\]$/);
+        const packedBit = bit && declarations.length && declarations.every(symbol => !symbol.array && ['net', 'variable', 'port'].includes(symbol.kind))
+            ? { name: bit[1], index: Number(bit[2]) } : undefined;
+        return { ...signal, role, ...(role !== 'unknown' ? { roleSource: 'RTL' } : {}), ...(packedBit ? { packedBit } : {}) };
     });
 }
 
