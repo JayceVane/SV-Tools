@@ -169,8 +169,11 @@ async function render(input) {
     if (format === 'png') fail('EXPORT_UNSUPPORTED','PNG需要栅格化宿主，M3当前只交付SVG；请使用--format svg',{format:'png'});
     if (format !== 'svg') fail('INVALID_ARGUMENT','不支持的--format：' + format);
     const style = normalizeStyle(input.style);
-    const bundle = input.noBundle !== true;
+    const bundle = input.foldPorts === true;
     const bundleNames = parseBundleNames(Array.isArray(input.bundleNames) ? input.bundleNames : []);
+    if (!bundle && Object.keys(bundleNames).length) {
+        fail('INVALID_ARGUMENT','--bundle-name 需要与 --fold-ports 同时使用');
+    }
     const { options, context, contents } = await resolveContext(input);
     const files = [...contents].map(([file, value]) => ({ path: file, text: value.text }));
     const arch = await buildArchitecture({ workspace: options.workspace, files, top: input.top, includeDirs: context.includeDirs,

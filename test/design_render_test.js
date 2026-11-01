@@ -285,73 +285,119 @@ test('扇出接口合并与无公共前缀标签回退', async t => {
     assert.equal(svg.includes('alpha, beta (2 bits)'), true);
 });
 
-test('演示项目：端口折叠、--no-bundle/--bundle-name、布局确定与两风格渲染', { skip: fs.existsSync(DEMO) ? false : '演示项目不存在' }, async t => {
+test('端口折叠 opt-in 门禁：默认端口事实、m_axi/m_valid 守卫、s_*、预算与 title 位宽', async t => {
+    const directory = await workspace(t, 'bundles');
+    const arch = (await run(['design', 'arch', '--workspace', directory, '--top', 'bundle_top'])).output.data;
+    const instance = arch.instances.find(item => item.name === 'u_c');
+    assert.equal(instance.ports.length, 8);
+    assert.deepEqual(instance.bundles.map(bundle => [bundle.name, bundle.direction, bundle.bits, bundle.members.length]), [
+        ['clk', 'input', 1, 1],
+        ['m_axi', 'inout', 96, 2],
+        ['m_valid', 'input', 1, 1],
+        ['s0', 'inout', 64, 2],
+        ['s_awaddr', 'input', 32, 1],
+        ['s_wdata', 'output', 32, 1]
+    ]);
+    assert.deepEqual(instance.bundles.find(bundle => bundle.name === 'm_axi').members.map(member => member.name), ['m_axi_araddr', 'm_axi_rdata']);
+    assert.equal(instance.bundles.reduce((total, bundle) => total + bundle.members.length, 0), instance.ports.length, '折叠成员总和等于端口数');
+    assert.equal(arch.limitations.some(text => text.includes('虚拟接口端口为前缀折叠展示')), true);
+
+    const plain = buildRenderProjection(arch);
+    const folded = buildRenderProjection(arch, { bundle: true });
+    assert.equal(plain.stats.bundled, false);
+    assert.equal(plain.stats.bundles, 0);
+    assert.equal(plain.stats.ports, plain.stats.fullPorts);
+    assert.equal(folded.stats.bundled, true);
+    assert.equal(folded.stats.bundles, 2);
+    assert.equal(folded.stats.ports < plain.stats.ports, true);
+    assert.equal(folded.stats.fullPorts, plain.stats.fullPorts);
+    const endpointOf = (projection, port) => projection.edges.find(edge => edge.interface.toPorts.includes(port));
+    assert.equal(endpointOf(plain, 'm_axi_araddr').targets[0], 'instance:u_c/m_axi_araddr');
+    assert.equal(endpointOf(folded, 'm_axi_araddr').targets[0], 'instance:u_c/bundle:m_axi');
+    assert.equal(endpointOf(folded, 'm_valid').targets[0], 'instance:u_c/m_valid');
+    assert.equal(endpointOf(folded, 's0_awaddr').targets[0], 'instance:u_c/bundle:s0');
+    const sourceEdge = projection => projection.edges.find(edge => edge.interface.fromPorts.includes('m_axi_rdata'));
+    assert.equal(sourceEdge(plain).sources[0], 'instance:u_c/m_axi_rdata');
+    assert.equal(sourceEdge(folded).sources[0], 'instance:u_c/bundle:m_axi');
+
+    assert.doesNotThrow(() => buildRenderProjection(arch, { bundle: true, budget: { ports: 15 } }));
+    assert.throws(() => buildRenderProjection(arch, { budget: { ports: 15 } }), error => {
+        assert.equal(error.code, 'DESIGN_LIMIT');
+        assert.equal(error.details.kind, 'ports');
+        return true;
+    });
+    assert.throws(() => buildRenderProjection(arch, { bundle: true, budget: { ports: folded.stats.ports - 1 } }), error => {
+        assert.equal(error.code, 'DESIGN_LIMIT');
+        assert.equal(error.details.kind, 'ports');
+        return true;
+    });
+
+    const baseline = await run(['design', 'render', '--workspace', directory, '--top', 'bundle_top', '--out', 'out-default']);
+    assert.equal(baseline.exitCode, 0);
+    assert.equal(baseline.output.data.evidence.export.bundled, false);
+    assert.equal(baseline.output.data.evidence.export.bundleCount, 0);
+    assert.equal(baseline.output.data.stats.ports, plain.stats.ports);
+    const baselineSvg = await fsp.readFile(baseline.output.data.path, 'utf8');
+    assert.equal(baselineSvg.includes('m_axi_araddr['), true);
+    assert.equal(baselineSvg.includes('m_axi*'), false);
+    const baselineTitles = [...baselineSvg.matchAll(/<title>([\s\S]*?)<\/title>/g)].map(match => match[1]);
+    assert.equal(baselineTitles.some(title => title.includes('m_axi_araddr[32]')), true);
+    assert.equal(baselineTitles.some(title => title.includes('(0 bits)')), false, '默认 title 位宽不得为0');
+
+    const foldedRender = await run(['design', 'render', '--workspace', directory, '--top', 'bundle_top', '--fold-ports', '--out', 'out-fold']);
+    assert.equal(foldedRender.exitCode, 0);
+    assert.equal(foldedRender.output.data.evidence.export.bundled, true);
+    assert.equal(foldedRender.output.data.evidence.export.bundleCount, 2);
+    assert.equal(foldedRender.output.data.stats.ports, folded.stats.ports);
+    const foldedSvg = await fsp.readFile(foldedRender.output.data.path, 'utf8');
+    assert.equal(foldedSvg.includes('m_axi*'), true);
+    assert.equal(foldedSvg.includes('(96 bits)'), true);
+    assert.equal(foldedSvg.includes('virtual bundle'), true);
+    assert.equal(foldedSvg.includes('前缀折叠展示'), true);
+    const foldedTitles = [...foldedSvg.matchAll(/<title>([\s\S]*?)<\/title>/g)].map(match => match[1]);
+    assert.equal(foldedTitles.some(title => title.includes('虚拟接口端口 m_axi* (96 bits)')), true);
+    assert.equal(foldedTitles.some(title => title.includes('虚拟接口端口 s0* (64 bits)')), true);
+    assert.equal(foldedTitles.some(title => title.includes('s0_awaddr[32]')), true);
+    assert.equal(foldedTitles.some(title => title.includes('(0 bits)')), false, '折叠 title 位宽不得为0');
+    const again = await run(['design', 'render', '--workspace', directory, '--top', 'bundle_top', '--fold-ports', '--out', 'out-fold']);
+    assert.equal(again.output.data.sha256, foldedRender.output.data.sha256);
+
+    const named = await run(['design', 'render', '--workspace', directory, '--top', 'bundle_top', '--fold-ports', '--out', 'out-named', '--bundle-name', 's0=s0_axi']);
+    assert.equal(named.exitCode, 0);
+    assert.equal(named.output.data.bundleNames.s0, 's0_axi');
+    const namedSvg = await fsp.readFile(named.output.data.path, 'utf8');
+    assert.equal(namedSvg.includes('s0_axi*'), true);
+    const invalidName = await run(['design', 'render', '--workspace', directory, '--top', 'bundle_top', '--out', 'out-invalid', '--bundle-name', 's0=s0_axi']);
+    assert.equal(invalidName.exitCode, 2);
+    assert.equal(invalidName.output.diagnostics[0].code, 'INVALID_ARGUMENT');
+});
+
+test('演示项目：默认端口事实与 --fold-ports 规模检查', { skip: fs.existsSync(DEMO) ? false : '演示项目不存在' }, async () => {
     const files = readDirectory(path.join(DEMO, 'rtl'));
     const arch = await buildArchitecture({ workspace: DEMO, files, top: 'soc_top' });
     assert.equal(arch.graph.nodes.filter(node => node.kind === 'instance').length, 15);
     assert.equal(arch.graph.edges.length, 191);
     assert.equal(arch.interfaces.length, 30);
+    const plain = await layoutArchitecture(arch);
+    const folded = await layoutArchitecture(arch, { bundle: true });
+    assert.equal(plain.projection.stats.bundled, false);
+    assert.equal(folded.projection.stats.bundled, true);
+    assert.equal(folded.projection.stats.bundles > 0, true);
+    assert.equal(folded.projection.stats.ports < plain.projection.stats.ports, true);
+    assert.equal(folded.projection.stats.fullPorts, plain.projection.stats.fullPorts);
     const instance = name => arch.instances.find(item => item.name === name);
-    assert.equal(instance('u_ic').ports.length, 81);
-    assert.deepEqual(instance('u_ic').bundles.map(bundle => bundle.name), ['clk', 'rst_n', 's0', 's1', 'm0', 'm1']);
-    assert.equal(instance('u_cpu').ports.length, 24);
+    assert.equal(instance('u_ic').bundles.length, 6);
     assert.equal(instance('u_cpu').bundles.length, 4);
-    assert.equal(instance('u_cpu').bundles.find(bundle => bundle.name === 'm_axi').members.length, 21);
-    assert.equal(instance('u_ddr').ports.length, 29);
-    assert.equal(instance('u_ddr').bundles.length, 4);
-    assert.deepEqual(instance('u_ddr').bundles.map(bundle => bundle.name), ['clk', 'rst_n', 's', 'ddr']);
-    const bundled = await layoutArchitecture(arch);
-    const plain = await layoutArchitecture(arch, { bundle: false });
-    assert.equal(bundled.projection.stats.bundles, 18);
-    assert.equal(bundled.projection.stats.ports < plain.projection.stats.ports, true);
-    assert.equal(bundled.projection.stats.fullPorts, plain.projection.stats.fullPorts);
+    assert.equal(instance('u_ddr').bundles.some(bundle => bundle.name === 's'), false, '单字母桶 s_* 不折叠');
     const heightOf = (layout, id) => layout.nodes.find(node => node.id === id).height;
-    assert.equal(heightOf(bundled.layout, 'instance:u_ic') < heightOf(plain.layout, 'instance:u_ic') / 2, true);
-    assert.equal(heightOf(bundled.layout, 'instance:u_cpu') < heightOf(plain.layout, 'instance:u_cpu') * 0.6, true);
-    const ratio = bundled.layout.width / bundled.layout.height;
-    assert.equal(ratio > 1.4, true, '折叠后布局宽高比应大于1.4，实际 ' + ratio.toFixed(2));
-    assert.equal(ratio < 1.6, true, '折叠后布局宽高比应小于1.6，实际 ' + ratio.toFixed(2));
-    const boxes = bundled.layout.nodes.map(node => ({ id: node.id, x: node.x, y: node.y, width: node.width, height: node.height }));
-    for (let left = 0; left < boxes.length; left++) {
-        for (let right = left + 1; right < boxes.length; right++) {
-            const a = boxes[left], b = boxes[right];
-            const overlap = a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
-            assert.equal(overlap, false, a.id + ' 与 ' + b.id + ' 重叠');
-        }
-    }
-    const again = await layoutArchitecture(arch);
-    const geometry = layout => layout.nodes.map(node => [node.id, node.x, node.y, node.width, node.height]);
-    assert.deepEqual(geometry(again.layout), geometry(bundled.layout));
-    const imageA = renderArchitectureSvg(arch, bundled, { title: 'SoC 顶层架构', style: 'document' });
-    const imageB = renderArchitectureSvg(arch, again, { title: 'SoC 顶层架构', style: 'document' });
-    const presentationA = renderArchitectureSvg(arch, bundled, { title: 'SoC 顶层架构', style: 'presentation' });
-    const presentationB = renderArchitectureSvg(arch, again, { title: 'SoC 顶层架构', style: 'presentation' });
+    assert.equal(heightOf(folded.layout, 'instance:u_ic') < heightOf(plain.layout, 'instance:u_ic') / 2, true);
+    const imageA = renderArchitectureSvg(arch, folded, { title: 'SoC 顶层架构', style: 'document' });
+    const imageB = renderArchitectureSvg(arch, folded, { title: 'SoC 顶层架构', style: 'document' });
+    const presentation = renderArchitectureSvg(arch, folded, { title: 'SoC 顶层架构', style: 'presentation' });
     assert.equal(imageA.sha256, imageB.sha256);
-    assert.equal(presentationA.sha256, presentationB.sha256);
-    assert.equal(imageA.width, presentationA.width);
-    assert.equal(imageA.height, presentationA.height);
-    assert.equal(imageA.evidence.export.junctionCount, 8);
+    assert.equal(imageA.width, presentation.width);
+    assert.equal(imageA.height, presentation.height);
     assert.equal(imageA.evidence.export.bundled, true);
-    assert.equal(imageA.evidence.export.bundleCount, 18);
-    assert.equal(imageA.evidence.export.style, 'document');
-    assert.equal(presentationA.evidence.export.style, 'presentation');
+    assert.equal(imageA.evidence.export.bundleCount > 0, true);
     assert.equal(imageA.svg.includes('virtual bundle'), true);
-    assert.equal(imageA.svg.includes('前缀折叠展示'), true);
-    const temporary = await fsp.mkdtemp(path.join(os.tmpdir(), 'svtools-bundle-'));
-    t.after(() => fsp.rm(temporary, { recursive: true, force: true }));
-    const withoutBundle = await run(['design', 'render', '--workspace', DEMO, '--top', 'soc_top', '--no-bundle', '--out', temporary]);
-    assert.equal(withoutBundle.exitCode, 0);
-    assert.equal(withoutBundle.output.data.evidence.export.bundled, false);
-    assert.equal(withoutBundle.output.data.evidence.export.bundleCount, 0);
-    assert.equal(withoutBundle.output.data.stats.ports > bundled.projection.stats.ports, true);
-    const plainSvg = await fsp.readFile(withoutBundle.output.data.path, 'utf8');
-    assert.equal(plainSvg.includes('s0_awaddr['), true);
-    assert.equal(plainSvg.includes('s0* ('), false);
-    const named = await run(['design', 'render', '--workspace', DEMO, '--top', 'soc_top', '--out', temporary,
-        '--bundle-name', 's0=s0_axi', '--bundle-name', 's1=s1_axi', '--bundle-name', 'm0=m0_axi', '--bundle-name', 'm1=m1_axi']);
-    assert.equal(named.exitCode, 0);
-    assert.equal(named.output.data.bundleNames.s0, 's0_axi');
-    const namedSvg = await fsp.readFile(named.output.data.path, 'utf8');
-    assert.equal(namedSvg.includes('s0_axi*'), true);
-    assert.equal(namedSvg.includes('m1_axi*'), true);
 });

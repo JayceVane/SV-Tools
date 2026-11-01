@@ -126,7 +126,8 @@ function displayPorts(node, { bundle, bundleNames }) {
     if (!bundle) {
         return node.ports.map(port => ({
             id: node.id + '/' + port.name, label: port.name, displayLabel: port.name + (port.width > 1 ? '[' + port.width + ']' : ''),
-            direction: port.direction, width: port.width, bits: new Array(Math.max(1, Math.min(port.width, 64))).fill('n:0'),
+            direction: port.direction, width: port.width, bitWidth: port.width,
+            bits: new Array(Math.max(1, Math.min(port.width, 64))).fill('n:0'),
             members: null, prefix: null, collapsed: false
         }));
     }
@@ -135,7 +136,7 @@ function displayPorts(node, { bundle, bundleNames }) {
         const displayLabel = collapsed ? item.name + '* (' + item.bits + ')' : item.members[0].name + (item.bits > 1 ? '[' + item.bits + ']' : '');
         return {
             id: node.id + '/' + (item.prefix ? 'bundle:' + item.prefix : item.name),
-            label: item.name, displayLabel, direction: item.direction, width: item.bits,
+            label: item.name, displayLabel, direction: item.direction, width: item.bits, bitWidth: item.bits,
             bits: new Array(Math.max(1, Math.min(item.bits, 64))).fill('n:0'),
             members: item.members, prefix: item.prefix, collapsed
         };
@@ -177,7 +178,7 @@ function prepareBoundaryNode(node) {
     const height = 36;
     const side = node.direction === 'output' ? 'WEST' : 'EAST';
     const port = { id: node.id + '/' + node.ports[0].name, label: node.name, direction: node.ports[0].direction,
-        width: node.ports[0].width, bits: [], side, x: side === 'WEST' ? 0 : width, y: height / 2, width: 0, height: 0 };
+        width: node.ports[0].width, bitWidth: node.ports[0].width, bits: [], side, x: side === 'WEST' ? 0 : width, y: height / 2, width: 0, height: 0 };
     return { id: node.id, kind: 'boundary', label, name: node.name, direction: node.direction, boundary: true,
         width, height, paintBounds: { left: -10, top: -10, right: width + 10, bottom: height + 10 }, ports: [port] };
 }
@@ -229,7 +230,7 @@ function endpointNodes(name, kind) {
  *   bundle 默认 true（blackbox/collapsed 统一按前缀折叠显示端口）；bundleNames 覆盖显示名。
  * @returns {object} 可交给 layoutProjection 的投影。
  */
-function buildRenderProjection(arch, { budget = {}, bundle = true, bundleNames = {} } = {}) {
+function buildRenderProjection(arch, { budget = {}, bundle = false, bundleNames = {} } = {}) {
     const limits = { ...DEFAULT_RENDER_BUDGET, ...budget };
     for (const [name, limit] of Object.entries(limits)) {
         if (!Number.isSafeInteger(limit) || limit < 1) {
@@ -371,9 +372,9 @@ function drawInstance(node, parts, theme) {
         const px = node.x + port.x, py = node.y + port.y;
         const label = port.displayLabel;
         const title = port.members
-            ? '虚拟接口端口 ' + port.label + (port.collapsed ? '*' : '') + ' (' + port.width + ' bits) · ' + port.direction
+            ? '虚拟接口端口 ' + port.label + (port.collapsed ? '*' : '') + ' (' + port.bitWidth + ' bits) · ' + port.direction
                 + ' · 成员: ' + port.members.map(member => member.name + '[' + member.width + ']').join(', ')
-            : port.label + ' · ' + port.direction + ' · ' + port.width + ' bit' + (port.width === 1 ? '' : 's');
+            : port.label + ' · ' + port.direction + ' · ' + port.bitWidth + ' bit' + (port.bitWidth === 1 ? '' : 's');
         parts.push('<g data-model-id="' + escape(port.id) + '" data-kind="port" data-direction="' + escape(port.direction) + '">');
         parts.push('<title>' + escape(title) + '</title>');
         parts.push('<line x1="' + number(side === 'WEST' ? px - 8 : px) + '" y1="' + number(py) + '" x2="' + number(side === 'WEST' ? px : px + 8)
@@ -404,7 +405,7 @@ function drawBoundary(node, parts, theme) {
     for (const port of node.ports) {
         const px = node.x + port.x, py = node.y + port.y;
         parts.push('<g data-model-id="' + escape(port.id) + '" data-kind="port" data-direction="' + escape(port.direction) + '">');
-        parts.push('<title>' + escape(port.label + ' · ' + node.direction + ' · ' + port.width + ' bit' + (port.width === 1 ? '' : 's')) + '</title>');
+        parts.push('<title>' + escape(port.label + ' · ' + node.direction + ' · ' + port.bitWidth + ' bit' + (port.bitWidth === 1 ? '' : 's')) + '</title>');
         parts.push('<line x1="' + number(port.side === 'WEST' ? px - 10 : px) + '" y1="' + number(py) + '" x2="' + number(port.side === 'WEST' ? px : px + 10)
             + '" y2="' + number(py) + '" stroke="' + accent + '" stroke-width="1.5"/>');
         parts.push('</g>');

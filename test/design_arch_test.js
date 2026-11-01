@@ -331,15 +331,18 @@ test('实例双向对合并，不同源端口集合不误合并', async t => {
     assert.equal(fromF.some(item => item.to.name.includes('+')), false);
 });
 
-test('端口折叠：前缀聚类、语义保留与显示名覆盖', () => {
+test('端口折叠：前缀聚类守卫、成员守恒与显示名覆盖', () => {
     const ports = [
         { name: 's0_awaddr', width: 32, direction: 'input' },
         { name: 's0_wdata', width: 64, direction: 'input' },
         { name: 's0_rdata', width: 64, direction: 'output' },
         { name: 'm_axi_araddr', width: 32, direction: 'output' },
         { name: 'm_axi_rdata', width: 64, direction: 'input' },
+        { name: 'm_valid', width: 1, direction: 'input' },
         { name: 'ddr_cas_n', width: 1, direction: 'output' },
         { name: 'ddr_we_n', width: 1, direction: 'output' },
+        { name: 's_awaddr', width: 32, direction: 'input' },
+        { name: 's_wdata', width: 32, direction: 'output' },
         { name: 'clk_sys', width: 1, direction: 'input' },
         { name: 'clk_pix', width: 1, direction: 'input' },
         { name: 'rst_n_in', width: 1, direction: 'input' },
@@ -347,10 +350,12 @@ test('端口折叠：前缀聚类、语义保留与显示名覆盖', () => {
     ];
     const bundles = bundlePorts(ports);
     assert.deepEqual(bundles.map(bundle => [bundle.name, bundle.direction, bundle.bits, bundle.members.length]), [
-        ['s0', 'inout', 160, 3], ['m_axi', 'inout', 96, 2], ['ddr', 'output', 2, 2],
+        ['s0', 'inout', 160, 3], ['m_axi', 'inout', 96, 2], ['m_valid', 'input', 1, 1], ['ddr', 'output', 2, 2],
+        ['s_awaddr', 'input', 32, 1], ['s_wdata', 'output', 32, 1],
         ['clk_sys', 'input', 1, 1], ['clk_pix', 'input', 1, 1], ['rst_n_in', 'input', 1, 1], ['irq', 'input', 4, 1]
     ]);
     assert.deepEqual(bundles[0].members.map(member => member.name), ['s0_awaddr', 's0_wdata', 's0_rdata']);
+    assert.equal(bundles.reduce((total, bundle) => total + bundle.members.length, 0), ports.length, '成员总和等于输入端口数');
     const named = bundlePorts(ports, { names: { s0: 's0_axi', m_axi: 'm_axi' } });
     assert.equal(named[0].name, 's0_axi');
     assert.equal(named[0].prefix, 's0');

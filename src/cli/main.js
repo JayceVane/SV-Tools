@@ -19,7 +19,7 @@ const help=`SV Tools headless CLI (API 1)
   vivado run [--run synth_1|impl_1] [--jobs <n>]
   design arch --top <module> [--depth <n>] [--save <name>]
   design render --top <module> [--format svg] [--style document|presentation] [--out <dir>] [--title <t>]
-                [--no-bundle] [--bundle-name <prefix=display>] (repeatable)
+                [--fold-ports] [--bundle-name <prefix=display>] (repeatable)
   task start lint [lint options]
   task list|status|logs|cancel [task-id]
 
@@ -36,7 +36,7 @@ Node.js >=22. The existing Rust formatter CLI remains available in bin/.
 function argumentsFor(argv) {
     const strings=['workspace','config','project','fileset','file','top','iverilog','cygwin','vivado','standard','run','timeout','offset','limit','log-index','max-paths','jobs','name','dir','part','sim-top','target-fileset','depth','save','format','out','title','style'];
     const options=Object.fromEntries(strings.map(name=>[name,{type:'string'}]));
-    for(const name of ['help','version','json','write','check','no-bundle']) options[name]={type:'boolean'};
+    for(const name of ['help','version','json','write','check','fold-ports']) options[name]={type:'boolean'};
     options.include={type:'string',multiple:true}; options.define={type:'string',multiple:true}; options.source={type:'string',multiple:true};
     options['bundle-name']={type:'string',multiple:true};
     let parsed;
@@ -50,7 +50,7 @@ function argumentsFor(argv) {
     }
     if(input.include) {input.includeDirs=input.include;delete input.include;}
     if(input.define) {input.defines=input.define;delete input.define;}
-    if(input['no-bundle']!==undefined) {input.noBundle=input['no-bundle'];delete input['no-bundle'];}
+    if(input['fold-ports']!==undefined) {input.foldPorts=input['fold-ports'];delete input['fold-ports'];}
     if(input['bundle-name']!==undefined) {input.bundleNames=input['bundle-name'];delete input['bundle-name'];}
     return {input,positionals:parsed.positionals};
 }
