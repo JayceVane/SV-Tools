@@ -69,6 +69,7 @@ test/fixtures/design/*
 !test/fixtures/design/*/
 test/fixtures/design/*/*
 !test/fixtures/design/*/*.sv
+!test/fixtures/design/*/*.json
 
 # OS
 .DS_Store

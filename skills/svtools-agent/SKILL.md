@@ -19,6 +19,8 @@ Vivado 工程（M2）：`project create/add/set-top` 管理工程（创建幂等
 
 架构建模（M3，进行中）：`design arch --top <module>` 用内置 Yosys（`read_verilog -sv` + `hierarchy` + `proc` + `memory_collect`，不跑 `prep`/`opt`）把顶层用户模块实例投影为架构节点、顶层端口为边界，并把信号级连接聚合为接口束（`interfaces[]`：双向合并、同源多目标扇出合并、边界按 `uart*`/`spi*` 等前缀聚合；标签优先时钟/复位语义与信号公共前缀，否则用信号名摘要）；`instances[].ports` 保留完整端口，`bundles[]` 给出可选的前缀折叠结果。空模块自动成为 blackbox，已实现模块统一折叠为盒，子模块内部实现与存储不入图。`--depth` 当前固定按顶层投影，`--save <name>` 落盘到 `.svtools/agent/design/`。`design render --top <module> [--out <dir>] [--style document|presentation] [--fold-ports] [--bundle-name <prefix=display>]` 用纯 Node 生成自含 SVG 架构图：**默认按 RTL 端口事实绘制**，仅 `--fold-ports` 时按虚拟接口端口折叠（`--bundle-name` 仅与它同时有效）；写报告用默认 `document`（黑白线稿），演示用 `presentation`（深色主题，别名 `ui`）；ELK 布局 aspectRatio≈1.5，含 evidence 元数据、junctionCount/bundleCount 与 `data-model-id`，同一输入同一风格渲染确定。架构图优先看 RTL 端口事实；需要更粗粒度示意时用 `--fold-ports`。`--format png` 需要栅格化宿主，缺失时返回 `EXPORT_UNSUPPORTED`。架构图是源级结构事实，不得当作综合、时序或功能验证证据；`design check/diff` 尚未实现。
 
+架构骨架约定（`design scaffold`）：优先用 **packed struct 虚拟接口**（如 `axi4_lite_t m_axi`），不要用 SV interface——Yosys 会把 interface 摊平成 `m0.addr` 等端口，架构图难以聚合。主设备端口用 `m_` 前缀、从设备用 `s_` 前缀，时钟/复位用 `clk_*`/`rst_*`；空模块只声明端口、体内不写实现；顶层只声明 struct 总线 wire 并例化连线。推荐工作流：`design scaffold --spec <json|file>` → 补空模块实现 → `design arch --top <top>` → `design render`（默认 RTL 端口事实，`--fold-ports` 看虚拟接口）。违反 `m_`/`s_` 命名返回 `NAMING_VIOLATION`；目标文件已存在需 `--force`。架构图仍是源级结构事实，不得当作综合、时序证据。
+
 耗时操作可用 `task start lint`，保存返回的 UUID，再通过 `task status`、`task logs`、`task cancel` 管理。查询命令退出 0 只表示查询成功；检查 `data.result.status` 与 `data.sourceCurrent`。源码变化后重新验证，`CONTEXT_CHANGED`、`lost`、缺失结果或未知当前性都不能作为当前交付的通过证据。
 
 报告实际运行的命令、工程/源码版本、工具版本、结论和仍未验证的部分。原始日志按需分页读取，避免将整份日志交给模型。

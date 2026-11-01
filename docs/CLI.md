@@ -181,6 +181,20 @@ node src/cli/main.js design arch --workspace D:/project --top top --depth 1 --sa
 
 `--depth` 当前固定按顶层实例投影（大于 1 尚未展开子层，在 `limitations[]` 说明）。`--save <name>` 把架构 JSON 写入 `.svtools/agent/design/<name>.json`，供后续 `design diff` 使用。
 
+`design scaffold --spec <json|file> [--out <dir>] [--force]` 按 schemaVersion=1 规格生成架构骨架（默认 `rtl/<top>.sv`）：`typedef struct packed {...} <type>_t;` 虚拟接口、只含 struct 端口的空模块、顶层 struct 总线 wire 与实例化连线。`--spec` 可为规格 JSON 文件路径或内联 JSON；`--out` 必须位于工作区内；目标文件已存在且无 `--force` 时返回 `FILE_EXISTS`，主设备端口未以 `m_`/从设备未以 `s_` 开头返回 `NAMING_VIOLATION`，其余规格问题返回 `INVALID_ARGUMENT`。规格结构：
+
+```json
+{
+  "schemaVersion": 1,
+  "interfaces": [{ "type": "axi4_lite", "members": [{ "name": "awaddr", "width": 32 }] }],
+  "buses": [{ "name": "m0", "type": "axi4_lite" }],
+  "modules": [{ "name": "cpu", "ports": [{ "name": "m_axi", "type": "axi4_lite", "role": "master", "direction": "output" }] }],
+  "top": { "name": "soc_top", "instances": [{ "name": "u_cpu", "module": "cpu", "connections": { "m_axi": "m0" } }] }
+}
+```
+
+工作流：`design scaffold` 生成骨架 → 填写空模块实现（保持 struct 端口）→ `design arch --top <top>` 看结构 → `design render` 出图。架构图是源级结构事实，不得当作综合、时序或功能验证证据。
+
 `design render` 用纯 Node 字符串生成自含 SVG（不依赖编辑器 DOM）：
 
 ```powershell

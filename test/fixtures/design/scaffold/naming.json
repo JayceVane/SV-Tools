@@ -1,0 +1,21 @@
+{
+    "schemaVersion": 1,
+    "interfaces": [
+        { "type": "axi4_lite", "members": [{ "name": "awaddr", "width": 32 }] }
+    ],
+    "buses": [{ "name": "m0", "type": "axi4_lite" }],
+    "modules": [
+        {
+            "name": "cpu",
+            "ports": [
+                { "name": "axi", "type": "axi4_lite", "role": "master", "direction": "output" }
+            ]
+        }
+    ],
+    "top": {
+        "name": "bad_top",
+        "instances": [
+            { "name": "u_cpu", "module": "cpu", "connections": { "axi": "m0" } }
+        ]
+    }
+}

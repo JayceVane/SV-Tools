@@ -17,8 +17,9 @@ const { summarizeToolResult, processSucceeded } = require('../toolchains/result'
 const { acquireWorkspaceLease } = require('../toolchains/workspace-lease');
 const { buildArchitecture } = require('../design/arch');
 const { layoutArchitecture, renderArchitectureSvg, defaultFileName, normalizeStyle } = require('../design/svg');
+const { validateSpec, generateScaffold } = require('../design/scaffold');
 
-const capabilities = ['doctor','project.list','project.inspect','project.create','project.add','project.set-top','format.preview','format.check','format.write','lint','vivado.status','vivado.report','vivado.run','task.start','task.list','task.status','task.logs','task.cancel','design.arch','design.render'];
+const capabilities = ['doctor','project.list','project.inspect','project.create','project.add','project.set-top','format.preview','format.check','format.write','lint','vivado.status','vivado.report','vivado.run','task.start','task.list','task.status','task.logs','task.cancel','design.arch','design.scaffold','design.render'];
 async function locateIverilog(options) {
     const executable = process.platform === 'win32' ? 'iverilog.exe' : 'iverilog';
     const configured = options.iverilog ? path.resolve(options.workspace,options.iverilog) : null;
@@ -162,6 +163,54 @@ function parseBundleNames(values = []) {
     }
     return names;
 }
+/** @param {string} workspace @param {string} value 规格路径或内联 JSON。 @returns {Promise<{text:string,source:string|null}>} 规格文本。 */
+async function readSpec(workspace, value) {
+    const candidate = path.resolve(workspace, value);
+    try {
+        return { text: await fs.readFile(candidate, 'utf8'), source: candidate };
+    } catch (error) {
+        if (error.code !== 'ENOENT') fail('INVALID_ARGUMENT', 'design scaffold 规格读取失败：' + error.message);
+        return { text: value, source: null };
+    }
+}
+/** 按 schemaVersion=1 规格生成架构骨架（packed struct 接口 + 空模块 + 顶层连线）。 */
+async function scaffold(input) {
+    if (!input.spec) fail('INVALID_ARGUMENT', 'design scaffold需要--spec <json|file>');
+    const { options } = await readOptions(input);
+    const workspace = options.workspace;
+    const source = await readSpec(workspace, input.spec);
+    let spec;
+    try {
+        spec = JSON.parse(source.text);
+    } catch (error) {
+        fail('INVALID_ARGUMENT', 'design scaffold 规格不是合法 JSON：' + error.message);
+    }
+    const validated = validateSpec(spec);
+    const outputDirectory = input.out ? path.resolve(workspace, input.out) : path.join(workspace, 'rtl');
+    const relative = path.relative(workspace, outputDirectory);
+    if (relative.startsWith('..') || path.isAbsolute(relative)) {
+        fail('INVALID_ARGUMENT', 'design scaffold 的 --out 必须位于工作区内');
+    }
+    const text = generateScaffold(validated);
+    const file = path.join(outputDirectory, validated.top.name + '.sv');
+    await fs.mkdir(outputDirectory, { recursive: true });
+    try {
+        await fs.writeFile(file, text, { flag: input.force ? 'w' : 'wx' });
+    } catch (error) {
+        if (error.code === 'EEXIST') {
+            fail('FILE_EXISTS', 'design scaffold 目标文件已存在，使用 --force 覆盖：' + file, { file });
+        }
+        fail('DESIGN_FAILED', 'design scaffold 写入失败：' + error.message, { file });
+    }
+    const relativeFile = path.relative(workspace, file).split(path.sep).join('/');
+    return result('design.scaffold', {
+        workspace, out: relative.split(path.sep).join('/') || '.', file: relativeFile,
+        top: validated.top.name,
+        interfaces: validated.typedefs.map(item => ({ type: item.type, typedef: item.typedefName, members: item.members })),
+        buses: validated.buses, modules: validated.modules, instances: validated.top.instances.length,
+        source: source.source ? path.relative(workspace, source.source).split(path.sep).join('/') : null
+    }, null, [], [{ kind: 'source', path: file }]);
+}
 /** 渲染纯Node SVG架构图；PNG需要宿主栅格化，当前明确拒绝。 */
 async function render(input) {
     if (!input.top) fail('INVALID_ARGUMENT','design render需要--top');
@@ -238,4 +287,4 @@ async function lint(input, {signal,onContext,onArtifacts} = {}) {
     }
     return response;
 }
-module.exports={doctor,projects,inspect,format,arch,render,lint,capabilities};
+module.exports={doctor,projects,inspect,format,arch,scaffold,render,lint,capabilities};
