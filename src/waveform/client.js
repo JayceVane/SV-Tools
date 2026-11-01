@@ -199,20 +199,24 @@
         const end = Math.min(filtered.length, start + Math.ceil(catalog.clientHeight / CATALOG_HEIGHT) + 5);
         const selected = new Set(state.selected);
         for (let index = start; index < end; index++) {
-            const signal = filtered[index], row = document.createElement('div'); row.className = 'signal' + (selected.has(M.signalKey(signal)) ? ' added' : '');
+            const signal = filtered[index], key = M.signalKey(signal), added = selected.has(key), row = document.createElement('div'); row.className = 'signal' + (added ? ' added' : '');
             row.style.top = index * CATALOG_HEIGHT + 'px'; row.title = `${signal.path}${signal.range || ''} · ${signal.type} · ${signal.changeCount || 0} 次变更`;
             row.tabIndex = 0; row.setAttribute('role', 'listitem');
             const info = D.roleInfo(signal), glyph = document.createElement('span');
             glyph.className = 'signalRole role-' + info.role; glyph.textContent = info.glyph;
             glyph.title = info.label; glyph.setAttribute('aria-label', info.label);
-            row.title += ' · ' + info.label;
+            row.title += ' · ' + info.label + (added ? ' · 点击移除' : ' · 点击添加');
             row.appendChild(glyph);
-            for (const [className, text] of [['plus', selected.has(M.signalKey(signal)) ? '✓' : '+'], ['name', signal.name + (signal.range || '')], ['width', /real/i.test(signal.type) ? 'real' : signal.width + 'b']]) {
+            for (const [className, text] of [['plus', added ? '✓' : '+'], ['name', signal.name + (signal.range || '')], ['width', /real/i.test(signal.type) ? 'real' : signal.width + 'b']]) {
                 const span = document.createElement('span'); span.className = className; span.textContent = text; row.appendChild(span);
                 if (className === 'name') { const scope = document.createElement('small'); scope.textContent = signal.scopePath; span.appendChild(scope); }
             }
-            const add = () => addSignals([M.signalKey(signal)]); row.onclick = add;
-            row.onkeydown = event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); add(); } };
+            const toggle = () => {
+                if (state.selected.includes(key)) removeSignals(state.selected.filter(item => item === key || state.signals.get(item)?.parentKey === key));
+                else addSignals([key]);
+            };
+            row.onclick = toggle;
+            row.onkeydown = event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); toggle(); } };
             space.appendChild(row);
         }
     }
