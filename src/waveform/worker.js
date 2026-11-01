@@ -6,9 +6,11 @@ const { TextDecoder } = require('util');
 const { createVcdParser } = require('./parser');
 const { VcdStore } = require('./store');
 const { readSignalRoles } = require('./source-roles');
+const { restorePackedBuses } = require('./packed-buses');
 
 let store = null;
 let variables = null;
+let displayVariables = null;
 let loading = false;
 const options = workerData || {};
 const maxFileBytes = options.maxFileBytes || 2 * 1024 * 1024 * 1024;
@@ -50,7 +52,9 @@ async function open(filePath, sourceContext) {
         try { roles = await readSignalRoles(parsed.vars, sourceContext); }
         catch (error) { roles.sourceRoleNote = '方向匹配不可用：' + error.message; }
     }
-    return { ...store.metadata({ ...parsed, ...roles }, bytesRead), sourceRoleRetry: sourceContext?.invalidated === true, fileIdentity: { size: stat.size, mtimeMs: stat.mtimeMs }, parseMs: Date.now() - startedAt,
+    const vars = restorePackedBuses(roles.vars || parsed.vars, store);
+    displayVariables = vars;
+    return { ...store.metadata({ ...parsed, ...roles, vars }, bytesRead), sourceRoleRetry: sourceContext?.invalidated === true, fileIdentity: { size: stat.size, mtimeMs: stat.mtimeMs }, parseMs: Date.now() - startedAt,
         workerHeapBytes: process.memoryUsage().heapUsed, workerArrayBufferBytes: process.memoryUsage().arrayBuffers };
 }
 
@@ -63,7 +67,18 @@ parentPort.on('message', async message => {
             if (!store || loading) throw Object.assign(new Error('VCD 尚未完成加载'), { code: 'VCD_NOT_READY' });
             if (method === 'roles') {
                 const roles = await readSignalRoles(variables, params);
-                result = { roles: roles.vars.map(signal => ({ path: signal.path, role: signal.role || 'unknown', roleSource: signal.roleSource })),
+                const byPath = new Map(roles.vars.map(signal => [signal.path, signal]));
+                const annotated = displayVariables.map(signal => {
+                    const role = byPath.get(signal.bitPaths?.[0] || signal.path);
+                    return { ...signal, role: role?.role || 'unknown', roleSource: role?.roleSource,
+                        packedBit: signal.bitPaths ? undefined : role?.packedBit };
+                });
+                // 已确认的dump结构不随脏源码编辑而拆散；新恢复的RTL事实仍可归并其余逐位声明。
+                const refreshed = restorePackedBuses(annotated, store);
+                const changed = refreshed.length !== displayVariables.length || refreshed.some((signal, at) => signal.path !== displayVariables[at].path);
+                displayVariables = refreshed;
+                result = { roles: refreshed.map(signal => ({ path: signal.path, role: signal.role || 'unknown', roleSource: signal.roleSource })),
+                    ...(changed ? { vars: store.metadata({ vars: refreshed }).vars } : {}),
                     sourceRoleNote: roles.sourceRoleNote, sourceRoleRetry: params?.invalidated === true };
             } else {
                 if (!['window', 'values', 'edge'].includes(method)) throw new Error('未知 VCD 请求：' + method);

@@ -2,6 +2,7 @@
 
 const { bitValue } = require('./signal-display');
 const { DEFAULT_LIMITS } = require('./parser');
+const { CompositeEvents } = require('./composite-events');
 
 const EVENT_CHUNK_MAX = 65536;
 const VALUE_CHUNK_SIZE = 65536;
@@ -231,6 +232,7 @@ class VcdStore {
         this.budget = new StorageBudget(maxStoreBytes);
         this.valuesPool = new ValuePool(this.budget);
         this.signals = new Map();
+        this.composites = new Map();
         this.eventCount = 0;
         this.rawEventCount = 0;
     }
@@ -245,6 +247,15 @@ class VcdStore {
         if (typeof value !== 'string' || value.length > DEFAULT_LIMITS.maxSignalWidth) throw queryError('VCD 值超过安全长度', 'VCD_RESOURCE_LIMIT');
         this.rawEventCount++;
         this.eventCount += this.signals.get(id).append(time, value);
+    }
+    compose(ids) {
+        const key = JSON.stringify(ids);
+        if (this.composites.has(key)) return this.composites.get(key);
+        const members = ids.map(id => this.signals.get(id));
+        if (members.some(member => !member || member.width !== 1)) throw queryError('合并总线需要标量来源');
+        this.budget.reserve(256 + key.length * 2 + ids.length * 64);
+        const signal = new CompositeEvents(members, this.budget), id = '\0bus:' + this.composites.size;
+        this.signals.set(id, signal); this.composites.set(key, id); return id;
     }
     metadata(parsed, fileBytes) {
         return { ...parsed, vars: parsed.vars.map(variable => ({ ...variable, changeCount: this.signals.get(variable.id).length })),
@@ -312,7 +323,7 @@ class VcdStore {
         }
         return { values };
     }
-    edge({ id, time, direction, bitOffset, continuation }) {
+    edge({ id, time, direction, bitOffset, bitWidth = 1, continuation }) {
         this.checkTime(time);
         if (typeof id !== 'string') throw queryError('边沿查询需要信号 id');
         const next = direction === 'next' || direction === 'forward' || direction === 1;
@@ -326,7 +337,7 @@ class VcdStore {
             if (index >= 0 && signal.timeAt(index) === time) index--;
         }
         if (bitOffset !== undefined) {
-            if (!Number.isSafeInteger(bitOffset) || bitOffset < 0 || bitOffset >= signal.width || /real|string/i.test(signal.type)) throw queryError('位边沿下标无效');
+            if (!Number.isSafeInteger(bitOffset) || bitOffset < 0 || !Number.isSafeInteger(bitWidth) || bitWidth < 1 || bitOffset + bitWidth > signal.width || /real|string/i.test(signal.type)) throw queryError('位边沿下标无效');
             const bound = index;
             if (continuation !== undefined) {
                 if (!Number.isSafeInteger(continuation) || continuation < 0 || continuation >= signal.length
@@ -334,12 +345,23 @@ class VcdStore {
                 index = continuation;
             }
             const at = signal.upperBound(time) - 1;
-            const budget = new ResponseBudget(this.maxResponseBytes); budget.value(1);
-            const initial = at >= 0 ? signal.bitAt(at, bitOffset) : null;
+            const budget = new ResponseBudget(this.maxResponseBytes); budget.value(bitWidth);
+            const read = index => {
+                if (index < 0) return null;
+                if (bitWidth === 1) return signal.bitAt(index, bitOffset);
+                const parts = [];
+                for (let base = 0; base < bitWidth; base += 4096) {
+                    const bytes = Buffer.allocUnsafe(Math.min(4096, bitWidth - base));
+                    for (let bit = 0; bit < bytes.length; bit++) bytes[bit] = signal.bitAt(index, bitOffset + bitWidth - 1 - base - bit).charCodeAt(0);
+                    parts.push(bytes.toString('ascii'));
+                }
+                return parts.join('');
+            };
+            const initial = read(at), scanLimit = Math.max(1, Math.floor(this.maxBitEdgeScan / bitWidth));
             for (let scanned = 0; index >= 0 && index < signal.length; scanned++, index += next ? 1 : -1) {
-                if (scanned >= this.maxBitEdgeScan) return { time: null, value: null, continuation: index };
-                const value = signal.bitAt(index, bitOffset);
-                const before = next ? initial : index ? signal.bitAt(index - 1, bitOffset) : null;
+                if (scanned >= scanLimit) return { time: null, value: null, continuation: index };
+                const value = read(index);
+                const before = next ? initial : read(index - 1);
                 if (value !== before) return { time: signal.timeAt(index), value };
             }
             return { time: null, value: null };

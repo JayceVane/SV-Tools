@@ -76,9 +76,9 @@
     }
 
     /** 宽总线用 BigInt，X/Z 保持可见，signed 按声明宽度二补码解释。 */
-    function formatValue(value, signal, radix = 'hex') {
+    function formatValue(value, signal, radix = 'hex', projected = false) {
         if (value === null || value === undefined) return '—';
-        if (Number.isInteger(signal.bitOffset)) value = display.bitValue(value, signal.bitOffset);
+        if (!projected) value = display.projectValue(value, signal);
         if (floating.isFloat(radix)) return floating.format(value, signal, radix);
         if (/real/i.test(signal.type)) return String(value);
         if (signal.width > MAX_FORMAT_BITS) return `${signal.width}b VCD ${String(value).slice(0, 64)}${String(value).length > 64 ? '…' : ''}`;

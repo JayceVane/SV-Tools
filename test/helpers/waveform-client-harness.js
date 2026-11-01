@@ -23,6 +23,7 @@ function clientHarness(saved, { vars, height = 400, width = 900, reducedMotion =
         removeAttribute(name) { delete this.attributes[name]; }
         append(...children) { for (const child of children) { this.children.push(child); child.parent = this; } }
         appendChild(child) { this.append(child); return child; }
+        prepend(...children) { for (const child of children) child.parent = this; this.children.unshift(...children); }
         replaceChildren(...children) { this.children = []; this.append(...children); }
         remove() { if (this.parent) this.parent.children = this.parent.children.filter(child => child !== this); }
         addEventListener(name, callback) { this.listeners[name] = callback; }

@@ -112,7 +112,7 @@
                     ctx.lineTo(right - Math.min(4, (right - left) / 2), high); ctx.lineTo(right, middle);
                     ctx.lineTo(right - Math.min(4, (right - left) / 2), low); ctx.lineTo(left + Math.min(4, (right - left) / 2), low); ctx.closePath(); ctx.stroke();
                     if (right - left > 35) {
-                        const label = model.formatValue(value, row.signal, state.formats[model.signalKey(row.signal)] || 'hex');
+                        const label = model.formatValue(value, row.signal, state.formats[model.signalKey(row.signal)] || 'hex', true);
                         const labelColor = value === null || /[xz]/i.test(value) ? color : palette.labelText;
                         // 留出转折边沿，只给字符加细轮廓，不覆盖总线淡填充。
                         text(ctx, label, left + 6, middle + 3, right - left - 12, labelColor, palette.labelHalo);
@@ -123,11 +123,11 @@
         function analog(ctx, row, series, top) {
             const numeric = value => {
                 if (value === null || (!/real/i.test(row.signal.type) && /[xz]/i.test(value))) return NaN;
-                return /real/i.test(row.signal.type) ? Number(value) : Number.isInteger(row.signal.bitOffset) ? Number(value) : Number(model.formatValue(value, row.signal, 'dec'));
+                return /real/i.test(row.signal.type) ? Number(value) : Number(model.formatValue(value, row.signal, 'dec', true));
             };
             let ranges = analogRanges.get(series);
             if (!ranges) { ranges = new Map(); analogRanges.set(series, ranges); }
-            const cacheKey = row.signal.type + ':' + (row.signal.bitOffset ?? 'vector');
+            const cacheKey = row.signal.type + ':' + row.signal.width;
             let range = ranges.get(cacheKey);
             if (!range) {
                 let min = Infinity, max = -Infinity; metrics.analogScans++;
@@ -182,10 +182,10 @@
             if (highlight) { ctx.fillStyle = highlight; ctx.fillRect(g.names - 3, top + 2, 3, row.height - 4); }
             if (state.activeKey === key) { ctx.fillStyle = palette.accent; ctx.fillRect(0, top + 2, 3, row.height - 4); }
             const label = state.fullName ? signal.path + (signal.range || '') : signal.name;
-            const indent = Number.isInteger(signal.bitOffset) ? 12 : 0;
+            const indent = D.isDerived(signal) ? 12 : 0;
             signalIcon(ctx, signal, 28 + indent, top + 7);
             text(ctx, label, 48 + indent, top + 18, g.names - 148 - indent, palette.fg);
-            if (D.isBus(signal) && !exportGeometry) {
+            if (D.isBus(signal) && !signal.parentKey && !exportGeometry) {
                 const expanded = state.selected?.some(key => state.signals?.get(key)?.parentKey === row.key);
                 ctx.save(); ctx.font = '20px Consolas, monospace';
                 text(ctx, expanded ? '▾' : '▸', 6, top + 22, 20, palette.dim);
@@ -251,7 +251,7 @@
                 if (row.groupSummary) { groupSummary(ctx, row, top, g); continue; }
                 const source = valid ? state.series.get(row.signal.id) : null;
                 let series = source;
-                if (source && Number.isInteger(row.signal.bitOffset)) {
+                if (source && D.isDerived(row.signal)) {
                     const cached = projections.get(row.key);
                     series = cached?.source === source ? cached.series : D.projectSeries(source, row.signal);
                     nextProjections.set(row.key, { source, series });

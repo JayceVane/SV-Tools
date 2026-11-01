@@ -25,7 +25,7 @@
         onNameClick(point, row, event) {
             if (row.groupSummary) { toggleGroup(row.groupSummary); return true; }
             const within = point.y + tracks.scrollTop - row.y;
-            if (!D.isBus(row.signal) || point.x < 4 || point.x > 27 || within < 6 || within > 28) return false;
+            if (!D.isBus(row.signal) || row.signal.parentKey || point.x < 4 || point.x > 27 || within < 6 || within > 28) return false;
             selectRow(row, event); toggleBus(row.key); return true;
         },
         onPan: view => { state.view = M.clampView(view.start, view.span, state.metadata.endTime); viewportChanged(); }, commitPan: persist,
@@ -159,6 +159,7 @@
     async function queryEdge(signal, time, direction, version) {
         const params = { id: signal.id, time, direction };
         if (Number.isInteger(signal.bitOffset)) params.bitOffset = signal.bitOffset;
+        if (Number.isInteger(signal.sliceOffset)) { params.bitOffset = signal.sliceOffset; params.bitWidth = signal.width; }
         let edge;
         do {
             edge = await request('edge', params);
@@ -284,12 +285,22 @@
     }
     function children(parent) { return state.selected.filter(key => state.signals.get(key)?.parentKey === parent); }
     function expandBus(targets) {
+        if (targets.length === 1 && state.signals.get(targets[0])?.parentKey) {
+            const signal = state.signals.get(targets[0]);
+            try { if (D.isBus(signal)) replaceSplit(signal, D.bitSignals(signal, MAX_TRACKS)); }
+            catch (error) { status(error.message); }
+            return;
+        }
         const parents = busParents(targets);
         const needed = parents.reduce((sum, key) => sum + state.signals.get(key).width - children(key).length, 0);
         const newBits = parents.reduce((sum, key) => sum + state.signals.get(key).width - [...state.bitKeys].filter(bit => state.signals.get(bit)?.parentKey === key).length, 0);
         if (needed + state.selected.length > MAX_TRACKS || state.bitKeys.size + newBits > MAX_TRACKS) { status('展开将超过2000行预算，请先减少已添加信号'); return; }
         for (const key of parents) {
             const parent = state.signals.get(key), existing = new Set(state.selected), added = [];
+            if ([...state.bitKeys].some(child => state.signals.get(child)?.parentKey === key && Number.isInteger(state.signals.get(child)?.sliceOffset))) {
+                try { replaceSplit(parent, D.bitSignals(parent, MAX_TRACKS)); } catch (error) { status(error.message); return; }
+                continue;
+            }
             for (const bit of D.bitSignals(parent, MAX_TRACKS)) if (!existing.has(bit.key)) {
                 state.signals.set(bit.key, bit); added.push(bit.key);
                 if (!state.bitKeys.has(bit.key)) {
@@ -321,7 +332,67 @@
         const collapsed = new Set(state.collapsedGroups); if (collapsed.has(name)) collapsed.delete(name); else collapsed.add(name);
         state.collapsedGroups = [...collapsed]; rebuildRows();
     }
-    function toggleBus(key) { if (children(key).length) collapseBus([key]); else expandBus([key]); }
+    function toggleBus(key) {
+        if (children(key).length) { collapseBus([key]); return; }
+        const stored = [...state.bitKeys].filter(child => state.signals.get(child)?.parentKey === key);
+        if (stored.some(child => Number.isInteger(state.signals.get(child)?.sliceOffset))) {
+            if (state.selected.length + stored.length > MAX_TRACKS) { status('展开将超过2000行预算'); return; }
+            state.selected.splice(state.selected.indexOf(key) + 1, 0, ...stored); rebuildRows(); return;
+        }
+        expandBus([key]);
+    }
+    function replaceSplit(signal, parts) {
+        if (!parts.length) throw new RangeError('拆分将超过2000行预算');
+        const key = M.signalKey(signal), removing = new Set(signal.parentKey ? [key]
+            : [...state.bitKeys].filter(child => state.signals.get(child)?.parentKey === key));
+        const order = state.selected.filter(item => !removing.has(item));
+        const at = signal.parentKey ? state.selected.indexOf(key) : order.indexOf(key) + 1;
+        const existing = new Set(order), added = parts.filter(part => !existing.has(part.key));
+        const retained = [...state.bitKeys].filter(item => !removing.has(item)), retainedSet = new Set(retained);
+        if (order.length + added.length > MAX_TRACKS || retained.length + added.filter(part => !retainedSet.has(part.key)).length > MAX_TRACKS) throw new RangeError('拆分将超过2000行预算，请先减少信号');
+        for (const part of added) {
+            state.signals.set(part.key, part); state.bitKeys.add(part.key);
+            for (const map of [state.formats, state.groups, state.highlights, state.heights]) {
+                if (map[key] !== undefined) map[part.key] = map[key];
+            }
+        }
+        order.splice(Math.max(0, at), 0, ...added.map(part => part.key)); state.selected = order;
+        for (const item of removing) if (!state.selected.includes(item)) {
+            state.signals.delete(item); state.bitKeys.delete(item);
+            for (const map of [state.formats, state.groups, state.highlights, state.heights]) delete map[item];
+        }
+        ++edgeVersion; state.activeKey = added[0]?.key || key; state.selectionAnchor = state.activeKey; state.multi = new Set(added.map(part => part.key));
+        rebuildRows(); status('已拆分为 ' + parts.length + ' 段；可继续拆分，各段保持同层');
+    }
+    function showSplitDialog(key, mode) {
+        const signal = state.signals.get(key); if (!D.isBus(signal)) return;
+        hideMenu();
+        const overlay = document.createElement('div'); overlay.className = 'waveDialogOverlay';
+        const dialog = document.createElement('section'); dialog.className = 'waveGroupDialog'; dialog.setAttribute('role', 'dialog'); dialog.setAttribute('aria-modal', 'true'); dialog.setAttribute('aria-labelledby', 'waveSplitTitle');
+        const title = document.createElement('h2'); title.id = 'waveSplitTitle'; title.textContent = mode === 'pair' ? '按两段位宽拆分' : '按固定单元拆分';
+        const hint = document.createElement('p'); hint.textContent = signal.name + ' · ' + signal.width + ' bit。' + (mode === 'pair' ? '按高位、低位输入，两段之和等于信号位宽。' : '从低位开始切分，余数保留在最高段。');
+        const inputs = (mode === 'pair' ? ['高段位宽', '低段位宽'] : ['单元位宽']).map((text, index) => {
+            const label = document.createElement('label'); label.textContent = text; label.htmlFor = 'waveSplitWidth' + index;
+            const input = document.createElement('input'); input.id = label.htmlFor; input.type = 'number'; input.min = '1'; input.max = String(signal.width - 1); input.step = '1';
+            input.value = String(mode === 'pair' ? index ? signal.width - Math.floor(signal.width / 2) : Math.floor(signal.width / 2) : Math.min(8, signal.width - 1));
+            dialog.append(label, input); return input;
+        });
+        const error = document.createElement('p'); error.className = 'dialogError'; error.id = 'waveSplitError'; error.setAttribute('role', 'alert'); inputs.forEach(input => input.setAttribute('aria-describedby', error.id));
+        const actions = document.createElement('div'); actions.className = 'dialogActions';
+        const cancel = document.createElement('button'); cancel.textContent = '取消'; const confirm = document.createElement('button'); confirm.textContent = '拆分'; confirm.className = 'active'; confirm.id = 'waveSplitConfirm';
+        actions.append(cancel, confirm); dialog.prepend(title, hint); dialog.append(error, actions); overlay.appendChild(dialog);
+        const close = () => { overlay.remove(); groupDialog = null; canvas.focus({ preventScroll: true }); }; groupDialog = { close }; cancel.onclick = close;
+        confirm.onclick = () => {
+            try { replaceSplit(signal, D.splitSignals(signal, mode, inputs.map(input => /^\d+$/.test(input.value) ? Number(input.value) : NaN))); close(); }
+            catch (validation) { error.textContent = validation.message; inputs[0].focus(); }
+        };
+        overlay.onkeydown = event => {
+            if (event.key === 'Escape') close(); else if (event.key === 'Enter') confirm.click();
+            else if (event.key === 'Tab') { const controls = [...inputs, cancel, confirm], index = controls.indexOf(document.activeElement); controls[(index + (event.shiftKey ? -1 : 1) + controls.length) % controls.length].focus(); }
+            else return; event.preventDefault(); event.stopPropagation();
+        };
+        document.body.appendChild(overlay); inputs[0].focus();
+    }
     function removeSignals(targets) {
         edgeVersion++;
         const removing = new Set(targets);
@@ -363,11 +434,15 @@
                 paint(); persist();
             }, { checked: oneHighlight && highlightIds[0] === option.id, swatch: option.id })) });
         const parents = busParents(targets), needed = parents.reduce((sum, key) => sum + state.signals.get(key).width - children(key).length, 0);
-        const overBudget = state.selected.length + needed > MAX_TRACKS;
+        const slice = signals.length === 1 && signals[0].parentKey && D.isBus(signals[0]) ? signals[0] : null;
+        const overBudget = state.selected.length + (slice ? slice.width - 1 : needed) > MAX_TRACKS;
         const busItems = [];
-        if (parents.length && needed > 0) busItems.push(action('expand-bus', '展开总线为bit', () => expandBus(targets),
+        if (signals.some(D.isBus)) busItems.push({ id: 'split-bus', label: '拆分总线', icon: 'expand', disabled: signals.length !== 1 || !D.isBus(signals[0]), detail: signals.length !== 1 ? '单信号' : '', submenu: [
+            action('split-pair', '按两段位宽…', () => showSplitDialog(targets[0], 'pair')),
+            action('split-unit', '按固定单元…', () => showSplitDialog(targets[0], 'unit'))] });
+        if (parents.length && (slice || needed > 0)) busItems.push(action('expand-bus', slice ? '拆分此段为bit' : '展开总线为bit', () => expandBus(targets),
             { icon: 'expand', disabled: overBudget, detail: overBudget ? '最多2000行' : '' }));
-        if (parents.some(key => children(key).length)) busItems.push(action('collapse-bus', '收起总线bit', () => collapseBus(targets), { icon: 'collapse' }));
+        if (parents.some(key => children(key).length)) busItems.push(action('collapse-bus', '收起拆分信号', () => collapseBus(targets), { icon: 'collapse' }));
         items.splice(2, 0, ...busItems);
         items.splice(3,0,{id:'circuit-trace',label:'电路追踪',detail:targets.length===1?'':'单信号',submenu:[
             action('circuit-drivers','在电路追踪驱动',()=>api.postMessage({type:'circuit-trace',key:targets[0],direction:'drivers'}),{disabled:targets.length!==1}),
@@ -388,9 +463,13 @@
         metadata = { ...metadata, vars: M.prepareSignals(metadata.vars) };
         state.metadata = metadata; state.signals = new Map(metadata.vars.map(signal => [M.signalKey(signal), signal])); state.secondsPerTick = metadata.secondsPerTick || null;
         $('circuitLink').disabled=false;
-        const saved = api.getState();
+        let saved = api.getState();
+        if (saved?.fileKey === BOOT.fileKey) {
+            const aliases = new Map(metadata.vars.flatMap(signal => (signal.bitPaths || []).map(path => [path, M.signalKey(signal)])));
+            if (aliases.size) saved = { ...saved, selected: [...new Set((saved.selected || []).map(key => aliases.get(key) || key))] };
+        }
         if (saved?.fileKey === BOOT.fileKey) D.restoreBits(saved.bitKeys || saved.selected, state.signals, MAX_TRACKS);
-        state.bitKeys = new Set((Array.isArray(saved?.bitKeys || saved?.selected) ? saved.bitKeys || saved.selected : []).filter(key => Number.isInteger(state.signals.get(key)?.bitOffset)));
+        state.bitKeys = new Set((Array.isArray(saved?.bitKeys || saved?.selected) ? saved.bitKeys || saved.selected : []).filter(key => D.isDerived(state.signals.get(key))));
         const restored = M.restoreState(saved, metadata, BOOT.fileKey, state.signals);
         Object.assign(state, { view: restored.view, cursorA: restored.cursorA, cursorB: restored.cursorB });
         if (saved?.fileKey === BOOT.fileKey) {
@@ -443,6 +522,7 @@
             if (message.error) promise.reject(new Error(message.error)); else promise.resolve(message.result); }
         else if (message.type === 'init') initialize(message.metadata);
         else if (message.type === 'roles' && state.metadata) {
+            if (message.vars) { persist(); initialize({ ...state.metadata, vars: message.vars, sourceRoleNote: message.sourceRoleNote }); return; }
             const roles = new Map(message.roles.map(item => [item.path, item]));
             const apply = signal => {
                 const parent = signal.parentKey ? state.signals.get(signal.parentKey) : signal;
