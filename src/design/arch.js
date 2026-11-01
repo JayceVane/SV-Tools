@@ -15,6 +15,7 @@ const { processSucceeded } = require('../toolchains/result');
 const { yosysQuote } = require('../circuit/yosys-runner');
 const { directory } = require('../agent/storage');
 const { fail } = require('../agent/protocol');
+const { bundlePorts } = require('./bundles');
 
 const SCHEMA_VERSION = 1;
 const STAGE = 'source';
@@ -435,7 +436,7 @@ function buildInterfaces(module, nodes, edges) {
     function directedGroup(source, target) {
         const key = source + '\u0000' + target;
         if (!directed.has(key)) {
-            directed.set(key, { source, target, ports: new Map(), signals: new Map() });
+            directed.set(key, { source, target, ports: new Map(), sourcePorts: new Set(), targetPorts: new Set(), signals: new Map() });
         }
         return directed.get(key);
     }
@@ -444,7 +445,7 @@ function buildInterfaces(module, nodes, edges) {
         // 前缀束与精确端口分属不同命名空间，避免 gpio 与 gpio_a 被合并。
         const key = prefix ? 'prefix:' + prefix : 'port:' + portName;
         if (!boundaryGroups.has(key)) {
-            boundaryGroups.set(key, { prefix, boundaryPorts: new Set(), instances: new Set(), signals: new Map() });
+            boundaryGroups.set(key, { prefix, boundaryPorts: new Set(), instancePorts: new Set(), instances: new Set(), signals: new Map() });
         }
         return boundaryGroups.get(key);
     }
@@ -461,16 +462,20 @@ function buildInterfaces(module, nodes, edges) {
             }
             const group = directedGroup(source, target), sourcePort = splitEndpoint(edge.source).portName;
             group.ports.set(sourcePort, Math.max(group.ports.get(sourcePort) || 0, edge.width));
+            group.sourcePorts.add(sourcePort);
+            group.targetPorts.add(splitEndpoint(edge.target).portName);
             addSignal(group.signals, signalName, edge.width, 'forward');
         } else if (sourceKind === 'boundary' && targetKind === 'instance') {
             const group = boundaryGroup(splitEndpoint(edge.source).portName);
             group.instances.add(endpointName(edge.targetNode));
             group.boundaryPorts.add(splitEndpoint(edge.source).portName);
+            group.instancePorts.add(splitEndpoint(edge.target).portName);
             addSignal(group.signals, splitEndpoint(edge.source).portName, edge.width, 'input');
         } else if (sourceKind === 'instance' && targetKind === 'boundary') {
             const group = boundaryGroup(splitEndpoint(edge.target).portName);
             group.instances.add(endpointName(edge.sourceNode));
             group.boundaryPorts.add(splitEndpoint(edge.target).portName);
+            group.instancePorts.add(splitEndpoint(edge.source).portName);
             addSignal(group.signals, splitEndpoint(edge.target).portName, edge.width, 'output');
         }
     }
@@ -485,6 +490,9 @@ function buildInterfaces(module, nodes, edges) {
         for (const cell of matched) {
             group.instances.add(cell.name);
             group.boundaryPorts.add(port.name);
+            for (const item of cell.ports.filter(item => item.bits.some(bit => port.bits.includes(bit)))) {
+                group.instancePorts.add(item.name);
+            }
             addSignal(group.signals, port.name, port.bits.length, 'inout');
         }
     }
@@ -511,8 +519,12 @@ function buildInterfaces(module, nodes, edges) {
         }
         const signals = signalList(combined);
         const bits = signals.reduce((total, signal) => total + signal.width, 0);
+        const fromPorts = [...new Set([...(group.source === from.name ? group.sourcePorts : group.targetPorts),
+            ...(reverse.source === from.name ? reverse.sourcePorts : reverse.targetPorts)])].sort();
+        const toPorts = [...new Set([...(group.source === to.name ? group.sourcePorts : group.targetPorts),
+            ...(reverse.source === to.name ? reverse.sourcePorts : reverse.targetPorts)])].sort();
         interfaces.push({ id: interfaceId(from, to), from, to, direction: 'bidirectional', bits,
-            label: trimLabel(labelForSignals(signals)), signals });
+            label: trimLabel(labelForSignals(signals)), signals, fromPorts, toPorts });
     }
     // 单向连接：同源实例且源端口集合相同的多目标连接合并为一条扇出接口。
     const fanout = new Map();
@@ -524,10 +536,17 @@ function buildInterfaces(module, nodes, edges) {
             .map(([port, width]) => port + ':' + width).join(',');
         const fanoutKey = group.source + '\u0000' + signature;
         if (!fanout.has(fanoutKey)) {
-            fanout.set(fanoutKey, { source: group.source, ports: group.ports, targets: new Set(), signals: new Map() });
+            fanout.set(fanoutKey, { source: group.source, ports: group.ports, targets: new Set(),
+                sourcePorts: new Set(), targetPorts: new Set(), signals: new Map() });
         }
         const entry = fanout.get(fanoutKey);
         entry.targets.add(group.target);
+        for (const port of group.sourcePorts) {
+            entry.sourcePorts.add(port);
+        }
+        for (const port of group.targetPorts) {
+            entry.targetPorts.add(port);
+        }
         for (const signal of group.signals.values()) {
             addSignal(entry.signals, signal.name, signal.width, 'forward');
         }
@@ -538,7 +557,8 @@ function buildInterfaces(module, nodes, edges) {
         const signals = signalList(group.signals);
         const bits = signals.reduce((total, signal) => total + signal.width, 0);
         interfaces.push({ id: interfaceId(from, to), from, to, direction: 'forward', bits,
-            label: trimLabel(labelForSignals(signals)), signals });
+            label: trimLabel(labelForSignals(signals)), signals,
+            fromPorts: [...group.sourcePorts].sort(), toPorts: [...group.targetPorts].sort() });
     }
     for (const group of boundaryGroups.values()) {
         const signals = signalList(group.signals);
@@ -555,7 +575,9 @@ function buildInterfaces(module, nodes, edges) {
         const bits = signals.reduce((total, signal) => total + signal.width, 0);
         const label = group.prefix ? group.prefix + '*' : signals[0].name;
         interfaces.push({ id: interfaceId(from, to), from, to, direction: bidirectional ? 'bidirectional' : 'forward',
-            bits, label: trimLabel(label), signals });
+            bits, label: trimLabel(label), signals,
+            fromPorts: [...(from.kind === 'boundary' ? group.boundaryPorts : group.instancePorts)].sort(),
+            toPorts: [...(to.kind === 'boundary' ? group.boundaryPorts : group.instancePorts)].sort() });
     }
     interfaces.sort((left, right) => {
         const leftKey = [left.from.kind, left.from.name, left.to.kind, left.to.name].join('\u0000');
@@ -617,26 +639,30 @@ function projectArchitecture(design, { workspace, depth = 1, budget = {} }) {
         .map(node => interfaceReference(design, node.moduleId))
         .filter(Boolean)
         .map(reference => reference.id)])];
-    const interfaceModules = moduleIds.map(id => findModule(design, id)).filter(Boolean).map(reference => ({
-        id: reference.id, name: moduleLabel(reference),
-        file: reference.source ? relativePosix(workspace, reference.source.path) : null,
-        blackbox: flagSet(reference.attributes && reference.attributes.blackbox),
-        parameters: decodeParameters(reference.parameters),
-        ports: reference.ports.map(port => {
+    const interfaceModules = moduleIds.map(id => findModule(design, id)).filter(Boolean).map(reference => {
+        const ports = reference.ports.map(port => {
             const source = relativeSource(port.source, workspace);
             return { name: port.name, direction: port.direction, width: port.bits.length, ...(source ? { source } : {}) };
-        })
-    }));
+        });
+        return {
+            id: reference.id, name: moduleLabel(reference),
+            file: reference.source ? relativePosix(workspace, reference.source.path) : null,
+            blackbox: flagSet(reference.attributes && reference.attributes.blackbox),
+            parameters: decodeParameters(reference.parameters),
+            ports, bundles: bundlePorts(ports)
+        };
+    });
     const instances = instanceNodes.map(node => {
         const cell = module.cells.find(item => item.name === node.name);
         const source = relativeSource(cell && cell.source, workspace);
         return { name: node.name, module: node.module, moduleId: node.moduleId, implementation: node.implementation,
-            status: node.status, nodeId: node.id, ports: node.ports, ...(source ? { source } : {}) };
+            status: node.status, nodeId: node.id, ports: node.ports, bundles: bundlePorts(node.ports), ...(source ? { source } : {}) };
     });
     const limitations = [
         '架构图是源级结构事实：未综合、未做时序或功能验证，不得作为综合/时序证据。',
         '只投影顶层实例与顶层端口；子模块内部实现折叠为盒，内部网络、寄存器和存储不单独入图。',
         '仅保留用户模块实例；工具生成的 $ 单元（组合/时序/存储）不绘制为节点。',
+        '虚拟接口端口为前缀折叠展示，未改变 RTL 端口事实；AXI 的 inout 仅为架构示意，不代表电气方向。',
         '参数覆盖以实例连接位宽为准，模块接口表为声明默认值；未连接端口按声明默认位宽。',
         '未连接/多驱动等结构问题在D2检查；本交付只呈现连接关系。',
         '缺失子模块按unresolved展示为无端口盒，不伪造端口表。',

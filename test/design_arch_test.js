@@ -10,6 +10,7 @@ const { spawnSync } = require('node:child_process');
 const { createHash } = require('node:crypto');
 const { run } = require('../src/cli/main');
 const { buildArchitecture, DEFAULT_BUDGET, buildArchScript, classifyYosysFailure, blackboxFlag } = require('../src/design/arch');
+const { bundlePorts } = require('../src/design/bundles');
 
 const ROOT = path.resolve(__dirname, '..');
 const FIXTURES = path.join(__dirname, 'fixtures', 'design');
@@ -328,4 +329,29 @@ test('实例双向对合并，不同源端口集合不误合并', async t => {
     assert.equal(fromF.length, 2, '不同源端口集合不得合并');
     assert.deepEqual(fromF.map(item => item.to.name).sort(), ['u_d', 'u_e']);
     assert.equal(fromF.some(item => item.to.name.includes('+')), false);
+});
+
+test('端口折叠：前缀聚类、语义保留与显示名覆盖', () => {
+    const ports = [
+        { name: 's0_awaddr', width: 32, direction: 'input' },
+        { name: 's0_wdata', width: 64, direction: 'input' },
+        { name: 's0_rdata', width: 64, direction: 'output' },
+        { name: 'm_axi_araddr', width: 32, direction: 'output' },
+        { name: 'm_axi_rdata', width: 64, direction: 'input' },
+        { name: 'ddr_cas_n', width: 1, direction: 'output' },
+        { name: 'ddr_we_n', width: 1, direction: 'output' },
+        { name: 'clk_sys', width: 1, direction: 'input' },
+        { name: 'clk_pix', width: 1, direction: 'input' },
+        { name: 'rst_n_in', width: 1, direction: 'input' },
+        { name: 'irq', width: 4, direction: 'input' }
+    ];
+    const bundles = bundlePorts(ports);
+    assert.deepEqual(bundles.map(bundle => [bundle.name, bundle.direction, bundle.bits, bundle.members.length]), [
+        ['s0', 'inout', 160, 3], ['m_axi', 'inout', 96, 2], ['ddr', 'output', 2, 2],
+        ['clk_sys', 'input', 1, 1], ['clk_pix', 'input', 1, 1], ['rst_n_in', 'input', 1, 1], ['irq', 'input', 4, 1]
+    ]);
+    assert.deepEqual(bundles[0].members.map(member => member.name), ['s0_awaddr', 's0_wdata', 's0_rdata']);
+    const named = bundlePorts(ports, { names: { s0: 's0_axi', m_axi: 'm_axi' } });
+    assert.equal(named[0].name, 's0_axi');
+    assert.equal(named[0].prefix, 's0');
 });

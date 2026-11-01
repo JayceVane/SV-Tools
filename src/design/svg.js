@@ -9,6 +9,7 @@ const { elkNode } = require('../circuit/projection');
 const { svgDocument } = require('../graphics/image-export');
 const { escape } = require('../graphics/svg-canvas');
 const { fail } = require('../agent/protocol');
+const { bundlePorts } = require('./bundles');
 
 const DEFAULT_RENDER_BUDGET = Object.freeze({ nodes: 2000, edges: 6000, ports: 16384 });
 const LAYOUT_OPTIONS = Object.freeze({
@@ -19,7 +20,7 @@ const LAYOUT_OPTIONS = Object.freeze({
     'elk.layered.nodePlacement.strategy': 'NETWORK_SIMPLEX',
     'elk.layered.nodePlacement.favorStraightEdges': 'true',
     'elk.layered.thoroughness': '7',
-    'elk.spacing.nodeNode': '44', 'elk.layered.spacing.nodeNodeBetweenLayers': '200',
+    'elk.spacing.nodeNode': '44', 'elk.layered.spacing.nodeNodeBetweenLayers': '180',
     'elk.spacing.edgeNode': '20', 'elk.spacing.edgeEdge': '16',
     'elk.layered.spacing.edgeNodeBetweenLayers': '20', 'elk.layered.spacing.edgeEdgeBetweenLayers': '16',
     'elk.padding': '[top=32,left=32,bottom=32,right=32]'
@@ -120,20 +121,40 @@ function splitPorts(ports) {
     return { inputs: ports.filter(port => port.direction !== 'output'), outputs: ports.filter(port => port.direction === 'output') };
 }
 
-/** @param {object} node 架构图实例节点。 @returns {object} 已分配尺寸/锚点的布局节点。 */
-function prepareInstanceNode(node) {
+/** @param {object} node 架构图实例节点。 @param {{bundle:boolean,bundleNames:object}} options @returns {object[]} 显示端口（折叠端口或原始端口）。 */
+function displayPorts(node, { bundle, bundleNames }) {
+    if (!bundle) {
+        return node.ports.map(port => ({
+            id: node.id + '/' + port.name, label: port.name, displayLabel: port.name + (port.width > 1 ? '[' + port.width + ']' : ''),
+            direction: port.direction, width: port.width, bits: new Array(Math.max(1, Math.min(port.width, 64))).fill('n:0'),
+            members: null, prefix: null, collapsed: false
+        }));
+    }
+    return bundlePorts(node.ports, { names: bundleNames }).map(item => {
+        const collapsed = Boolean(item.prefix && item.members.length > 1);
+        const displayLabel = collapsed ? item.name + '* (' + item.bits + ')' : item.members[0].name + (item.bits > 1 ? '[' + item.bits + ']' : '');
+        return {
+            id: node.id + '/' + (item.prefix ? 'bundle:' + item.prefix : item.name),
+            label: item.name, displayLabel, direction: item.direction, width: item.bits,
+            bits: new Array(Math.max(1, Math.min(item.bits, 64))).fill('n:0'),
+            members: item.members, prefix: item.prefix, collapsed
+        };
+    });
+}
+
+/** @param {object} node 架构图实例节点。 @param {{bundle:boolean,bundleNames:object}} options @returns {object} 已分配尺寸/锚点的布局节点。 */
+function prepareInstanceNode(node, options) {
     const base = prepareNode({
         id: node.id, kind: 'instance', label: node.label, detail: node.module,
         moduleId: node.moduleId || 'unresolved:' + node.name,
         implementation: node.implementation, status: node.status,
-        ports: node.ports.map(port => ({ id: node.id + '/' + port.name, label: port.name, direction: port.direction,
-            width: port.width, bits: new Array(Math.max(1, Math.min(port.width, 64))).fill('n:0') }))
+        ports: displayPorts(node, options)
     });
     const { inputs, outputs } = splitPorts(base.ports);
     const badge = node.status === 'unresolved' ? 'unresolved' : node.implementation;
     const badgeWidth = textWidth(badge, 9) + 12;
     const titleWidth = Math.max(textWidth(base.label, 13), textWidth(base.detail || '', 11)) + badgeWidth + 36;
-    const portWidth = Math.max(0, ...base.ports.map(port => textWidth(port.label, 11) + (port.width > 1 ? textWidth('[' + port.width + ']', 11) : 0)));
+    const portWidth = Math.max(0, ...base.ports.map(port => textWidth(port.displayLabel, 11)));
     const width = Math.ceil(Math.max(base.width || 0, titleWidth, portWidth * 2 + 96) / GRID) * GRID;
     const height = Math.ceil((HEADER_BAND + PORT_PITCH * Math.max(inputs.length, outputs.length, 1) + 16) / GRID) * GRID;
     for (const [list, side] of [[inputs, 'WEST'], [outputs, 'EAST']]) {
@@ -175,16 +196,26 @@ function interfacesOf(arch) {
     }));
 }
 
-/** @param {object} node @param {string} hint 'input'|'output'|null @returns {object|null} 代表端口。 */
-function representativePort(node, hint) {
+/** @param {object} node @param {string} hint 'input'|'output'|'inout'|null @param {string[]} [portNames] 接口实际端口名。 @returns {object|null} 代表端口。 */
+function representativePort(node, hint, portNames = []) {
     if (!node || !node.ports.length) {
         return null;
     }
     if (node.kind === 'boundary') {
         return node.ports[0];
     }
-    const match = node.ports.find(port => port.direction === hint);
-    return match || node.ports[0];
+    const names = new Set(portNames);
+    const named = node.ports.find(port => (port.members && port.members.some(member => names.has(member.name)))
+        || names.has(port.label));
+    if (named) {
+        return named;
+    }
+    const exact = node.ports.find(port => port.direction === hint);
+    if (exact) {
+        return exact;
+    }
+    const inout = node.ports.find(port => port.direction === 'inout');
+    return inout || node.ports[0];
 }
 
 /** @param {string} name 端点名称（多端用 + 分隔）。 @param {'boundary'|'instance'} kind @returns {string[]} 节点 id。 */
@@ -194,10 +225,11 @@ function endpointNodes(name, kind) {
 
 /**
  * 构造 ELK 投影：节点为实例/边界，接口束为边；多端接口引入总线汇合节点。
- * @param {object} arch design arch 数据。 @param {{budget?:object}} [options]
+ * @param {object} arch design arch 数据。 @param {{budget?:object, bundle?:boolean, bundleNames?:object}} [options]
+ *   bundle 默认 true（blackbox/collapsed 统一按前缀折叠显示端口）；bundleNames 覆盖显示名。
  * @returns {object} 可交给 layoutProjection 的投影。
  */
-function buildRenderProjection(arch, { budget = {} } = {}) {
+function buildRenderProjection(arch, { budget = {}, bundle = true, bundleNames = {} } = {}) {
     const limits = { ...DEFAULT_RENDER_BUDGET, ...budget };
     for (const [name, limit] of Object.entries(limits)) {
         if (!Number.isSafeInteger(limit) || limit < 1) {
@@ -208,18 +240,17 @@ function buildRenderProjection(arch, { budget = {} } = {}) {
     if (!graphNodes.length) {
         fail('DESIGN_LIMIT', '架构图没有可渲染的节点', { kind: 'nodes', used: 0, limit: limits.nodes });
     }
-    const portTotal = graphNodes.reduce((total, node) => total + (node.ports ? node.ports.length : 0), 0);
+    const fullPorts = graphNodes.reduce((total, node) => total + (node.ports ? node.ports.length : 0), 0);
     if (graphNodes.length > limits.nodes) {
         fail('DESIGN_LIMIT', '架构图节点数量超出渲染预算', { kind: 'nodes', used: graphNodes.length, limit: limits.nodes });
-    }
-    if (portTotal > limits.ports) {
-        fail('DESIGN_LIMIT', '架构图端口数量超出渲染预算', { kind: 'ports', used: portTotal, limit: limits.ports });
     }
     const interfaces = interfacesOf(arch);
     if (interfaces.length > limits.edges) {
         fail('DESIGN_LIMIT', '架构图接口数量超出渲染预算', { kind: 'edges', used: interfaces.length, limit: limits.edges });
     }
-    const nodes = graphNodes.map(node => node.kind === 'boundary' ? prepareBoundaryNode(node) : prepareInstanceNode(node));
+    const nodes = graphNodes.map(node => node.kind === 'boundary'
+        ? prepareBoundaryNode(node)
+        : prepareInstanceNode(node, { bundle, bundleNames }));
     const byId = new Map(nodes.map(node => [node.id, node]));
     const edges = [];
     for (const item of interfaces) {
@@ -232,8 +263,8 @@ function buildRenderProjection(arch, { budget = {} } = {}) {
         }
         const bidirectional = item.direction === 'bidirectional';
         if (sources.length === 1 && targets.length === 1) {
-            const sourcePort = representativePort(sources[0], 'output');
-            const targetPort = representativePort(targets[0], 'input');
+            const sourcePort = representativePort(sources[0], 'output', item.fromPorts);
+            const targetPort = representativePort(targets[0], 'input', item.toPorts);
             if (sourcePort && targetPort) {
                 edges.push({ id: item.id, sources: [sourcePort.id], targets: [targetPort.id], interface: item, bidirectional });
             }
@@ -264,14 +295,14 @@ function buildRenderProjection(arch, { budget = {} } = {}) {
         nodes.push(junction);
         byId.set(junctionId, junction);
         sources.forEach((source, index) => {
-            const sourcePort = representativePort(source, 'output');
+            const sourcePort = representativePort(source, 'output', item.fromPorts);
             if (sourcePort) {
                 edges.push({ id: item.id + ':in:' + index, sources: [sourcePort.id], targets: [junctionInputs[index].id],
                     interface: item, bidirectional, junction: true });
             }
         });
         targets.forEach((target, index) => {
-            const targetPort = representativePort(target, 'input');
+            const targetPort = representativePort(target, 'input', item.toPorts);
             if (targetPort) {
                 edges.push({ id: item.id + ':out:' + index, sources: [junctionOutputs[index].id],
                     targets: [targetPort.id], interface: item, bidirectional, junction: true });
@@ -296,8 +327,9 @@ function buildRenderProjection(arch, { budget = {} } = {}) {
     };
     return { id: 'graph:arch', moduleId: arch.top ? arch.top.moduleId : null, name: arch.top ? arch.top.name : 'architecture',
         input, nodes, edges, signals: [], parameters: null,
-        stats: { nodes: nodes.length, edges: edges.length, ports: renderPorts, interfaces: interfaces.length,
-            junctions: nodes.filter(node => node.kind === 'junction').length } };
+        stats: { nodes: nodes.length, edges: edges.length, ports: renderPorts, fullPorts,
+            bundles: nodes.reduce((total, node) => total + node.ports.filter(port => port.collapsed).length, 0),
+            interfaces: interfaces.length, junctions: nodes.filter(node => node.kind === 'junction').length, bundled: bundle } };
 }
 
 /**
@@ -337,9 +369,13 @@ function drawInstance(node, parts, theme) {
     for (const port of node.ports) {
         const side = port.x <= node.width / 2 ? 'WEST' : 'EAST';
         const px = node.x + port.x, py = node.y + port.y;
-        const label = port.label + (port.width > 1 ? '[' + port.width + ']' : '');
+        const label = port.displayLabel;
+        const title = port.members
+            ? '虚拟接口端口 ' + port.label + (port.collapsed ? '*' : '') + ' (' + port.width + ' bits) · ' + port.direction
+                + ' · 成员: ' + port.members.map(member => member.name + '[' + member.width + ']').join(', ')
+            : port.label + ' · ' + port.direction + ' · ' + port.width + ' bit' + (port.width === 1 ? '' : 's');
         parts.push('<g data-model-id="' + escape(port.id) + '" data-kind="port" data-direction="' + escape(port.direction) + '">');
-        parts.push('<title>' + escape(port.label + ' · ' + port.direction + ' · ' + port.width + ' bit' + (port.width === 1 ? '' : 's')) + '</title>');
+        parts.push('<title>' + escape(title) + '</title>');
         parts.push('<line x1="' + number(side === 'WEST' ? px - 8 : px) + '" y1="' + number(py) + '" x2="' + number(side === 'WEST' ? px : px + 8)
             + '" y2="' + number(py) + '" stroke="' + theme.wire + '" stroke-width="1.25"/>');
         parts.push('<circle cx="' + number(px) + '" cy="' + number(py) + '" r="2" fill="' + theme.cellBg + '" stroke="' + theme.wire + '" stroke-width="1.25"/>');
@@ -440,7 +476,7 @@ function renderArchitectureSvg(arch, layoutResult, { title, style } = {}) {
     const heading = title || (((arch.top && arch.top.name) ? arch.top.name : 'architecture') + ' 架构图');
     const revision = arch.contextRevision ? String(arch.contextRevision).slice(0, 12) : 'unknown';
     const subtitle = 'top ' + (arch.top ? arch.top.name : '?') + ' · context ' + revision + ' · nodes ' + projection.stats.nodes
-        + ' · interfaces ' + projection.stats.interfaces + ' · source-level';
+        + ' · interfaces ' + projection.stats.interfaces + (projection.stats.bundles ? ' · virtual bundles ' + projection.stats.bundles : '') + ' · source-level';
     const parts = [];
     const evidence = {
         designId: arch.designId || (arch.archSha256 ? 'design:' + String(arch.archSha256).slice(0, 16) : null),
@@ -451,7 +487,8 @@ function renderArchitectureSvg(arch, layoutResult, { title, style } = {}) {
         layout: { engine: 'elk', engineVersion: 'bundled' },
         export: { format: 'svg', style: styleName, width, height, title: heading,
             nodeCount: projection.stats.nodes, portCount: projection.stats.ports, edgeCount: projection.stats.edges,
-            interfaceCount: projection.stats.interfaces, junctionCount: projection.stats.junctions }
+            interfaceCount: projection.stats.interfaces, junctionCount: projection.stats.junctions,
+            bundled: projection.stats.bundled, bundleCount: projection.stats.bundles }
     };
     parts.push('<metadata id="svtools-evidence">' + escape(JSON.stringify(evidence)) + '</metadata>');
     parts.push('<defs>');
@@ -509,6 +546,9 @@ function renderArchitectureSvg(arch, layoutResult, { title, style } = {}) {
         ['blackbox', theme.blackbox, 'dash'], ['collapsed', theme.collapsed, 'solid'],
         ['bus', theme.wire, 'bus'], ['boundary', theme.border, 'boundary']
     ];
+    if (projection.stats.bundles) {
+        legends.push(['virtual bundle', theme.wire, 'bundle']);
+    }
     let legendX = PADDING;
     for (const [label, color, kind] of legends) {
         if (kind === 'bus') {
@@ -517,13 +557,21 @@ function renderArchitectureSvg(arch, layoutResult, { title, style } = {}) {
         } else if (kind === 'boundary') {
             parts.push('<rect x="' + legendX + '" y="' + (legendY - 7) + '" width="26" height="14" rx="2" fill="' + theme.panel + '" stroke="' + theme.border + '"/>');
             parts.push('<rect x="' + legendX + '" y="' + (legendY - 7) + '" width="3" height="14" fill="' + color + '"/>');
+        } else if (kind === 'bundle') {
+            parts.push('<polygon points="' + (legendX + 13) + ',' + (legendY - 8) + ' ' + (legendX + 22) + ',' + legendY + ' '
+                + (legendX + 13) + ',' + (legendY + 8) + ' ' + (legendX + 4) + ',' + legendY + '" fill="' + theme.cellBg + '" stroke="' + color
+                + '" stroke-width="' + theme.strokeWidth + '"/>');
         } else {
             parts.push('<rect x="' + legendX + '" y="' + (legendY - 7) + '" width="26" height="14" rx="2" fill="' + theme.cellBg + '" stroke="' + color
                 + '" stroke-width="' + theme.strokeWidth + '"' + (kind === 'dash' ? ' stroke-dasharray="' + theme.blackboxDash + '"' : '') + '/>');
         }
         parts.push('<text x="' + (legendX + 33) + '" y="' + (legendY + 4) + '" fill="' + theme.muted + '" font-family="' + FONT_UI
             + '" font-size="11">' + label + '</text>');
-        legendX += 108;
+        legendX += 128;
+    }
+    if (projection.stats.bundles) {
+        parts.push('<text x="' + legendX + '" y="' + (legendY + 4) + '" fill="' + theme.muted + '" font-family="' + FONT_UI
+            + '" font-size="10">虚拟接口端口为前缀折叠展示，未改变 RTL 端口事实；inout 仅为架构示意</text>');
     }
     const body = parts.join('');
     const svg = svgDocument({ width, height, title: heading, detail: subtitle, body, background: theme.background });

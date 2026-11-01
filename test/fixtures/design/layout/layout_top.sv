@@ -1,4 +1,4 @@
-// 布局门禁夹具：8 个实例、时钟扇出与多接口，用于固定 aspectRatio 1.4–1.6 与节点不重叠断言。
+// 布局门禁夹具：9 个实例、时钟扇出与多接口，用于固定 aspectRatio 1.4–1.6 与节点不重叠断言。
 module layout_top (
     input  logic clk,
     input  logic din,
@@ -15,6 +15,7 @@ module layout_top (
     logic w_mid3_0, w_mid3_1, w_mid3_2, w_mid3_3;
     logic w_mid4_0, w_mid4_1, w_mid4_2, w_mid4_3;
     logic w_mid5_0, w_mid5_1, w_mid5_2, w_mid5_3;
+    logic w_out0, w_out1, w_out2, w_out3;
 
     assign clk_sys = clk;
     leaf u_src (
@@ -116,10 +117,23 @@ module layout_top (
         .in3(w_mid3_0),
         .in4(w_mid4_0),
         .in5(w_mid5_0),
+        .out0(w_out0),
+        .out1(w_out1),
+        .out2(w_out2),
+        .out3(w_out3)
+    );
+    leaf u_out (
+        .clk(clk_sys),
+        .in0(w_out0),
+        .in1(w_out1),
+        .in2(w_out2),
+        .in3(w_out3),
+        .in4(),
+        .in5(),
         .out0(),
         .out1(),
         .out2(),
         .out3()
     );
-    assign dout = w_src0;
+    assign dout = w_out0;
 endmodule

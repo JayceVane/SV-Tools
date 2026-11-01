@@ -184,7 +184,7 @@ test('document/presentation 共用布局坐标，各自两次渲染确定', asyn
 test('布局门禁：固定夹具宽高比 1.4–1.6、节点不重叠且布局确定', async t => {
     const directory = await workspace(t, 'layout');
     const arch = (await run(['design', 'arch', '--workspace', directory, '--top', 'layout_top'])).output.data;
-    assert.equal(arch.instances.length, 8);
+    assert.equal(arch.instances.length, 9);
     assert.equal(arch.interfaces.length >= 8, true);
     const first = await layoutArchitecture(arch);
     const second = await layoutArchitecture(arch);
@@ -285,29 +285,73 @@ test('扇出接口合并与无公共前缀标签回退', async t => {
     assert.equal(svg.includes('alpha, beta (2 bits)'), true);
 });
 
-test('演示项目接口束远少于信号级边，且规模可渲染', { skip: fs.existsSync(DEMO) ? false : '演示项目不存在' }, async () => {
+test('演示项目：端口折叠、--no-bundle/--bundle-name、布局确定与两风格渲染', { skip: fs.existsSync(DEMO) ? false : '演示项目不存在' }, async t => {
     const files = readDirectory(path.join(DEMO, 'rtl'));
     const arch = await buildArchitecture({ workspace: DEMO, files, top: 'soc_top' });
     assert.equal(arch.graph.nodes.filter(node => node.kind === 'instance').length, 15);
     assert.equal(arch.graph.edges.length, 191);
     assert.equal(arch.interfaces.length, 30);
-    assert.equal(arch.interfaces.length < 60, true, '接口束应明显少于191条信号边');
-    assert.equal(arch.interfaces.length < arch.graph.edges.length / 3, true);
-    const fanouts = arch.interfaces.filter(item => item.from.name === 'u_clkrst' && item.to.name.includes('+'));
-    assert.deepEqual(fanouts.map(item => item.label), ['clk/rst', 'clk/rst']);
-    assert.equal(fanouts.reduce((total, item) => total + item.to.name.split('+').length, 0), 14);
-    const first = await layoutArchitecture(arch);
-    const second = await layoutArchitecture(arch);
-    assert.equal(first.projection.stats.junctions, 8);
-    const imageA = renderArchitectureSvg(arch, first, { title: 'SoC 顶层架构', style: 'document' });
-    const imageB = renderArchitectureSvg(arch, second, { title: 'SoC 顶层架构', style: 'document' });
-    const presentationA = renderArchitectureSvg(arch, first, { title: 'SoC 顶层架构', style: 'presentation' });
-    const presentationB = renderArchitectureSvg(arch, second, { title: 'SoC 顶层架构', style: 'presentation' });
+    const instance = name => arch.instances.find(item => item.name === name);
+    assert.equal(instance('u_ic').ports.length, 81);
+    assert.deepEqual(instance('u_ic').bundles.map(bundle => bundle.name), ['clk', 'rst_n', 's0', 's1', 'm0', 'm1']);
+    assert.equal(instance('u_cpu').ports.length, 24);
+    assert.equal(instance('u_cpu').bundles.length, 4);
+    assert.equal(instance('u_cpu').bundles.find(bundle => bundle.name === 'm_axi').members.length, 21);
+    assert.equal(instance('u_ddr').ports.length, 29);
+    assert.equal(instance('u_ddr').bundles.length, 4);
+    assert.deepEqual(instance('u_ddr').bundles.map(bundle => bundle.name), ['clk', 'rst_n', 's', 'ddr']);
+    const bundled = await layoutArchitecture(arch);
+    const plain = await layoutArchitecture(arch, { bundle: false });
+    assert.equal(bundled.projection.stats.bundles, 18);
+    assert.equal(bundled.projection.stats.ports < plain.projection.stats.ports, true);
+    assert.equal(bundled.projection.stats.fullPorts, plain.projection.stats.fullPorts);
+    const heightOf = (layout, id) => layout.nodes.find(node => node.id === id).height;
+    assert.equal(heightOf(bundled.layout, 'instance:u_ic') < heightOf(plain.layout, 'instance:u_ic') / 2, true);
+    assert.equal(heightOf(bundled.layout, 'instance:u_cpu') < heightOf(plain.layout, 'instance:u_cpu') * 0.6, true);
+    const ratio = bundled.layout.width / bundled.layout.height;
+    assert.equal(ratio > 1.4, true, '折叠后布局宽高比应大于1.4，实际 ' + ratio.toFixed(2));
+    assert.equal(ratio < 1.6, true, '折叠后布局宽高比应小于1.6，实际 ' + ratio.toFixed(2));
+    const boxes = bundled.layout.nodes.map(node => ({ id: node.id, x: node.x, y: node.y, width: node.width, height: node.height }));
+    for (let left = 0; left < boxes.length; left++) {
+        for (let right = left + 1; right < boxes.length; right++) {
+            const a = boxes[left], b = boxes[right];
+            const overlap = a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
+            assert.equal(overlap, false, a.id + ' 与 ' + b.id + ' 重叠');
+        }
+    }
+    const again = await layoutArchitecture(arch);
+    const geometry = layout => layout.nodes.map(node => [node.id, node.x, node.y, node.width, node.height]);
+    assert.deepEqual(geometry(again.layout), geometry(bundled.layout));
+    const imageA = renderArchitectureSvg(arch, bundled, { title: 'SoC 顶层架构', style: 'document' });
+    const imageB = renderArchitectureSvg(arch, again, { title: 'SoC 顶层架构', style: 'document' });
+    const presentationA = renderArchitectureSvg(arch, bundled, { title: 'SoC 顶层架构', style: 'presentation' });
+    const presentationB = renderArchitectureSvg(arch, again, { title: 'SoC 顶层架构', style: 'presentation' });
     assert.equal(imageA.sha256, imageB.sha256);
     assert.equal(presentationA.sha256, presentationB.sha256);
     assert.equal(imageA.width, presentationA.width);
     assert.equal(imageA.height, presentationA.height);
     assert.equal(imageA.evidence.export.junctionCount, 8);
+    assert.equal(imageA.evidence.export.bundled, true);
+    assert.equal(imageA.evidence.export.bundleCount, 18);
     assert.equal(imageA.evidence.export.style, 'document');
     assert.equal(presentationA.evidence.export.style, 'presentation');
+    assert.equal(imageA.svg.includes('virtual bundle'), true);
+    assert.equal(imageA.svg.includes('前缀折叠展示'), true);
+    const temporary = await fsp.mkdtemp(path.join(os.tmpdir(), 'svtools-bundle-'));
+    t.after(() => fsp.rm(temporary, { recursive: true, force: true }));
+    const withoutBundle = await run(['design', 'render', '--workspace', DEMO, '--top', 'soc_top', '--no-bundle', '--out', temporary]);
+    assert.equal(withoutBundle.exitCode, 0);
+    assert.equal(withoutBundle.output.data.evidence.export.bundled, false);
+    assert.equal(withoutBundle.output.data.evidence.export.bundleCount, 0);
+    assert.equal(withoutBundle.output.data.stats.ports > bundled.projection.stats.ports, true);
+    const plainSvg = await fsp.readFile(withoutBundle.output.data.path, 'utf8');
+    assert.equal(plainSvg.includes('s0_awaddr['), true);
+    assert.equal(plainSvg.includes('s0* ('), false);
+    const named = await run(['design', 'render', '--workspace', DEMO, '--top', 'soc_top', '--out', temporary,
+        '--bundle-name', 's0=s0_axi', '--bundle-name', 's1=s1_axi', '--bundle-name', 'm0=m0_axi', '--bundle-name', 'm1=m1_axi']);
+    assert.equal(named.exitCode, 0);
+    assert.equal(named.output.data.bundleNames.s0, 's0_axi');
+    const namedSvg = await fsp.readFile(named.output.data.path, 'utf8');
+    assert.equal(namedSvg.includes('s0_axi*'), true);
+    assert.equal(namedSvg.includes('m1_axi*'), true);
 });

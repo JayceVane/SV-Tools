@@ -152,6 +152,16 @@ async function arch(input) {
     }
     return result('design.arch',{ ...data, ...(snapshot ? { snapshot } : {}) },context);
 }
+/** @param {string[]} [values] --bundle-name 参数。 @returns {Record<string,string>} 前缀→显示名映射。 */
+function parseBundleNames(values = []) {
+    const names = {};
+    for (const value of values) {
+        const match = /^([A-Za-z0-9_.-]+)=([^=\r\n]+)$/.exec(String(value));
+        if (!match) fail('INVALID_ARGUMENT','--bundle-name需要 <prefix=display> 形式');
+        names[match[1]] = match[2].trim();
+    }
+    return names;
+}
 /** 渲染纯Node SVG架构图；PNG需要宿主栅格化，当前明确拒绝。 */
 async function render(input) {
     if (!input.top) fail('INVALID_ARGUMENT','design render需要--top');
@@ -159,11 +169,13 @@ async function render(input) {
     if (format === 'png') fail('EXPORT_UNSUPPORTED','PNG需要栅格化宿主，M3当前只交付SVG；请使用--format svg',{format:'png'});
     if (format !== 'svg') fail('INVALID_ARGUMENT','不支持的--format：' + format);
     const style = normalizeStyle(input.style);
+    const bundle = input.noBundle !== true;
+    const bundleNames = parseBundleNames(Array.isArray(input.bundleNames) ? input.bundleNames : []);
     const { options, context, contents } = await resolveContext(input);
     const files = [...contents].map(([file, value]) => ({ path: file, text: value.text }));
     const arch = await buildArchitecture({ workspace: options.workspace, files, top: input.top, includeDirs: context.includeDirs,
         defines: context.defines, depth: input.depth ?? 1, timeoutMs: options.timeoutMs, contextRevision: context.revision });
-    const layoutResult = await layoutArchitecture(arch);
+    const layoutResult = await layoutArchitecture(arch, { bundle, bundleNames });
     const image = renderArchitectureSvg(arch, layoutResult, { title: typeof input.title === 'string' ? input.title : undefined, style });
     const outputDirectory = input.out ? path.resolve(options.workspace, input.out) : await directory(options.workspace,'design','render');
     await fs.mkdir(outputDirectory,{recursive:true});
@@ -176,8 +188,8 @@ async function render(input) {
         fail('DESIGN_FAILED','写入架构图失败：' + error.message,{file});
     }
     const artifact = { kind:'image', format:'svg', path:file, sha256:image.sha256, bytes:image.bytes, width:image.width, height:image.height };
-    return result('design.render',{ format:'svg', style, path:file, sha256:image.sha256, bytes:image.bytes, width:image.width, height:image.height,
-        title: image.evidence.export.title, stats:image.stats, evidence:image.evidence },context,[],[artifact]);
+    return result('design.render',{ format:'svg', style, bundled:bundle, bundleNames, path:file, sha256:image.sha256, bytes:image.bytes,
+        width:image.width, height:image.height, title: image.evidence.export.title, stats:image.stats, evidence:image.evidence },context,[],[artifact]);
 }
 async function lint(input, {signal,onContext,onArtifacts} = {}) {
     const resolved = await resolveContext(input), {context,options} = resolved;
