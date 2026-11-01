@@ -71,6 +71,40 @@ test('实际控制器批量背景色冻结右键目标，持久化且不重新�
     assert.equal(h.persisted().highlights['tb.a'],'sky'); assert.deepEqual(h.messages.filter(m=>m.requestId).map(m=>m.type),['window','values']);
 });
 
+test('目录中的信号可点击或按键切换添加和移除，批量添加保持幂等', async () => {
+    const h = clientHarness(); await h.flush();
+    h.node('clearSignals').click();
+    const row = () => h.node('catalogSpace').children.find(item => item.title.startsWith('tb.a ·'));
+    row().click(); assert.deepEqual([...h.state.selected], ['tb.a']);
+    row().click(); assert.deepEqual([...h.state.selected], []);
+    assert.deepEqual(h.persisted().selected, []);
+    let prevented = false;
+    row().onkeydown({ key: 'Enter', preventDefault() { prevented = true; } });
+    assert.equal(prevented, true); assert.deepEqual([...h.state.selected], ['tb.a']);
+    row().onkeydown({ key: ' ', preventDefault() {} }); assert.deepEqual([...h.state.selected], []);
+    h.node('addFiltered').click(); h.node('addFiltered').click();
+    assert.deepEqual([...h.state.selected], ['tb.a', 'tb.b', 'tb.c']);
+});
+
+test('目录移除已拆分的总线时同步移除其派生行，其他信号和保存状态保持一致', async () => {
+    const parent = { ...bus(), changeCount: 3 };
+    const keep = { key: 'tb.keep', id: 'keep', name: 'keep', path: 'tb.keep', scopePath: 'tb', type: 'wire', width: 1, changeCount: 1 };
+    const saved = { fileKey: 'test', selected: [parent.key, keep.key] };
+    const h = clientHarness(saved, { vars: [parent, keep] }); await h.flush();
+    h.contextMenu(parent.key).items.find(item => item.id === 'split-bus').submenu.find(item => item.id === 'split-unit').action();
+    h.find('waveSplitWidth0').value = '2'; h.find('waveSplitConfirm').click(); await h.flush();
+    const parts = h.state.rows.filter(row => row.signal.parentKey === parent.key).map(row => row.key);
+    assert.equal(parts.length, 2); h.pointer(parts[0]);
+    h.node('catalogSpace').children.find(item => item.title.startsWith('tb.ctrl[7:4]')).click();
+    assert.deepEqual([...h.state.selected], [keep.key]); assert.equal(h.state.activeKey, keep.key);
+    assert.equal(h.state.multi.size, 0); assert.equal(h.state.bitKeys.size, 0);
+    assert.ok(parts.every(key => !h.state.signals.has(key)));
+    const restored = clientHarness(h.persisted(), { vars: [parent, keep] }); await restored.flush();
+    assert.deepEqual([...restored.state.selected], [keep.key]);
+    restored.node('catalogSpace').children.find(item => item.title.startsWith('tb.ctrl[7:4]')).click();
+    assert.deepEqual([...restored.state.selected], [keep.key, parent.key]);
+});
+
 test('实际控制器展开/收起保持父总线，可单独选择和分组，重载恢复位行和颜色', async () => {
     const h=clientHarness(undefined,{vars:[{...bus(),changeCount:3}]}); await h.flush();
     h.contextMenu('tb.ctrl').items.find(item=>item.id==='expand-bus').action(); await h.flush();
