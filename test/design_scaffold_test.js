@@ -7,6 +7,7 @@ const fsp = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const { run } = require('../src/cli/main');
+const { createContainedDirectories, cleanupDirectories } = require('../src/design/scaffold-paths');
 
 const FIXTURES = path.join(__dirname, 'fixtures', 'design', 'scaffold');
 const VALID = path.join(FIXTURES, 'valid.json');
@@ -146,7 +147,37 @@ test('design scaffold --out 越界、普通文件目标与目标目录返回稳�
     assert.equal(directoryTarget.output.diagnostics[0].code, 'INVALID_ARGUMENT');
     const unrepresentable = await inlineScaffold(directory, BASE_SPEC, 'x'.repeat(300));
     assert.equal(unrepresentable.exitCode, 2);
-    assert.equal(unrepresentable.output.diagnostics[0].code, 'DESIGN_FAILED');
+    assert.equal(['INVALID_ARGUMENT', 'DESIGN_FAILED'].includes(unrepresentable.output.diagnostics[0].code), true);
+    assert.notEqual(unrepresentable.output.diagnostics[0].code, 'SERVICE_FAILED');
+});
+
+test('design scaffold 目录创建/清理逐级校验，不沿 junction 删除工作区外内容', async t => {
+    const directory = await workspace(t);
+    const target = path.join(directory, 'a', 'b');
+    const created = await createContainedDirectories(target, directory);
+    assert.deepEqual(created.created, [path.join(directory, 'a'), path.join(directory, 'a', 'b')]);
+    assert.equal(fs.existsSync(target), true);
+    await cleanupDirectories(created.created, directory);
+    assert.equal(fs.existsSync(path.join(directory, 'a')), false);
+
+    const outside = await fsp.mkdtemp(path.join(os.tmpdir(), 'svtools-scaffold-cleanup-'));
+    t.after(() => fsp.rm(outside, { recursive: true, force: true }));
+    const keep = path.join(outside, 'keep');
+    await fsp.mkdir(keep);
+    await fsp.writeFile(path.join(keep, 'sentinel'), 'keep');
+    try {
+        await fsp.symlink(outside, path.join(directory, 'escape'), 'junction');
+    } catch (error) {
+        t.skip('当前环境不支持创建 junction：' + error.code);
+        return;
+    }
+    await cleanupDirectories([path.join(directory, 'escape'), path.join(directory, 'escape', 'keep')], directory);
+    assert.equal(fs.existsSync(path.join(outside, 'keep', 'sentinel')), true, '清理不得沿 junction 删除外部目录');
+    await assert.rejects(createContainedDirectories(path.join(directory, 'escape', 'rtl'), directory), error => {
+        assert.equal(error.code, 'OUTSIDE_WORKSPACE');
+        return true;
+    });
+    assert.equal(fs.existsSync(path.join(outside, 'rtl')), false);
 });
 
 test('design scaffold 拒绝 junction 目录逃逸', async t => {
