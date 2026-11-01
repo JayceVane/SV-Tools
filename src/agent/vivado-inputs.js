@@ -105,22 +105,36 @@ async function captureInputs(resolved,run) {
         const sha256=hash(bytes);await cacheWrite(workspace,sha256,bytes);
         files.set(keyOf(file),{path:file,kind,sha256,size:bytes.length,bytes:kind==='binary'?null:bytes});
     }
+    // 显式增量检查点是run输入：复制并流式哈希；输出DCP不在此列，由SVTOOLS_CHECKPOINT单独记录。
+    let checkpoint=null;
+    const explicitCheckpoint=runElement?.attrs?.IncrementalCheckpoint;
+    if(explicitCheckpoint && runElement.attrs.AutoIncrementalCheckpoint!=='true') {
+        const file=originalPath(document,explicitCheckpoint);
+        if(!/\.dcp$/i.test(file)) unsupported('显式增量检查点必须指向DCP文件',{run,checkpoint:file});
+        const stat=await fs.lstat(file).catch(error=>{if(error.code==='ENOENT') fail('SOURCE_NOT_FOUND','显式增量检查点不存在',{file,run});throw error;});
+        if(!stat.isFile()) unsupported('显式增量检查点不能是目录或链接',{file});
+        const staged=await stageFile(file,workspace,budget);
+        used.binary+=staged.size;
+        if(used.binary>budget.binaryMiB) fail('SOURCE_LIMIT','输入超出预算',{file,class:'binary',size:used.binary,limit:budget.binaryMiB});
+        files.set(keyOf(file),{path:file,...staged,role:'incremental-checkpoint'});
+        checkpoint={path:file,sha256:staged.sha256,size:staged.size,run};
+    }
     for(const element of document.elements) {
         if(/TCL[._](?:PRE|POST)$/i.test(element.attrs?.Name || element.attrs?.Id || '') && element.attrs?.Val) unsupported('本轮隔离运行暂不接受外部Tcl运行钩子',{property:element.attrs.Name || element.attrs.Id});
-        if(element.name==='Run' && element.attrs?.IncrementalCheckpoint && element.attrs.AutoIncrementalCheckpoint!=='true') unsupported('显式增量检查点尚不能可靠隔离',{run:element.attrs.Id});
         if(element.name!=='File' || element.closing) continue;
         const file=originalPath(document,element.attrs?.Path);
-        if(/\.(?:xci|xcix|bd|dcp|tcl)$/i.test(file)) unsupported('该工程包含尚未支持隔离的IP/脚本/检查点输入',{file});
+        // 显式增量检查点是run输入而非输出：输出DCP由SVTOOLS_CHECKPOINT单独记录，不能混入输入。
         if(files.has(keyOf(file))) continue;
+        if(/\.(?:xci|xcix|bd|dcp|tcl)$/i.test(file)) unsupported('该工程包含尚未支持隔离的IP/脚本/检查点输入',{file});
         const staged=await stageFile(file,workspace,budget);
         used[staged.kind]+=staged.size;
         if(used[staged.kind]>budget[staged.kind+'MiB']) fail('SOURCE_LIMIT','输入超出预算',{file,class:staged.kind,size:used[staged.kind],limit:budget[staged.kind+'MiB']});
         files.set(keyOf(file),{path:file,...staged});
     }
-    const inputs=[...files.values()].map(file=>({path:file.path,sha256:file.sha256,kind:file.kind,size:file.size})).sort((a,b)=>keyOf(a.path).localeCompare(keyOf(b.path)));
+    const inputs=[...files.values()].map(file=>({path:file.path,sha256:file.sha256,kind:file.kind,size:file.size,...(file.role?{role:file.role}:{})})).sort((a,b)=>keyOf(a.path).localeCompare(keyOf(b.path)));
     if(files.size>4096) fail('SOURCE_LIMIT','输入条目超过4096项',{count:files.size});
     const config={policy:'rtl-snapshot-v2',project:configuration(document),fileset:context.fileset,top:context.top,defines:context.defines,includeDirs:context.includeDirs.map(keyOf),run};
-    return {document,files,inputs,used,config,synthRun:runElement?.attrs.SynthRun || null,fingerprint:hash(JSON.stringify([config,inputs]))};
+    return {document,files,inputs,used,config,checkpoint,synthRun:runElement?.attrs.SynthRun || null,fingerprint:hash(JSON.stringify([config,inputs]))};
 }
 
 function rewriteSource(file,text,captured,relocate,context) {
@@ -175,7 +189,13 @@ async function materialize(captured,resolved,buildDirectory) {
         if(element.name==='DefaultLaunch') {attrs.Dir='$PRUNDIR';changed=true;}
         if(element.name==='File') {attrs.Path=relocate(originalPath(captured.document,attrs.Path)).replace(/\\/g,'/');changed=true;}
         if(element.name==='Option' && attrs.Name==='VerilogDir') {attrs.Val=folder(originalPath(captured.document,attrs.Val)).replace(/\\/g,'/');changed=true;}
-        if(element.name==='Run') {for(const name of [...runtimeRun,'IncrementalCheckpoint']) delete attrs[name];attrs.AutoIncrementalCheckpoint='false';changed=true;}
+        if(element.name==='Run') {
+            for(const name of [...runtimeRun]) delete attrs[name];
+            // 恢复被隔离清掉的显式增量引用，并指向本轮不可变副本；自动增量始终关闭，避免引用原run目录。
+            if(captured.checkpoint && element.attrs.Id===captured.checkpoint.run) attrs.IncrementalCheckpoint=relocate(captured.checkpoint.path).replace(/\\/g,'/');
+            else delete attrs.IncrementalCheckpoint;
+            attrs.AutoIncrementalCheckpoint='false';changed=true;
+        }
         if(changed) edits.push({...element,text:'<'+element.name+Object.entries(attrs).map(([key,value])=>' '+key+'="'+xml(value)+'"').join('')+(element.empty?'/>':'>')});
     }
     let text=captured.document.text;

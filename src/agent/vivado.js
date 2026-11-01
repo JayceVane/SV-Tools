@@ -1,5 +1,7 @@
 'use strict';
 const fs = require('node:fs/promises');
+const { createReadStream } = require('node:fs');
+const readline = require('node:readline');
 const path = require('node:path');
 const { result, fail, identity } = require('./protocol');
 const { resolveContext, readOptions, hash } = require('./context');
@@ -117,6 +119,86 @@ function lifecycle(stdout, summary, logs = []) {
 }
 /** batch运行器的stdout同时含marker集合与完整输出，同一marker会出现两次；按值去重保留首次顺序。 */
 function tagged(lines, prefix) { return [...new Set(lines.filter(line => line.startsWith(prefix)).map(line => line.slice(prefix.length).trim()).filter(Boolean))]; }
+
+/** Reuse Summary表同时存在4列和5列两种格式，按表头定位“Current Reuse %”列，避免固定列号。 */
+function reuseSummary(lines) {
+    const header = lines.findIndex(line => /Current Reuse %/.test(line));
+    if (header < 0) return null;
+    const columns = lines[header].split('|').map(value => value.trim());
+    const matchedAt = columns.findIndex(value => /^Matched %/.test(value));
+    const reuseAt = columns.findIndex(value => /^Current Reuse %/.test(value));
+    const totalAt = columns.findIndex(value => value === 'Total');
+    if (reuseAt < 0) return null;
+    const number = value => (value === '-' ? null : (/^\d+(?:\.\d+)?$/.test(value) ? Number(value) : null));
+    const summary = {};
+    for (const line of lines.slice(header + 1, header + 20)) {
+        const cells = line.split('|').map(value => value.trim());
+        if (!/^(?:Cells|Nets|Pins|Ports)$/.test(cells[1] || '')) continue;
+        summary[cells[1]] = { matched: matchedAt < 0 ? null : number(cells[matchedAt]), reused: number(cells[reuseAt]), total: totalAt < 0 ? null : number(cells[totalAt]) };
+    }
+    return Object.keys(summary).length ? summary : null;
+}
+
+/** 增量检查点是否被工具实际加载并复用：只认本轮runme日志，请求了增量但工具未加载时明确为false。 */
+function incrementalStatus(log, checkpoint) {
+    const status = { requested: Boolean(checkpoint), checkpoint: checkpoint ? { sha256: checkpoint.sha256, size: checkpoint.size } : null,
+        applied: null, reused: null, directive: null, reuseMode: null, autoIncremental: null, nonReusedCells: null, reuse: null, evidence: [] };
+    if (!checkpoint) return status;
+    if (!log) return status;
+    const lines = log.lines || [];
+    const find = pattern => lines.map(line => pattern.exec(line)).find(Boolean);
+    status.applied = Boolean(find(/read_checkpoint\b.*-incremental/i) || find(/Incremental flow is being run/i));
+    const directive = find(/Incremental flow is being run with directive '([^']+)'/);
+    if (directive) status.directive = directive[1];
+    const reuseMode = find(/^\|\s*Reuse mode\s*\|\s*([A-Za-z]+)\s*\|/);
+    if (reuseMode) status.reuseMode = reuseMode[1];
+    const auto = find(/^\|\s*Auto Incremental\s*\|\s*(Yes|No)\s*\|/);
+    if (auto) status.autoIncremental = auto[1] === 'Yes';
+    const nonReused = find(/^\|\s*Non-Reused Cells\s*\|\s*([\d.]+)\s*\|/);
+    if (nonReused) status.nonReusedCells = Number(nonReused[1]);
+    const reuse = reuseSummary(lines);
+    if (reuse) {
+        status.reuse = reuse;
+        const cells = reuse.Cells;
+        status.reused = cells?.reused !== null && cells?.reused !== undefined ? cells.reused > 0
+            : (reuse.Pins?.reused !== null && reuse.Pins?.reused !== undefined ? reuse.Pins.reused > 0 : null);
+    } else if (!status.applied) status.reused = false;
+    for (const line of lines) {
+        if (status.evidence.length >= 8) break;
+        if (/(?:Incremental flow is being run|read_checkpoint\b.*-incremental|^\|\s*Reuse mode|^\|\s*Auto Incremental|^\|\s*Non-Reused Cells)/i.test(line)) status.evidence.push(line.trim().slice(0, 300));
+    }
+    return status;
+}
+
+/** 隔离构建的runme日志是增量复用事实的唯一来源；只保留增量相关段落，避免整份日志进内存。 */
+async function readRunLog(snapshot, run) {
+    if (!RUN_NAME.test(run)) return null;
+    const root = path.resolve(snapshot.root), projectDir = path.dirname(snapshot.project), base = path.basename(snapshot.project, '.xpr');
+    const candidates = [path.join(projectDir, base + '.runs', run, 'runme.log')];
+    try {
+        for (const entry of await fs.readdir(projectDir, { withFileTypes: true })) {
+            if (entry.isDirectory() && entry.name.endsWith('.runs')) candidates.push(path.join(projectDir, entry.name, run, 'runme.log'));
+        }
+    } catch (error) { if (error.code !== 'ENOENT') throw error; }
+    let file = null;
+    for (const candidate of candidates) {
+        const real = await fs.realpath(candidate).catch(() => null);
+        if (real && inside(real, root) && (await fs.stat(real).catch(() => null))?.isFile()) { file = real; break; }
+    }
+    if (!file) return null;
+    const lines = []; let window = 0, bytes = 0;
+    const reader = readline.createInterface({ input: createReadStream(file, { encoding: 'utf8' }), crlfDelay: Infinity });
+    try {
+        for await (const line of reader) {
+            bytes += Buffer.byteLength(line, 'utf8') + 1;
+            if (bytes > 64 * 1024 * 1024) break;
+            if (/Incremental|Reuse|read_checkpoint/i.test(line)) window = 40;
+            if (window > 0) { lines.push(line.slice(0, 1000)); window--; }
+            if (lines.length > 2000) break;
+        }
+    } finally { reader.close(); }
+    return { file, lines };
+}
 
 async function createProject(input, { runner } = {}) {
     const { options } = await readOptions(input);
@@ -257,10 +339,14 @@ async function run(input, { signal, onContext, onArtifacts, runner } = {}) {
         const outputs=await checkpoints(snapshot,tagged(lines,'SVTOOLS_CHECKPOINT'));
         const current=await ensureInputsCurrent(resolved,target,captured);
         const toolVersion = tagged(lines,'SVTOOLS_RUN_VERSION')[0] || null;
+        // 增量复用属于执行事实：读取隔离构建的runme日志，不把“已请求检查点”当作“已复用”。
+        const runLog=await readRunLog(snapshot,target);
+        const incremental=incrementalStatus(runLog,captured.checkpoint);
         // 四轴分开表达：能运行/输入已捕获/可否重建/验证做到哪一步，不合并成单一“可信”。
         const evidence = {
-            execution: { run: target, status, runId: job.id, toolVersion },
-            inputs: { completeness: 'complete', fingerprint: captured.fingerprint, used: captured.used },
+            execution: { run: target, status, runId: job.id, toolVersion, incremental },
+            inputs: { completeness: 'complete', fingerprint: captured.fingerprint, used: captured.used,
+                checkpoint: captured.checkpoint ? { sha256: captured.checkpoint.sha256, size: captured.checkpoint.size } : null },
             regeneration: { mode: 'source' },
             verification: { checks: [target.startsWith('impl_') ? 'synth+impl' : 'synth'], acceptance: false }
         };
@@ -269,7 +355,8 @@ async function run(input, { signal, onContext, onArtifacts, runner } = {}) {
         await writeJson(path.join(buildDirectory,'manifest.json'),manifest);
         await writeJson(pointer,manifest);
         await pruneCache(options.workspace).catch(()=>{});
-        return result('vivado.run', { run:target,status,runId:job.id,project:snapshot.project,inputFingerprint:captured.fingerprint,evidence }, current, [], artifactLogs(logs).concat([{kind:'manifest',path:path.join(buildDirectory,'manifest.json')} ]));
+        return result('vivado.run', { run:target,status,runId:job.id,project:snapshot.project,inputFingerprint:captured.fingerprint,evidence }, current, [], artifactLogs(logs)
+            .concat([{kind:'manifest',path:path.join(buildDirectory,'manifest.json')}], runLog?[{kind:'run-log',path:runLog.file}]:[]));
     } catch(error) {
         if(!(error instanceof Error)) error=new Error(String(error));
         if(job.signal.aborted) {error.code='TOOL_CANCELLED';error.exitCode=3;}
@@ -282,4 +369,4 @@ async function run(input, { signal, onContext, onArtifacts, runner } = {}) {
     }
 }
 
-module.exports = { status, report, run, createProject, addFiles, setTop, locateVivado, vivadoTarget };
+module.exports = { status, report, run, createProject, addFiles, setTop, locateVivado, vivadoTarget, incrementalStatus, reuseSummary, readRunLog };

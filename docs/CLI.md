@@ -138,13 +138,13 @@ node src/cli/main.js task cancel <task-id> --workspace D:/project
 
 隔离构建位于 `.svtools/agent/vivado/builds/`，默认保留最近5次；原工程的run目录保持独立，`vivado status` 的 `agentRuns` 展示CLI构建。报告校验对应DCP的SHA-256，单份检查点上限512MiB；构建被清理返回 `ARTIFACT_EXPIRED`，检查点被替换返回 `ARTIFACT_INVALID`。输入、配置、源码副本映射与检查点身份记录在每轮 `manifest.json`，结果还提供完整 `inputFingerprint`，后台当前性判断包含初始化数据等非RTL输入。
 
-当前隔离适配覆盖普通RTL、字面量include、显式数据文件和常规XDC。IP/BD、显式增量DCP、外部Tcl运行钩子、宏include及XDC中的动态外部读取暂返回 `SNAPSHOT_UNSUPPORTED`，不会声称这些依赖已被完整捕获。工具自动生成的增量缓存不复制，隔离副本执行完整重建。
+当前隔离适配覆盖普通RTL、字面量include、显式数据文件、常规XDC与显式增量DCP。显式增量检查点（run 的 `IncrementalCheckpoint`，且 `AutoIncrementalCheckpoint` 不为 true）作为输入复制并流式计算 SHA-256，引用在隔离工程中重定位到不可变副本；run 输出的 DCP 只记入 `checkpoints`，不会混入 `inputs`，输入检查点条目带 `role=incremental-checkpoint`。无效、缺失或不存在的显式检查点分别返回 `SNAPSHOT_UNSUPPORTED`、`SOURCE_NOT_FOUND`，不会静默回退到完整重建。IP/BD、外部Tcl运行钩子、宏include及XDC中的动态外部读取暂返回 `SNAPSHOT_UNSUPPORTED`，不会声称这些依赖已被完整捕获。工具自动生成的增量缓存不复制，隔离副本的 `AutoIncrementalCheckpoint` 始终关闭。
 
 没有Agent构建记录的既有工程仍可读取原run的报告，包括已有IP工程；此时返回 `stale=null`、`runInfo=null`，仅表示报告读取成功，不构成对当前源码的验证。输入隔离的限制针对新建可信构建绑定，不阻止已有报告查询。
 
 `vivado run` 与 `vivado report` 的结果同时给出四个**互不合并**的证据轴：
 
-- `execution`：工具是否真的跑完（run/status/runId/toolVersion）；
+- `execution`：工具是否真的跑完（run/status/runId/toolVersion）。`incremental` 单独记录增量事实：`requested`、`checkpoint`（sha256/size）、`applied`（本轮 runme 日志是否实际加载检查点）、`reused`（Cells 的 Current Reuse % 是否大于 0）、`directive`、`reuseMode`、`autoIncremental`、`reuse` 明细与 `evidence[]`；无法从日志确认时为 `null`，不把“请求了增量”当作“已复用”；
 - `inputs`：输入是否被完整捕获（`completeness`、`fingerprint`、各类 `used`）；
 - `regeneration`：能否由源配置重建（`source` 可重建；`artifact` 仅绑定产物；`unknown`）；
 - `verification`：验证做到哪一步（`checks[]`、`acceptance`）。当前 `acceptance=false` 表示只有构建/检查，**不代表功能验证通过**。
