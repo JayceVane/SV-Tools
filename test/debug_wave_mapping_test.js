@@ -41,6 +41,16 @@ test('带点的实际作用域与多个层级分段不混淆，未知范围、�
     assert.throws(()=>waveDeclaration({type:'wire',name:'d',width:4}),/没有记录/);assert.throws(()=>c.select('["$bit","missing",2]'),/不存在/);
     const h=fixture();assert.throws(()=>waveCircuitRequest(h.catalog.select('tb.dut.u0.d'),h.catalog,3),/不在/);
 });
+
+test('多位切片从原总线按绝对偏移映射电路，拒绝越界和递归父键',()=>{
+    const parser=createVcdParser();parser.write('$scope module tb $end $var wire 8 ! d [15:8] $end $var wire 8 # a [0:7] $end $upscope $end $enddefinitions $end');
+    const catalog=createWaveCatalog(parser.finish());
+    assert.deepEqual(catalog.select('["$slice","tb.d",4,4]').indices,[12,13,14,15]);
+    assert.deepEqual(catalog.select('["$slice","tb.a",4,4]').indices,[3,2,1,0]);
+    assert.deepEqual(catalog.select('["$bit","tb.d",7]').indices,[15]);
+    assert.throws(()=>catalog.select('["$slice","tb.d",7,4]'),/无效/);
+    assert.throws(()=>catalog.select(JSON.stringify(['$slice','["$slice","tb.d",4,4]',0,2])),/不存在/);
+});
 test('Vivado平坦限定名称使用适配器的斜杠层级，不按同名模块假造实例',()=>{
     const h=fixture({flat:true}),found=h.circuit.find(waveCircuitRequest(h.catalog.select('tb.dut.u1.d'),h.catalog,1));
     assert.equal(found[0].moduleId,'top');assert.deepEqual(found[0].instancePath,[]);assert.deepEqual(found[0].nameParts,['u1','d']);assert.equal(matchCircuitSignal(found[0],h.catalog,1)[0].key,'tb.dut.u1.d');

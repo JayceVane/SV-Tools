@@ -62,7 +62,10 @@ async function main() {
     const source = path.join(root, 'wave.sv'), filePath = fileIndex >= 0 ? path.resolve(process.argv[fileIndex + 1]) : path.join(root, signalMode ? 'signals.vcd' : 'floating.vcd');
     if (signalMode) await fs.writeFile(source, 'module wave_tb; reg clk; reg [7:4] ctrl; wire [0:7] status; wire io; demo dut(.ctrl(ctrl),.status(status),.io(io)); endmodule module demo(input [7:4] ctrl,output reg [0:7] status,inout io); wire internal_net; reg internal_reg; endmodule');
     if (fileIndex < 0) await fs.writeFile(filePath, signalMode ? fixtureSignals() : fixtureVcd());
-    const session = new VcdSession(), metadata = await session.open(filePath, signalMode ? { roots: [root], files: [source] } : undefined);
+    const sources = process.argv.flatMap((arg, index) => arg === '--source' ? [path.resolve(process.argv[index + 1])] : []);
+    const sourceContext = sources.length ? { roots: [...new Set(sources.map(file => path.dirname(file)))], files: sources }
+        : signalMode ? { roots: [root], files: [source] } : undefined;
+    const session = new VcdSession(), metadata = await session.open(filePath, sourceContext);
     metadata.secondsPerTick = parseTimescaleSeconds(metadata.timescale);
     const layoutUri = { scheme:'file', fsPath:path.join(root,'test.svwave.json') };
     const layoutFiles = createLayoutFiles({ filePath, vscode:{ Uri:{ file:file=>({scheme:'file',fsPath:file}) },
