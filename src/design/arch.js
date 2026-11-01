@@ -53,7 +53,28 @@ function flagSet(value) {
 }
 
 /**
- * 判定模块是否为空骨架：Yosys blackbox 属性，或结构上无 cells/processes/memories。
+ * 判定端口是否存在别名或常量驱动。Yosys 会把 assign 别名折叠成共享 bit，常量端口为 c:0/c:1；
+ * 这类模块虽然 cells/processes/memories 为空，但仍有逻辑语义，不能判为空骨架。
+ * @param {object} module 模块。 @returns {boolean} 是否存在别名/常量驱动。
+ */
+function portAliasOrConstant(module) {
+    const owners = new Map();
+    for (const port of module.ports || []) {
+        for (const bit of port.bits || []) {
+            if (typeof bit === 'string' && bit.startsWith('c:')) {
+                return true;
+            }
+            if (owners.has(bit) && owners.get(bit) !== port.name) {
+                return true;
+            }
+            owners.set(bit, port.name);
+        }
+    }
+    return false;
+}
+
+/**
+ * 判定模块是否为空骨架：Yosys blackbox 属性，或结构上无 cells/processes/memories 且无端口别名/常量驱动。
  * packed struct 端口会让空模块产生 netnames，Yosys 不再写 blackbox 属性，需要结构兜底。
  * @param {object|null} module 目标模块。 @returns {{empty:boolean, source:'yosys'|'structure'|null}} 判定结果。
  */
@@ -67,7 +88,8 @@ function blackboxInfo(module) {
     const cells = Array.isArray(module.cells) ? module.cells.length : 0;
     const processes = module.processes && typeof module.processes === 'object' ? Object.keys(module.processes).length : 0;
     const memories = module.memories && typeof module.memories === 'object' ? Object.keys(module.memories).length : 0;
-    return { empty: cells === 0 && processes === 0 && memories === 0, source: cells === 0 && processes === 0 && memories === 0 ? 'structure' : null };
+    const empty = cells === 0 && processes === 0 && memories === 0 && !portAliasOrConstant(module);
+    return { empty, source: empty ? 'structure' : null };
 }
 
 /** @param {*} value @returns {number|string|boolean|null} Yosys 32 位二进制参数值转十进制，其余原样保留。 */

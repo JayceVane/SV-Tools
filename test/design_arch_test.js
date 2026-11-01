@@ -377,6 +377,24 @@ test('packed struct 空模块按结构判 blackbox，含 assign/always_ff 仍 co
     assert.equal(modules.get('leaf_assign').empty, false);
 });
 
+test('纯 alias 与常量 assign 不得判为空模块', async t => {
+    const directory = await workspace(t, 'alias-empty');
+    const response = await run(['design', 'arch', '--workspace', directory, '--top', 'alias_empty_top']);
+    assert.equal(response.exitCode, 0, JSON.stringify(response.output.diagnostics));
+    const instances = new Map(response.output.data.instances.map(item => [item.name, item]));
+    assert.deepEqual([instances.get('u_alias').implementation, instances.get('u_alias').empty, instances.get('u_alias').blackboxSource],
+        ['collapsed', false, null]);
+    assert.deepEqual([instances.get('u_const').implementation, instances.get('u_const').empty, instances.get('u_const').blackboxSource],
+        ['collapsed', false, null]);
+    assert.equal(instances.get('u_empty').implementation, 'blackbox');
+    assert.equal(instances.get('u_empty').empty, true);
+    const modules = new Map(response.output.data.modules.map(item => [item.name, item]));
+    assert.deepEqual([modules.get('alias_mod').blackbox, modules.get('alias_mod').empty], [false, false]);
+    assert.deepEqual([modules.get('const_mod').blackbox, modules.get('const_mod').empty], [false, false]);
+    assert.equal(modules.get('empty_mod').blackbox, true);
+    assert.equal(modules.get('empty_mod').empty, true);
+});
+
 test('端口折叠前缀必须是完整的下划线 token，m_axi 与 m_axil/m_axis 不误合并', () => {
     const ports = [
         { name: 'm_axi_araddr', width: 32, direction: 'output' },

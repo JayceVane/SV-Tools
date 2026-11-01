@@ -176,6 +176,49 @@ async function readSpec(workspace, value) {
         return { text: value, source: null };
     }
 }
+/** @param {string} target 路径。 @returns {Promise<string>} 最近已存在祖先的真实路径。 */
+async function nearestRealPath(target) {
+    let probe = target;
+    while (true) {
+        try {
+            return await fs.realpath(probe);
+        } catch (error) {
+            if (error.code !== 'ENOENT') throw error;
+            const parent = path.dirname(probe);
+            if (parent === probe) throw error;
+            probe = parent;
+        }
+    }
+}
+
+/** @param {string} target 路径。 @returns {Promise<string[]>} 尚不存在的祖先目录（叶到根）。 */
+async function missingDirectories(target) {
+    const missing = [];
+    let probe = target;
+    while (true) {
+        try {
+            await fs.lstat(probe);
+            return missing;
+        } catch (error) {
+            if (error.code !== 'ENOENT') throw error;
+            missing.push(probe);
+            const parent = path.dirname(probe);
+            if (parent === probe) return missing;
+            probe = parent;
+        }
+    }
+}
+
+/** @param {string[]} directories 叶到根的目录列表。 @returns {Promise<void>} 尽力清理本轮新建的空目录。 */
+async function cleanupDirectories(directories) {
+    for (const directory of directories) {
+        try {
+            await fs.rmdir(directory);
+        } catch {
+            // 目录非空或已被并发清理时保留；不掩盖原始错误。
+        }
+    }
+}
 /** 按 schemaVersion=1 规格生成架构骨架（packed struct 接口 + 空模块 + 顶层连线）。 */
 async function scaffold(input) {
     if (!input.spec) fail('INVALID_ARGUMENT', 'design scaffold需要--spec <json|file>');
@@ -196,14 +239,24 @@ async function scaffold(input) {
     }
     const text = generateScaffold(validated);
     const file = path.join(outputDirectory, validated.top.name + '.sv');
-    let phase = 'mkdir';
+    let phase = 'precheck';
+    let missing = [];
     try {
-        await fs.mkdir(outputDirectory, { recursive: true });
-        // 目录创建后按真实路径复核，防止 symlink/junction 把 --out 逃逸到工作区外。
+        // 创建前先解析最近已存在祖先的真实路径，避免先在 symlink/junction 外建目录再报错。
         const realWorkspace = await fs.realpath(workspace);
+        const nearest = await nearestRealPath(outputDirectory);
+        const preContainment = path.relative(realWorkspace, nearest);
+        if (preContainment.startsWith('..') || path.isAbsolute(preContainment)) {
+            fail('INVALID_ARGUMENT', 'design scaffold 的 --out 通过符号链接逃逸出工作区', { out: input.out || 'rtl' });
+        }
+        missing = await missingDirectories(outputDirectory);
+        phase = 'mkdir';
+        await fs.mkdir(outputDirectory, { recursive: true });
+        // 目录创建后再按真实路径复核；若仍因竞态逃逸，清理本轮新建目录。
         const realOutput = await fs.realpath(outputDirectory);
         const containment = path.relative(realWorkspace, realOutput);
         if (containment.startsWith('..') || path.isAbsolute(containment)) {
+            await cleanupDirectories(missing);
             fail('INVALID_ARGUMENT', 'design scaffold 的 --out 通过符号链接逃逸出工作区', { out: input.out || 'rtl' });
         }
         let existing = null;
@@ -227,6 +280,7 @@ async function scaffold(input) {
         await fs.writeFile(file, text, { flag: input.force ? 'w' : 'wx' });
     } catch (error) {
         if (error instanceof ServiceError) throw error;
+        await cleanupDirectories(missing);
         if (error.code === 'EEXIST' && phase === 'write') {
             fail('FILE_EXISTS', 'design scaffold 目标文件已存在，使用 --force 覆盖：' + file, { file });
         }

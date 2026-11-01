@@ -211,11 +211,27 @@ test('struct 空模块渲染为虚线盒，含 assign/always_ff 的模块保持�
     const blockOf = id => {
         const start = image.svg.indexOf('data-model-id="' + id + '"');
         assert.notEqual(start, -1, id);
-        return image.svg.slice(start, start + 1600);
+        const next = image.svg.indexOf('<g data-model-id="instance:', start + 1);
+        return image.svg.slice(start, next < 0 ? start + 8000 : next);
     };
     assert.equal(blockOf('instance:u_empty').includes('stroke-dasharray="6 4"'), true);
     assert.equal(blockOf('instance:u_assign').includes('stroke-dasharray="6 4"'), false);
     assert.equal(blockOf('instance:u_ff').includes('stroke-dasharray="6 4"'), false);
+});
+
+test('纯 alias/常量 assign 渲染为实线盒，真正空模块为虚线', async t => {
+    const directory = await workspace(t, 'alias-empty');
+    const arch = (await run(['design', 'arch', '--workspace', directory, '--top', 'alias_empty_top'])).output.data;
+    const image = renderArchitectureSvg(arch, await layoutArchitecture(arch));
+    const blockOf = id => {
+        const start = image.svg.indexOf('data-model-id="' + id + '"');
+        assert.notEqual(start, -1, id);
+        const next = image.svg.indexOf('<g data-model-id="instance:', start + 1);
+        return image.svg.slice(start, next < 0 ? start + 8000 : next);
+    };
+    assert.equal(blockOf('instance:u_alias').includes('stroke-dasharray="6 4"'), false);
+    assert.equal(blockOf('instance:u_const').includes('stroke-dasharray="6 4"'), false);
+    assert.equal(blockOf('instance:u_empty').includes('stroke-dasharray="6 4"'), true);
 });
 
 test('PNG 无栅格化宿主返回 EXPORT_UNSUPPORTED 且不落盘', async t => {

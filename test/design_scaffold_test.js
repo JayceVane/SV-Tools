@@ -163,6 +163,11 @@ test('design scaffold 拒绝 junction 目录逃逸', async t => {
     assert.equal(escaped.exitCode, 2);
     assert.equal(escaped.output.diagnostics[0].code, 'INVALID_ARGUMENT');
     assert.equal(fs.existsSync(path.join(outside, 'rtl', 'soc_top.sv')), false);
+    assert.equal(fs.existsSync(path.join(outside, 'rtl')), false);
+    const nested = await inlineScaffold(directory, BASE_SPEC, path.join('escape', 'nested', 'rtl'));
+    assert.equal(nested.exitCode, 2);
+    assert.equal(nested.output.diagnostics[0].code, 'INVALID_ARGUMENT');
+    assert.equal(fs.existsSync(path.join(outside, 'nested')), false);
 });
 
 test('design scaffold 拒绝覆盖符号链接目标', async t => {
