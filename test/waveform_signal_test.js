@@ -346,7 +346,45 @@ test('缺RTL、索引空洞和不同ID的重名逐位声明不擅自合并', () 
     const vars=[3,2,1,0].map((index)=>({id:String(index),width:1,type:'wire',name:'d['+index+']',path:'top.d['+index+']',scopePath:'top'}));
     const store={compose(){assert.fail('不应合并');}};
     assert.deepEqual(restorePackedBuses(vars,store),vars);
-    const marked=vars.map(v=>({...v,packedBit:{name:'d',index:Number(v.id)}}));
+    const marked=vars.map(v=>({...v,packedBit:{name:'d',index:Number(v.id),bounds:{left:3,right:0}}}));
     assert.deepEqual(restorePackedBuses([marked[0],marked[2]],store),[marked[0],marked[2]]);
     assert.equal(restorePackedBuses([...marked,{...marked[0],id:'conflict'}],store).length,5);
+});
+
+
+test('逐位VCD恢复总线时依据RTL范围排序，而不是VCD声明顺序', async t => {
+    const cases = [
+        { rtl:'wire [3:0] d;', indices:[0,1,2,3], range:'[3:0]', value:'00x1' },
+        { rtl:'wire [0:3] d;', indices:[3,2,1,0], range:'[0:3]', value:'1x00' },
+        { rtl:'wire [-1:-4] d;', indices:[-4,-2,-1,-3], range:'[-1:-4]', value:'00x1' },
+        { rtl:'wire [WIDTH-1:0] d;', indices:[0,2,3,1], range:'[3:0]', value:'00x1' },
+        { rtl:'wire [0:WIDTH-1] d;', indices:[3,0,2,1], range:'[0:3]', value:'1x00' },
+        { rtl:'wire [3:0] a, d;', indices:[0,2,1,3], range:'[3:0]', value:'00x1' },
+    ];
+    const ids = ['!', '#', '$', '%'];
+    for (const [at, scenario] of cases.entries()) {
+        const {root,file}=await sourceFixture(t),trace=path.join(root, 'order-'+at+'.vcd');
+        await fs.writeFile(file,'module top; parameter WIDTH=4; '+scenario.rtl+' endmodule');
+        const min = Math.min(...scenario.indices);
+        const declarations=scenario.indices.map((index,i)=>'$var wire 1 '+ids[i]+' d ['+index+'] $end').join(' ');
+        const values=scenario.indices.map((index,i)=>(index===min?'1':index===min+1?'x':'0')+ids[i]).join(' ');
+        await fs.writeFile(trace,'$scope module top $end '+declarations+' $upscope $end $enddefinitions $end #0 '+values);
+        const session=new VcdSession(); t.after(()=>session.dispose());
+        const metadata=await session.open(trace,{roots:[root],files:[file]});
+        const signal=metadata.vars.find(item=>item.path==='top.d');
+        assert.ok(signal,scenario.rtl); assert.equal(signal.range,scenario.range,scenario.rtl);
+        assert.equal((await session.values({ids:[signal.id],time:0})).values[signal.id],scenario.value,scenario.rtl);
+    }
+});
+
+test('RTL范围方向未知或VCD位号超出已知范围时不猜测总线位序', async t => {
+    for (const rtl of ['wire [MSB:LSB] d;', 'wire [3:1] d;', 'wire [WIDTH-1:5] d;', 'wire [3:0][1:0] d;', 'wire [3:0] d; reg [0:3] d;']) {
+        const {root,file}=await sourceFixture(t),trace=path.join(root,'ambiguous.vcd');
+        await fs.writeFile(file,'module top; parameter WIDTH=4; '+rtl+' endmodule');
+        const declarations=[0,1,2,3].map((index,i)=>'$var wire 1 '+['!','#','$','%'][i]+' d ['+index+'] $end').join(' ');
+        await fs.writeFile(trace,'$scope module top $end '+declarations+' $upscope $end $enddefinitions $end #0 0! 0# 0$ 0%');
+        const session=new VcdSession(); t.after(()=>session.dispose());
+        const metadata=await session.open(trace,{roots:[root],files:[file]});
+        assert.equal(metadata.vars.length,4,rtl); assert.ok(metadata.vars.every(signal=>signal.width===1),rtl);
+    }
 });
