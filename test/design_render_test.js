@@ -204,6 +204,20 @@ test('布局门禁：固定夹具宽高比 1.4–1.6、节点不重叠且布局�
     assert.deepEqual(geometry(second.layout), geometry(first.layout));
 });
 
+test('struct 空模块渲染为虚线盒，含 assign/always_ff 的模块保持实线', async t => {
+    const directory = await workspace(t, 'struct-empty');
+    const arch = (await run(['design', 'arch', '--workspace', directory, '--top', 'struct_empty_top'])).output.data;
+    const image = renderArchitectureSvg(arch, await layoutArchitecture(arch));
+    const blockOf = id => {
+        const start = image.svg.indexOf('data-model-id="' + id + '"');
+        assert.notEqual(start, -1, id);
+        return image.svg.slice(start, start + 1600);
+    };
+    assert.equal(blockOf('instance:u_empty').includes('stroke-dasharray="6 4"'), true);
+    assert.equal(blockOf('instance:u_assign').includes('stroke-dasharray="6 4"'), false);
+    assert.equal(blockOf('instance:u_ff').includes('stroke-dasharray="6 4"'), false);
+});
+
 test('PNG 无栅格化宿主返回 EXPORT_UNSUPPORTED 且不落盘', async t => {
     const directory = await workspace(t, 'skeleton');
     const response = await run(['design', 'render', '--workspace', directory, '--top', 'fifo_top', '--format', 'png', '--out', 'png-out']);

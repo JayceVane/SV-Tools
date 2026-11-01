@@ -360,3 +360,39 @@ test('端口折叠：前缀聚类守卫、成员守恒与显示名覆盖', () =>
     assert.equal(named[0].name, 's0_axi');
     assert.equal(named[0].prefix, 's0');
 });
+
+test('packed struct 空模块按结构判 blackbox，含 assign/always_ff 仍 collapsed', async t => {
+    const directory = await workspace(t, 'struct-empty');
+    const response = await run(['design', 'arch', '--workspace', directory, '--top', 'struct_empty_top']);
+    assert.equal(response.exitCode, 0, JSON.stringify(response.output.diagnostics));
+    const instances = new Map(response.output.data.instances.map(item => [item.name, item]));
+    assert.deepEqual([instances.get('u_empty').implementation, instances.get('u_empty').empty, instances.get('u_empty').blackboxSource],
+        ['blackbox', true, 'structure']);
+    assert.equal(instances.get('u_assign').implementation, 'collapsed', 'assign 产生 $and 单元，应为 collapsed');
+    assert.equal(instances.get('u_ff').implementation, 'collapsed', 'always_ff 产生 $dff 单元，应为 collapsed');
+    const modules = new Map(response.output.data.modules.map(item => [item.name, item]));
+    assert.deepEqual([modules.get('leaf_empty').blackbox, modules.get('leaf_empty').empty, modules.get('leaf_empty').blackboxSource],
+        [true, true, 'structure']);
+    assert.equal(modules.get('leaf_assign').blackbox, false);
+    assert.equal(modules.get('leaf_assign').empty, false);
+});
+
+test('端口折叠前缀必须是完整的下划线 token，m_axi 与 m_axil/m_axis 不误合并', () => {
+    const ports = [
+        { name: 'm_axi_araddr', width: 32, direction: 'output' },
+        { name: 'm_axi_rdata', width: 64, direction: 'input' },
+        { name: 'm_axil_awaddr', width: 32, direction: 'output' },
+        { name: 'm_axis_tdata', width: 32, direction: 'output' }
+    ];
+    const bundles = bundlePorts(ports);
+    assert.deepEqual(bundles.map(bundle => [bundle.name, bundle.members.length, bundle.bits]), [
+        ['m_axi', 2, 96], ['m_axil_awaddr', 1, 32], ['m_axis_tdata', 1, 32]
+    ]);
+    assert.deepEqual(bundles.find(bundle => bundle.name === 'm_axil_awaddr').members.map(member => member.name), ['m_axil_awaddr']);
+    assert.equal(bundles.reduce((total, bundle) => total + bundle.members.length, 0), ports.length);
+    const merged = bundlePorts([
+        { name: 'm_axi_araddr', width: 32, direction: 'output' },
+        { name: 'm_axi_rdata', width: 64, direction: 'input' }
+    ]);
+    assert.deepEqual(merged.map(bundle => [bundle.name, bundle.members.length]), [['m_axi', 2]]);
+});

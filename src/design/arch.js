@@ -52,6 +52,24 @@ function flagSet(value) {
     return value === true || value === 1 || (typeof value === 'string' && /^0*1$/.test(value.trim()));
 }
 
+/**
+ * 判定模块是否为空骨架：Yosys blackbox 属性，或结构上无 cells/processes/memories。
+ * packed struct 端口会让空模块产生 netnames，Yosys 不再写 blackbox 属性，需要结构兜底。
+ * @param {object|null} module 目标模块。 @returns {{empty:boolean, source:'yosys'|'structure'|null}} 判定结果。
+ */
+function blackboxInfo(module) {
+    if (!module) {
+        return { empty: false, source: null };
+    }
+    if (flagSet(module.attributes && module.attributes.blackbox)) {
+        return { empty: true, source: 'yosys' };
+    }
+    const cells = Array.isArray(module.cells) ? module.cells.length : 0;
+    const processes = module.processes && typeof module.processes === 'object' ? Object.keys(module.processes).length : 0;
+    const memories = module.memories && typeof module.memories === 'object' ? Object.keys(module.memories).length : 0;
+    return { empty: cells === 0 && processes === 0 && memories === 0, source: cells === 0 && processes === 0 && memories === 0 ? 'structure' : null };
+}
+
 /** @param {*} value @returns {number|string|boolean|null} Yosys 32 位二进制参数值转十进制，其余原样保留。 */
 function decodeParameter(value) {
     if (typeof value === 'string' && /^[01]+$/.test(value) && value.length <= 52) {
@@ -208,6 +226,7 @@ function buildInstanceNodes(module, design, limits) {
     return cells.map(cell => {
         const target = cell.moduleId ? findModule(design, cell.moduleId) : null;
         const moduleType = instanceModuleLabel(cell);
+        const blackbox = blackboxInfo(target);
         const ports = (target ? target.ports : []).map(port => {
             const connection = cell.ports.find(item => item.name === port.name);
             const width = connection && connection.bits.length ? connection.bits.length : port.bits.length;
@@ -216,7 +235,7 @@ function buildInstanceNodes(module, design, limits) {
         return {
             id: 'instance:' + cell.name, kind: 'instance', label: cell.name + ' (' + moduleType + ')',
             name: cell.name, module: moduleType, moduleId: target ? target.id : null,
-            implementation: target && flagSet(target.attributes && target.attributes.blackbox) ? 'blackbox' : 'collapsed',
+            implementation: blackbox.source ? 'blackbox' : 'collapsed', empty: blackbox.empty, blackboxSource: blackbox.source,
             status: target ? 'resolved' : 'unresolved', ports,
             width: Math.max(150, (cell.name + ' (' + moduleType + ')').length * 7 + 44),
             height: Math.max(62, ports.length * 22 + 32)
@@ -644,10 +663,11 @@ function projectArchitecture(design, { workspace, depth = 1, budget = {} }) {
             const source = relativeSource(port.source, workspace);
             return { name: port.name, direction: port.direction, width: port.bits.length, ...(source ? { source } : {}) };
         });
+        const blackbox = blackboxInfo(reference);
         return {
             id: reference.id, name: moduleLabel(reference),
             file: reference.source ? relativePosix(workspace, reference.source.path) : null,
-            blackbox: flagSet(reference.attributes && reference.attributes.blackbox),
+            blackbox: blackbox.source !== null, empty: blackbox.empty, blackboxSource: blackbox.source,
             parameters: decodeParameters(reference.parameters),
             ports, bundles: bundlePorts(ports)
         };
@@ -656,7 +676,8 @@ function projectArchitecture(design, { workspace, depth = 1, budget = {} }) {
         const cell = module.cells.find(item => item.name === node.name);
         const source = relativeSource(cell && cell.source, workspace);
         return { name: node.name, module: node.module, moduleId: node.moduleId, implementation: node.implementation,
-            status: node.status, nodeId: node.id, ports: node.ports, bundles: bundlePorts(node.ports), ...(source ? { source } : {}) };
+            empty: node.empty, blackboxSource: node.blackboxSource, status: node.status, nodeId: node.id,
+            ports: node.ports, bundles: bundlePorts(node.ports), ...(source ? { source } : {}) };
     });
     const limitations = [
         '架构图是源级结构事实：未综合、未做时序或功能验证，不得作为综合/时序证据。',

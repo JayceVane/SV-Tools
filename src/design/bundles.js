@@ -49,9 +49,25 @@ function bundle(ports, prefix, names) {
     };
 }
 
+/** @param {string[]} names 端口名。 @returns {string|null} 在 '_' 边界结束的公共前缀；边界不齐时返回 null。 */
+function boundaryPrefix(names) {
+    if (names.length < 2) {
+        return null;
+    }
+    const raw = commonPrefix(names);
+    if (!raw) {
+        return null;
+    }
+    const atBoundary = raw.endsWith('_') || names.every(name => name.charAt(raw.length) === '_');
+    return atBoundary ? raw.replace(/_+$/, '') : null;
+}
+
 /** @param {string[]} names @param {string} key 桶键。 @returns {string|null} 满足整个桶折叠条件时的前缀，否则 null。 */
 function foldablePrefix(names, key) {
-    const prefix = commonPrefix(names).replace(/_+$/, '');
+    const prefix = boundaryPrefix(names);
+    if (!prefix) {
+        return null;
+    }
     return prefix.length > key.length || (prefix.length === key.length && key.length >= 2) ? prefix : null;
 }
 
@@ -76,8 +92,8 @@ function bundleBucket(ports, key, names) {
             result.push(singleton(group[0]));
             continue;
         }
-        const subPrefix = commonPrefix(group.map(port => port.name)).replace(/_+$/, '');
-        if (subPrefix.length > key.length) {
+        const subPrefix = boundaryPrefix(group.map(port => port.name));
+        if (subPrefix && subPrefix.length > key.length) {
             result.push(bundle(group, subPrefix, names));
         } else {
             result.push(...group.map(singleton));
