@@ -174,7 +174,8 @@ async function readSpec(workspace, value) {
         return { text: await fs.readFile(candidate, 'utf8'), source: candidate };
     } catch (error) {
         if (error.code !== 'ENOENT') fail('INVALID_ARGUMENT', 'design scaffold 规格读取失败：' + error.message);
-        return { text: value, source: null };
+        // 路径不存在时直接说明，不回退把路径当 JSON 解析而报"不是合法 JSON"误导排障方向。
+        fail('INVALID_ARGUMENT', 'design scaffold 规格文件不存在：' + candidate + '；内联 JSON 规格需以 { 开头');
     }
 }
 /** 按 schemaVersion=1 规格生成架构骨架（packed struct 接口 + 空模块 + 顶层连线）。 */
@@ -273,13 +274,30 @@ async function render(input) {
     const layoutResult = await layoutArchitecture(arch, { bundle, bundleNames });
     const image = renderArchitectureSvg(arch, layoutResult, { title: typeof input.title === 'string' ? input.title : undefined, style });
     const outputDirectory = input.out ? path.resolve(options.workspace, input.out) : await directory(options.workspace,'design','render');
-    await fs.mkdir(outputDirectory,{recursive:true});
+    // 与 design scaffold 同一安全模型：拒绝越界 --out 与 symlink/junction 逃逸，失败清理本轮创建的目录。
+    let createdOut = [];
+    try {
+        createdOut = (await createContainedDirectories(outputDirectory, options.workspace)).created;
+    } catch (error) {
+        if (error instanceof ServiceError) throw error;
+        if (error.code === 'OUTSIDE_WORKSPACE') {
+            fail('INVALID_ARGUMENT', 'design render 的 --out 通过符号链接逃逸出工作区', { out: input.out || null });
+        }
+        if (error.code === 'OUT_NOT_DIRECTORY' || ['EEXIST', 'ENOTDIR', 'EISDIR', 'EINVAL'].includes(error.code)) {
+            fail('INVALID_ARGUMENT', 'design render 的 --out 必须是工作区内的目录：' + (input.out || '.svtools/agent/design/render'), { out: input.out || null });
+        }
+        if (error.code === 'EACCES' || error.code === 'EPERM') {
+            fail('DESIGN_FAILED', 'design render 没有输出目录写入权限：' + error.message, { out: input.out || null });
+        }
+        fail('DESIGN_FAILED', 'design render 创建输出目录失败：' + error.message, { out: input.out || null });
+    }
     const file = path.join(outputDirectory,defaultFileName(arch, style)), temporary = file + '.' + randomUUID() + '.tmp';
     try {
         await fs.writeFile(temporary,image.svg,{flag:'wx'});
         await fs.rename(temporary,file);
     } catch (error) {
         await fs.rm(temporary,{force:true});
+        await cleanupDirectories(createdOut, options.workspace);
         fail('DESIGN_FAILED','写入架构图失败：' + error.message,{file});
     }
     const artifact = { kind:'image', format:'svg', path:file, sha256:image.sha256, bytes:image.bytes, width:image.width, height:image.height };

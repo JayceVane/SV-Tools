@@ -105,6 +105,16 @@ test('design scaffold 支持以 { 开头的内联 JSON 规格', async t => {
     assert.equal(fs.existsSync(path.join(directory, 'rtl-inline', 'soc_top.sv')), true);
 });
 
+test('design scaffold 规格文件不存在时提示路径而不是 JSON 解析错误', async t => {
+    const directory = await workspace(t);
+    const response = await run(['design', 'scaffold', '--workspace', directory, '--spec', 'no/such/spec.json']);
+    assert.equal(response.exitCode, 2);
+    assert.equal(response.output.diagnostics[0].code, 'INVALID_ARGUMENT');
+    assert.match(response.output.diagnostics[0].message, /规格文件不存在/);
+    assert.match(response.output.diagnostics[0].message, /no.such.spec\.json/, '消息包含解析后的路径');
+    assert.equal(/不是合法 JSON/.test(response.output.diagnostics[0].message), false, '不得误导为 JSON 解析错误');
+});
+
 test('design scaffold 规格错误返回 INVALID_ARGUMENT 且不落盘', async t => {
     const directory = await workspace(t);
     const cases = [

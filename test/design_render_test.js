@@ -402,6 +402,61 @@ test('端口折叠 opt-in 门禁：默认端口事实、m_axi/m_valid 守卫、s
     assert.equal(invalidName.output.diagnostics[0].code, 'INVALID_ARGUMENT');
 });
 
+test('render --out 越界、绝对路径与普通文件目标返回 INVALID_ARGUMENT，不写工作区外', async t => {
+    const directory = await workspace(t, 'skeleton');
+    const escapeName = 'render-escape-' + process.pid;
+    await fsp.rm(path.join(path.dirname(directory), escapeName), { recursive: true, force: true });
+    const parentEscape = await run(['design', 'render', '--workspace', directory, '--top', 'fifo_top', '--out', '../' + escapeName]);
+    assert.equal(parentEscape.exitCode, 2);
+    assert.equal(parentEscape.output.diagnostics[0].code, 'INVALID_ARGUMENT');
+    assert.equal(fs.existsSync(path.join(path.dirname(directory), escapeName)), false, '不得在工作区外创建目录');
+    const outside = path.join(os.tmpdir(), 'svtools-render-outside-' + process.pid);
+    const absoluteOutside = await run(['design', 'render', '--workspace', directory, '--top', 'fifo_top', '--out', outside]);
+    assert.equal(absoluteOutside.exitCode, 2);
+    assert.equal(absoluteOutside.output.diagnostics[0].code, 'INVALID_ARGUMENT');
+    assert.equal(fs.existsSync(outside), false);
+    await fsp.writeFile(path.join(directory, 'blocked'), 'x');
+    const blocked = await run(['design', 'render', '--workspace', directory, '--top', 'fifo_top', '--out', 'blocked']);
+    assert.equal(blocked.exitCode, 2);
+    assert.equal(blocked.output.diagnostics[0].code, 'INVALID_ARGUMENT');
+    const okay = await run(['design', 'render', '--workspace', directory, '--top', 'fifo_top', '--out', 'out-safe']);
+    assert.equal(okay.exitCode, 0, JSON.stringify(okay.output.diagnostics));
+    assert.equal((await fsp.readdir(path.join(directory, 'out-safe'))).filter(name => name.endsWith('.svg')).length, 1);
+});
+
+/** @param {string} text @param {number} size @returns {number} 与实现一致的文本宽度估算。 */
+function estimatedTextWidth(text, size) {
+    return [...String(text)].reduce((total, char) => total + (/[^\x00-\x7f]/.test(char) ? size : size * 0.62), 0);
+}
+
+test('窄图图例按画布宽度换行，不超出 viewBox', async t => {
+    const directory = await workspace(t, 'unresolved');
+    const response = await run(['design', 'render', '--workspace', directory, '--top', 'ghost_top']);
+    assert.equal(response.exitCode, 0, JSON.stringify(response.output.diagnostics));
+    const data = response.output.data;
+    const svg = await fsp.readFile(data.path, 'utf8');
+    // 底部图例/说明文本（fill #333 的 muted 文本，含 11px 图例与 10px 说明）。
+    const legendTexts = [...svg.matchAll(/<text x="([\d.]+)" y="([\d.]+)" fill="#333333"[^>]*font-size="(10|11)"[^>]*>([^<]+)<\/text>/g)]
+        .map(match => ({ x: Number(match[1]), y: Number(match[2]), size: Number(match[3]), text: match[4] }))
+        .filter(item => item.y > data.height - 80);
+    assert.equal(legendTexts.length >= 4, true, '四项基础图例：' + JSON.stringify(legendTexts));
+    for (const item of legendTexts) {
+        const right = item.x + estimatedTextWidth(item.text, item.size);
+        assert.equal(right <= data.width, true, '图例超出画布：' + item.text + ' 右缘 ' + right.toFixed(1) + ' > ' + data.width);
+    }
+    const rows = new Set(legendTexts.filter(item => item.size === 11).map(item => item.y));
+    assert.equal(rows.size >= 2, true, '窄图应换行：' + JSON.stringify(legendTexts.map(item => [item.x, item.y])));
+
+    // --fold-ports 发生折叠时补一行说明文字；bundles 夹具较宽，验证说明单独成行且不超画布。
+    const foldedDirectory = await workspace(t, 'bundles');
+    const folded = await run(['design', 'render', '--workspace', foldedDirectory, '--top', 'bundle_top', '--fold-ports']);
+    assert.equal(folded.exitCode, 0, JSON.stringify(folded.output.diagnostics));
+    const foldedSvg = await fsp.readFile(folded.output.data.path, 'utf8');
+    const note = /<text x="([\d.]+)" y="([\d.]+)" fill="#333333"[^>]*font-size="10"[^>]*>(虚拟接口端口[^<]+)<\/text>/.exec(foldedSvg);
+    assert(note, '折叠说明文字保留');
+    assert.equal(Number(note[1]) + estimatedTextWidth(note[3], 10) <= folded.output.data.width, true, '说明文字超出画布');
+});
+
 test('演示项目：默认端口事实与 --fold-ports 规模检查', { skip: fs.existsSync(DEMO) ? false : '演示项目不存在' }, async () => {
     const files = readDirectory(path.join(DEMO, 'rtl'));
     const arch = await buildArchitecture({ workspace: DEMO, files, top: 'soc_top' });

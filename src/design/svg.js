@@ -28,6 +28,9 @@ const LAYOUT_OPTIONS = Object.freeze({
 const FONT_MONO = "Consolas, 'SFMono-Regular', 'Courier New', monospace";
 const FONT_UI = "-apple-system, 'Segoe UI', Roboto, sans-serif";
 const PADDING = 40, HEADER = 64, FOOTER = 52, PORT_PITCH = 17, HEADER_BAND = 54, GRID = 8;
+/** 基础图例项：[标签, 渲染类别]。颜色由主题在渲染时提供。 */
+const LEGEND_ITEMS = Object.freeze([['blackbox', 'dash'], ['collapsed', 'solid'], ['bus', 'bus'], ['boundary', 'boundary']]);
+const LEGEND_ROW_HEIGHT = 18;
 const THEMES = Object.freeze({
     document: Object.freeze({
         background: '#ffffff', panel: '#ffffff', cellBg: '#ffffff', border: '#111111', fg: '#111111', muted: '#333333',
@@ -450,6 +453,36 @@ function markerAttributes(edge) {
     return ' marker-end="url(#arrow)"' + (edge.bidirectional ? ' marker-start="url(#arrow)"' : '');
 }
 
+/** @param {string} label 图例标签。 @returns {number} 单项占宽（图形 26 + 文字偏移 33 + 标签 + 间距 32）。 */
+function legendItemSpan(label) {
+    return 26 + 33 + textWidth(label, 11) + 32;
+}
+
+/**
+ * 图例项与说明文字按画布宽度排布：放不下时换行（行高 18），全部定位先于渲染完成以保证确定性。
+ * @param {[string,string][]} items [标签, 渲染类别] 列表。 @param {string|null} note 尾注；null 表示无。
+ * @param {number} width 画布宽度。 @returns {{placements:{label:string,kind:string,x:number,y:number}[], rows:number}}
+ */
+function layoutLegend(items, note, width) {
+    const placements = [];
+    let row = 0, x = PADDING;
+    const place = (label, kind, span) => {
+        if (x > PADDING && x + span - 32 > width - PADDING) {
+            row += 1;
+            x = PADDING;
+        }
+        placements.push({ label, kind, x, y: row });
+        x += span;
+    };
+    for (const [label, kind] of items) {
+        place(label, kind, legendItemSpan(label));
+    }
+    if (note) {
+        place(note, 'note', textWidth(note, 10) + 32);
+    }
+    return { placements, rows: row + 1 };
+}
+
 /** @param {object[]} points 折线点。 @returns {{x:number,y:number,angle:number}|null} 标签锚点。 */
 function labelAnchor(points) {
     let best = null;
@@ -473,7 +506,10 @@ function renderArchitectureSvg(arch, layoutResult, { title, style } = {}) {
     const styleName = normalizeStyle(style), theme = THEMES[styleName];
     const { layout, projection } = layoutResult;
     const width = Math.ceil(layout.width + PADDING * 2);
-    const height = Math.ceil(HEADER + layout.height + FOOTER);
+    // 图例按画布宽度先布局再渲染：窄图换行、高度按行数扩展，避免固定间距把图例推出 viewBox 被裁剪。
+    const legendPlacements = layoutLegend(projection.stats.bundles ? LEGEND_ITEMS.concat([['virtual bundle', 'bundle']]) : LEGEND_ITEMS,
+        projection.stats.bundles ? '虚拟接口端口为前缀折叠展示，未改变 RTL 端口事实；inout 仅为架构示意' : null, width);
+    const height = Math.ceil(HEADER + layout.height + FOOTER + (legendPlacements.rows - 1) * 18);
     const heading = title || (((arch.top && arch.top.name) ? arch.top.name : 'architecture') + ' 架构图');
     const revision = arch.contextRevision ? String(arch.contextRevision).slice(0, 12) : 'unknown';
     const subtitle = 'top ' + (arch.top ? arch.top.name : '?') + ' · context ' + revision + ' · nodes ' + projection.stats.nodes
@@ -542,37 +578,32 @@ function renderArchitectureSvg(arch, layoutResult, { title, style } = {}) {
         }
     }
     parts.push('</g>');
-    const legendY = HEADER + layout.height + 26;
-    const legends = [
-        ['blackbox', theme.blackbox, 'dash'], ['collapsed', theme.collapsed, 'solid'],
-        ['bus', theme.wire, 'bus'], ['boundary', theme.border, 'boundary']
-    ];
-    if (projection.stats.bundles) {
-        legends.push(['virtual bundle', theme.wire, 'bundle']);
-    }
-    let legendX = PADDING;
-    for (const [label, color, kind] of legends) {
-        if (kind === 'bus') {
+    // 图例渲染：坐标来自 layoutLegend（行号 × 18 偏移），窄图自动换行不再裁剪。
+    const legendY0 = HEADER + layout.height + 26;
+    const legendColors = { dash: theme.blackbox, solid: theme.collapsed, bus: theme.wire, boundary: theme.border, bundle: theme.wire, note: theme.muted };
+    for (const item of legendPlacements.placements) {
+        const legendX = item.x, legendY = legendY0 + item.y * LEGEND_ROW_HEIGHT, color = legendColors[item.kind];
+        if (item.kind === 'note') {
+            parts.push('<text x="' + legendX + '" y="' + (legendY + 4) + '" fill="' + theme.muted + '" font-family="' + FONT_UI
+                + '" font-size="10">' + escape(item.label) + '</text>');
+            continue;
+        }
+        if (item.kind === 'bus') {
             parts.push('<line x1="' + legendX + '" y1="' + legendY + '" x2="' + (legendX + 26) + '" y2="' + legendY + '" stroke="' + color + '" stroke-width="' + theme.busWidth + '"/>');
             parts.push('<line x1="' + (legendX + 13) + '" y1="' + (legendY - 4) + '" x2="' + (legendX + 17) + '" y2="' + (legendY + 4) + '" stroke="' + color + '" stroke-width="1.5"/>');
-        } else if (kind === 'boundary') {
+        } else if (item.kind === 'boundary') {
             parts.push('<rect x="' + legendX + '" y="' + (legendY - 7) + '" width="26" height="14" rx="2" fill="' + theme.panel + '" stroke="' + theme.border + '"/>');
             parts.push('<rect x="' + legendX + '" y="' + (legendY - 7) + '" width="3" height="14" fill="' + color + '"/>');
-        } else if (kind === 'bundle') {
+        } else if (item.kind === 'bundle') {
             parts.push('<polygon points="' + (legendX + 13) + ',' + (legendY - 8) + ' ' + (legendX + 22) + ',' + legendY + ' '
                 + (legendX + 13) + ',' + (legendY + 8) + ' ' + (legendX + 4) + ',' + legendY + '" fill="' + theme.cellBg + '" stroke="' + color
                 + '" stroke-width="' + theme.strokeWidth + '"/>');
         } else {
             parts.push('<rect x="' + legendX + '" y="' + (legendY - 7) + '" width="26" height="14" rx="2" fill="' + theme.cellBg + '" stroke="' + color
-                + '" stroke-width="' + theme.strokeWidth + '"' + (kind === 'dash' ? ' stroke-dasharray="' + theme.blackboxDash + '"' : '') + '/>');
+                + '" stroke-width="' + theme.strokeWidth + '"' + (item.kind === 'dash' ? ' stroke-dasharray="' + theme.blackboxDash + '"' : '') + '/>');
         }
         parts.push('<text x="' + (legendX + 33) + '" y="' + (legendY + 4) + '" fill="' + theme.muted + '" font-family="' + FONT_UI
-            + '" font-size="11">' + label + '</text>');
-        legendX += 128;
-    }
-    if (projection.stats.bundles) {
-        parts.push('<text x="' + legendX + '" y="' + (legendY + 4) + '" fill="' + theme.muted + '" font-family="' + FONT_UI
-            + '" font-size="10">虚拟接口端口为前缀折叠展示，未改变 RTL 端口事实；inout 仅为架构示意</text>');
+            + '" font-size="11">' + escape(item.label) + '</text>');
     }
     const body = parts.join('');
     const svg = svgDocument({ width, height, title: heading, detail: subtitle, body, background: theme.background });
