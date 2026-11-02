@@ -20,8 +20,10 @@ const { layoutArchitecture, renderArchitectureSvg, defaultFileName, normalizeSty
 const { validateSpec, generateScaffold } = require('../design/scaffold');
 const { createContainedDirectories, cleanupDirectories } = require('../design/scaffold-paths');
 const { diffArchitectures } = require('../design/diff');
+const { rasterizeSvg, DEFAULT_SCALE } = require('../graphics/rasterize');
+const { generateReportMarkdown } = require('../design/report');
 
-const capabilities = ['doctor','project.list','project.inspect','project.create','project.add','project.set-top','format.preview','format.check','format.write','lint','vivado.status','vivado.report','vivado.run','task.start','task.list','task.status','task.logs','task.cancel','design.arch','design.scaffold','design.render','design.check','design.diff'];
+const capabilities = ['doctor','project.list','project.inspect','project.create','project.add','project.set-top','format.preview','format.check','format.write','lint','vivado.status','vivado.report','vivado.run','task.start','task.list','task.status','task.logs','task.cancel','design.arch','design.scaffold','design.render','design.check','design.diff','design.report'];
 async function locateIverilog(options) {
     const executable = process.platform === 'win32' ? 'iverilog.exe' : 'iverilog';
     const configured = options.iverilog ? path.resolve(options.workspace,options.iverilog) : null;
@@ -303,12 +305,11 @@ async function scaffold(input) {
         source: source.source ? path.relative(workspace, source.source).split(path.sep).join('/') : null
     }, null, [], [{ kind: 'source', path: file }]);
 }
-/** 渲染纯Node SVG架构图；PNG需要宿主栅格化，当前明确拒绝。 */
+/** 渲染 SVG/PNG 架构图；PNG 用内置 resvg 无宿主栅格化同一份 SVG。 */
 async function render(input) {
     if (!input.top) fail('INVALID_ARGUMENT','design render需要--top');
-    const format = input.format || 'svg';
-    if (format === 'png') fail('EXPORT_UNSUPPORTED','PNG需要栅格化宿主，M3当前只交付SVG；请使用--format svg',{format:'png'});
-    if (format !== 'svg') fail('INVALID_ARGUMENT','不支持的--format：' + format);
+    const format = input.imageFormat || 'svg';
+    if (!['svg', 'png'].includes(format)) fail('INVALID_ARGUMENT','不支持的--format：' + format + '（可选 svg|png）');
     const style = normalizeStyle(input.style);
     const detail = input.detail || 'interfaces';
     if (!['interfaces','signals'].includes(detail)) fail('INVALID_ARGUMENT','--detail需要 interfaces|signals');
@@ -343,18 +344,101 @@ async function render(input) {
         }
         fail('DESIGN_FAILED', 'design render 创建输出目录失败：' + error.message, { out: input.out || null });
     }
-    const file = path.join(outputDirectory,defaultFileName(arch, style, { bundle, bundleNames, title: input.title,detail })), temporary = file + '.' + randomUUID() + '.tmp';
+    const file = path.join(outputDirectory,defaultFileName(arch, style, { bundle, bundleNames, title: input.title,detail })
+        .replace(/\.svg$/, format === 'png' ? '.png' : '.svg')), temporary = file + '.' + randomUUID() + '.tmp';
+    // PNG 用内置 resvg 栅格化同一份 SVG（无编辑器宿主），像素倍率 2 保证报告清晰度。
+    const rasterized = format === 'png' ? rasterizeSvg(image.svg, { scale: DEFAULT_SCALE }) : null;
     try {
-        await fs.writeFile(temporary,image.svg,{flag:'wx'});
+        await fs.writeFile(temporary, rasterized ? rasterized.png : image.svg, {flag:'wx'});
         await fs.rename(temporary,file);
     } catch (error) {
         await fs.rm(temporary,{force:true});
         await cleanupDirectories(createdOut, options.workspace);
         fail('DESIGN_FAILED','写入架构图失败：' + error.message,{file});
     }
-    const artifact = { kind:'image', format:'svg', path:file, sha256:image.sha256, bytes:image.bytes, width:image.width, height:image.height };
-    return result('design.render',{ format:'svg', style, detail, bundled:bundle, bundleNames, path:file, sha256:image.sha256, bytes:image.bytes,
-        width:image.width, height:image.height, title: image.evidence.export.title, stats:image.stats, evidence:image.evidence },context,[],[artifact]);
+    const artifact = rasterized
+        ? { kind:'image', format:'png', path:file, sha256:hash(rasterized.png), bytes:rasterized.png.length,
+            width:rasterized.width, height:rasterized.height, sourceSha256:image.sha256, scale:rasterized.scale }
+        : { kind:'image', format:'svg', path:file, sha256:image.sha256, bytes:image.bytes, width:image.width, height:image.height };
+    return result('design.render',{ format, style, detail, bundled:bundle, bundleNames, path:file, sha256:artifact.sha256, bytes:artifact.bytes,
+        width:artifact.width, height:artifact.height, ...(rasterized ? { scale:rasterized.scale, sourceSha256:image.sha256 } : {}),
+        title: image.evidence.export.title, stats:image.stats, evidence:image.evidence },context,[],[artifact]);
+}
+/** 报告图表包：同一架构一次导出 SVG+PNG+architecture.json/md+report.json（C 节证据包）。 */
+async function report(input) {
+    if (!input.top) fail('INVALID_ARGUMENT','design report需要--top');
+    const style = normalizeStyle(input.style);
+    const detail = input.detail || 'interfaces';
+    if (!['interfaces','signals'].includes(detail)) fail('INVALID_ARGUMENT','--detail需要 interfaces|signals');
+    const bundle = input.foldPorts === true;
+    const bundleNames = parseBundleNames(Array.isArray(input.bundleNames) ? input.bundleNames : []);
+    if (!bundle && Object.keys(bundleNames).length) {
+        fail('INVALID_ARGUMENT','--bundle-name 需要与 --fold-ports 同时使用');
+    }
+    const resolved = await resolveContext(input);
+    const { options, context, contents } = resolved;
+    const files = [...contents].map(([file, value]) => ({ path: file, text: value.text }));
+    const arch = await buildArchitecture({ workspace: options.workspace, files, top: input.top, includeDirs: context.includeDirs,
+        defines: context.defines, depth: input.depth ?? 1, timeoutMs: options.timeoutMs, contextRevision: context.revision });
+    const layoutResult = await layoutArchitecture(arch, { bundle, bundleNames, detail });
+    const title = typeof input.title === 'string' ? input.title : (input.top + ' 架构报告');
+    const image = renderArchitectureSvg(arch, layoutResult, { title, style });
+    await assertCurrent(resolved);
+    const rasterized = rasterizeSvg(image.svg, { scale: DEFAULT_SCALE });
+    const outputDirectory = input.out ? path.resolve(options.workspace, input.out) : await directory(options.workspace,'design','report');
+    let createdOut = [];
+    try {
+        createdOut = (await createContainedDirectories(outputDirectory, options.workspace)).created;
+    } catch (error) {
+        if (error instanceof ServiceError) throw error;
+        if (error.code === 'OUTSIDE_WORKSPACE') {
+            fail('INVALID_ARGUMENT', 'design report 的 --out 通过符号链接逃逸出工作区', { out: input.out || null });
+        }
+        if (error.code === 'OUT_NOT_DIRECTORY' || ['EEXIST', 'ENOTDIR', 'EISDIR', 'EINVAL'].includes(error.code)) {
+            fail('INVALID_ARGUMENT', 'design report 的 --out 必须是工作区内的目录：' + (input.out || '.svtools/agent/design/report'), { out: input.out || null });
+        }
+        fail('DESIGN_FAILED', 'design report 创建输出目录失败：' + error.message, { out: input.out || null });
+    }
+    const base = defaultFileName(arch, style, { bundle, bundleNames, title: input.title, detail }).replace(/\.svg$/, '');
+    const entries = [
+        { kind: 'image', name: base + '.svg', bytes: Buffer.from(image.svg, 'utf8') },
+        { kind: 'image', name: base + '.png', bytes: rasterized.png },
+        { kind: 'source', name: 'architecture.json', bytes: Buffer.from(JSON.stringify(arch, null, 2) + '\n', 'utf8') }
+    ];
+    const shaOf = entry => ({ ...entry, sha256: hash(entry.bytes) });
+    const imageEntries = entries.map(shaOf);
+    const svgEntry = imageEntries[0], pngEntry = imageEntries[1];
+    const markdown = generateReportMarkdown(arch, { svgFile: svgEntry.name, pngFile: pngEntry.name,
+        pngSha256: pngEntry.sha256, scale: rasterized.scale, svgSha256: image.sha256 });
+    const outputs = [...imageEntries,
+        { kind: 'document', name: 'architecture.md', bytes: Buffer.from(markdown, 'utf8') }].map(shaOf);
+    const manifest = { generatedBy: 'svtools design report', top: input.top, style, detail, bundled: bundle, bundleNames,
+        scale: rasterized.scale, files: outputs.map(item => ({ kind: item.kind, path: item.name, sha256: item.sha256, bytes: item.bytes.length })),
+        evidence: image.evidence, checksSummary: { total: (arch.checks || []).length,
+            errors: (arch.checks || []).filter(item => item.severity === 'error').length,
+            warnings: (arch.checks || []).filter(item => item.severity === 'warning').length } };
+    outputs.push(shaOf({ kind: 'manifest', name: 'report.json', bytes: Buffer.from(JSON.stringify(manifest, null, 2) + '\n', 'utf8') }));
+    const written = [];
+    try {
+        for (const item of outputs) {
+            const file = path.join(outputDirectory, item.name), temporary = file + '.' + randomUUID() + '.tmp';
+            await fs.writeFile(temporary, item.bytes, { flag: 'wx' });
+            await fs.rename(temporary, file);
+            written.push({ kind: item.kind, format: item.name.endsWith('.svg') ? 'svg' : item.name.endsWith('.png') ? 'png' : null,
+                path: file, sha256: item.sha256, bytes: item.bytes.length,
+                ...(item.name.endsWith('.png') ? { width: rasterized.width, height: rasterized.height, scale: rasterized.scale, sourceSha256: image.sha256 } : {}) });
+        }
+    } catch (error) {
+        await cleanupDirectories(createdOut, options.workspace);
+        fail('DESIGN_FAILED', 'design report 写入产物失败：' + error.message, { out: input.out || null });
+    }
+    const errors = (arch.checks || []).filter(item => item.severity === 'error').length;
+    const response = result('design.report', { style, detail, bundled: bundle, bundleNames, out: outputDirectory, top: arch.top,
+        designId: arch.designId, archSha256: arch.archSha256, checksSummary: manifest.checksSummary,
+        files: written.map(item => ({ ...item, path: path.relative(options.workspace, item.path).split(path.sep).join('/') })),
+        evidence: { ...image.evidence, png: { sha256: pngEntry.sha256, scale: rasterized.scale,
+            width: rasterized.width, height: rasterized.height, sourceSha256: image.sha256 } } }, context, [], written);
+    return response;
 }
 async function lint(input, {signal,onContext,onArtifacts} = {}) {
     const resolved = await resolveContext(input), {context,options} = resolved;
@@ -400,4 +484,4 @@ async function lint(input, {signal,onContext,onArtifacts} = {}) {
     }
     return response;
 }
-module.exports={doctor,projects,inspect,format,arch,scaffold,render,check,diff,lint,capabilities};
+module.exports={doctor,projects,inspect,format,arch,scaffold,render,check,diff,report,lint,capabilities};

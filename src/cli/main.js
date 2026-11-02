@@ -23,6 +23,7 @@ const help=`SV Tools headless CLI (API 1)
                 [--detail interfaces|signals] [--fold-ports] [--bundle-name <prefix=display>] (repeatable)
   design check --top <module>
   design diff --top <module> --baseline <save-name|snapshot-file>
+  design report --top <module> [--out <dir>] [--style document|presentation] [--title <t>] (SVG+PNG+json+md bundle)
   task start lint [lint options]
   task list|status|logs|cancel [task-id]
 
@@ -54,6 +55,8 @@ function argumentsFor(argv) {
     if(input.include) {input.includeDirs=input.include;delete input.include;}
     if(input.define) {input.defines=input.define;delete input.define;}
     if(input['fold-ports']!==undefined) {input.foldPorts=input['fold-ports'];delete input['fold-ports'];}
+    // --format 是导出图像格式；配置层的 format（格式化选项对象）是另一个命名空间，进服务前改名避免冲突。
+    if(input.format!==undefined) {input.imageFormat=input.format;delete input.format;}
     if(input['bundle-name']!==undefined) {input.bundleNames=input['bundle-name'];delete input['bundle-name'];}
     return {input,positionals:parsed.positionals};
 }
@@ -81,6 +84,7 @@ async function run(argv) {
         else if(command==='design' && action==='render' && !id) output=await services.render(input);
         else if(command==='design' && action==='check' && !id) output=await services.check(input);
         else if(command==='design' && action==='diff' && !id) output=await services.diff(input);
+        else if(command==='design' && action==='report' && !id) output=await services.report(input);
         else if(command==='lint' && !action) {
             const controller=new AbortController(), cancel=()=>controller.abort();
             process.once('SIGINT',cancel);process.once('SIGTERM',cancel);

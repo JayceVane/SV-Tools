@@ -241,13 +241,21 @@ test('纯 alias/常量 assign 渲染为实线盒，真正空模块为虚线', as
     assert.equal(blockOf('instance:u_empty').includes('stroke-dasharray="6 4"'), true);
 });
 
-test('PNG 无栅格化宿主返回 EXPORT_UNSUPPORTED 且不落盘', async t => {
+test('render --format png 走内置 resvg 栅格化，非法格式拒绝', async t => {
     const directory = await workspace(t, 'skeleton');
     const response = await run(['design', 'render', '--workspace', directory, '--top', 'fifo_top', '--format', 'png', '--out', 'png-out']);
-    assert.equal(response.exitCode, 2);
-    assert.equal(response.output.diagnostics[0].code, 'EXPORT_UNSUPPORTED');
-    assert.equal(fs.existsSync(path.join(directory, 'png-out')), false);
-    assert.deepEqual((await fsp.readdir(directory)).filter(name => name.endsWith('.svg') || name.endsWith('.png')), []);
+    assert.equal(response.exitCode, 0, JSON.stringify(response.output.diagnostics));
+    assert.equal(response.output.data.format, 'png');
+    assert.equal(response.output.data.scale, 2, '默认 2x 栅格化');
+    assert.equal(response.output.data.width, response.output.data.evidence.export.width * 2);
+    const artifact = response.output.artifacts[0];
+    const png = await fsp.readFile(artifact.path);
+    assert.equal(png.slice(1, 4).toString(), 'PNG');
+    assert.equal(png.readUInt32BE(16), response.output.data.width, 'PNG 头尺寸与返回一致');
+    const invalid = await run(['design', 'render', '--workspace', directory, '--top', 'fifo_top', '--format', 'gif', '--out', 'png-out']);
+    assert.equal(invalid.exitCode, 2);
+    assert.equal(invalid.output.diagnostics[0].code, 'INVALID_ARGUMENT');
+    assert.equal(invalid.output.diagnostics[0].message.includes('gif'), true);
 });
 
 test('渲染预算超限返回 DESIGN_LIMIT', async t => {

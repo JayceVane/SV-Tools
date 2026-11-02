@@ -25,7 +25,7 @@ function assertPublicPaths(files) {
         const allowed = VSIX_FILES.has(normalized) || ROOT_FILES.has(normalized) || SOURCE_PATH.test(normalized)
             || /^src\/(?:configuration|extension|native-loader)\.js$/.test(normalized)
             || /^(?:syntaxes|templates)\//.test(normalized)
-            || /^bin\/(?:[^/]+\.node|vendor\/(?:elk\.bundled\.js|elk-license\.md|yosys\/.+))$/.test(normalized);
+            || /^bin\/(?:[^/]+\.node|vendor\/(?:elk\.bundled\.js|elk-license\.md|resvg-license\.txt|yosys\/.+))$/.test(normalized);
         if (!allowed) throw new Error('公开包文件不在发行范围内：' + file);
     }
 }

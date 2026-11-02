@@ -149,7 +149,7 @@ IP/BD 与分层 XDC 支持推迟到 4.3 开发计划，不在 4.2 阻塞项内�
 
 这些条目是4.2计划，不表示4.1已经具备全部无界面接口；FSDB维持此前取消的决定。
 
-M3 评审记录（2026-11-02）：空模块、packed struct 骨架与 SVG 已有实现，本轮补充了精确端口映射、隔离源码快照、生成规格校验、接口边界表及标签布局；随后交付 `design check`（逐端口结构诊断：悬空/无驱动/多驱动/隐式位宽补常量/缺失模块，常量驱动不产生假诊断）与 `design diff`（快照对比：实例/模块/顶层端口/接口增删改，空骨架补实现单列 `implemented[]`）。M3 剩余：完整报告图表包与无宿主 PNG 待交付；当前前端仅支持 Yosys `read_verilog -sv` 的语言子集且只投影顶层实例，位宽截断（宽 wire 连窄端口）在展开后不可见。缺陷机制与回归见 [M3 架构端点与输入身份](bugs/m3-architecture-evidence.md)。
+M3 评审记录（2026-11-02）：空模块、packed struct 骨架与 SVG 已有实现，本轮补充了精确端口映射、隔离源码快照、生成规格校验、接口边界表及标签布局；随后交付 `design check`（逐端口结构诊断：悬空/无驱动/多驱动/隐式位宽补常量/缺失模块，常量驱动不产生假诊断）、`design diff`（快照对比：实例/模块/顶层端口/接口增删改，空骨架补实现单列 `implemented[]`）、无宿主 PNG（内置 resvg 2x 栅格化，随 VSIX 发布 `bin/resvg.*.node`）与 `design report` 报告证据包（SVG+PNG+architecture.json/md+report.json，清单含逐产物哈希）。已知边界：前端仅支持 Yosys `read_verilog -sv` 的语言子集且只投影顶层实例，位宽截断（宽 wire 连窄端口）在展开后不可见，PNG 中文依赖系统字体。缺陷机制与回归见 [M3 架构端点与输入身份](bugs/m3-architecture-evidence.md)。
 
 ## 技术依据
 
