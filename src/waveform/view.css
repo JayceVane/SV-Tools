@@ -121,7 +121,7 @@ footer { display: flex; gap: 14px; align-items: center; padding: 6px 12px; borde
 .waveDialogOverlay { position: fixed; inset: 0; z-index: 20; background: #0005; display: flex; align-items: center; justify-content: center; padding: 16px; }
 .waveGroupDialog { width: 360px; max-width: 100%; padding: 20px; background: var(--panel); border: 1px solid var(--border); border-radius: 9px; box-shadow: 0 14px 40px #0005; }
 .waveGroupDialog h2 { margin: 0 0 10px; font-size: 15px; font-weight: 600; }.waveGroupDialog p { color: var(--dim); line-height: 1.6; margin: 0 0 12px; }
-.waveGroupDialog label { display: block; margin-bottom: 6px; }.waveGroupDialog input { width: 100%; }
+.waveGroupDialog label { display: block; margin-bottom: 6px; }.waveGroupDialog input { width: 100%; margin-bottom: 8px; }
 .waveGroupDialog .dialogError { min-height: 18px; margin: 5px 0 10px; color: var(--x); font-size: 11px; }.dialogActions { display: flex; justify-content: flex-end; gap: 8px; }
 /* 存储器以有界页显示；缩小波形区时仍保留时间轴和共享游标。 */
 #memoryPanel { flex: 0 1 375px; min-height: 180px; display: flex; flex-direction: column; border-top: 1px solid var(--border); background: var(--panel); }

@@ -43,14 +43,15 @@ function createWaveCatalog(metadata) {
         let signal = byKey.get(key), parent = signal;
         if (!signal) {
             let tuple; try { tuple = JSON.parse(key); } catch { throw new Error('波形行已不存在'); }
-            parent = Array.isArray(tuple) && tuple[0] === '$bit' && byKey.get(tuple[1]);
+            parent = Array.isArray(tuple) && ['$bit', '$slice'].includes(tuple[0]) && byKey.get(tuple[1]);
             if (!parent) throw new Error('波形行已不存在');
             const temporary = new Map([[parent.key, parent]]); D.restoreBits([key], temporary, D.MAX_TRACKS); signal = temporary.get(key);
         }
         if (!signal) throw new Error('波形位选择无效');
         const declaration = waveDeclaration(parent);
-        if (!Number.isInteger(signal.bitOffset) && declaration.width > MAX_LINK_BITS) throw new Error('整条波形超过4096位，请选择逐位行再追踪');
-        const indices = Number.isInteger(signal.bitOffset) ? [signal.bitIndex] : Array.from({ length: declaration.width }, (_, i) => declaration.right + i * (declaration.left >= declaration.right ? 1 : -1));
+        if (signal.width > MAX_LINK_BITS) throw new Error('所选波形超过4096位，请拆分后再追踪');
+        const offset = signal.bitOffset ?? signal.sliceOffset ?? 0;
+        const indices = Array.from({ length: signal.width }, (_, i) => declaration.right + (offset + i) * (declaration.left >= declaration.right ? 1 : -1));
         return { signal, parent, declaration, indices, scope: parent.scopeId === null ? [] : paths[parent.scopeId] };
     }
     return { variables, byKey, paths, scopes, scopeKeys, byScopedName, select, secondsPerTick:metadata.secondsPerTick };

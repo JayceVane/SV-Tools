@@ -84,7 +84,7 @@ class VcdSession {
     changes(params) { return this.query('changes', params); }
     /** @param {{clock: string, edge?: 'rise'|'fall'|'both', ids: string[], from?: number, to: number, limit?: number}} params @returns {Promise<object>} 时钟沿采样。 */
     sample(params) { return this.query('sample', params); }
-    /** @param {{id: string, time: number, direction: 'next'|'previous'|1|-1, bitOffset?:number, continuation?:number}} params @returns {Promise<object>} */
+    /** @param {{id: string, time: number, direction: 'next'|'previous'|1|-1, bitOffset?:number, bitWidth?:number, continuation?:number}} params @returns {Promise<object>} */
     edge(params) { return this.query('edge', params); }
     /** @param {object} sourceContext 有界RTL清单。 @returns {Promise<object>} 只重算方向，不重新读取VCD或创建事件存储。 */
     roles(sourceContext) { return this.query('roles', sourceContext); }

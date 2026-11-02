@@ -10,6 +10,16 @@ Wiki源稿和界面图解位于`docs/wiki/`，维护方式见`docs/WIKI.md`。�
 
 下面保留手动发布参考，自动发布以本节和工作流为准。
 
+## 维护分支与热修复回灌
+
+维护发行（自 `4.1.2` 起，如 `4.1.x`）从 `release/<minor>-maintenance` 分支发布，正式 tag 打在合入该维护分支的合并提交上；已发布的 tag 不得移动、删除或重用。
+
+每个已发布的修复必须在同一发行窗口内经 PR 回灌 `master`。回灌判定按内容等价、不按提交哈希：`git diff --stat <tag> master -- <受影响文件>` 为空即视为已回灌。只在维护分支修复而 `master` 缺失的版本，视为发行闭环未完成。
+
+回灌不携带维护分支的版本号：`master` 的 6 个版本文件（`package.json`、`package-lock.json`、`src/native/Cargo.toml`、`src/native/Cargo.lock`、`src/native/package.json`、`src/native/package-lock.json`）保持上一个主干线发行版本。原因是 `.github/workflows/release.yml` 的 `TAG === "v"+package.json.version` 门禁会指向已被占用的版本，`vsce publish --skip-duplicate` 会让正式发行「成功但静默跳过」。同时 `master` 的 `CHANGELOG.md` 与 `docs/releases/<tag>.md` 必须同步维护发行的条目。
+
+回灌 PR 合入前，`master` 视为落后于最新发行版本，不得从 `master` 发起新发行。补发入口只适用于主干线版本（`tag == v + master` 的 `package.json` 版本）；维护线版本需在维护分支重跑 tag 触发构建，或另行授权。
+
 ---
 
 # VSCode 插件发布指南

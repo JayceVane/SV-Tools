@@ -248,6 +248,18 @@ test('派生bit实际绘制为单线，A/B提取父总线对应位，内部无�
     assert.equal(view.context.calls.filter(call=>call.op==='fillRect'&&call.fill===dark.bus&&call.alpha===.08).length,0);
 });
 
+test('切片绘图仅投影一次，段内标签与A/B原始总线读值一致，模拟量幅度也使用切片值', () => {
+    const view=fixture({signalWidth:8,changes:[{t:0,value:'10110000'},{t:50,value:'00100001'}]});
+    const slice=model.signalDisplay.splitSignals(view.signal,'pair',[4,4])[0]; view.row.signal=slice;view.row.key=slice.key;
+    view.state.valuesA['#']='10110000';view.state.valuesB['#']='00100001';view.state.cursorB=100;
+    view.draw();
+    assert.deepEqual(view.labels().map(call=>call.args[0]),['0xB','0x2']);
+    const values=view.context.calls.filter(call=>call.op==='fillText'&&call.args[1]===view.renderer.geometry().names-96);
+    assert.deepEqual(values.map(call=>call.args[0]),['0xB','0x2']);
+    view.state.formats[slice.key]='analog';view.draw();
+    assert.ok(view.context.calls.some(call=>call.op==='fillText'&&call.args[0]==='2 … 11'));
+});
+
 
 test('分层绘制中连续移动游标和更新读值不触碰静态波形，A/B仍在覆盖层可见', () => {
     const view = fixture({ layered:true }); view.draw();

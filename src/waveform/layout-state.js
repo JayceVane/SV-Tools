@@ -15,7 +15,8 @@
             const parent = signal.parentKey ? state.signals.get(signal.parentKey) : signal;
             if (!parent) return null;
             return { signal: { path: parent.path, range: parent.range || '', width: parent.width,
-                ...(Number.isInteger(signal.bitOffset) ? { bitOffset: signal.bitOffset } : {}) }, visible: chosen.has(key),
+                ...(Number.isInteger(signal.bitOffset) ? { bitOffset: signal.bitOffset } : {}),
+                ...(Number.isInteger(signal.sliceOffset) ? { sliceOffset: signal.sliceOffset, sliceWidth: signal.width } : {}) }, visible: chosen.has(key),
                 format: state.formats?.[key], group: state.groups?.[key], highlight: state.highlights?.[key], height: state.heights?.[key] };
         }).filter(Boolean);
         return { kind: 'svtools-wave-layout', version: 1, tracks, collapsedGroups: [...(state.collapsedGroups || [])],
@@ -32,6 +33,8 @@
             const s = track?.signal;
             if (!s || !boundedText(s.path) || !boundedText(s.range || '') || !Number.isSafeInteger(s.width) || s.width < 1
                 || s.bitOffset !== undefined && (!Number.isSafeInteger(s.bitOffset) || s.bitOffset < 0 || s.bitOffset >= s.width)
+                || s.sliceOffset !== undefined && (s.bitOffset !== undefined || !Number.isSafeInteger(s.sliceOffset) || s.sliceOffset < 0
+                    || !Number.isSafeInteger(s.sliceWidth) || s.sliceWidth < 2 || s.sliceOffset + s.sliceWidth > s.width)
                 || track.group !== undefined && (!boundedText(track.group) || track.group.length > 80)) throw new Error('波形布局的信号声明或分组无效');
         }
         if (layout.collapsedGroups !== undefined && (!Array.isArray(layout.collapsedGroups) || layout.collapsedGroups.length > D.MAX_TRACKS
@@ -53,8 +56,9 @@
             const ref = track.signal, candidates = declarations.get(identity(ref));
             if (candidates?.length !== 1) { state.missing.push(ref.path + (ref.range || '') + (ref.bitOffset === undefined ? '' : ' bit@' + ref.bitOffset)); continue; }
             let signal = candidates[0];
-            if (ref.bitOffset !== undefined) {
-                const key = JSON.stringify(['$bit', M.signalKey(signal), ref.bitOffset]);
+            if (ref.bitOffset !== undefined || ref.sliceOffset !== undefined) {
+                const key = JSON.stringify(ref.bitOffset !== undefined ? ['$bit', M.signalKey(signal), ref.bitOffset]
+                    : ['$slice', M.signalKey(signal), ref.sliceOffset, ref.sliceWidth]);
                 D.restoreBits([key], signals, D.MAX_TRACKS); signal = signals.get(key);
                 if (!signal || state.bitKeys.size >= D.MAX_TRACKS) { state.missing.push(ref.path + ' bit@' + ref.bitOffset); continue; }
                 state.bitKeys.add(key);
