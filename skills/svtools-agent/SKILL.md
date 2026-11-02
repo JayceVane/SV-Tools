@@ -7,7 +7,7 @@ description: 使用 SV Tools CLI 在无 IDE 环境中查询 RTL 工程与源码�
 
 将 `<svtools-root>` 替换为已构建的 SV Tools 目录，以 `node <svtools-root>/src/cli/main.js` 调用；已链接的 Node 包也提供 `svtools-agent`。CLI 的 `--workspace` 明确指向用户的 RTL 工作区，不能把工具安装目录当作被检查工程。
 
-先运行 `doctor --workspace <rtl-workspace>` 查看 `data.capabilities` 和实际工具可用性。缺依赖是未执行，不是零错误通过。当前 CLI 提供工程查询与写操作、格式化、Icarus 检查、后台任务与 Vivado 工程/运行/报告（M2）；架构建模（design arch）已提供，架构 SVG/PNG 导出已提供（document 默认黑白线稿 / presentation 可选，PNG 用内置 resvg 2x 栅格化）；报告证据包 `design report` 一次导出 SVG+PNG+json+md+清单；波形查询与 MCP 尚未实现，不要编造。IP/BD、外部 Tcl 钩子与动态 XDC 读取暂不支持，遇到 SNAPSHOT_UNSUPPORTED 按未支持处理并停止。
+先运行 `doctor --workspace <rtl-workspace>` 查看 `data.capabilities` 和实际工具可用性。缺依赖是未执行，不是零错误通过。当前 CLI 提供工程查询与写操作、格式化、Icarus 检查、后台任务与 Vivado 工程/运行/报告（M2）；架构建模（design arch）已提供，架构 SVG/PNG 导出已提供（document 默认黑白线稿 / presentation 可选，PNG 用内置 resvg 2x 栅格化）；报告证据包 `design report` 一次导出 SVG+PNG+json+md+清单；波形查询（wave 命令族：信号清单/时间点值/跳变/沿/时钟采样/A-B 差异/波形图导出）已提供；MCP 尚未实现，不要编造。IP/BD、外部 Tcl 钩子与动态 XDC 读取暂不支持，遇到 SNAPSHOT_UNSUPPORTED 按未支持处理并停止。
 
 用 `project list`、`project inspect` 确认工程、文件集、top 与文件摘要。歧义时使用返回候选补充 `--project`、`--fileset`、`--file`、`--top`；不要借用另一个工程或编辑器的活动 top。根据任务读取必要的分页，不必一次枚举全部源码。
 
@@ -20,6 +20,8 @@ Vivado 工程（M2）：`project create/add/set-top` 管理工程（创建幂等
 架构设计（M3，进行中）：新建骨架默认声明 **packed struct 虚拟端口**，一个逻辑接口一个端口、一条连接；整体 inout 可用于架构中的双向接口，成员内容和收发约定写入架构文档。不要为出图强制拆开请求/响应或展开完整协议引脚，不要把主/从角色等同于电气方向。分析已有 RTL 则保留其真实端口。执行架构设计或图表交付前，读取 [references/architecture.md](references/architecture.md)，其中包含生成规格、方向约束、时钟/复位处理、验收与当前限制。
 
 实际命令为 `design scaffold --spec <json|file>`、`design arch --top <module>` 和 `design render --top <module>`。SVG 默认采用接口级连线（--detail interfaces）：接口表外一条汇总线，方向缩写（`i`/`o`/`io`）在表内逐行标注；--detail signals 用于信号级排查。`--format png` 用内置 resvg 2x 栅格化（`sourceSha256` 关联源 SVG；中文依赖系统字体，文档首选 SVG）。默认黑白 document 风格；`--style presentation` 用于演示。`--fold-ports` 仅作可选的显示折叠，不能替代虚拟端口声明；`--bundle-name` 仅与折叠选项同时生效。输入快照及哈希绑定生成模型，源码变化后应重新运行。结构检查用 `design check --top <module>`：诊断逐条指认悬空 input（error）、无驱动网络（error）、多驱动（error）、缺失模块（error）与悬空 output、顶层无驱动输出、隐式位宽补常量（warning）；有 error 时退出码 1、`status=failed`，检查完成不等于结构干净，warning 也不得当作已验证。常量驱动不产生假诊断。架构比较用 `design arch --save <name>` 保存快照，改动后 `design diff --top <module> --baseline <name>` 报告实例/模块/端口/接口增删改与 `implemented[]`（空骨架补实现）；diff 只报告差异，好坏由设计判断。交付文档用 `design report --top <module> [--out <dir>]` 一次导出 SVG+PNG+`architecture.json`+`architecture.md`+`report.json`（清单含每份产物哈希；Markdown 检查表与 `checksSummary` 呈现结构结论，报告生成不等于结构合格）；引用产物时按清单哈希核对。任意深度层级展开尚未交付，不得编造调用或通过结论。
+
+波形调试（M4，进行中）：仿真失败后先用 `wave signals --file <vcd> [--query|--role]` 找到 DUT 与参考模型信号（方向标注要求唯一 RTL 匹配），再从失败日志/断言时刻用 `wave values --at <ticks|时间>` 取现场值。定位首个数据不一致用 `wave sample --clock <clk> --signals a,b --where "a != b"`（右值唯一命中信号名即为信号对信号比较；字面量支持 `0x/0b/8'hA5`，`contains-x/contains-z` 查未知态传播），返回命中时刻与双方值；`wave changes/edges` 枚举窗口跳变与沿（向量 rise/fall 需 `--bit`）。修复后重跑仿真，用 `wave diff --file broken.vcd --against fixed.vcd` 复验：`firstDiff` 是首个行为分叉点，差异计数应与注入缺陷的传播窗口一致；修复有效时同一 `--where` 条件命中数应为 0。取证交付用 `wave export --signals ... --from --to --at [--format png]`（document 黑白风格，A/B 游标标注错误窗口；`--out` 须在工作区内）。时间输出一律整数 tick 字符串；索引缓存按文件 size+mtime 失效，改文件后旧查询结果不得引用。失败日志自动解析取窗尚未实现，`--at` 时刻由调用者提供。执行波形调试前，读取 [references/waveform.md](references/waveform.md)。
 
 耗时操作可用 `task start lint`，保存返回的 UUID，再通过 `task status`、`task logs`、`task cancel` 管理。查询命令退出 0 只表示查询成功；检查 `data.result.status` 与 `data.sourceCurrent`。源码变化后重新验证，`CONTEXT_CHANGED`、`lost`、缺失结果或未知当前性都不能作为当前交付的通过证据。
 

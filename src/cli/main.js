@@ -32,6 +32,8 @@ const help=`SV Tools headless CLI (API 1)
   wave sample --file <vcd> --clock <c> [--clock-edge rise|fall|both] --signals <a,b> [--where <cond>]
               [--from <t>] [--to <t>] [--limit <n>]   (--where e.g. "dut.q != 8'hA5", "bus contains-x")
   wave diff --file <a.vcd> --against <b.vcd> [--signals <a,b>] [--from <t>] [--to <t>] [--limit <n>]
+  wave export --file <vcd> --signals <a,b> --out <dir> [--from <t>] [--to <t>] [--at <t>] [--at-b <t>]
+              [--format svg|png] [--title <t>] (document-style waveform image)
   task start lint [lint options]
   task list|status|logs|cancel [task-id]
 
@@ -46,7 +48,7 @@ Output:  JSON on stdout; --help and --version return text.
 Node.js >=22. The existing Rust formatter CLI remains available in bin/.
 `;
 function argumentsFor(argv) {
-    const strings=['workspace','config','project','fileset','file','top','iverilog','cygwin','vivado','standard','run','timeout','offset','limit','log-index','max-paths','jobs','name','dir','part','sim-top','target-fileset','depth','save','spec','format','out','title','style','detail','baseline','against','clock','query','scope','role','bit','at','from','to','signal','signals','min-width','max-width','clock-edge','kind'];
+    const strings=['workspace','config','project','fileset','file','top','iverilog','cygwin','vivado','standard','run','timeout','offset','limit','log-index','max-paths','jobs','name','dir','part','sim-top','target-fileset','depth','save','spec','format','out','title','style','detail','baseline','against','clock','query','scope','role','bit','at','at-b','from','to','signal','signals','min-width','max-width','clock-edge','kind'];
     const options=Object.fromEntries(strings.map(name=>[name,{type:'string'}]));
     for(const name of ['help','version','json','write','check','fold-ports','force']) options[name]={type:'boolean'};
     options.include={type:'string',multiple:true}; options.define={type:'string',multiple:true}; options.source={type:'string',multiple:true};
@@ -55,7 +57,7 @@ function argumentsFor(argv) {
     try { parsed=parseArgs({args:argv,options,allowPositionals:true,strict:true}); }
     catch(error) { fail('INVALID_ARGUMENT',error.message); }
     const input={...parsed.values};
-    for(const [from,to] of [['timeout','timeoutMs'],['log-index','logIndex'],['max-paths','maxPaths'],['sim-top','simTop'],['source','sources'],['target-fileset','filesetTarget'],['clock-edge','clockEdge'],['min-width','minWidth'],['max-width','maxWidth']]) if(input[from]!==undefined) {input[to]=input[from]; delete input[from];}
+    for(const [from,to] of [['timeout','timeoutMs'],['log-index','logIndex'],['max-paths','maxPaths'],['sim-top','simTop'],['source','sources'],['target-fileset','filesetTarget'],['clock-edge','clockEdge'],['min-width','minWidth'],['max-width','maxWidth'],['at-b','atB']]) if(input[from]!==undefined) {input[to]=input[from]; delete input[from];}
     for(const field of ['timeoutMs','offset','limit','logIndex','maxPaths','jobs','depth']) if(input[field]!==undefined) {
         if(!/^\d+$/.test(input[field]) || !Number.isSafeInteger(Number(input[field]))) fail('INVALID_ARGUMENT',field+'必须为非负整数');
         input[field]=Number(input[field]);
@@ -93,7 +95,7 @@ async function run(argv) {
         else if(command==='design' && action==='check' && !id) output=await services.check(input);
         else if(command==='design' && action==='diff' && !id) output=await services.diff(input);
         else if(command==='design' && action==='report' && !id) output=await services.report(input);
-        else if(command==='wave' && !id && ['signals','values','changes','edges','sample','diff'].includes(action)) output=await services[{signals:'waveSignals',values:'waveValues',changes:'waveChanges',edges:'waveEdges',sample:'waveSample',diff:'waveDiff'}[action]](input);
+        else if(command==='wave' && !id && ['signals','values','changes','edges','sample','diff','export'].includes(action)) output=await services[{signals:'waveSignals',values:'waveValues',changes:'waveChanges',edges:'waveEdges',sample:'waveSample',diff:'waveDiff',export:'waveExport'}[action]](input);
         else if(command==='lint' && !action) {
             const controller=new AbortController(), cancel=()=>controller.abort();
             process.once('SIGINT',cancel);process.once('SIGTERM',cancel);

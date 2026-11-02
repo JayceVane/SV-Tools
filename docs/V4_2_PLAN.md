@@ -153,6 +153,8 @@ M3 评审记录（2026-11-02）：空模块、packed struct 骨架与 SVG 已有
 
 4.2 中期审查记录（2026-11-02，M3 完成后全量审查）：结论 pass-with-conditions。已处置：Skill 能力边界文案过期（`design check/diff/report` 与无宿主 PNG 已交付）；`cacheMiB` 预算此前无消费者——内容寻址缓存现按每工程保留最近 5 份输入清单封顶（失败/损坏清单同样按时间淘汰，不再无限累积），被引用对象超过 `cacheMiB` 时从最旧清单开始整体解除引用，Vivado run 成功后触发；约束/源文件缺失时的裸 ENOENT 改为 `SOURCE_NOT_FOUND`；缓存临时文件名加随机后缀避免跨工程并发竞争；binary 输入不再绕过单文件与总量预算。已知待办：`task status` 每次查询都全量重算输入指纹（与 run 流程重复 `captureInputs`），大工程下查询会放大 IO，M5 验收前评估指纹缓存。
 
+M4 评审记录（2026-11-02）：交付 `wave` 命令族七操作——`signals`（query/scope/role/位宽过滤，RTL 方向匹配复用 readSignalRoles）、`values`（时间点左闭取值，原始位串+解码值）、`changes`（窗口全保真跳变枚举，`next` 游标分页）、`edges`（rise/fall/x/z，位级投影，X 后回 1 不构成 rise）、`sample`（时钟沿采样，`--where` 受限条件支持信号对信号比较定位首个不一致）、`diff`（两 VCD 同名信号双指针对齐，首差异+差异计数）、`export`（无宿主波形图，document 风格，Node 沙箱复用 webview renderer + svg-canvas，A/B 游标，SVG/PNG）。底层新增 VcdStore `changes`/`sample` 原语与二进制快照（typed 数组 8 字节对齐零拷贝加载）；索引缓存落盘 `.svtools/agent/wave/<路径哈希>/`，size+mtime 身份失效、原子写、损坏自动重建；时间输出一律整数 tick 字符串。验收：注入输出级位翻转缺陷的流水线，纯波形（不读 TB 日志）`sample --where "dout != model_dout"` 定位首个不一致于 t=25000 ticks（25ns 沿，dout=0xA4 vs 0xA5，比 TB 的 #1 延迟检查精确一拍），`wave diff` 复验首差异同刻、修复后条件命中 0；错误窗口 PNG 经视觉检查（四行信号/方波/总线段/标尺/游标正常）。资源边界（合成 VCD，100 信号）：100 MiB/293 万事件冷解析 1.8 s、命中加载 72–89 ms；500 MiB/1464 万事件冷解析 8.8 s、命中加载 211–290 ms、全沿 where 扫描（69 万沿）216 ms。已知边界：失败日志自动解析取窗未实现（时刻由调用者提供）、export 仅 document 风格、VCD↔电路映射联动未交付（用 design arch 连接事实组合）、diff 窗口事件超 200 万标记 truncated。
+
 ## 技术依据
 
 - [MCP工具与结构化结果](https://modelcontextprotocol.io/specification/latest/server/tools)、[标准传输](https://modelcontextprotocol.io/specification/latest/basic/transports)。协议实现版本以目标客户端实测兼容矩阵为准。

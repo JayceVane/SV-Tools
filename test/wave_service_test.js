@@ -114,6 +114,26 @@ test('wave 信号解析与错误合同：未命中/时间非法的退出码为 2
     assert.equal(broken.output.diagnostics[0].code, 'INVALID_ARGUMENT', 'from 晚于 to 要拒绝');
 });
 
+test('wave export：无宿主 SVG/PNG 波形图与目录边界防护', async t => {
+    const directory = await workspace(t, 'trace.vcd', VCD_A);
+    const exported = (await run(['wave', 'export', '--workspace', directory, '--file', 'trace.vcd', '--signals', 'clk,q,d', '--out', 'shots', '--at', '30ns', '--at-b', '10', '--title', 'demo'])).output;
+    assert.equal(exported.status, 'success');
+    assert.equal(exported.data.format, 'svg');
+    assert.equal(exported.data.cursor.b, '10', 'A/B 游标同时导出');
+    const svg = await fsp.readFile(exported.data.out + path.sep + 'demo.svg', 'utf8');
+    assert.match(svg, /<svg[^>]*width="1100"/);
+    for (const name of ['tb.clk', 'tb.q[7:0]', 'tb.d[7:0]']) assert.ok(svg.includes(name), '图中含信号 ' + name);
+    assert.match(svg, /10 ns → 30 ns/, 'desc 记录导出区间');
+    const png = (await run(['wave', 'export', '--workspace', directory, '--file', 'trace.vcd', '--signals', 'q', '--out', 'shots', '--format', 'png', '--title', 'demo'])).output;
+    assert.equal(png.artifacts.length, 2, 'PNG 模式同时落 SVG 与 PNG');
+    const bytes = await fsp.readFile(png.data.out + path.sep + 'demo.png');
+    assert.equal(bytes.readUInt32BE(0), 0x89504E47, 'PNG magic');
+    const escape = await run(['wave', 'export', '--workspace', directory, '--file', 'trace.vcd', '--signals', 'q', '--out', '../escape']);
+    assert.equal(escape.output.diagnostics[0].code, 'INVALID_ARGUMENT', '导出目录逃逸工作区被拒绝');
+    const pastCursor = await run(['wave', 'export', '--workspace', directory, '--file', 'trace.vcd', '--signals', 'q', '--out', 'shots', '--at', '999']);
+    assert.equal(pastCursor.output.diagnostics[0].code, 'INVALID_ARGUMENT', '游标超出窗口被拒绝');
+});
+
 test('wave signals --role：RTL 匹配到唯一端口才标方向，垃圾条件不伪造', async t => {
     const directory = await workspace(t, 'trace.vcd', VCD_A);
     await fsp.writeFile(path.join(directory, 'dut.sv'), 'module tb(input wire clk, output wire [7:0] q);\nendmodule\n');

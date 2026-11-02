@@ -9,10 +9,14 @@ const { createHash, randomUUID } = require('node:crypto');
 const { createVcdParser } = require('../waveform/parser');
 const { VcdStore } = require('../waveform/store');
 const model = require('../waveform/model');
+const rowLayout = require('../waveform/row-layout');
 const { bitValue } = require('../waveform/signal-display');
 const { readSignalRoles } = require('../waveform/source-roles');
 const { isExcludedSourcePath } = require('../workspace/source-policy');
-const { readOptions } = require('./context');
+const { createWaveImage } = require('../waveform/node-export');
+const { createContainedDirectories, cleanupDirectories } = require('../design/scaffold-paths');
+const { rasterizeSvg, DEFAULT_SCALE } = require('../graphics/rasterize');
+const { readOptions, hash } = require('./context');
 const { directory, writeJson } = require('./storage');
 const { result, fail } = require('./protocol');
 
@@ -37,18 +41,20 @@ function parseTick(trace, text, label) {
 }
 const tickString = tick => String(Math.round(tick));
 
-/** 信号名 → 唯一 id：完整路径 > 唯一后缀/短名 > 唯一包含匹配；歧义与未命中都给出候选。 */
+/** 信号名 → 唯一 id：完整路径 > 唯一后缀/短名 > 唯一包含匹配；alias 共享同一 id 不算歧义，未命中与多 id 歧义都给出候选。 */
 function resolveIds(vars, names) {
     const ids = [];
     for (const name of names) {
         const exact = vars.filter(variable => variable.path === name);
         const loose = vars.filter(variable => variable.path.endsWith('.' + name) || variable.name === name);
-        const pick = exact.length === 1 ? exact : loose.length === 1 ? loose
-            : exact.length + loose.length === 0 ? vars.filter(variable => variable.path.toLowerCase().includes(name.toLowerCase())) : [];
-        if (pick.length !== 1) fail('SIGNAL_NOT_FOUND',
-            pick.length ? '信号名匹配多个候选，请使用完整层级路径：' + name : '信号不存在：' + name,
-            { name, candidates: [...new Set([...exact, ...loose, ...pick])].slice(0, 20).map(variable => variable.path) });
-        ids.push(pick[0].id);
+        // 唯一性按 id 判定：同一 net 的多个变量声明（alias）解析到同一 id。
+        const uniqueIds = list => [...new Set(list.map(variable => variable.id))];
+        let picked = uniqueIds(exact).length === 1 ? uniqueIds(exact) : uniqueIds(loose).length === 1 ? uniqueIds(loose) : [];
+        if (!picked.length && !exact.length && !loose.length) picked = uniqueIds(vars.filter(variable => variable.path.toLowerCase().includes(name.toLowerCase())));
+        if (picked.length !== 1) fail('SIGNAL_NOT_FOUND',
+            picked.length > 1 ? '信号名匹配多个候选，请使用完整层级路径：' + name : '信号不存在：' + name,
+            { name, candidates: [...new Set([...exact, ...loose])].slice(0, 20).map(variable => variable.path) });
+        ids.push(picked[0]);
     }
     return [...new Set(ids)];
 }
@@ -170,12 +176,20 @@ function literalBits(literal, width) {
 }
 function evaluateWhere(conditions, valuesById, names) {
     for (const condition of conditions) {
-        const variable = names.get(condition.name);
-        if (!variable) fail('SIGNAL_NOT_FOUND', '--where 引用的信号不存在：' + condition.name);
+        const entry = names.get(condition.name);
+        if (!entry) fail('SIGNAL_NOT_FOUND', '--where 引用的信号不存在：' + condition.name);
+        const variable = entry.variable;
         const raw = valuesById[variable.id];
         const bits = raw === null || raw === undefined ? null : model.binaryValue(raw, variable.width);
         if (condition.operator === 'contains-x') { if (!bits || !bits.includes('x')) return false; }
         else if (condition.operator === 'contains-z') { if (!bits || !bits.includes('z')) return false; }
+        else if (entry.against) {
+            // 信号对信号：按各自位宽规范化后逐位比较，X/Z 参与比较而非通配。
+            const other = valuesById[entry.against.id];
+            const otherBits = other === null || other === undefined ? null : model.binaryValue(other, entry.against.width);
+            const equal = bits !== null && otherBits !== null && otherBits === bits;
+            if (equal !== (condition.operator === '==')) return false;
+        }
         else {
             const expected = literalBits(condition.literal, variable.width);
             const equal = bits !== null && model.binaryValue(expected, variable.width) === bits;
@@ -321,7 +335,18 @@ async function sample(input) {
     const conditions = (input.where || []).map(parseWhere);
     const conditionNames = new Map(conditions.map(condition => {
         const id = resolveIds(trace.meta.vars, [condition.name])[0];
-        return [condition.name, displayPaths(trace.meta).get(id)];
+        const entry = { name: condition.name, variable: displayPaths(trace.meta).get(id) };
+        // 比较右值若唯一命中一个信号则按信号对信号比较，否则按字面量解析。
+        if (condition.literal) {
+            const name = condition.literal;
+            const exact = trace.meta.vars.filter(variable => variable.path === name);
+            const loose = trace.meta.vars.filter(variable => variable.path.endsWith('.' + name) || variable.name === name);
+            const matches = exact.length === 1 ? exact : loose.length === 1 ? loose : exact.length + loose.length > 1 ? [] : null;
+            if (matches === null) entry.against = null;
+            else if (matches.length === 1) entry.against = displayPaths(trace.meta).get(matches[0].id);
+            else fail('SIGNAL_NOT_FOUND', '--where 右值匹配多个信号，请使用完整路径：' + name, { name, candidates: [...new Set([...exact, ...loose])].slice(0, 20).map(variable => variable.path) });
+        }
+        return [condition.name, entry];
     }));
     const to = parseTick(trace, input.to ?? trace.meta.endTime, '--to');
     const from = input.from === undefined ? -1 : parseTick(trace, input.from, '--from') - 1;
@@ -418,4 +443,60 @@ async function diff(input) {
     });
 }
 
-module.exports = { openTrace, signals, values, changes, edges, sample, diff, secondsPerTick };
+/** 时间窗波形图导出：无宿主渲染（document 黑白风格），SVG/PNG 落入工作区目录并返回产物身份。 */
+async function exportImage(input) {
+    const trace = await openTrace(input);
+    if (input.out === undefined) fail('INVALID_ARGUMENT', 'wave export 需要 --out <dir>');
+    const ids = requireSignals(trace, input);
+    const names = displayPaths(trace.meta);
+    const to = parseTick(trace, input.to ?? trace.meta.endTime, '--to');
+    const from = input.from === undefined ? 0 : parseTick(trace, input.from, '--from');
+    if (from >= to) fail('INVALID_ARGUMENT', '--from 必须早于 --to');
+    const cursorA = input.at !== undefined ? parseTick(trace, input.at, '--at') : from;
+    const cursorB = input.atB !== undefined ? parseTick(trace, input.atB, '--at-b') : null;
+    if (cursorA > to || cursorB !== null && cursorB > to) fail('INVALID_ARGUMENT', '游标时间超出导出窗口');
+    const prepared = model.prepareSignals(ids.map(id => names.get(id)));
+    const keys = prepared.map(variable => model.signalKey(variable));
+    const rows = rowLayout.buildRows(keys, new Map(prepared.map(variable => [model.signalKey(variable), variable])), {}, {}, {});
+    const state = { rows, signals: new Map(prepared.map(variable => [model.signalKey(variable), variable])),
+        metadata: trace.meta, view: { start: from, span: to - from }, cursorA, cursorB,
+        secondsPerTick: secondsPerTick(trace.meta.timescale), multi: new Set(), selected: [], formats: {},
+        groups: {}, heights: {}, highlights: {}, fullName: false, activeKey: null, rowPresentation: null };
+    const request = (method, params) => Promise.resolve(trace.store[method](params));
+    const options = { range: cursorB !== null && cursorA !== cursorB ? 'ab' : 'view', signals: 'all' };
+    const title = input.title || path.basename(trace.file);
+    const image = await createWaveImage({ state, options, request, title });
+    const base = (input.title ? input.title.replace(/[\\/:*?"<>|]/g, '_') : path.basename(trace.file).replace(/\.vcd$/i, '')) || 'waveform';
+    const outputDirectory = path.resolve(trace.options.workspace, input.out);
+    const artifacts = [];
+    try {
+        const created = (await createContainedDirectories(outputDirectory, trace.options.workspace)).created;
+        try {
+            const svgFile = path.join(outputDirectory, base + '.svg');
+            await fs.writeFile(svgFile, image.svg);
+            artifacts.push({ kind: 'image', path: svgFile, sha256: hash(image.svg), bytes: Buffer.byteLength(image.svg) });
+            if (input.imageFormat === 'png') {
+                const { png, width, height } = rasterizeSvg(image.svg, { scale: DEFAULT_SCALE });
+                const pngFile = path.join(outputDirectory, base + '.png');
+                await fs.writeFile(pngFile, png);
+                artifacts.push({ kind: 'image', path: pngFile, sha256: hash(png), bytes: png.length, width, height });
+            }
+        } catch (error) {
+            await cleanupDirectories(created, trace.options.workspace);
+            throw error;
+        }
+    } catch (error) {
+        if (error.code === 'OUTSIDE_WORKSPACE') fail('INVALID_ARGUMENT', 'wave export 的 --out 通过符号链接逃逸出工作区', { out: input.out });
+        if (error.code === 'OUT_NOT_DIRECTORY') fail('INVALID_ARGUMENT', 'wave export 的 --out 必须是工作区内的目录：' + input.out, { out: input.out });
+        if (error.code === 'EACCES' || error.code === 'EPERM') fail('INVALID_ARGUMENT', 'wave export 的 --out 不可写：' + input.out, { out: input.out, reason: error.code });
+        throw error;
+    }
+    return result('wave.export', {
+        file: trace.file, from: tickString(from), to: tickString(to), timescale: trace.meta.timescale || null,
+        out: outputDirectory, format: input.imageFormat || 'svg', width: image.width, height: image.height,
+        signals: prepared.map(variable => variable.path), cursor: { a: tickString(cursorA), ...(cursorB !== null ? { b: tickString(cursorB) } : {}) },
+        stats: trace.stats
+    }, null, [], artifacts);
+}
+
+module.exports = { openTrace, signals, values, changes, edges, sample, diff, exportImage, secondsPerTick };

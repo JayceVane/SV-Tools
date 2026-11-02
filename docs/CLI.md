@@ -120,6 +120,8 @@ node src/cli/main.js task cancel <task-id> --workspace D:/project
 | `VIVADO_RUN_FAILED` | run 状态为 ERROR/Failed/Aborted | 读日志定位失败阶段；不得当作完成 |
 | `SNAPSHOT_UNSUPPORTED`、`VIVADO_CONTEXT_MISMATCH` | 工程存在尚不能隔离的依赖，或所选源文件集与run不符 | 按返回的文件/属性修正输入；不回退到未绑定的实时源码运行 |
 | `ARTIFACT_INVALID` | 检查点已变化、越界或不可信 | 重新构建，不使用原来的输入绑定 |
+| `SIGNAL_NOT_FOUND` | wave 信号名未命中或匹配多个信号 | 用 `data.candidates` 的完整层级路径重试；alias 共享 id 不算歧义 |
+| `VCD_PARSE`、`VCD_RESOURCE_LIMIT` | VCD 语法/编码损坏或事件存储超预算 | 修复重新仿真或缩小记录范围；不得截断后继续 |
 | `SERVICE_FAILED` | 未分类失败 | 读 `diagnostics` 与对应日志产物 |
 
 ## Vivado（M2）
@@ -222,4 +224,30 @@ node src/cli/main.js design render --workspace D:/project --top top --fold-ports
 
 `design report --top <module> [--out <dir>] [--style document|presentation] [--title <t>]` 一次导出报告证据包（默认 `.svtools/agent/design/report/`）：同一架构的 `SVG`、`PNG`（2x 栅格化）、`architecture.json`（含 checks 的完整模型）、`architecture.md`（图 + 模块接口分配表 + 接口连接表 + 结构检查表 + 可追溯性）与 `report.json`（产物清单与哈希、导出参数、evidence）。Markdown 表格方向缩写与 SVG 边界接口表一致（端口 `i/o/io`；连接以端点 A 为视角 `o`/`io`/`bus`，`bus` 表示共享网络、成员方向未声明）。`--out` 与 render/scaffold 同一安全模型。结构存在 error 时报告仍生成（生成不等于结构合格），结论看 `data.checksSummary` 与 Markdown 检查表。
 
-Agent 使用入口见 [SV Tools Skill](../skills/svtools-agent/SKILL.md)。架构建模（`design arch`）、架构图渲染（`design render`，SVG/PNG）、结构检查（`design check`）、架构比较（`design diff`）与报告证据包（`design report`）已提供；波形查询与 MCP 尚未实现。按 `doctor.data.capabilities` 发现实际接口。
+Agent 使用入口见 [SV Tools Skill](../skills/svtools-agent/SKILL.md)。架构建模（`design arch`）、架构图渲染（`design render`，SVG/PNG）、结构检查（`design check`）、架构比较（`design diff`）、报告证据包（`design report`）与波形查询（`wave` 命令族）已提供；MCP 尚未实现。按 `doctor.data.capabilities` 发现实际接口。
+
+## 波形查询（M4）
+
+```powershell
+node src/cli/main.js wave signals --workspace D:/project --file sim/wave.vcd --query fifo --role output
+node src/cli/main.js wave values --workspace D:/project --file sim/wave.vcd --signals tb.dut.q,tb.d --at 1250ns
+node src/cli/main.js wave changes --workspace D:/project --file sim/wave.vcd --signals tb.dut.q --limit 200
+node src/cli/main.js wave edges --workspace D:/project --file sim/wave.vcd --signal tb.dut.q --bit 0 --kind rise
+node src/cli/main.js wave sample --workspace D:/project --file sim/wave.vcd --clock tb.clk --signals dut.q,model.q --where "dut.q != model.q"
+node src/cli/main.js wave diff --workspace D:/project --file broken.vcd --against fixed.vcd --signals q
+node src/cli/main.js wave export --workspace D:/project --file sim/wave.vcd --signals clk,q --out report --at 1250ns --format png
+```
+
+所有命令先打开 VCD 并复用索引缓存：首次流式解析后把紧凑事件存储落盘到 `.svtools/agent/wave/<路径哈希>/`（`index.bin` + `meta.json`），后续命令按文件 size+mtime 身份命中后零拷贝加载（实测 500 MiB/1463 万事件：冷解析 8.8 s，命中加载 211–290 ms）；文件变化或缓存损坏时自动重新解析覆盖，不复活旧数据。解析期间文件变化返回 `SOURCE_CHANGED`；文件超过 2048 MiB 或事件存储超预算返回 `SOURCE_LIMIT`/`VCD_RESOURCE_LIMIT`。
+
+时间输入接受裸整数 ticks 或带 `s/ms/us/ns/ps/fs` 单位的物理时间（物理单位要求 VCD 声明 timescale）；输出中的时刻一律为整数 tick 字符串（`t`、`from`、`to`、`next`），并列 `timescale` 与人类可读换算，浮点 JSON 不承载时标精度。信号名解析优先完整层级路径，其次唯一短名/后缀（同一 net 的 alias 共享 id，不算歧义），未命中或多个 id 歧义返回 `SIGNAL_NOT_FOUND` 并附 `candidates`。
+
+- `wave signals`：信号清单（路径/短名/位宽/类型/变更计数），`--query` 子串、`--scope` 层级前缀、`--min-width/--max-width` 过滤；`--role input|output|inout|internal` 用工作区 RTL 做方向匹配（唯一层级匹配才标注，其余 unknown，附 `sourceRoleNote`）。
+- `wave values --at`：时间点左闭取值，输出原始位串（`bits`，保留 X/Z）、位宽与解码值（≤64 位整数给 `value` 十六进制）。
+- `wave changes`：窗口内全保真跳变枚举（`--from/--to` 含起点，`(from,to]` 之外的完整窗口语义见 `next`），每信号 `limit`（≤10000）+ `total` + `next` 游标（下一页直接作 `--from`）。
+- `wave edges`：`--kind any|rise|fall|x|z` 沿/未知态搜索；rise/fall 对向量信号需 `--bit`（LSB 起 0）位级投影，X 之后回到 1 不构成 rise；`--limit` 为命中数上限，超出时 `next` 续查。
+- `wave sample`：按 `--clock` 的 `--clock-edge rise|fall|both` 沿采样多信号（时钟必须 1 位标量，X/Z 不构成沿）；`--where` 可重复且为 AND，条件为 `信号 op 字面量|信号`，op ∈ `==`/`!=`/`contains-x`/`contains-z`，字面量支持 `0b/0x/十进制/8'hA5`，右值唯一命中信号名时做信号对信号比较（首个数据不一致定位）；返回 `scannedEdges`/`matched`/`next`。
+- `wave diff --against`：两份 VCD 同名信号（键为路径+向量 range）双指针对齐比较，默认全部交集或 `--signals` 子集；返回 `firstDiff`（首个差异时刻与双方值）、差异区间计数、`differingSignals` 与前 `--limit` 条差异；窗口事件总量超 200 万返回 `truncated=true`。
+- `wave export`：时间窗波形图（document 黑白风格，无编辑器宿主；与插件导出共用同一渲染器）；`--at/--at-b` 画 A/B 游标（默认导出窗口首尾），`--format svg|png`（PNG 为 2x 内置 resvg 栅格化），`--out` 与 design render 同一目录安全模型；产物为 `artifacts[]`（SVG 必产，PNG 可选）。
+
+波形查询返回原始位值与解码值，不改变或推断波形内容；密集区在 `changes` 中不降采样（与查看器像素窗口的 `dense` 标记不同）。失败日志解析取窗尚未实现，`--at` 时刻由调用者从仿真日志/断言提供。
