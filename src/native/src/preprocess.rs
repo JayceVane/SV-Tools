@@ -1136,3 +1136,75 @@ mod complete_operator_tests {
         }
     }
 }
+
+#[cfg(test)]
+mod generate_block_layout_tests {
+    use crate::{config::FormatOptions, format_code_segment};
+
+    /// generate 体内的 if/for 头也会给出 state_end（闭合 `)`）；只有 endgenerate
+    /// 才收尾块。此前 Generate 分支对任意 state_end 提前 flush，滞后吞掉下一条
+    /// 语句的换行，`if (A) $error(...);endgenerate` 被并成一行。
+    #[test]
+    fn statements_in_generate_keep_endgenerate_on_own_line() {
+        let cases = [
+            (
+                "if 语句",
+                "module afifo (input wire clk);\n    generate\n        if((DEPTH&(DEPTH-1))!=0) $error(\"The Depth of afifo must be power of 2\");    endgenerate\nendmodule\n",
+                "        if((DEPTH&(DEPTH-1))!=0) $error(\"The Depth of afifo must be power of 2\");\n    endgenerate\n",
+            ),
+            (
+                "连续两条语句",
+                "module m;\ngenerate\nif (A) x = 1;\ny = 2;\nendgenerate\nendmodule\n",
+                "        if (A) x = 1;\n        y = 2;\n    endgenerate\n",
+            ),
+        ];
+        for (name, input, expected) in cases {
+            let output = format_code_segment(input, &FormatOptions::default());
+            assert!(
+                output.contains(expected),
+                "{}: endgenerate 未独立成行：\n{}",
+                name,
+                output
+            );
+        }
+    }
+
+    /// 单行紧凑写法 `generate ... endgenerate` 也必须拆开收尾。
+    #[test]
+    fn single_line_generate_block_splits_endgenerate() {
+        let input = "module m; generate if (A) $error(\"x\"); endgenerate endmodule\n";
+        let output = format_code_segment(input, &FormatOptions::default());
+        assert!(output.contains("\n    endgenerate\n"), "{}", output);
+    }
+
+    /// generate 体内合法结构（always/assign/initial）收尾后，endgenerate 仍独立
+    /// 成行、缩进正确，且二次格式化幂等。
+    #[test]
+    fn generate_block_members_layout_unchanged() {
+        let cases: &[(&str, &str)] = &[
+            ("always", "module m;\ngenerate\nalways @(posedge clk) begin\nq<=d;\nend\nendgenerate\nendmodule\n"),
+            ("assign", "module m;\ngenerate\nassign a = b;\nassign c = d;\nendgenerate\nendmodule\n"),
+            ("initial", "module m;\ngenerate\ninitial x = 1;\nendgenerate\nendmodule\n"),
+        ];
+        for (name, input) in cases {
+            let output = format_code_segment(input, &FormatOptions::default());
+            let end_line = output
+                .lines()
+                .find(|line| line.trim() == "endgenerate")
+                .unwrap_or_else(|| panic!("{}: 缺少独立 endgenerate 行：\n{}", name, output));
+            assert_eq!(
+                end_line.len() - end_line.trim_start().len(),
+                4,
+                "{}: endgenerate 缩进错误：{:?}",
+                name,
+                end_line
+            );
+            assert_eq!(
+                format_code_segment(&output, &FormatOptions::default()),
+                output,
+                "{}: 二次格式化不幂等",
+                name
+            );
+        }
+    }
+}
