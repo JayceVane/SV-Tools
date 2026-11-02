@@ -149,6 +149,8 @@ IP/BD 与分层 XDC 支持推迟到 4.3 开发计划，不在 4.2 阻塞项内�
 
 这些条目是4.2计划，不表示4.1已经具备全部无界面接口；FSDB维持此前取消的决定。
 
+M3 评审记录（2026-11-02）：空模块、packed struct 骨架与 SVG 已有实现，本轮补充了精确端口映射、隔离源码快照、生成规格校验、接口边界表及标签布局。M3 尚未整体验收完成：`design check/diff`、完整报告图表包与无宿主 PNG 仍待交付，当前前端仅支持 Yosys `read_verilog -sv` 的语言子集且只投影顶层实例。缺陷机制与回归见 [M3 架构端点与输入身份](bugs/m3-architecture-evidence.md)。
+
 ## 技术依据
 
 - [MCP工具与结构化结果](https://modelcontextprotocol.io/specification/latest/server/tools)、[标准传输](https://modelcontextprotocol.io/specification/latest/basic/transports)。协议实现版本以目标客户端实测兼容矩阵为准。

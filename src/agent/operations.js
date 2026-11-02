@@ -3,7 +3,7 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const { randomUUID } = require('node:crypto');
 const { readOptions, resolveContext, listProjects, assertCurrent, page, hash } = require('./context');
-const { maskSourceText } = require('../workspace/sources');
+const { snapshotInputs } = require('./source-snapshot');
 const { keyOf } = require('../project/model');
 const { result, fail, identity, ServiceError } = require('./protocol');
 const { directory, writeJson } = require('./storage');
@@ -97,33 +97,6 @@ function selectTarget(resolved) {
     if (matching.length!==1) fail('AMBIGUOUS_TOP','请明确指定唯一的--file与--top',{candidates:matching});
     return matching[0];
 }
-/** 将本轮输入复制到隔离目录，工具输出映射回原始源码路径。 */
-async function snapshotInputs(resolved, runDirectory) {
-    const root = path.join(runDirectory,'inputs'), mapped = new Map(), reverse = new Map(), byKey=new Map(), unresolved=new Map();
-    const relocate = file => path.join(root,...path.resolve(file).replace(/:/g,'').split(/[\\/]+/).filter(Boolean));
-    for (const file of resolved.contents.keys()) { const copy=relocate(file); mapped.set(file,copy); reverse.set(keyOf(copy),file);byKey.set(keyOf(file),copy); }
-    const includeDirs=[...new Set([...resolved.context.includeDirs,...resolved.context.files.map(file=>path.dirname(file.path))])];
-    for (const [file,{bytes,text}] of resolved.contents) {
-        // M1只接受可验证的字面量include；宏include留给后续完整编译上下文适配。
-        const masked=maskSourceText(text), chunks=[];let offset=0;
-        for(const match of masked.matchAll(/`include\b/g)) {
-            const directive=/^`include[ \t]+"([^"\r\n]+)"/.exec(text.slice(match.index));
-            if(!directive) fail('UNSUPPORTED_INCLUDE','M1要求include使用双引号字面量',{file});
-            const name=directive[1], candidates=path.isAbsolute(name)?[name]:[path.resolve(path.dirname(file),name),...includeDirs.map(dir=>path.resolve(dir,name))];
-            // 未收录的include改指向快照内的缺失路径，由编译器判断条件分支是否实际需要它。
-            const known=candidates.map(candidate=>byKey.get(keyOf(candidate))).find(Boolean);
-            const target=known || path.join(root,'unresolved',hash(name),path.basename(name));
-            if(!known) unresolved.set(target,name);
-            // include内容不会经过Windows argv路径转换；相对快照根路径兼容Cygwin预处理器。
-            chunks.push(text.slice(offset,match.index),'`include "'+path.relative(root,target).replace(/\\/g,'/')+'"');
-            offset=match.index+directive[0].length;
-        }
-        chunks.push(text.slice(offset)); const rewritten=chunks.join('');
-        const copy=mapped.get(file); await fs.mkdir(path.dirname(copy),{recursive:true});
-        await fs.writeFile(copy,rewritten===text?bytes:rewritten,{flag:'wx'});
-    }
-    return {root,mapped,reverse,relocate,unresolved};
-}
 /** 未解析的include在诊断中还原为源码中的原始名称，不暴露本轮快照目录。 */
 function scrubMissingIncludes(findings, snapshot) {
     const pairs=[];
@@ -141,10 +114,12 @@ function scrubMissingIncludes(findings, snapshot) {
 /** 用内置Yosys链接空模块并投影顶层架构；可选落盘供后续比较。 */
 async function arch(input) {
     if (!input.top) fail('INVALID_ARGUMENT','design arch需要--top');
-    const { options, context, contents } = await resolveContext(input);
+    const resolved = await resolveContext(input);
+    const { options, context, contents } = resolved;
     const files = [...contents].map(([file, value]) => ({ path: file, text: value.text }));
     const data = await buildArchitecture({ workspace: options.workspace, files, top: input.top, includeDirs: context.includeDirs,
         defines: context.defines, depth: input.depth ?? 1, timeoutMs: options.timeoutMs, contextRevision: context.revision });
+    await assertCurrent(resolved);
     let snapshot;
     if (input.save !== undefined) {
         if (typeof input.save !== 'string' || !/^[\w.-]+$/.test(input.save)) fail('INVALID_ARGUMENT','--save名称只能包含字母、数字、下划线、点和短横线');
@@ -262,17 +237,21 @@ async function render(input) {
     if (format === 'png') fail('EXPORT_UNSUPPORTED','PNG需要栅格化宿主，M3当前只交付SVG；请使用--format svg',{format:'png'});
     if (format !== 'svg') fail('INVALID_ARGUMENT','不支持的--format：' + format);
     const style = normalizeStyle(input.style);
+    const detail = input.detail || 'interfaces';
+    if (!['interfaces','signals'].includes(detail)) fail('INVALID_ARGUMENT','--detail需要 interfaces|signals');
     const bundle = input.foldPorts === true;
     const bundleNames = parseBundleNames(Array.isArray(input.bundleNames) ? input.bundleNames : []);
     if (!bundle && Object.keys(bundleNames).length) {
         fail('INVALID_ARGUMENT','--bundle-name 需要与 --fold-ports 同时使用');
     }
-    const { options, context, contents } = await resolveContext(input);
+    const resolved = await resolveContext(input);
+    const { options, context, contents } = resolved;
     const files = [...contents].map(([file, value]) => ({ path: file, text: value.text }));
     const arch = await buildArchitecture({ workspace: options.workspace, files, top: input.top, includeDirs: context.includeDirs,
         defines: context.defines, depth: input.depth ?? 1, timeoutMs: options.timeoutMs, contextRevision: context.revision });
-    const layoutResult = await layoutArchitecture(arch, { bundle, bundleNames });
+    const layoutResult = await layoutArchitecture(arch, { bundle, bundleNames,detail });
     const image = renderArchitectureSvg(arch, layoutResult, { title: typeof input.title === 'string' ? input.title : undefined, style });
+    await assertCurrent(resolved);
     const outputDirectory = input.out ? path.resolve(options.workspace, input.out) : await directory(options.workspace,'design','render');
     // 与 design scaffold 同一安全模型：拒绝越界 --out 与 symlink/junction 逃逸，失败清理本轮创建的目录。
     let createdOut = [];
@@ -291,7 +270,7 @@ async function render(input) {
         }
         fail('DESIGN_FAILED', 'design render 创建输出目录失败：' + error.message, { out: input.out || null });
     }
-    const file = path.join(outputDirectory,defaultFileName(arch, style)), temporary = file + '.' + randomUUID() + '.tmp';
+    const file = path.join(outputDirectory,defaultFileName(arch, style, { bundle, bundleNames, title: input.title,detail })), temporary = file + '.' + randomUUID() + '.tmp';
     try {
         await fs.writeFile(temporary,image.svg,{flag:'wx'});
         await fs.rename(temporary,file);
@@ -301,7 +280,7 @@ async function render(input) {
         fail('DESIGN_FAILED','写入架构图失败：' + error.message,{file});
     }
     const artifact = { kind:'image', format:'svg', path:file, sha256:image.sha256, bytes:image.bytes, width:image.width, height:image.height };
-    return result('design.render',{ format:'svg', style, bundled:bundle, bundleNames, path:file, sha256:image.sha256, bytes:image.bytes,
+    return result('design.render',{ format:'svg', style, detail, bundled:bundle, bundleNames, path:file, sha256:image.sha256, bytes:image.bytes,
         width:image.width, height:image.height, title: image.evidence.export.title, stats:image.stats, evidence:image.evidence },context,[],[artifact]);
 }
 async function lint(input, {signal,onContext,onArtifacts} = {}) {

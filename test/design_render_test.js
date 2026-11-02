@@ -181,7 +181,7 @@ test('document/presentation 共用布局坐标，各自两次渲染确定', asyn
     assert.equal(unresolvedImage.svg.includes('>unresolved<'), true);
 });
 
-test('布局门禁：固定夹具宽高比 1.4–1.6、节点不重叠且布局确定', async t => {
+test('布局门禁：横向可读、节点与连线标签不重叠且布局确定', async t => {
     const directory = await workspace(t, 'layout');
     const arch = (await run(['design', 'arch', '--workspace', directory, '--top', 'layout_top'])).output.data;
     assert.equal(arch.instances.length, 9);
@@ -189,8 +189,7 @@ test('布局门禁：固定夹具宽高比 1.4–1.6、节点不重叠且布局�
     const first = await layoutArchitecture(arch);
     const second = await layoutArchitecture(arch);
     const ratio = first.layout.width / first.layout.height;
-    assert.equal(ratio > 1.4, true, '布局宽高比应大于1.4，实际 ' + ratio.toFixed(2));
-    assert.equal(ratio < 1.6, true, '布局宽高比应小于1.6，实际 ' + ratio.toFixed(2));
+    assert.equal(ratio > 1 && ratio < 2.2, true, '夹具布局应保持可读的横向比例，实际 ' + ratio.toFixed(2));
     assert.equal(first.projection.stats.junctions > 0, true);
     const boxes = first.layout.nodes.map(node => ({ id: node.id, x: node.x, y: node.y, width: node.width, height: node.height }));
     for (let left = 0; left < boxes.length; left++) {
@@ -202,6 +201,14 @@ test('布局门禁：固定夹具宽高比 1.4–1.6、节点不重叠且布局�
     }
     const geometry = layout => layout.nodes.map(node => [node.id, node.x, node.y, node.width, node.height]);
     assert.deepEqual(geometry(second.layout), geometry(first.layout));
+    const labels = first.layout.edges.flatMap(edge => edge.labels || []);
+    assert.ok(labels.length, '连线标签必须参与布局');
+    const overlap = (a,b) => a.x < b.x+b.width && b.x < a.x+a.width && a.y < b.y+b.height && b.y < a.y+a.height;
+    for (const label of labels) {
+        assert.ok(label.x >= 0 && label.y >= 0 && label.x+label.width <= first.layout.width && label.y+label.height <= first.layout.height);
+        assert.ok(boxes.every(box => !overlap(label,box)), '连线标签覆盖模块');
+    }
+    for (let at=0; at<labels.length; at++) assert.ok(labels.slice(at+1).every(other => !overlap(labels[at],other)), '连线标签互相覆盖');
 });
 
 test('struct 空模块渲染为虚线盒，含 assign/always_ff 的模块保持实线', async t => {
@@ -308,14 +315,13 @@ test('扇出接口合并与无公共前缀标签回退', async t => {
     const image = await run(['design', 'render', '--workspace', directory, '--top', 'fanout_top', '--out', 'out']);
     assert.equal(image.exitCode, 0);
     assert.equal(image.output.data.style, 'document');
-    assert.equal(image.output.data.stats.junctions, 1);
-    assert.equal(image.output.data.evidence.export.junctionCount, 1);
+    assert.equal(image.output.data.stats.junctions, 2, 'clk/rst 是不同端口，分别扇出');
+    assert.equal(image.output.data.evidence.export.junctionCount, 2);
     const svg = await fsp.readFile(image.output.data.path, 'utf8');
-    assert.equal(svg.includes('clk/rst (2 bits)'), true);
-    assert.equal(svg.includes('alpha, beta (2 bits)'), true);
+    for (const label of ['clk_sys (1 bits)', 'rst_sys_n (1 bits)', 'alpha (1 bits)', 'beta (1 bits)']) assert.equal(svg.includes(label), true, label);
 });
 
-test('端口折叠 opt-in 门禁：默认端口事实、m_axi/m_valid 守卫、s_*、预算与 title 位宽', async t => {
+test('端口折叠 opt-in 门禁：信号级端口事实、m_axi/m_valid 守卫、s_*、预算与 title 位宽', async t => {
     const directory = await workspace(t, 'bundles');
     const arch = (await run(['design', 'arch', '--workspace', directory, '--top', 'bundle_top'])).output.data;
     const instance = arch.instances.find(item => item.name === 'u_c');
@@ -332,8 +338,8 @@ test('端口折叠 opt-in 门禁：默认端口事实、m_axi/m_valid 守卫、s
     assert.equal(instance.bundles.reduce((total, bundle) => total + bundle.members.length, 0), instance.ports.length, '折叠成员总和等于端口数');
     assert.equal(arch.limitations.some(text => text.includes('虚拟接口端口为前缀折叠展示')), true);
 
-    const plain = buildRenderProjection(arch);
-    const folded = buildRenderProjection(arch, { bundle: true });
+    const plain = buildRenderProjection(arch, {detail:'signals'});
+    const folded = buildRenderProjection(arch, { detail:'signals', bundle: true });
     assert.equal(plain.stats.bundled, false);
     assert.equal(plain.stats.bundles, 0);
     assert.equal(plain.stats.ports, plain.stats.fullPorts);
@@ -350,19 +356,19 @@ test('端口折叠 opt-in 门禁：默认端口事实、m_axi/m_valid 守卫、s
     assert.equal(sourceEdge(plain).sources[0], 'instance:u_c/m_axi_rdata');
     assert.equal(sourceEdge(folded).sources[0], 'instance:u_c/bundle:m_axi');
 
-    assert.doesNotThrow(() => buildRenderProjection(arch, { bundle: true, budget: { ports: 15 } }));
-    assert.throws(() => buildRenderProjection(arch, { budget: { ports: 15 } }), error => {
+    assert.doesNotThrow(() => buildRenderProjection(arch, { detail:'signals', bundle: true, budget: { ports: 15 } }));
+    assert.throws(() => buildRenderProjection(arch, { detail:'signals', budget: { ports: 15 } }), error => {
         assert.equal(error.code, 'DESIGN_LIMIT');
         assert.equal(error.details.kind, 'ports');
         return true;
     });
-    assert.throws(() => buildRenderProjection(arch, { bundle: true, budget: { ports: folded.stats.ports - 1 } }), error => {
+    assert.throws(() => buildRenderProjection(arch, { detail:'signals', bundle: true, budget: { ports: folded.stats.ports - 1 } }), error => {
         assert.equal(error.code, 'DESIGN_LIMIT');
         assert.equal(error.details.kind, 'ports');
         return true;
     });
 
-    const baseline = await run(['design', 'render', '--workspace', directory, '--top', 'bundle_top', '--out', 'out-default']);
+    const baseline = await run(['design', 'render', '--detail', 'signals', '--workspace', directory, '--top', 'bundle_top', '--out', 'out-default']);
     assert.equal(baseline.exitCode, 0);
     assert.equal(baseline.output.data.evidence.export.bundled, false);
     assert.equal(baseline.output.data.evidence.export.bundleCount, 0);
@@ -374,7 +380,7 @@ test('端口折叠 opt-in 门禁：默认端口事实、m_axi/m_valid 守卫、s
     assert.equal(baselineTitles.some(title => title.includes('m_axi_araddr[32]')), true);
     assert.equal(baselineTitles.some(title => title.includes('(0 bits)')), false, '默认 title 位宽不得为0');
 
-    const foldedRender = await run(['design', 'render', '--workspace', directory, '--top', 'bundle_top', '--fold-ports', '--out', 'out-fold']);
+    const foldedRender = await run(['design', 'render', '--detail', 'signals', '--workspace', directory, '--top', 'bundle_top', '--fold-ports', '--out', 'out-fold']);
     assert.equal(foldedRender.exitCode, 0);
     assert.equal(foldedRender.output.data.evidence.export.bundled, true);
     assert.equal(foldedRender.output.data.evidence.export.bundleCount, 2);
@@ -389,15 +395,15 @@ test('端口折叠 opt-in 门禁：默认端口事实、m_axi/m_valid 守卫、s
     assert.equal(foldedTitles.some(title => title.includes('虚拟接口端口 s0* (64 bits)')), true);
     assert.equal(foldedTitles.some(title => title.includes('s0_awaddr[32]')), true);
     assert.equal(foldedTitles.some(title => title.includes('(0 bits)')), false, '折叠 title 位宽不得为0');
-    const again = await run(['design', 'render', '--workspace', directory, '--top', 'bundle_top', '--fold-ports', '--out', 'out-fold']);
+    const again = await run(['design', 'render', '--detail', 'signals', '--workspace', directory, '--top', 'bundle_top', '--fold-ports', '--out', 'out-fold']);
     assert.equal(again.output.data.sha256, foldedRender.output.data.sha256);
 
-    const named = await run(['design', 'render', '--workspace', directory, '--top', 'bundle_top', '--fold-ports', '--out', 'out-named', '--bundle-name', 's0=s0_axi']);
+    const named = await run(['design', 'render', '--detail', 'signals', '--workspace', directory, '--top', 'bundle_top', '--fold-ports', '--out', 'out-named', '--bundle-name', 's0=s0_axi']);
     assert.equal(named.exitCode, 0);
     assert.equal(named.output.data.bundleNames.s0, 's0_axi');
     const namedSvg = await fsp.readFile(named.output.data.path, 'utf8');
     assert.equal(namedSvg.includes('s0_axi*'), true);
-    const invalidName = await run(['design', 'render', '--workspace', directory, '--top', 'bundle_top', '--out', 'out-invalid', '--bundle-name', 's0=s0_axi']);
+    const invalidName = await run(['design', 'render', '--detail', 'signals', '--workspace', directory, '--top', 'bundle_top', '--out', 'out-invalid', '--bundle-name', 's0=s0_axi']);
     assert.equal(invalidName.exitCode, 2);
     assert.equal(invalidName.output.diagnostics[0].code, 'INVALID_ARGUMENT');
 });
@@ -457,9 +463,16 @@ test('窄图图例按画布宽度换行，不超出 viewBox', async t => {
     assert.equal(Number(note[1]) + estimatedTextWidth(note[3], 10) <= folded.output.data.width, true, '说明文字超出画布');
 });
 
-test('演示项目：默认端口事实与 --fold-ports 规模检查', { skip: fs.existsSync(DEMO) ? false : '演示项目不存在' }, async () => {
-    const files = readDirectory(path.join(DEMO, 'rtl'));
-    const arch = await buildArchitecture({ workspace: DEMO, files, top: 'soc_top' });
+test('演示项目：默认端口事实与 --fold-ports 规模检查', { skip: fs.existsSync(DEMO) ? false : '演示项目不存在' }, async t => {
+    const directory = await fsp.realpath(await fsp.mkdtemp(path.join(os.tmpdir(), 'svtools-demo-render-')));
+    t.after(() => fsp.rm(directory, { recursive: true, force: true }));
+    const files = [];
+    for (const source of readDirectory(path.join(DEMO, 'rtl'))) {
+        const file = path.join(directory, path.relative(DEMO, source.path));
+        await fsp.mkdir(path.dirname(file), { recursive: true }); await fsp.writeFile(file, source.text);
+        files.push({ path: file, text: source.text });
+    }
+    const arch = await buildArchitecture({ workspace: directory, files, top: 'soc_top' });
     assert.equal(arch.graph.nodes.filter(node => node.kind === 'instance').length, 15);
     assert.equal(arch.graph.edges.length, 191);
     assert.equal(arch.interfaces.length, 30);

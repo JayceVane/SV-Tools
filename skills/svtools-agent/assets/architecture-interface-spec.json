@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "interfaces": [{ "type": "control_link", "members": [
+    { "name": "request", "width": 32 }, { "name": "response", "width": 32 }
+  ] }],
+  "buses": [{ "name": "control_bus", "type": "control_link" }],
+  "modules": [
+    { "name": "controller", "ports": [{ "name": "m_control", "type": "control_link", "role": "master", "direction": "inout" }] },
+    { "name": "engine", "ports": [{ "name": "s_control", "type": "control_link", "role": "slave", "direction": "inout" }] }
+  ],
+  "top": { "name": "architecture_top", "instances": [
+    { "name": "u_controller", "module": "controller", "connections": { "m_control": "control_bus" } },
+    { "name": "u_engine", "module": "engine", "connections": { "s_control": "control_bus" } }
+  ] }
+}

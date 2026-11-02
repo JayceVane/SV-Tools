@@ -10,6 +10,8 @@ const { svgDocument } = require('../graphics/image-export');
 const { escape } = require('../graphics/svg-canvas');
 const { fail } = require('../agent/protocol');
 const { bundlePorts } = require('./bundles');
+const { renderConnections } = require('./render-connections');
+const { boundaryPeerGroups, aggregatePeerPorts } = require('./interface-ports');
 
 const DEFAULT_RENDER_BUDGET = Object.freeze({ nodes: 2000, edges: 6000, ports: 16384 });
 const LAYOUT_OPTIONS = Object.freeze({
@@ -20,7 +22,7 @@ const LAYOUT_OPTIONS = Object.freeze({
     'elk.layered.nodePlacement.strategy': 'NETWORK_SIMPLEX',
     'elk.layered.nodePlacement.favorStraightEdges': 'true',
     'elk.layered.thoroughness': '7',
-    'elk.spacing.nodeNode': '44', 'elk.layered.spacing.nodeNodeBetweenLayers': '180',
+    'elk.spacing.nodeNode': '44', 'elk.layered.spacing.nodeNodeBetweenLayers': '72',
     'elk.spacing.edgeNode': '20', 'elk.spacing.edgeEdge': '16',
     'elk.layered.spacing.edgeNodeBetweenLayers': '20', 'elk.layered.spacing.edgeEdgeBetweenLayers': '16',
     'elk.padding': '[top=32,left=32,bottom=32,right=32]'
@@ -121,27 +123,30 @@ function netLabel(names, width) {
 
 /** @param {object[]} ports 节点端口。 @returns {{inputs:object[], outputs:object[]}} 按方向分组。 */
 function splitPorts(ports) {
-    return { inputs: ports.filter(port => port.direction !== 'output'), outputs: ports.filter(port => port.direction === 'output') };
+    // m_/s_ 是架构接口的布局提示：请求与响应放在面对同一模块的一侧；direction 始终保留真实方向。
+    const west = port => port.layoutSide ? port.layoutSide === 'WEST' : /^s\d*_/.test(port.label) || (!/^m\d*_/.test(port.label) && port.direction !== 'output');
+    return { inputs: ports.filter(west), outputs: ports.filter(port => !west(port)) };
 }
 
 /** @param {object} node 架构图实例节点。 @param {{bundle:boolean,bundleNames:object}} options @returns {object[]} 显示端口（折叠端口或原始端口）。 */
-function displayPorts(node, { bundle, bundleNames }) {
+function displayPorts(node, { bundle, bundleNames, sideHints = new Map() }) {
     if (!bundle) {
         return node.ports.map(port => ({
             id: node.id + '/' + port.name, label: port.name, displayLabel: port.name + (port.width > 1 ? '[' + port.width + ']' : ''),
             direction: port.direction, width: port.width, bitWidth: port.width,
             bits: new Array(Math.max(1, Math.min(port.width, 64))).fill('n:0'),
-            members: null, prefix: null, collapsed: false
+            members: null, prefix: null, collapsed: false, layoutSide: sideHints.get(node.id + '/' + port.name)
         }));
     }
     return bundlePorts(node.ports, { names: bundleNames }).map(item => {
         const collapsed = Boolean(item.prefix && item.members.length > 1);
         const displayLabel = collapsed ? item.name + '* (' + item.bits + ')' : item.members[0].name + (item.bits > 1 ? '[' + item.bits + ']' : '');
+        const sides = new Set(item.members.map(member => sideHints.get(node.id + '/' + member.name)).filter(Boolean));
         return {
             id: node.id + '/' + (item.prefix ? 'bundle:' + item.prefix : item.name),
             label: item.name, displayLabel, direction: item.direction, width: item.bits, bitWidth: item.bits,
             bits: new Array(Math.max(1, Math.min(item.bits, 64))).fill('n:0'),
-            members: item.members, prefix: item.prefix, collapsed
+            members: item.members, prefix: item.prefix, collapsed, layoutSide: sides.size === 1 ? [...sides][0] : undefined
         };
     });
 }
@@ -149,17 +154,17 @@ function displayPorts(node, { bundle, bundleNames }) {
 /** @param {object} node 架构图实例节点。 @param {{bundle:boolean,bundleNames:object}} options @returns {object} 已分配尺寸/锚点的布局节点。 */
 function prepareInstanceNode(node, options) {
     const base = prepareNode({
-        id: node.id, kind: 'instance', label: node.label, detail: node.module,
+        id: node.id, kind: 'instance', label: node.name || node.label, detail: node.module,
         moduleId: node.moduleId || 'unresolved:' + node.name,
         implementation: node.implementation, status: node.status,
-        ports: displayPorts(node, options)
+        ports: aggregatePeerPorts(node, displayPorts(node, options), options.interfaceGroups)
     });
     const { inputs, outputs } = splitPorts(base.ports);
     const badge = node.status === 'unresolved' ? 'unresolved' : node.implementation;
     const badgeWidth = textWidth(badge, 9) + 12;
     const titleWidth = Math.max(textWidth(base.label, 13), textWidth(base.detail || '', 11)) + badgeWidth + 36;
-    const portWidth = Math.max(0, ...base.ports.map(port => textWidth(port.displayLabel, 11)));
-    const width = Math.ceil(Math.max(base.width || 0, titleWidth, portWidth * 2 + 96) / GRID) * GRID;
+    const sideWidth = list => Math.max(0, ...list.map(port => textWidth(port.displayLabel, 11)));
+    const width = Math.ceil(Math.max(titleWidth, sideWidth(inputs) + sideWidth(outputs) + 48) / GRID) * GRID;
     const height = Math.ceil((HEADER_BAND + PORT_PITCH * Math.max(inputs.length, outputs.length, 1) + 16) / GRID) * GRID;
     for (const [list, side] of [[inputs, 'WEST'], [outputs, 'EAST']]) {
         list.forEach((port, index) => {
@@ -170,7 +175,8 @@ function prepareInstanceNode(node, options) {
             port.height = 0;
         });
     }
-    return { ...base, width, height, badge, badgeWidth, paintBounds: { left: -10, top: -10, right: width + 10, bottom: height + 10 },
+    return { ...base, width, height, badge, badgeWidth, labelColumns: { WEST: sideWidth(inputs), EAST: sideWidth(outputs) },
+        paintBounds: { left: -10, top: -10, right: width + 10, bottom: height + 10 },
         implementation: node.implementation, status: node.status };
 }
 
@@ -184,6 +190,50 @@ function prepareBoundaryNode(node) {
         width: node.ports[0].width, bitWidth: node.ports[0].width, bits: [], side, x: side === 'WEST' ? 0 : width, y: height / 2, width: 0, height: 0 };
     return { id: node.id, kind: 'boundary', label, name: node.name, direction: node.direction, boundary: true,
         width, height, paintBounds: { left: -10, top: -10, right: width + 10, bottom: height + 10 }, ports: [port] };
+}
+
+/** 同前缀边界排成接口表；默认共用一个逻辑锚点，信号级视图保留逐行锚点。 */
+function prepareBoundaryTables(boundaries, detail) {
+    const byName = new Map(boundaries.map(node => [node.name, node]));
+    return bundlePorts(boundaries.map(node => ({ name: node.name, direction: node.direction, width: node.ports[0].width }))).map(group => {
+        if (!group.prefix || group.members.length < 2) return prepareBoundaryNode(byName.get(group.members[0].name));
+        const rowHeight = 22, headerHeight = 50;
+        const nameWidth = Math.max(100, ...group.members.map(port => textWidth(port.name, 11) + 24));
+        const width = Math.ceil(Math.max(nameWidth + 104, textWidth(group.name, 12) + textWidth(group.members.length + ' ports · ' + group.bits + ' bits', 10) + 40) / GRID) * GRID;
+        const height = headerHeight + rowHeight * group.members.length;
+        const inputCount = group.members.filter(port => port.direction === 'input').length;
+        const side = inputCount > group.members.length / 2 ? 'EAST' : 'WEST';
+        const ports = group.members.map((member, at) => {
+            const node = byName.get(member.name), port = node.ports[0];
+            return { id: node.id + '/' + port.name, sourceNodeId: node.id, label: member.name, boundaryDirection: node.direction,
+                direction: port.direction, bitWidth: port.width, bits: [], side, x: side === 'WEST' ? 0 : width,
+                y: headerHeight + rowHeight * (at + 0.5), width: 0, height: 0 };
+        });
+        const id = 'boundary-table:' + group.prefix;
+        const summary = {id:id+'/interface',label:group.name,displayLabel:group.name,direction:group.direction,
+            bitWidth:group.bits,bits:[],side,x:side==='WEST'?0:width,y:headerHeight+(height-headerHeight)/2,width:0,height:0,
+            members:ports.map(port=>({name:port.label,width:port.bitWidth,direction:port.direction,sourceNodeId:port.sourceNodeId})),
+            interfaceLevel:true,interfaceName:group.name};
+        return { id, kind: 'boundary', boundary: true, boundaryTable: true,
+            name: group.name, label: group.name, direction: group.direction, bitWidth: group.bits,
+            width, height, nameWidth, rowHeight, headerHeight, ports: detail==='signals'?ports:[summary], rows:ports, detail,
+            paintBounds: { left: -10, top: -10, right: width + 10, bottom: height + 10 } };
+    });
+}
+
+/** 由真实连接给表格对端端口确定朝向；方向冲突时保留常规布局，不改变RTL方向。 */
+function boundarySideHints(arch, boundaries) {
+    const sides = new Map(boundaries.filter(node => node.boundaryTable).flatMap(node => (node.rows || node.ports).map(port => [port.sourceNodeId, port.side])));
+    const candidates = new Map();
+    for (const edge of [...(arch.graph.edges || []), ...(arch.interfaces || []).flatMap(item => item.bindings || [])]) {
+        for (const [boundary, peer, peerPort] of [[edge.sourceNode,edge.targetNode,edge.targetPort],[edge.targetNode,edge.sourceNode,edge.sourcePort]]) {
+            if (!sides.has(boundary) || typeof peer !== 'string' || !peer.startsWith('instance:')) continue;
+            const key = peer + '/' + peerPort;
+            if (!candidates.has(key)) candidates.set(key, new Set());
+            candidates.get(key).add(sides.get(boundary) === 'WEST' ? 'EAST' : 'WEST');
+        }
+    }
+    return new Map([...candidates].filter(([,values]) => values.size === 1).map(([key,values]) => [key,[...values][0]]));
 }
 
 /** @param {object} arch 架构数据。 @returns {object[]} 接口列表；旧数据回退到 graph.edges。 */
@@ -229,11 +279,12 @@ function endpointNodes(name, kind) {
 
 /**
  * 构造 ELK 投影：节点为实例/边界，接口束为边；多端接口引入总线汇合节点。
- * @param {object} arch design arch 数据。 @param {{budget?:object, bundle?:boolean, bundleNames?:object}} [options]
- *   bundle 默认 true（blackbox/collapsed 统一按前缀折叠显示端口）；bundleNames 覆盖显示名。
+ * @param {object} arch design arch 数据。 @param {{budget?:object, bundle?:boolean, bundleNames?:object, detail?:'interfaces'|'signals'}} [options]
+ *   bundle 默认 false；启用后只合并落在同一显示端口上的成员连接。
  * @returns {object} 可交给 layoutProjection 的投影。
  */
-function buildRenderProjection(arch, { budget = {}, bundle = false, bundleNames = {} } = {}) {
+function buildRenderProjection(arch, { budget = {}, bundle = false, bundleNames = {}, detail = 'interfaces' } = {}) {
+    if (!['interfaces','signals'].includes(detail)) fail('INVALID_ARGUMENT','--detail需要 interfaces|signals');
     const limits = { ...DEFAULT_RENDER_BUDGET, ...budget };
     for (const [name, limit] of Object.entries(limits)) {
         if (!Number.isSafeInteger(limit) || limit < 1) {
@@ -248,18 +299,27 @@ function buildRenderProjection(arch, { budget = {}, bundle = false, bundleNames 
     if (graphNodes.length > limits.nodes) {
         fail('DESIGN_LIMIT', '架构图节点数量超出渲染预算', { kind: 'nodes', used: graphNodes.length, limit: limits.nodes });
     }
-    const interfaces = interfacesOf(arch);
+    const legacyInout = arch.interfaces?.some(item => !item.bindings?.length && item.signals?.some(signal => signal.direction === 'inout'));
+    const hasBindingFacts = !legacyInout && (!arch.interfaces?.length || arch.graph.edges?.length || arch.interfaces.some(item => item.bindings?.length));
+    const boundaries = graphNodes.filter(node => node.kind === 'boundary');
+    const boundaryNodes = hasBindingFacts ? prepareBoundaryTables(boundaries, detail) : boundaries.map(prepareBoundaryNode);
+    const sideHints = boundarySideHints(arch, boundaryNodes);
+    const peerGroups = detail==='interfaces' ? boundaryPeerGroups(arch,boundaryNodes) : new Map();
+    const nodes = [...boundaryNodes,
+        ...graphNodes.filter(node => node.kind !== 'boundary').map(node => prepareInstanceNode(node, { bundle, bundleNames, sideHints,interfaceGroups:peerGroups.get(node.id) }))];
+    const byId = new Map(nodes.map(node => [node.id, node]));
+    const interfaces = renderConnections(arch, nodes, interfacesOf(arch));
     if (interfaces.length > limits.edges) {
         fail('DESIGN_LIMIT', '架构图接口数量超出渲染预算', { kind: 'edges', used: interfaces.length, limit: limits.edges });
     }
-    const nodes = graphNodes.map(node => node.kind === 'boundary'
-        ? prepareBoundaryNode(node)
-        : prepareInstanceNode(node, { bundle, bundleNames }));
-    const byId = new Map(nodes.map(node => [node.id, node]));
+    const endpointPort = (item, node, side, hint, names) => {
+        const reference = item[side]?.find(value => value.nodeId === node.id);
+        return reference ? node.ports.find(port => port.id === reference.portId) : representativePort(node, hint, names);
+    };
     const edges = [];
     for (const item of interfaces) {
-        const sourceIds = endpointNodes(item.from.name, item.from.kind);
-        const targetIds = endpointNodes(item.to.name, item.to.kind);
+        const sourceIds = item.renderSources?.map(value => value.nodeId) || endpointNodes(item.from.name, item.from.kind);
+        const targetIds = item.renderTargets?.map(value => value.nodeId) || endpointNodes(item.to.name, item.to.kind);
         const sources = sourceIds.map(id => byId.get(id)).filter(Boolean);
         const targets = targetIds.map(id => byId.get(id)).filter(Boolean);
         if (!sources.length || !targets.length) {
@@ -267,8 +327,8 @@ function buildRenderProjection(arch, { budget = {}, bundle = false, bundleNames 
         }
         const bidirectional = item.direction === 'bidirectional';
         if (sources.length === 1 && targets.length === 1) {
-            const sourcePort = representativePort(sources[0], 'output', item.fromPorts);
-            const targetPort = representativePort(targets[0], 'input', item.toPorts);
+            const sourcePort = endpointPort(item, sources[0], 'renderSources', 'output', item.fromPorts);
+            const targetPort = endpointPort(item, targets[0], 'renderTargets', 'input', item.toPorts);
             if (sourcePort && targetPort) {
                 edges.push({ id: item.id, sources: [sourcePort.id], targets: [targetPort.id], interface: item, bidirectional });
             }
@@ -285,28 +345,29 @@ function buildRenderProjection(arch, { budget = {}, bundle = false, bundleNames 
             x: 0, y: 14 + index * 10, bits: []
         }));
         const label = item.label + ' (' + item.bits + ' bits)';
-        const width = Math.ceil(Math.max(120, textWidth(label, 11) + 26) / GRID) * GRID;
+        const width = Math.ceil(Math.max(48, textWidth(label, 11) + 16) / GRID) * GRID;
         const height = Math.ceil((Math.max(junctionInputs.length, junctionOutputs.length) * 10 + 22) / GRID) * GRID;
-        const junction = { id: junctionId, kind: 'junction', label, width: width + 20, height, x: 0, y: 0,
+        const junction = { id: junctionId, kind: 'junction', label, bitWidth: item.bits, width: width + 20, height: height + 18, x: 0, y: 0,
             ports: [...junctionInputs, ...junctionOutputs], implementation: null, status: 'resolved',
-            paintBounds: { left: -6, top: -6, right: width + 26, bottom: height + 6 } };
+            paintBounds: { left: -6, top: -6, right: width + 26, bottom: height + 24 } };
         for (const port of junctionInputs) {
-            port.x = 0;
+            port.x = 0; port.y += 18;
         }
         for (const port of junctionOutputs) {
-            port.x = width + 20;
+            port.x = width + 20; port.y += 18;
         }
         nodes.push(junction);
         byId.set(junctionId, junction);
         sources.forEach((source, index) => {
-            const sourcePort = representativePort(source, 'output', item.fromPorts);
+            const sourcePort = endpointPort(item, source, 'renderSources', 'output', item.fromPorts);
             if (sourcePort) {
                 edges.push({ id: item.id + ':in:' + index, sources: [sourcePort.id], targets: [junctionInputs[index].id],
                     interface: item, bidirectional, junction: true });
             }
         });
         targets.forEach((target, index) => {
-            const targetPort = representativePort(target, 'input', item.toPorts);
+            const reference = item.renderTargets?.[index];
+            const targetPort = reference ? target.ports.find(port => port.id === reference.portId) : representativePort(target, 'input', item.toPorts);
             if (targetPort) {
                 edges.push({ id: item.id + ':out:' + index, sources: [junctionOutputs[index].id],
                     targets: [targetPort.id], interface: item, bidirectional, junction: true });
@@ -324,16 +385,22 @@ function buildRenderProjection(arch, { budget = {}, bundle = false, bundleNames 
     if (renderPorts > limits.ports) {
         fail('DESIGN_LIMIT', '架构图渲染端口数量超出预算', { kind: 'ports', used: renderPorts, limit: limits.ports });
     }
+    const portSides = new Map(nodes.flatMap(node => node.ports.map(port => [port.id, port.side])));
     const input = {
         id: 'graph:arch', layoutOptions: LAYOUT_OPTIONS,
         children: nodes.map(elkNode),
-        edges: edges.map(edge => ({ id: edge.id, sources: edge.sources, targets: edge.targets }))
+        edges: edges.map(edge => ({ id: edge.id, sources: edge.sources, targets: edge.targets,
+            layoutOptions: { 'elk.layered.priority.direction': portSides.get(edge.sources[0]) === 'EAST' ? '10' : '0' },
+            ...(!edge.junction ? { labels: [{ id: edge.id + ':label', text: edge.interface.label + ' (' + edge.interface.bits + ' bits)',
+                width: textWidth(edge.interface.label + ' (' + edge.interface.bits + ' bits)', 10) + 12, height: 18,
+                layoutOptions: { 'elk.edgeLabels.placement': 'CENTER', 'elk.edgeLabels.inline': 'false' } }] } : {}) }))
     };
     return { id: 'graph:arch', moduleId: arch.top ? arch.top.moduleId : null, name: arch.top ? arch.top.name : 'architecture',
         input, nodes, edges, signals: [], parameters: null,
         stats: { nodes: nodes.length, edges: edges.length, ports: renderPorts, fullPorts,
             bundles: nodes.reduce((total, node) => total + node.ports.filter(port => port.collapsed).length, 0),
-            interfaces: interfaces.length, junctions: nodes.filter(node => node.kind === 'junction').length, bundled: bundle } };
+            interfaces: interfaces.length, junctions: nodes.filter(node => node.kind === 'junction').length, bundled: bundle,
+            boundaryTables: nodes.filter(node => node.boundaryTable).length, detail } };
 }
 
 /**
@@ -374,6 +441,7 @@ function drawInstance(node, parts, theme) {
         const side = port.x <= node.width / 2 ? 'WEST' : 'EAST';
         const px = node.x + port.x, py = node.y + port.y;
         const label = port.displayLabel;
+        const labelWidth = node.width - (node.labelColumns?.[side === 'WEST' ? 'EAST' : 'WEST'] || 0) - 32;
         const title = port.members
             ? '虚拟接口端口 ' + port.label + (port.collapsed ? '*' : '') + ' (' + port.bitWidth + ' bits) · ' + port.direction
                 + ' · 成员: ' + port.members.map(member => member.name + '[' + member.width + ']').join(', ')
@@ -383,12 +451,17 @@ function drawInstance(node, parts, theme) {
         parts.push('<line x1="' + number(side === 'WEST' ? px - 8 : px) + '" y1="' + number(py) + '" x2="' + number(side === 'WEST' ? px : px + 8)
             + '" y2="' + number(py) + '" stroke="' + theme.wire + '" stroke-width="1.25"/>');
         parts.push('<circle cx="' + number(px) + '" cy="' + number(py) + '" r="2" fill="' + theme.cellBg + '" stroke="' + theme.wire + '" stroke-width="1.25"/>');
+        if (port.direction !== 'inout' && !port.interfaceLevel) {
+            const sign = (side === 'EAST' ? 1 : -1) * (port.direction === 'output' ? 1 : -1), center = px + (side === 'EAST' ? 5 : -5);
+            parts.push('<path d="M ' + number(center + sign * 2.5) + ' ' + number(py) + ' L ' + number(center - sign * 2.5) + ' ' + number(py - 2.5)
+                + ' L ' + number(center - sign * 2.5) + ' ' + number(py + 2.5) + ' Z" fill="' + theme.wire + '"/>');
+        }
         if (side === 'WEST') {
             parts.push('<text x="' + number(node.x + 10) + '" y="' + number(py + 4) + '" fill="' + theme.fg + '" font-family="' + theme.labelFont
-                + '" font-size="11" text-anchor="start">' + escape(shorten(label, node.width / 2 - 18, 11)) + '</text>');
+                + '" font-size="11" text-anchor="start">' + escape(shorten(label, labelWidth, 11)) + '</text>');
         } else {
             parts.push('<text x="' + number(node.x + node.width - 10) + '" y="' + number(py + 4) + '" fill="' + theme.fg + '" font-family="' + theme.labelFont
-                + '" font-size="11" text-anchor="end">' + escape(shorten(label, node.width / 2 - 18, 11)) + '</text>');
+                + '" font-size="11" text-anchor="end">' + escape(shorten(label, labelWidth, 11)) + '</text>');
         }
         parts.push('</g>');
     }
@@ -397,6 +470,7 @@ function drawInstance(node, parts, theme) {
 
 /** @param {object} node 布局节点。 @param {object[]} parts SVG片段。 @param {object} theme 风格。 @returns {void} 追加边界条。 */
 function drawBoundary(node, parts, theme) {
+    if (node.boundaryTable) { drawBoundaryTable(node, parts, theme); return; }
     const accent = node.direction === 'output' ? theme.output : node.direction === 'inout' ? theme.inout : theme.input;
     parts.push('<g data-model-id="' + escape(node.id) + '" data-kind="boundary" data-direction="' + escape(node.direction) + '">');
     parts.push('<rect x="' + number(node.x) + '" y="' + number(node.y) + '" width="' + number(node.width) + '" height="' + number(node.height)
@@ -416,18 +490,58 @@ function drawBoundary(node, parts, theme) {
     parts.push('</g>');
 }
 
+/** 边界接口表：方向是相对于 RTL 顶层，位宽列表示位数，各行锚点保持原端口身份。 */
+function drawBoundaryTable(node, parts, theme) {
+    const left = node.x, top = node.y, dirX = left + node.width - 78, widthX = left + node.width - 26;
+    parts.push('<g data-model-id="' + escape(node.id) + '" data-kind="boundary-table">');
+    parts.push('<title>' + escape(node.name + '：按名称前缀分组；方向相对于RTL顶层，未推断协议') + '</title>');
+    parts.push('<rect x="' + number(left) + '" y="' + number(top) + '" width="' + node.width + '" height="' + node.height
+        + '" rx="2" fill="' + theme.panel + '" stroke="' + theme.border + '" stroke-width="' + theme.strokeWidth + '"/>');
+    if (theme.titleStrip) parts.push('<rect x="' + number(left+1) + '" y="' + number(top+1) + '" width="' + (node.width-2) + '" height="27" fill="' + theme.titleStrip + '"/>');
+    parts.push('<text x="' + number(left + 10) + '" y="' + number(top + 18) + '" fill="' + theme.fg + '" font-family="' + theme.font + '" font-size="12" font-weight="600">' + escape(node.name) + '</text>');
+    parts.push('<text x="' + number(left + node.width - 10) + '" y="' + number(top + 18) + '" fill="' + theme.muted + '" font-family="' + theme.labelFont + '" font-size="10" text-anchor="end">'
+        + node.rows.length + ' ports · ' + node.bitWidth + ' bits</text>');
+    for (const [label, x, anchor] of [['Signal',left+10,'start'],['Dir',dirX,'middle'],['Bits',widthX,'middle']]) {
+        parts.push('<text x="' + number(x) + '" y="' + number(top + 42) + '" fill="' + theme.muted + '" font-family="' + theme.labelFont
+            + '" font-size="10" text-anchor="' + anchor + '">' + label + '</text>');
+    }
+    for (let row = 0; row <= node.rows.length; row++) {
+        const y = top + node.headerHeight + row * node.rowHeight;
+        parts.push('<line x1="' + number(left) + '" y1="' + number(y) + '" x2="' + number(left+node.width) + '" y2="' + number(y) + '" stroke="' + theme.border + '" stroke-width="0.5" opacity="0.5"/>');
+    }
+    for (const x of [dirX - 25, widthX - 24]) parts.push('<line x1="' + number(x) + '" y1="' + number(top + 28) + '" x2="' + number(x) + '" y2="' + number(top + node.height) + '" stroke="' + theme.border + '" stroke-width="0.5" opacity="0.5"/>');
+    for (const port of node.rows) {
+        // 方向用 i/o/io 缩写而非箭头：箭头在左右两侧表中含义相反（→ 在左表为流入设计、右表为流出），
+        // 缩写直接对应 RTL 端口方向且无视角歧义；全词保留在 <title>。
+        const y = top + port.y, x = left + port.x, direction = { input:'i',output:'o',inout:'io' }[port.boundaryDirection] || port.boundaryDirection;
+        parts.push('<g data-model-id="' + escape(port.id) + '" data-kind="port" data-boundary-id="' + escape(port.sourceNodeId) + '" data-direction="' + port.boundaryDirection + '">');
+        parts.push('<title>' + escape(port.label + ' · ' + port.boundaryDirection + ' · ' + port.bitWidth + ' bits') + '</title>');
+        parts.push('<text x="' + number(left+10) + '" y="' + number(y+4) + '" fill="' + theme.fg + '" font-family="' + theme.labelFont + '" font-size="11">' + escape(port.label) + '</text>');
+        for (const [label, column] of [[direction,dirX],[port.bitWidth,widthX]]) parts.push('<text x="' + number(column) + '" y="' + number(y+4) + '" fill="' + theme.fg + '" font-family="' + theme.labelFont + '" font-size="10" text-anchor="middle">' + label + '</text>');
+        if (node.detail==='signals') parts.push('<line x1="' + number(x) + '" y1="' + number(y) + '" x2="' + number(x+(port.side==='WEST'?-8:8)) + '" y2="' + number(y) + '" stroke="' + theme.wire + '" stroke-width="' + (port.bitWidth>1?theme.busWidth:theme.wireWidth) + '"/>');
+        parts.push('</g>');
+    }
+    if (node.detail!=='signals') {
+        const port=node.ports[0], x=left+port.x, y=top+port.y;
+        parts.push('<g data-model-id="'+escape(port.id)+'" data-kind="interface-port"><line x1="'+number(x)+'" y1="'+number(y)+'" x2="'+number(x+(port.side==='WEST'?-8:8))+'" y2="'+number(y)+'" stroke="'+theme.wire+'" stroke-width="'+theme.busWidth+'"/></g>');
+    }
+    parts.push('</g>');
+}
+
 /** @param {object} node 布局节点。 @param {object[]} parts SVG片段。 @param {object} theme 风格。 @returns {void} 追加接口汇合节点。 */
 function drawJunction(node, parts, theme) {
     parts.push('<g data-model-id="' + escape(node.id) + '" data-kind="junction">');
-    parts.push('<rect x="' + number(node.x) + '" y="' + number(node.y) + '" width="' + number(node.width) + '" height="' + number(node.height)
-        + '" rx="11" fill="' + theme.panel + '" stroke="' + theme.wire + '" stroke-width="' + theme.strokeWidth + '"/>');
-    parts.push('<text x="' + number(node.x + node.width / 2) + '" y="' + number(node.y + node.height / 2 + 4) + '" fill="' + theme.fg
+    const center = node.x + node.width / 2, ys = node.ports.map(port => node.y + port.y);
+    parts.push('<line x1="' + number(center) + '" y1="' + number(Math.min(...ys)) + '" x2="' + number(center) + '" y2="'
+        + number(Math.max(...ys)) + '" stroke="' + theme.wire + '" stroke-width="' + (node.bitWidth > 1 ? theme.busWidth : theme.wireWidth) + '"/>');
+    parts.push('<text x="' + number(center) + '" y="' + number(node.y + 15) + '" fill="' + theme.fg
         + '" font-family="' + theme.labelFont + '" font-size="11" text-anchor="middle">' + escape(shorten(node.label, node.width - 18, 11)) + '</text>');
     for (const port of node.ports) {
         parts.push('<g data-model-id="' + escape(port.id) + '" data-kind="port">');
-        parts.push('<line x1="' + number(node.x + (port.side === 'WEST' ? 0 : node.width)) + '" y1="' + number(node.y + port.y)
-            + '" x2="' + number(node.x + (port.side === 'WEST' ? -4 : node.width + 4)) + '" y2="' + number(node.y + port.y)
+        parts.push('<line x1="' + number(node.x + port.x) + '" y1="' + number(node.y + port.y)
+            + '" x2="' + number(center) + '" y2="' + number(node.y + port.y)
             + '" stroke="' + theme.wire + '" stroke-width="1.5"/>');
+        parts.push('<circle cx="' + number(center) + '" cy="' + number(node.y + port.y) + '" r="2" fill="' + theme.wire + '"/>');
         parts.push('</g>');
     }
     parts.push('</g>');
@@ -450,6 +564,7 @@ function edgeStyle(width, theme) {
 
 /** @param {object} edge 布局连边。 @returns {string} 端点标记属性：双向边双箭头，正向边仅终点箭头。 */
 function markerAttributes(edge) {
+    if (edge.interface.interfaceLevel || edge.interface.direction==='connection') return '';
     return ' marker-end="url(#arrow)"' + (edge.bidirectional ? ' marker-start="url(#arrow)"' : '');
 }
 
@@ -525,11 +640,11 @@ function renderArchitectureSvg(arch, layoutResult, { title, style } = {}) {
         export: { format: 'svg', style: styleName, width, height, title: heading,
             nodeCount: projection.stats.nodes, portCount: projection.stats.ports, edgeCount: projection.stats.edges,
             interfaceCount: projection.stats.interfaces, junctionCount: projection.stats.junctions,
-            bundled: projection.stats.bundled, bundleCount: projection.stats.bundles }
+            bundled: projection.stats.bundled, bundleCount: projection.stats.bundles, boundaryTableCount: projection.stats.boundaryTables, detail:projection.stats.detail }
     };
     parts.push('<metadata id="svtools-evidence">' + escape(JSON.stringify(evidence)) + '</metadata>');
     parts.push('<defs>');
-    parts.push('<marker id="arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse">'
+    parts.push('<marker id="arrow" viewBox="0 0 8 8" refX="7" refY="4" markerUnits="userSpaceOnUse" markerWidth="6" markerHeight="6" orient="auto-start-reverse">'
         + '<path d="M 0 0 L 8 4 L 0 8 z" fill="' + theme.wire + '"/></marker>');
     if (theme.gridBackground) {
         parts.push('<pattern id="arch-grid" width="20" height="20" patternUnits="userSpaceOnUse"><circle cx="1" cy="1" r="0.8" fill="' + theme.grid + '"/></pattern>');
@@ -540,7 +655,8 @@ function renderArchitectureSvg(arch, layoutResult, { title, style } = {}) {
     }
     parts.push('<text x="' + PADDING + '" y="28" fill="' + theme.fg + '" font-family="' + FONT_UI + '" font-size="17" font-weight="600">'
         + escape(shorten(heading, width - PADDING * 2, 17)) + '</text>');
-    parts.push('<text x="' + PADDING + '" y="48" fill="' + theme.muted + '" font-family="' + FONT_UI + '" font-size="12">' + escape(subtitle) + '</text>');
+    parts.push('<text x="' + PADDING + '" y="48" fill="' + theme.muted + '" font-family="' + FONT_UI + '" font-size="12"><title>' + escape(subtitle)
+        + '</title>' + escape(shorten(subtitle, width - PADDING * 2, 12)) + '</text>');
     parts.push('<g transform="translate(' + PADDING + ' ' + HEADER + ')">');
     for (const edge of layout.edges) {
         const item = edge.interface;
@@ -548,17 +664,17 @@ function renderArchitectureSvg(arch, layoutResult, { title, style } = {}) {
         if (!points.length) {
             continue;
         }
-        let d = 'M ' + number(points[0][0]) + ' ' + number(points[0][1]);
-        for (const point of points.slice(1)) {
-            d += ' L ' + number(point[0]) + ' ' + number(point[1]);
-        }
+        const d = edge.sections.map(section => sectionPoints(section).map((point, at) =>
+            (at ? 'L ' : 'M ') + number(point[0]) + ' ' + number(point[1])).join(' ')).join(' ');
         const styleNameForEdge = edgeStyle(item.bits, theme);
         parts.push('<g data-interface-id="' + escape(item.id) + '" data-kind="interface">');
         parts.push('<title>' + escape(item.label + ' (' + item.bits + ' bits) · ' + item.from.kind + ':' + item.from.name + ' → '
             + item.to.kind + ':' + item.to.name + ' · signals: ' + item.signals.map(signal => signal.name + '[' + signal.width + ']').join(', ')) + '</title>');
         parts.push('<path d="' + d + '" fill="none" stroke="' + styleNameForEdge.stroke + '" stroke-width="' + styleNameForEdge.width
             + '" stroke-linejoin="round"' + markerAttributes(edge) + '/>');
-        const anchor = labelAnchor(points);
+        const placed = edge.labels?.[0];
+        const anchor = placed ? { x: placed.x + placed.width / 2, y: placed.y + placed.height / 2 + 9, angle: 0 }
+            : edge.sections.map(section => labelAnchor(sectionPoints(section))).filter(Boolean)[0];
         if (anchor && !edge.junction) {
             const label = item.label + ' (' + item.bits + ' bits)';
             const transform = anchor.angle ? ' transform="rotate(-90 ' + number(anchor.x) + ' ' + number(anchor.y - 6) + ')"' : '';
@@ -612,9 +728,10 @@ function renderArchitectureSvg(arch, layoutResult, { title, style } = {}) {
 }
 
 /** @param {object} arch @param {string} [style] @returns {string} 默认输出文件名（含风格后缀）。 */
-function defaultFileName(arch, style = 'document') {
+function defaultFileName(arch, style = 'document', options = {}) {
     const suffix = normalizeStyle(style);
-    return safeName((arch.top && arch.top.name) || 'architecture') + '-' + String(arch.archSha256 || '0').slice(0, 8) + '-' + suffix + '.svg';
+    const identity = sha256(JSON.stringify([options.bundle === true, Object.entries(options.bundleNames || {}).sort(), options.title || null,options.detail || 'interfaces'])).slice(0, 8);
+    return safeName((arch.top && arch.top.name) || 'architecture') + '-' + String(arch.archSha256 || '0').slice(0, 8) + '-' + identity + '-' + suffix + '.svg';
 }
 
 module.exports = { buildRenderProjection, layoutArchitecture, renderArchitectureSvg, defaultFileName, normalizeStyle,

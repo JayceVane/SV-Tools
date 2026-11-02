@@ -14,7 +14,8 @@ const { runProcess } = require('../toolchains/process');
 const { processSucceeded } = require('../toolchains/result');
 const { yosysQuote } = require('../circuit/yosys-runner');
 const { directory } = require('../agent/storage');
-const { fail } = require('../agent/protocol');
+const { fail, ServiceError } = require('../agent/protocol');
+const { snapshotInputs } = require('../agent/source-snapshot');
 const { bundlePorts } = require('./bundles');
 
 const SCHEMA_VERSION = 1;
@@ -326,10 +327,10 @@ function buildEdges(module, nodes, limits) {
         }
         groups.get(key).bits.push(bit);
     }
-    const edges = [];
+    const edges = [], interfaceConnections = [];
     let undrivenBits = 0, multiDriverBits = 0, ambiguousBits = 0;
     for (const group of groups.values()) {
-        if (!group.drivers.length && (group.sinks.length || group.ambiguous.length)) {
+        if (!group.drivers.length && group.sinks.length && !group.ambiguous.length) {
             undrivenBits += group.bits.length;
         }
         if (group.drivers.length > 1) {
@@ -337,6 +338,27 @@ function buildEdges(module, nodes, limits) {
         }
         if (group.ambiguous.length) {
             ambiguousBits += group.bits.length;
+            // 整体 inout 接口仍有明确的共享网络拓扑；布局起点不是电气驱动方向。
+            const instanceEndpoints = [...new Set([...group.drivers, ...group.sinks, ...group.ambiguous])]
+                .filter(endpoint => endpoint.startsWith('instance:'));
+            const width = group.bits.filter(bit => bit.startsWith('n:')).length;
+            if (instanceEndpoints.length > 1 && width) {
+                const unknown = new Set(group.ambiguous);
+                const drivers = instanceEndpoints.filter(endpoint => group.drivers.includes(endpoint));
+                // 有已知驱动时复用其拓扑；否则以一个 inout 为中心，避免遗漏其它输入端点。
+                const candidates = drivers.length ? drivers : instanceEndpoints.filter(endpoint => unknown.has(endpoint));
+                candidates.sort((a, b) => Number(/^m\d*_/.test(splitEndpoint(b).portName)) - Number(/^m\d*_/.test(splitEndpoint(a).portName))
+                    || (a < b ? -1 : a > b ? 1 : 0));
+                const source = candidates[0];
+                const netNames = [...new Set(group.bits.flatMap(bit => namesOfBit(bit, module.signals)))].sort();
+                for (const target of instanceEndpoints) {
+                    if (source === target || (!unknown.has(source) && !unknown.has(target))) continue;
+                    interfaceConnections.push({ source, target, width, netNames, connectionOnly: true });
+                    if (interfaceConnections.length + edges.length > limits.edges) {
+                        fail('DESIGN_LIMIT', '架构接口连接数量超出预算', { kind: 'edges', limit: limits.edges });
+                    }
+                }
+            }
         }
         if (!group.drivers.length) {
             continue;
@@ -349,10 +371,10 @@ function buildEdges(module, nodes, limits) {
         }
     }
     edges.sort((left, right) => (left.source + '>' + left.target + '>' + left.width) < (right.source + '>' + right.target + '>' + right.width) ? -1 : 1);
-    if (edges.length > limits.edges) {
+    if (edges.length + interfaceConnections.length > limits.edges) {
         fail('DESIGN_LIMIT', '架构图连边数量超出预算', { kind: 'edges', used: edges.length, limit: limits.edges });
     }
-    return { edges, stats: { bits: endpoints.size, undrivenBits, multiDriverBits, ambiguousBits } };
+    return { edges, interfaceConnections, stats: { bits: endpoints.size, undrivenBits, multiDriverBits, ambiguousBits } };
 }
 
 /** @param {object} module 顶层模块。 @param {string} name 顶层端口名。 @returns {string[]} 端口 bit。 */
@@ -486,7 +508,7 @@ function buildInterfaces(module, nodes, edges) {
         // 前缀束与精确端口分属不同命名空间，避免 gpio 与 gpio_a 被合并。
         const key = prefix ? 'prefix:' + prefix : 'port:' + portName;
         if (!boundaryGroups.has(key)) {
-            boundaryGroups.set(key, { prefix, boundaryPorts: new Set(), instancePorts: new Set(), instances: new Set(), signals: new Map() });
+            boundaryGroups.set(key, { prefix, boundaryPorts: new Set(), instancePorts: new Set(), instances: new Set(), signals: new Map(), bindings: [] });
         }
         return boundaryGroups.get(key);
     }
@@ -522,8 +544,9 @@ function buildInterfaces(module, nodes, edges) {
     }
     // inout 顶层端口在信号级连边中方向未知，仅按用户模块实例连接补齐为双向接口。
     for (const port of module.ports.filter(item => item.direction === 'inout')) {
+        const bits = new Set(port.bits.filter(bit => bit.startsWith('n:')));
         const matched = module.cells.filter(isUserInstance)
-            .filter(cell => cell.ports.some(item => item.bits.some(bit => port.bits.includes(bit))));
+            .filter(cell => cell.ports.some(item => item.bits.some(bit => bits.has(bit))));
         if (!matched.length) {
             continue;
         }
@@ -531,8 +554,15 @@ function buildInterfaces(module, nodes, edges) {
         for (const cell of matched) {
             group.instances.add(cell.name);
             group.boundaryPorts.add(port.name);
-            for (const item of cell.ports.filter(item => item.bits.some(bit => port.bits.includes(bit)))) {
+            for (const item of cell.ports.filter(item => item.bits.some(bit => bits.has(bit)))) {
                 group.instancePorts.add(item.name);
+                const width = new Set(item.bits.filter(bit => bits.has(bit))).size;
+                if (width) {
+                    const boundary = { node: 'boundary:' + port.name, port: port.name }, instance = { node: 'instance:' + cell.name, port: item.name };
+                    const source = item.direction === 'output' ? instance : boundary, target = item.direction === 'output' ? boundary : instance;
+                    group.bindings.push({ sourceNode: source.node, sourcePort: source.port, targetNode: target.node, targetPort: target.port,
+                        width, netNames: [port.name], bidirectional: item.direction !== 'input' && item.direction !== 'output' });
+                }
             }
             addSignal(group.signals, port.name, port.bits.length, 'inout');
         }
@@ -617,6 +647,7 @@ function buildInterfaces(module, nodes, edges) {
         const label = group.prefix ? group.prefix + '*' : signals[0].name;
         interfaces.push({ id: interfaceId(from, to), from, to, direction: bidirectional ? 'bidirectional' : 'forward',
             bits, label: trimLabel(label), signals,
+            ...(group.bindings.length ? { bindings: group.bindings } : {}),
             fromPorts: [...(from.kind === 'boundary' ? group.boundaryPorts : group.instancePorts)].sort(),
             toPorts: [...(to.kind === 'boundary' ? group.boundaryPorts : group.instancePorts)].sort() });
     }
@@ -671,6 +702,13 @@ function projectArchitecture(design, { workspace, depth = 1, budget = {} }) {
             targetNode: target.nodeId, targetPort: target.portName, width: edge.width, netNames: edge.netNames };
     });
     const interfaces = buildInterfaces(module, nodes, edges);
+    for (const connection of connected.interfaceConnections) {
+        const source = splitEndpoint(connection.source), target = splitEndpoint(connection.target);
+        const from = {kind:'instance',name:endpointName(source.nodeId)}, to = {kind:'instance',name:endpointName(target.nodeId)};
+        interfaces.push({id:'connection:'+hashText(JSON.stringify(connection)).slice(0,24),from,to,direction:'connection',bits:connection.width,
+            label:connection.netNames[0] || source.portName, signals:[{name:connection.netNames[0] || source.portName,width:connection.width,direction:'unknown'}],
+            fromPorts:[source.portName],toPorts:[target.portName],bindings:[{...connection,sourceNode:source.nodeId,sourcePort:source.portName,targetNode:target.nodeId,targetPort:target.portName}]});
+    }
     const unresolved = instanceNodes.filter(node => node.status === 'unresolved').map(node => {
         const cell = module.cells.find(item => item.name === node.name);
         const source = relativeSource(cell && cell.source, workspace);
@@ -706,9 +744,10 @@ function projectArchitecture(design, { workspace, depth = 1, budget = {} }) {
         '只投影顶层实例与顶层端口；子模块内部实现折叠为盒，内部网络、寄存器和存储不单独入图。',
         '仅保留用户模块实例；工具生成的 $ 单元（组合/时序/存储）不绘制为节点。',
         '虚拟接口端口为前缀折叠展示，未改变 RTL 端口事实；AXI 的 inout 仅为架构示意，不代表电气方向。',
-        '实例间 inout 直连当前不生成接口束：无驱动方向的连接只计入 ambiguousBits，双向补齐仅覆盖顶层 inout 端口。',
+        '整体 inout 接口按共享网络保留连接，布局起点不代表驱动方向；成员收发语义由接口文档声明，未执行电气或协议验证。',
         '参数覆盖以实例连接位宽为准，模块接口表为声明默认值；未连接端口按声明默认位宽。',
-        '未连接/多驱动等结构问题在D2检查；本交付只呈现连接关系。',
+        'scaffold 仅检查生成规格；对任意现有 RTL 的 design check/diff 尚未实现。',
+        '工具只读取已捕获源码与字面量 include 快照；未捕获的初始化数据和动态文件不从实时工程补读。',
         '缺失子模块按unresolved展示为无端口盒，不伪造端口表。',
         'Yosys 失败时保留 .svtools/agent/design/runs/<uuid> 任务目录作为日志证据，当前无自动淘汰。',
         'IP/BD、动态XDC与宏include不在4.2范围。'
@@ -812,10 +851,21 @@ async function buildArchitecture({ workspace, files, top, includeDirs = [], defi
     const runDirectory = await createRunDirectory(workspace);
     let bundled;
     try {
-        bundled = await prepareBundledYosys({ directory: runDirectory, sourceRoot: workspace,
-            sources: hdl.map(file => file.path), includeDirs });
+        const snapshot = await snapshotInputs({ context: { includeDirs, files }, contents: new Map(files.map(file =>
+            [file.path, { text: file.text, bytes: Buffer.from(file.text, 'utf8') }])) }, runDirectory);
+        const folders = new Map(files.map(file => [path.dirname(snapshot.mapped.get(file.path)), path.dirname(file.path)]));
+        for (const folder of includeDirs) folders.set(snapshot.relocate(folder), folder);
+        bundled = await prepareBundledYosys({ directory: runDirectory, sourceRoot: snapshot.root,
+            sources: hdl.map(file => snapshot.mapped.get(file.path)), includeDirs: includeDirs.map(snapshot.relocate) });
+        bundled.sourceDirectories = bundled.sourceDirectories.map(mapping => ({ ...mapping, to: folders.get(mapping.to) || mapping.to }));
+        // include 被改写成相对于快照根的路径，诊断和来源仍指回原始文件。
+        for (const [original, copy] of snapshot.mapped) {
+            const relative = path.relative(snapshot.root, copy).split(path.sep).join('/');
+            bundled.sourceDirectories.push({ from: '/' + relative, to: original }, { from: relative, to: original });
+        }
     } catch (error) {
         await fs.rm(runDirectory, { recursive: true, force: true }).catch(() => {});
+        if (error instanceof ServiceError) throw error;
         const message = '内置 Yosys 输入准备失败：' + error.message;
         if (/内置 Yosys|yosys\.wasm|bin\/vendor\/yosys/i.test(error.message)) {
             fail('TOOL_NOT_FOUND', message);
@@ -869,4 +919,4 @@ async function createRunDirectory(workspace) {
 }
 
 module.exports = { buildArchitecture, projectArchitecture, DEFAULT_BUDGET, SCHEMA_VERSION, buildArchScript, duplicateCandidates,
-    classifyYosysFailure, blackboxFlag: flagSet };
+    classifyYosysFailure, blackboxFlag: flagSet, labelForSignals };

@@ -20,7 +20,7 @@ const help=`SV Tools headless CLI (API 1)
   design arch --top <module> [--depth <n>] [--save <name>]
   design scaffold --spec <json|file> [--out <dir>] [--force]
   design render --top <module> [--format svg] [--style document|presentation] [--out <dir>] [--title <t>]
-                [--fold-ports] [--bundle-name <prefix=display>] (repeatable)
+                [--detail interfaces|signals] [--fold-ports] [--bundle-name <prefix=display>] (repeatable)
   task start lint [lint options]
   task list|status|logs|cancel [task-id]
 
@@ -35,7 +35,7 @@ Output:  JSON on stdout; --help and --version return text.
 Node.js >=22. The existing Rust formatter CLI remains available in bin/.
 `;
 function argumentsFor(argv) {
-    const strings=['workspace','config','project','fileset','file','top','iverilog','cygwin','vivado','standard','run','timeout','offset','limit','log-index','max-paths','jobs','name','dir','part','sim-top','target-fileset','depth','save','spec','format','out','title','style'];
+    const strings=['workspace','config','project','fileset','file','top','iverilog','cygwin','vivado','standard','run','timeout','offset','limit','log-index','max-paths','jobs','name','dir','part','sim-top','target-fileset','depth','save','spec','format','out','title','style','detail'];
     const options=Object.fromEntries(strings.map(name=>[name,{type:'string'}]));
     for(const name of ['help','version','json','write','check','fold-ports','force']) options[name]={type:'boolean'};
     options.include={type:'string',multiple:true}; options.define={type:'string',multiple:true}; options.source={type:'string',multiple:true};

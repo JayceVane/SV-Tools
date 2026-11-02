@@ -10,7 +10,7 @@ const { run } = require('../src/cli/main');
 const { createContainedDirectories, cleanupDirectories } = require('../src/design/scaffold-paths');
 
 const FIXTURES = path.join(__dirname, 'fixtures', 'design', 'scaffold');
-const VALID = path.join(FIXTURES, 'valid.json');
+const VALID = path.resolve(__dirname, '../skills/svtools-agent/assets/architecture-spec.json');
 const NAMING = path.join(FIXTURES, 'naming.json');
 
 /** @param {object} t 测试上下文。 @returns {Promise<string>} 临时工作区。 */
@@ -25,23 +25,25 @@ test('design scaffold 生成 packed struct 接口、空模块与顶层，并可�
     const response = await run(['design', 'scaffold', '--workspace', directory, '--spec', VALID, '--out', 'rtl']);
     assert.equal(response.exitCode, 0);
     assert.equal(response.output.status, 'success');
-    assert.equal(response.output.data.file, 'rtl/scaffold_top.sv');
-    assert.equal(response.output.data.top, 'scaffold_top');
+    assert.equal(response.output.data.file, 'rtl/architecture_top.sv');
+    assert.equal(response.output.data.top, 'architecture_top');
     assert.equal(response.output.data.instances, 2);
-    const file = path.join(directory, 'rtl', 'scaffold_top.sv');
+    const file = path.join(directory, 'rtl', 'architecture_top.sv');
     assert.equal(fs.existsSync(file), true);
     const text = await fsp.readFile(file, 'utf8');
     assert.equal(text.includes('typedef struct packed'), true);
-    assert.equal(text.includes('} axi4_lite_t;'), true);
-    assert.equal(text.includes('module cpu ('), true);
-    assert.equal(text.includes('output axi4_lite_t m_axi'), true);
-    assert.equal(text.includes('module scaffold_top ();'), true);
-    assert.equal(text.includes('axi4_lite_t m0;'), true);
-    assert.equal(text.includes('.m_axi(m0)'), true);
+    assert.equal(text.includes('} request_t;'), true);
+    assert.equal(text.includes('module controller ('), true);
+    assert.equal(text.includes('output request_t m_req'), true);
+    assert.equal(text.includes('module architecture_top ();'), true);
+    assert.equal(text.includes('request_t req;'), true);
+    assert.equal(text.includes('.m_req(req)'), true);
+    assert.equal(text.includes('input  response_t m_rsp'), true);
+    assert.equal(text.includes('output response_t s_rsp'), true);
     assert.equal(text.includes('always'), false);
-    const arch = await run(['design', 'arch', '--workspace', directory, '--top', 'scaffold_top']);
+    const arch = await run(['design', 'arch', '--workspace', directory, '--top', 'architecture_top']);
     assert.equal(arch.exitCode, 0, JSON.stringify(arch.output.diagnostics));
-    assert.deepEqual(arch.output.data.instances.map(item => item.name).sort(), ['u_cpu', 'u_mem']);
+    assert.deepEqual(arch.output.data.instances.map(item => item.name).sort(), ['u_controller', 'u_engine']);
     assert.equal(arch.output.data.graph.edges.length > 0, true);
     assert.equal(arch.output.data.interfaces.length > 0, true);
     const doctor = await run(['doctor', '--workspace', directory]);
@@ -62,11 +64,26 @@ test('design scaffold 非 m_/s_ 命名仍成功，只返回 PORT_NAMING 建议',
     assert.match(response.output.data.suggestions[0].message, /建议主设备端口以 m_ 开头/);
 });
 
+test('Skill接口级示例使用整体inout struct，每个模块一个虚拟端口', async t => {
+    const directory=await workspace(t);
+    const spec=path.resolve(__dirname,'../skills/svtools-agent/assets/architecture-interface-spec.json');
+    const generated=await run(['design','scaffold','--workspace',directory,'--spec',spec]);
+    assert.equal(generated.exitCode,0);
+    assert.ok(generated.output.data.modules.every(module=>module.ports.length===1 && module.ports[0].direction==='inout'));
+    const image=await run(['design','render','--workspace',directory,'--top','architecture_top']);
+    assert.equal(image.exitCode,0,JSON.stringify(image.output.diagnostics));
+    assert.equal(image.output.data.detail,'interfaces');
+    assert.equal(image.output.data.stats.edges,1);
+    assert.equal(image.output.data.evidence.export.detail,'interfaces');
+    const invalid=await run(['design','render','--workspace',directory,'--top','architecture_top','--detail','invalid']);
+    assert.equal(invalid.output.diagnostics[0].code,'INVALID_ARGUMENT');
+});
+
 test('design scaffold 已存在文件需 --force 覆盖', async t => {
     const directory = await workspace(t);
     const first = await run(['design', 'scaffold', '--workspace', directory, '--spec', VALID, '--out', 'rtl']);
     assert.equal(first.exitCode, 0);
-    const file = path.join(directory, 'rtl', 'scaffold_top.sv');
+    const file = path.join(directory, 'rtl', 'architecture_top.sv');
     const before = await fsp.readFile(file, 'utf8');
     const exists = await run(['design', 'scaffold', '--workspace', directory, '--spec', VALID, '--out', 'rtl']);
     assert.equal(exists.exitCode, 2);
