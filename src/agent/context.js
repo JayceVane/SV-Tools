@@ -114,7 +114,7 @@ async function resolveContext(input = {}) {
     const constraintPaths=[...new Set((snapshot?.sets || []).filter(set=>set.type==='Constrs').flatMap(set=>set.files).map(file=>path.resolve(file)))];
     const constraints=[], auxiliaryContents=new Map();let constraintBytes=0;
     for (const file of constraintPaths) {
-        const handle=await fs.open(file,'r');
+        const handle=await fs.open(file,'r').catch(error=>{if(error.code==='ENOENT') fail('SOURCE_NOT_FOUND','约束文件不存在：'+file,{file});throw error;});
         try {
             const stat=await handle.stat();constraintBytes+=stat.size;
             if(!stat.isFile() || stat.size>fileCap || constraintBytes>totalCap) fail('SOURCE_LIMIT','约束快照超过安全预算',{file,size:stat.size,limit:fileCap});
@@ -130,7 +130,7 @@ async function resolveContext(input = {}) {
     const ordered = [...files];
     await Promise.all(Array.from({length: Math.min(8,ordered.length)}, async () => {
         while (next < ordered.length) {
-            const index = next++, file = ordered[index], handle = await fs.open(file,'r');
+            const index = next++, file = ordered[index], handle = await fs.open(file,'r').catch(error=>{if(error.code==='ENOENT') fail('SOURCE_NOT_FOUND','工程引用的源文件不存在：'+file,{file});throw error;});
             try {
                 const stat = await handle.stat();
                 if (!stat.isFile() || stat.size > fileCap) fail('SOURCE_LIMIT', '源码超出单文件预算', {file,size:stat.size,limit:fileCap});

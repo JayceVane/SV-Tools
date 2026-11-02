@@ -26,10 +26,8 @@ node <svtools-root>/src/cli/main.js design render --workspace <rtl-workspace> --
 
 多个同前缀顶层引脚排成接口表，例如 DDR 地址、控制和数据。默认 `--detail interfaces`：每个模块与接口表之间使用一条汇总线，方向缩写（`i` 输入、`o` 输出、`io` 双向）只在表内逐行标注，不用箭头（左右两侧表中箭头含义会翻转）；表格分组不等于协议识别。底层 JSON 保留原始端口和连接，`--detail signals` 可用于信号级排查。`m_`/`s_`（含 m0_/s0_）只提示架构布局，不用于伪造驱动关系。
 
-交付 SVG 及架构 Markdown：包含接口定义、模块接口分配、接口连接表与源码/图像身份。整体 inout 必须在图中保留连接，接口内容放进文档，不拆成每个成员的线路。确认标签可读、没有遮挡和裁剪；能看图时实际检查 SVG。图片内嵌源码哈希、上下文及导出参数，引用实际 artifact 路径和哈希。不同标题/粒度/折叠参数分别保留产物。
+交付 SVG 及架构 Markdown：包含接口定义、模块接口分配、接口连接表与源码/图像身份。整体 inout 必须在图中保留连接，接口内容放进文档，不拆成每个成员的线路。确认标签可读、没有遮挡和裁剪；能看图时实际检查 SVG。图片内嵌源码哈希、上下文及导出参数，引用实际 artifact 路径和哈希。不同标题/粒度/折叠参数分别保留产物。程序化交付优先用 `design report` 一次导出证据包（SVG+PNG+`architecture.json`+`architecture.md`+`report.json` 哈希清单）；交付前用 `design check` 复核结构结论，检查表会进入报告。
 
 ## 能力边界
 
-当前架构由 Yosys 的 `read_verilog -sv`、`hierarchy`、`proc`、`memory_collect` 得到，只投影顶层实例。它保留空模块，但并不支持完整 SystemVerilog/UVM 语言。无法展开的类型、宏、位宽或层级必须报告限制，不伪造结果。输入使用捕获文本的隔离副本；未被捕获的初始化数据或动态文件读取无法作为证据。
-
-`design check/diff` 与无宿主 PNG 仍未交付。scaffold 的规格检查仅覆盖其生成输入，不能代替对任意现有 RTL 的结构检查。源级架构图不代表综合结果、时序收敛、CDC 或功能验证。
+当前架构由 Yosys 的 `read_verilog -sv`、`hierarchy`、`proc`、`memory_collect` 得到，只投影顶层实例。它保留空模块，但并不支持完整 SystemVerilog/UVM 语言。无法展开的类型、宏、位宽或层级必须报告限制，不伪造结果。输入使用捕获文本的隔离副本；未被捕获的初始化数据或动态文件读取无法作为证据。`design check`（逐端口结构诊断）、`design diff`（快照对比）、无宿主 PNG（内置 resvg 栅格化）与 `design report`（证据包）已交付；任意深度层级展开仍未交付。scaffold 的规格检查仅覆盖其生成输入；`design check` 只报告结构事实，不代表综合结果、时序收敛、CDC 或功能验证。

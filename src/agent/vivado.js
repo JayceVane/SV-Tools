@@ -11,7 +11,7 @@ const { runVivadoBatchTask } = require('../vivado/batch');
 const { createToolTaskManager } = require('../toolchains/job');
 const { acquireWorkspaceLease } = require('../toolchains/workspace-lease');
 const { keyOf, inside } = require('../project/model');
-const { captureInputs, materialize, verifyCopies, checkpoints, fileIdentity, pruneCache } = require('./vivado-inputs');
+const { captureInputs, materialize, verifyCopies, checkpoints, fileIdentity, pruneCache, budgetOf } = require('./vivado-inputs');
 const tclgen = require('../vivado/tclgen');
 
 const RUN_NAME = /^(?:synth|impl)_\d+$/;
@@ -354,7 +354,7 @@ async function run(input, { signal, onContext, onArtifacts, runner } = {}) {
             toolVersion,completedAt:new Date().toISOString(),context:identity(current),inputs:captured.inputs,copies:snapshot.copies,config:captured.config,checkpoints:outputs,evidence};
         await writeJson(path.join(buildDirectory,'manifest.json'),manifest);
         await writeJson(pointer,manifest);
-        await pruneCache(options.workspace).catch(()=>{});
+        await pruneCache(options.workspace,5,budgetOf(options).cacheMiB).catch(()=>{});
         return result('vivado.run', { run:target,status,runId:job.id,project:snapshot.project,inputFingerprint:captured.fingerprint,evidence }, current, [], artifactLogs(logs)
             .concat([{kind:'manifest',path:path.join(buildDirectory,'manifest.json')}], runLog?[{kind:'run-log',path:runLog.file}]:[]));
     } catch(error) {

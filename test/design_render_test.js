@@ -14,7 +14,8 @@ const { buildRenderProjection, DEFAULT_RENDER_BUDGET, layoutArchitecture, render
 
 const ROOT = path.resolve(__dirname, '..');
 const FIXTURES = path.join(__dirname, 'fixtures', 'design');
-const DEMO = process.env.SVTOOLS_ARCH_DEMO || 'D:/Workspace/FPGA/svtools-arch-demo';
+// 演示工程用例只在显式提供 SVTOOLS_ARCH_DEMO 时运行，不回退任何本机固定路径。
+const DEMO = process.env.SVTOOLS_ARCH_DEMO;
 
 /** @param {string} directory @returns {{path:string,text:string}[]} 递归读取源码文本。 */
 function readDirectory(directory) {
@@ -471,7 +472,7 @@ test('窄图图例按画布宽度换行，不超出 viewBox', async t => {
     assert.equal(Number(note[1]) + estimatedTextWidth(note[3], 10) <= folded.output.data.width, true, '说明文字超出画布');
 });
 
-test('演示项目：默认端口事实与 --fold-ports 规模检查', { skip: fs.existsSync(DEMO) ? false : '演示项目不存在' }, async t => {
+test('演示项目：默认端口事实与 --fold-ports 规模检查', { skip: DEMO && fs.existsSync(DEMO) ? false : '未设置 SVTOOLS_ARCH_DEMO 指向演示工程' }, async t => {
     const directory = await fsp.realpath(await fsp.mkdtemp(path.join(os.tmpdir(), 'svtools-demo-render-')));
     t.after(() => fsp.rm(directory, { recursive: true, force: true }));
     const files = [];

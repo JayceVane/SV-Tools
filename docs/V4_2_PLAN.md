@@ -151,6 +151,8 @@ IP/BD 与分层 XDC 支持推迟到 4.3 开发计划，不在 4.2 阻塞项内�
 
 M3 评审记录（2026-11-02）：空模块、packed struct 骨架与 SVG 已有实现，本轮补充了精确端口映射、隔离源码快照、生成规格校验、接口边界表及标签布局；随后交付 `design check`（逐端口结构诊断：悬空/无驱动/多驱动/隐式位宽补常量/缺失模块，常量驱动不产生假诊断）、`design diff`（快照对比：实例/模块/顶层端口/接口增删改，空骨架补实现单列 `implemented[]`）、无宿主 PNG（内置 resvg 2x 栅格化，随 VSIX 发布 `bin/resvg.*.node`）与 `design report` 报告证据包（SVG+PNG+architecture.json/md+report.json，清单含逐产物哈希）。已知边界：前端仅支持 Yosys `read_verilog -sv` 的语言子集且只投影顶层实例，位宽截断（宽 wire 连窄端口）在展开后不可见，PNG 中文依赖系统字体。缺陷机制与回归见 [M3 架构端点与输入身份](bugs/m3-architecture-evidence.md)。
 
+4.2 中期审查记录（2026-11-02，M3 完成后全量审查）：结论 pass-with-conditions。已处置：Skill 能力边界文案过期（`design check/diff/report` 与无宿主 PNG 已交付）；`cacheMiB` 预算此前无消费者——内容寻址缓存现按每工程保留最近 5 份输入清单封顶（失败/损坏清单同样按时间淘汰，不再无限累积），被引用对象超过 `cacheMiB` 时从最旧清单开始整体解除引用，Vivado run 成功后触发；约束/源文件缺失时的裸 ENOENT 改为 `SOURCE_NOT_FOUND`；缓存临时文件名加随机后缀避免跨工程并发竞争；binary 输入不再绕过单文件与总量预算。已知待办：`task status` 每次查询都全量重算输入指纹（与 run 流程重复 `captureInputs`），大工程下查询会放大 IO，M5 验收前评估指纹缓存。
+
 ## 技术依据
 
 - [MCP工具与结构化结果](https://modelcontextprotocol.io/specification/latest/server/tools)、[标准传输](https://modelcontextprotocol.io/specification/latest/basic/transports)。协议实现版本以目标客户端实测兼容矩阵为准。

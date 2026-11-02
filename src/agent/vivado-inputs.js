@@ -2,7 +2,7 @@
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const { createReadStream } = require('node:fs');
-const { createHash } = require('node:crypto');
+const { createHash, randomUUID } = require('node:crypto');
 const { hash } = require('./context');
 const { fail } = require('./protocol');
 const { keyOf, inside } = require('../project/model');
@@ -52,7 +52,8 @@ async function readText(file,budget,kind) {
 }
 /** 大文件流式复制并同时计算哈希，避免整块进内存；写入临时文件后原子改名。 */
 async function streamToCache(file,workspace,perFile) {
-    const temporary=path.join(cacheDir(workspace),'.tmp-'+createHash('sha256').update(file).digest('hex').slice(0,16));
+    // 临时名带随机后缀，避免跨工程并发复制同一源文件时共用截断同一个临时文件。
+    const temporary=path.join(cacheDir(workspace),'.tmp-'+createHash('sha256').update(file).digest('hex').slice(0,16)+'-'+randomUUID());
     await fs.mkdir(cacheDir(workspace),{recursive:true});
     const digest=createHash('sha256');let size=0;
     const out=await fs.open(temporary,'w');
@@ -99,9 +100,9 @@ async function captureInputs(resolved,run) {
     const files=new Map(),used={text:0,init:0,binary:0};
     for(const [file,value] of [...resolved.contents,...resolved.auxiliaryContents]) {
         const kind=kindOf(file),bytes=value.bytes;
-        if(kind!=='binary' && bytes.length>budget[kind+'FileMiB']) fail('SOURCE_LIMIT','输入超出预算',{file,class:kind,size:bytes.length,limit:budget[kind+'FileMiB']});
+        if(bytes.length>budget[kind+'FileMiB']) fail('SOURCE_LIMIT','输入超出预算',{file,class:kind,size:bytes.length,limit:budget[kind+'FileMiB']});
         used[kind]+=bytes.length;
-        if(used[kind]>budget[kind+'MiB'] && kind!=='binary') fail('SOURCE_LIMIT','输入超出预算',{file,class:kind,size:used[kind],limit:budget[kind+'MiB']});
+        if(used[kind]>budget[kind+'MiB']) fail('SOURCE_LIMIT','输入超出预算',{file,class:kind,size:used[kind],limit:budget[kind+'MiB']});
         const sha256=hash(bytes);await cacheWrite(workspace,sha256,bytes);
         files.set(keyOf(file),{path:file,kind,sha256,size:bytes.length,bytes:kind==='binary'?null:bytes});
     }
@@ -224,26 +225,68 @@ async function checkpoints(snapshot,paths) {
     }
     return output;
 }
-/** 内容寻址缓存按最近成功构建引用集合剪枝；活动构建与失败记录另由构建目录配额管理。 */
-async function pruneCache(workspace,keep=5) {
+/** 内容寻址缓存剪枝：每个工程（清单名前缀）只保留最近 keep 份输入清单，无引用对象删除；
+ * 被引用对象总量超过 cacheLimitBytes 时从最旧清单开始整体解除引用，直到回到限额内（每工程至少保留最新一份）。
+ * 返回删除的对象数；活动构建与失败记录另由构建目录配额管理。 */
+async function pruneCache(workspace,keep=5,cacheLimitBytes=DEFAULT_BUDGET.cacheMiB*1024*1024) {
     const manifests=path.join(workspace,'.svtools','agent','vivado','manifests');
-    let entries=[];
-    try { entries=(await fs.readdir(manifests)).filter(name=>name.endsWith('.json')); } catch(error) { if(error.code==='ENOENT') return 0; throw error; }
-    const referenced=new Set();
-    for(const name of entries) {
-        let record;
-        try { record=JSON.parse(await fs.readFile(path.join(manifests,name),'utf8')); } catch(error) { continue; }
-        if(record?.schemaVersion!==2 || record.state!=='complete') continue;
-        for(const input of record.inputs || []) referenced.add(input.sha256);
+    let names=[];
+    try { names=(await fs.readdir(manifests)).filter(name=>name.endsWith('.json')); } catch(error) { if(error.code==='ENOENT') return 0; throw error; }
+    const records=[];
+    for(const name of names) {
+        const file=path.join(manifests,name);
+        const stat=await fs.lstat(file).catch(()=>null);
+        if(!stat?.isFile()) continue;
+        let inputs=[];
+        try {
+            const record=JSON.parse(await fs.readFile(file,'utf8'));
+            if(record?.schemaVersion===2 && Array.isArray(record.inputs)) inputs=record.inputs;
+        } catch { /* 损坏的清单保守视为无引用，其文件按时间参与淘汰。 */ }
+        records.push({name,file,mtime:stat.mtimeMs,inputs});
     }
-    let removed=0;
+    const groups=new Map();
+    for(const record of [...records].sort((a,b)=>b.mtime-a.mtime)) {
+        const group=record.name.split('-')[0];
+        if(!groups.has(group)) groups.set(group,[]);
+        groups.get(group).push(record);
+    }
+    const survivors=new Set(),stale=[];
+    for(const group of groups.values()) group.forEach((record,index)=>(index<keep?survivors.add(record):stale.push(record)));
     const base=cacheDir(workspace);
+    const sizes=new Map();
     for(const bucket of await fs.readdir(base).catch(()=>[])) {
         const directory=path.join(base,bucket);
         const stat=await fs.lstat(directory).catch(()=>null);
         if(!stat?.isDirectory()) continue;
-        for(const name of await fs.readdir(directory)) {
-            if(referenced.has(name)) continue;
+        for(const name of await fs.readdir(directory).catch(()=>[])) {
+            const size=(await fs.lstat(path.join(directory,name)).catch(()=>null))?.size;
+            if(Number.isFinite(size)) sizes.set(name,size);
+        }
+    }
+    const usedBytes=set => {
+        const seen=new Set();let total=0;
+        for(const record of set) for(const input of record.inputs)
+            if(!seen.has(input.sha256)) {seen.add(input.sha256);total+=sizes.get(input.sha256)??0;}
+        return total;
+    };
+    if(Number.isFinite(cacheLimitBytes) && cacheLimitBytes>0 && usedBytes(survivors)>cacheLimitBytes) {
+        const latest=new Map();for(const group of groups.values()) latest.set(group[0].name.split('-')[0],group[0]);
+        const demotable=[...survivors].filter(record=>latest.get(record.name.split('-')[0])!==record).sort((a,b)=>a.mtime-b.mtime);
+        for(const record of demotable) {
+            survivors.delete(record);stale.push(record);
+            if(usedBytes(survivors)<=cacheLimitBytes) break;
+        }
+    }
+    const referenced=new Set();
+    for(const record of survivors) for(const input of record.inputs) referenced.add(input.sha256);
+    for(const record of stale) await fs.rm(record.file,{force:true});
+    let removed=0;
+    for(const bucket of await fs.readdir(base).catch(()=>[])) {
+        const directory=path.join(base,bucket);
+        const stat=await fs.lstat(directory).catch(()=>null);
+        if(!stat?.isDirectory()) continue;
+        for(const name of await fs.readdir(directory).catch(()=>[])) {
+            if(referenced.has(name) || !sizes.has(name)) continue;
             await fs.rm(path.join(directory,name),{force:true});removed++;
         }
     }

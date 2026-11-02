@@ -6,7 +6,7 @@ const os=require('node:os');
 const path=require('node:path');
 const {run,report,incrementalStatus}=require('../src/agent/vivado');
 const {resolveContext}=require('../src/agent/context');
-const {captureInputs,materialize}=require('../src/agent/vivado-inputs');
+const {captureInputs,materialize,pruneCache}=require('../src/agent/vivado-inputs');
 const {parseXprText}=require('../src/vivado/xpr');
 const {createHash,randomUUID}=require('node:crypto');
 const {directory,writeJson}=require('../src/agent/storage');
@@ -236,5 +236,40 @@ test('请求了增量检查点但工具未加载时记录为未复用',async t=>
     const incremental=output.data.evidence.execution.incremental;
     assert.equal(incremental.requested,true);assert.equal(incremental.applied,false);assert.equal(incremental.reused,false);
     assert.equal(incremental.reuse,null);assert.deepEqual(incremental.evidence,[]);
+});
+
+test('缓存剪枝：每工程清单封顶并淘汰失败记录，超容量从最旧解除引用且至少保留最新一份',async t=>{
+    const workspace=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'svtools-prune-')));
+    t.after(()=>fs.rm(workspace,{recursive:true,force:true}));
+    const manifests=path.join(workspace,'.svtools','agent','vivado','manifests'),cache=path.join(workspace,'.svtools','agent','vivado','cache');
+    await fs.mkdir(manifests,{recursive:true});
+    const write=async(group,index,shas,state='complete')=>{
+        const file=path.join(manifests,group+'-'+index+'.json');
+        await fs.writeFile(file,JSON.stringify({schemaVersion:2,state,runId:group+'-'+index,inputs:shas.map(sha256=>({sha256}))}));
+        // 用递增的旧时间戳制造清单时序：index 越大越新。
+        await fs.utimes(file,new Date(index*1000),new Date(index*1000));
+    };
+    const object=async sha=>{await fs.mkdir(path.join(cache,sha.slice(0,2)),{recursive:true});await fs.writeFile(path.join(cache,sha.slice(0,2),sha),'data');};
+    const a0='aa'.repeat(32),a1='bb'.repeat(32),a2='cc'.repeat(32),b0='dd'.repeat(32),orphan='ee'.repeat(32);
+    for(const sha of [a0,a1,a2,b0,orphan]) await object(sha);
+    await write('aaaaaaaaaaaaaaaa',0,[a0],'failed');
+    await write('aaaaaaaaaaaaaaaa',1,[a1]);
+    await write('aaaaaaaaaaaaaaaa',2,[a2]);
+    await write('bbbbbbbbbbbbbbbb',2,[b0]);
+    // keep=2：A 组保留最近两份（含最新），最旧的失败清单与孤儿对象一并淘汰；B 组唯一清单保留。
+    const removed=await pruneCache(workspace,2,Number.POSITIVE_INFINITY);
+    assert.equal(removed,2,'只删无引用对象');
+    assert.deepEqual((await fs.readdir(manifests)).sort(),['aaaaaaaaaaaaaaaa-1.json','aaaaaaaaaaaaaaaa-2.json','bbbbbbbbbbbbbbbb-2.json']);
+    assert.equal(await fs.readFile(path.join(cache,a2.slice(0,2),a2),'utf8'),'data');
+    assert.equal(await fs.readFile(path.join(cache,a1.slice(0,2),a1),'utf8'),'data');
+    await assert.rejects(fs.access(path.join(manifests,'aaaaaaaaaaaaaaaa-0.json')),{code:'ENOENT'});
+    await assert.rejects(fs.access(path.join(cache,a0.slice(0,2),a0)),{code:'ENOENT'});
+    await assert.rejects(fs.access(path.join(cache,orphan.slice(0,2),orphan)),{code:'ENOENT'});
+    // 容量上限低于在用量时，从最旧幸存清单开始整体解除引用；每组最新一份始终保留，即使仍超限。
+    await pruneCache(workspace,5,'data'.length+1);
+    await assert.rejects(fs.access(path.join(manifests,'aaaaaaaaaaaaaaaa-1.json')),{code:'ENOENT'});
+    await assert.rejects(fs.access(path.join(cache,a1.slice(0,2),a1)),{code:'ENOENT'});
+    assert.equal(await fs.readFile(path.join(cache,a2.slice(0,2),a2),'utf8'),'data','每组最新引用仍在');
+    assert.equal(await fs.readFile(path.join(cache,b0.slice(0,2),b0),'utf8'),'data');
 });
 
