@@ -1,5 +1,5 @@
 'use strict';
-// 真实Vivado门控测试：仅当指定工程且本机存在Vivado时运行，CI无Vivado时自动跳过。
+// 真实Vivado门控测试：本机存在Vivado即运行（未提供既有工程时自建临时最小工程），CI无Vivado时自动跳过。
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
@@ -18,10 +18,18 @@ async function removeWithRetry(directory) {
     }
     return false;
 }
-const ready = !!project && !!findVivadoBinDir('');
+const ready = !!findVivadoBinDir('');
 
-test('真实Vivado状态查询绑定工程并返回器件与runs', { skip: !ready && '未设置SVTOOLS_TEST_VIVADO_PROJECT或未安装Vivado' }, async () => {
-    const output = await status({ workspace: path.dirname(project), project: path.basename(project) });
+test('真实Vivado状态查询绑定工程并返回器件与runs', { skip: !ready && '未安装Vivado' }, async t => {
+    // 建工程是纯Tcl元数据操作，不需要器件license；指定SVTOOLS_TEST_VIVADO_PROJECT时仍优先读既有工程。
+    let target = project;
+    if (!target) {
+        const root = await fs.mkdtemp(path.join(os.tmpdir(), 'svtools-vivado-smoke-'));
+        t.after(async () => { if (!await removeWithRetry(root)) t.diagnostic('残留临时目录：' + root); });
+        await createProject({ workspace: root, name: 'smoke', part: process.env.SVTOOLS_TEST_VIVADO_PART || 'xc7z100ffg900-2' });
+        target = path.join(root, 'smoke.xpr');
+    }
+    const output = await status({ workspace: path.dirname(target), project: path.basename(target) });
     assert.equal(output.status, 'success', JSON.stringify(output.diagnostics));
     assert.equal(typeof output.data.version, 'string');
     assert.equal(typeof output.data.part, 'string');
@@ -30,7 +38,7 @@ test('真实Vivado状态查询绑定工程并返回器件与runs', { skip: !read
 });
 
 const lifecycle = ready && process.env.SVTOOLS_TEST_VIVADO_LIFECYCLE === '1';
-test('真实Vivado工程生命周期：创建/加源与XDC/设置两种top', { skip: !lifecycle && '需SVTOOLS_TEST_VIVADO_LIFECYCLE=1、工程与Vivado' }, async t => {
+test('真实Vivado工程生命周期：创建/加源与XDC/设置两种top', { skip: !lifecycle && '需SVTOOLS_TEST_VIVADO_LIFECYCLE=1与已安装Vivado' }, async t => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'svtools-vivado-lifecycle-'));
     t.after(async () => { if (!await removeWithRetry(root)) t.diagnostic('残留临时目录：' + root); });
     await fs.writeFile(path.join(root, 'top.sv'), 'module top(input wire clk, output reg q); always @(posedge clk) q <= ~q; endmodule\n');
@@ -51,7 +59,7 @@ test('真实Vivado工程生命周期：创建/加源与XDC/设置两种top', { s
 });
 
 const cancelCase = ready && process.env.SVTOOLS_TEST_VIVADO_CANCEL === '1';
-test('真实后台运行取消：保留cancelled合同与vivado.run操作名', { skip: !cancelCase && '需SVTOOLS_TEST_VIVADO_CANCEL=1、工程与Vivado', timeout: 300000 }, async t => {
+test('真实后台运行取消：保留cancelled合同与vivado.run操作名', { skip: !cancelCase && '需SVTOOLS_TEST_VIVADO_CANCEL=1与已安装Vivado', timeout: 300000 }, async t => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'svtools-vivado-cancel-'));
     t.after(async () => { if (!await removeWithRetry(root)) t.diagnostic('残留临时目录：' + root); });
     await fs.writeFile(path.join(root, 'top.sv'), 'module top(input wire clk, output reg q); always @(posedge clk) q <= ~q; endmodule' + String.fromCharCode(10));
@@ -80,7 +88,7 @@ test('真实后台运行取消：保留cancelled合同与vivado.run操作名', {
 });
 
 const e2e = ready && process.env.SVTOOLS_TEST_VIVADO_E2E === '1';
-test('真实Vivado端到端：创建→加源→综合→报告→改源→复跑→对比', { skip: !e2e && '需SVTOOLS_TEST_VIVADO_E2E=1、工程与Vivado', timeout: 900000 }, async t => {
+test('真实Vivado端到端：创建→加源→综合→报告→改源→复跑→对比', { skip: !e2e && '需SVTOOLS_TEST_VIVADO_E2E=1与已安装Vivado', timeout: 900000 }, async t => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'svtools-vivado-e2e-'));
     t.after(async () => { if (!await removeWithRetry(root)) t.diagnostic('残留临时目录：' + root); });
     const source = withSecond =>
