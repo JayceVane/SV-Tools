@@ -17,6 +17,7 @@ const { directory } = require('../agent/storage');
 const { fail, ServiceError } = require('../agent/protocol');
 const { snapshotInputs } = require('../agent/source-snapshot');
 const { bundlePorts } = require('./bundles');
+const { checkStructure } = require('./check');
 
 const SCHEMA_VERSION = 1;
 const STAGE = 'source';
@@ -314,6 +315,10 @@ function buildEdges(module, nodes, limits) {
                 ? boundaryBits(module, node.name)
                 : (module.cells.find(item => item.name === node.name)?.ports.find(item => item.name === port.name)?.bits || []);
             for (const bit of bitSource) {
+                // 常量/悬空 bit（c:0/1/x/z）不是网络：不参与端口间连接，避免常量端口之间画假边或误计多驱动。
+                if (typeof bit !== 'string' || !bit.startsWith('n:')) {
+                    continue;
+                }
                 track(endpoints, bit, port.direction, node.id + '/' + port.name);
             }
         }
@@ -746,7 +751,7 @@ function projectArchitecture(design, { workspace, depth = 1, budget = {} }) {
         '虚拟接口端口为前缀折叠展示，未改变 RTL 端口事实；AXI 的 inout 仅为架构示意，不代表电气方向。',
         '整体 inout 接口按共享网络保留连接，布局起点不代表驱动方向；成员收发语义由接口文档声明，未执行电气或协议验证。',
         '参数覆盖以实例连接位宽为准，模块接口表为声明默认值；未连接端口按声明默认位宽。',
-        'scaffold 仅检查生成规格；对任意现有 RTL 的 design check/diff 尚未实现。',
+        'design check 报告未连接、无驱动、多驱动与位宽不一致的结构事实；与 arch 同一语言子集，不做功能/时序/CDC 验证。',
         '工具只读取已捕获源码与字面量 include 快照；未捕获的初始化数据和动态文件不从实时工程补读。',
         '缺失子模块按unresolved展示为无端口盒，不伪造端口表。',
         'Yosys 失败时保留 .svtools/agent/design/runs/<uuid> 任务目录作为日志证据，当前无自动淘汰。',
@@ -761,6 +766,7 @@ function projectArchitecture(design, { workspace, depth = 1, budget = {} }) {
         modules: interfaceModules, instances, unresolved, interfaces,
         graph: { nodes, edges, stats: { ...connected.stats, modules: interfaceModules.length, instances: instanceNodes.length,
             boundaries: boundaryNodes.length, nodes: nodes.length, edges: edges.length, depth } },
+        checks: checkStructure(design, module, workspace),
         limitations
     };
 }

@@ -19,7 +19,7 @@ Vivado 工程（M2）：`project create/add/set-top` 管理工程（创建幂等
 
 架构设计（M3，进行中）：新建骨架默认声明 **packed struct 虚拟端口**，一个逻辑接口一个端口、一条连接；整体 inout 可用于架构中的双向接口，成员内容和收发约定写入架构文档。不要为出图强制拆开请求/响应或展开完整协议引脚，不要把主/从角色等同于电气方向。分析已有 RTL 则保留其真实端口。执行架构设计或图表交付前，读取 [references/architecture.md](references/architecture.md)，其中包含生成规格、方向约束、时钟/复位处理、验收与当前限制。
 
-实际命令为 `design scaffold --spec <json|file>`、`design arch --top <module>` 和 `design render --top <module>`。SVG 默认采用接口级连线（--detail interfaces）：接口表外一条汇总线，方向缩写（`i`/`o`/`io`）在表内逐行标注；--detail signals 用于信号级排查。默认黑白 document 风格；`--style presentation` 用于演示。`--fold-ports` 仅作可选的显示折叠，不能替代虚拟端口声明；`--bundle-name` 仅与折叠选项同时生效。输入快照及哈希绑定生成模型，源码变化后应重新运行。`design check/diff`、任意深度层级展开和无宿主 PNG 尚未交付，不得编造调用或通过结论。
+实际命令为 `design scaffold --spec <json|file>`、`design arch --top <module>` 和 `design render --top <module>`。SVG 默认采用接口级连线（--detail interfaces）：接口表外一条汇总线，方向缩写（`i`/`o`/`io`）在表内逐行标注；--detail signals 用于信号级排查。默认黑白 document 风格；`--style presentation` 用于演示。`--fold-ports` 仅作可选的显示折叠，不能替代虚拟端口声明；`--bundle-name` 仅与折叠选项同时生效。输入快照及哈希绑定生成模型，源码变化后应重新运行。结构检查用 `design check --top <module>`：诊断逐条指认悬空 input（error）、无驱动网络（error）、多驱动（error）、缺失模块（error）与悬空 output、顶层无驱动输出、隐式位宽补常量（warning）；有 error 时退出码 1、`status=failed`，检查完成不等于结构干净，warning 也不得当作已验证。常量驱动不产生假诊断。架构比较用 `design arch --save <name>` 保存快照，改动后 `design diff --top <module> --baseline <name>` 报告实例/模块/端口/接口增删改与 `implemented[]`（空骨架补实现）；diff 只报告差异，好坏由设计判断。任意深度层级展开和无宿主 PNG 尚未交付，不得编造调用或通过结论。
 
 耗时操作可用 `task start lint`，保存返回的 UUID，再通过 `task status`、`task logs`、`task cancel` 管理。查询命令退出 0 只表示查询成功；检查 `data.result.status` 与 `data.sourceCurrent`。源码变化后重新验证，`CONTEXT_CHANGED`、`lost`、缺失结果或未知当前性都不能作为当前交付的通过证据。
 

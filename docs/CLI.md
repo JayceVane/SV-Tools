@@ -177,6 +177,7 @@ node src/cli/main.js design arch --workspace D:/project --top top --depth 1 --sa
 - `interfaces[]`：架构接口束，`id`、`from{kind,name}`、`to{kind,name}`、`direction`（`forward`|`bidirectional`|`connection`）、`bits`、`label`、`signals[]{name,width,direction}`、`fromPorts[]`/`toPorts[]`（端点实际端口名）。`connection` 表示共享网络相连，布局起点不代表电气驱动方向，其成员方向为 `unknown`，`bindings[]` 保存实际端口连接。已知方向的实例连接先合并双向对，再合并同源端口集合相同的扇出接口（`to.name` 用 `+` 连接多个实例）；实例↔边界按顶层端口前缀（如 `uart*`、`spi*`、`vin*`）聚合，`clk_in`/`rst_n_in`/`gpio` 等保留为独立束。`label` 优先取时钟/复位语义，其次成员信号公共前缀，否则用最多两个信号名摘要，长度不超过 48 字符；完整成员在 `signals[]` 与 SVG `<title>`；
 - `unresolved[]`：工作区未声明的子模块，逐条带 `source`，不伪造端口表（图上为无端口盒，结构检查属 D2）；
 - `graph`：`nodes[]`（`boundary` 顶层端口边界 / `instance` 实例盒，含 `label`、`ports`）、`edges[]`（`source`/`target`、`sourceNode`/`sourcePort`、`targetNode`/`targetPort`、`width`、`netNames`）与 `stats`（实例、边界、边与位宽统计、`depth`）；
+- `checks[]`：结构诊断（见 `design check`），随架构数据一并返回并计入 `archSha256`；
 - `limitations[]`：静态结构边界（未综合、不展开子层、IP/BD 等）。
 
 `--depth` 当前固定按顶层实例投影（大于 1 尚未展开子层，在 `limitations[]` 说明）。`--save <name>` 把架构 JSON 写入 `.svtools/agent/design/<name>.json`，供后续 `design diff` 使用（同名快照直接覆盖）。实例间整体 inout 接口按共享网络生成 `direction=connection` 的架构连接，无须拆开成员；没有确定驱动方向的位仍计入 `graph.stats.ambiguousBits`，不当作电气方向已验证。Yosys 失败时保留 `.svtools/agent/design/runs/<uuid>` 任务目录作为日志 artifact，当前无自动淘汰。
@@ -204,6 +205,19 @@ node src/cli/main.js design render --workspace D:/project --top top --fold-ports
 
 同一前缀的一组顶层端口（例如 `ddr_addr`、`ddr_ba`、`ddr_dq`）默认合成一张边界接口表，列为信号、相对顶层的方向和位数。各行保留原始端口 ID 与方向缩写（`i` 输入、`o` 输出、`io` 双向；全词在悬停 `<title>`，避免箭头在左右两侧表中含义翻转），表外默认一条汇总线；时钟、复位和单成员信号继续独立显示。分组只来自完整名称前缀，不代表工具识别或验证了 DDR/AXI 协议。`stats.boundaryTables` 与 SVG 证据的 `boundaryTableCount` 给出表格数量，领域模型 `graph.nodes/edges` 保持原始事实。整体 inout struct 可作为架构虚拟接口，成员内容及收发约定由配套文档声明，不强制拆分请求响应。新模型的顶层 inout 同时记录逐端口 `interfaces[].bindings`，保证表内的双向行有精确锚点。`m_`/`s_` 名称可提示请求和响应放在相对的一侧，不改变端口的真实方向。
 
-错误码：`AMBIGUOUS_MODULE`（工作区同名模块声明，`data.candidates[]` 给出全部 `{name,file,line}`，exit 2）、`MODULE_NOT_FOUND`（`--top` 未命中）、`DESIGN_LIMIT`（架构模块 4096、实例 20000、边 50000；渲染节点 2000、接口 6000、端口 16384；超出不产出部分模型或半成品）、`TOOL_NOT_FOUND`（内置 Yosys 资源缺失或不可加载）、`EXPORT_UNSUPPORTED`（PNG 无栅格化宿主）；单源文件 8 MiB 与源码总量属上下文预算，超限返回 `SOURCE_LIMIT`，不映射为 `DESIGN_LIMIT`；其余 Yosys/导出失败返回 `DESIGN_FAILED` 并附日志 artifact。
+错误码：`AMBIGUOUS_MODULE`（工作区同名模块声明，`data.candidates[]` 给出全部 `{name,file,line}`，exit 2）、`MODULE_NOT_FOUND`（`--top` 未命中）、`DESIGN_LIMIT`（架构模块 4096、实例 20000、边 50000、结构诊断 5000；渲染节点 2000、接口 6000、端口 16384；超出不产出部分模型或半成品）、`TOOL_NOT_FOUND`（内置 Yosys 资源缺失或不可加载）、`EXPORT_UNSUPPORTED`（PNG 无栅格化宿主）；单源文件 8 MiB 与源码总量属上下文预算，超限返回 `SOURCE_LIMIT`，不映射为 `DESIGN_LIMIT`；其余 Yosys/导出失败返回 `DESIGN_FAILED` 并附日志 artifact。
 
-Agent 使用入口见 [SV Tools Skill](../skills/svtools-agent/SKILL.md)。架构建模（`design arch`）与 SVG 架构图渲染（`design render`）已提供；架构检查/比较（`design check/diff`）、波形查询与 MCP 尚未实现。按 `doctor.data.capabilities` 发现实际接口。
+`design check --top <module>` 对同一架构数据做结构检查，逐条指认问题而不是只给位计数。诊断随 `design arch` 的 `data.checks[]` 一并返回，check 命令把它们提升为顶层 `diagnostics[]`：存在 error 级问题时 `status=failed` 且 exit 1（对齐 lint：检查完成但工程有结构错误），仅 warning 时 exit 0，`data.status` 为 `errors|warnings|clean`。诊断码与语义：
+
+- `UNRESOLVED_MODULE`（error）：实例引用工作区未声明的子模块，按无端口盒展示；
+- `UNDRIVEN_INPUT`（error）：input 端口未连接（悬空），或所在网络没有任何驱动（`netNames[]` 给出网络名）；
+- `MULTI_DRIVER`（error）：同一网络被多个输出端口驱动，`drivers[]` 列出全部 `实例/端口`；
+- `UNCONNECTED_PORT`（warning）：output/inout 端口未连接（常见有意悬空，不阻断）；
+- `UNDRIVEN_OUTPUT`（warning）：顶层输出端口没有被任何实例驱动；
+- `WIDTH_MISMATCH`（warning）：连接的网络窄于端口声明，其余位由工具隐式补常量（`connectedWidth`/`declaredWidth`/`implicitBits`）；宽 wire 连窄端口的截断在 Yosys 展开后不可见，不虚构报告。
+
+网络分析只统计网络 bit：常量驱动（如 `.rst_n(1'b0)`）是值不是连接，不产生假边、假多驱动或假无驱动诊断。诊断带源码位置（`source{file,line,column}`，模块端口声明处）；同一源码的检查结果确定。结构检查不构成功能、时序或 CDC 验证。
+
+`design diff --top <module> --baseline <save名|快照路径>` 比较基线快照与当前架构，报告补实现前后的结构差异。`--baseline` 先按 `design arch --save` 的快照名（`.svtools/agent/design/<name>.json`）解析，也接受工作区相对的快照文件路径；基线不存在、不是 schemaVersion=1/stage=source 快照或顶层与 `--top` 不一致均返回 `INVALID_ARGUMENT`。`data.diff` 按身份报告差异：实例按名称、模块与接口按归一化 id、顶层端口按名称、源文件按路径，各维度给出 `added/removed/changed`（`changed` 记录 `{field:{baseline,current}}`，端口按 `名称:方向:位宽` 签名比较）；空骨架（blackbox）变为已实现（collapsed）的实例单独列入 `implemented[]` 与 `summary.implementedInstances`。源码未变时 `data.status=unchanged`。diff 只报告差异，不判断好坏；基线身份（`name/path/archSha256`）随结果返回可追溯。
+
+Agent 使用入口见 [SV Tools Skill](../skills/svtools-agent/SKILL.md)。架构建模（`design arch`）、SVG 架构图渲染（`design render`）、结构检查（`design check`）与架构比较（`design diff`）已提供；报告图表包、无宿主 PNG、波形查询与 MCP 尚未实现。按 `doctor.data.capabilities` 发现实际接口。

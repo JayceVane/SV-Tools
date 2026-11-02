@@ -19,8 +19,9 @@ const { buildArchitecture } = require('../design/arch');
 const { layoutArchitecture, renderArchitectureSvg, defaultFileName, normalizeStyle } = require('../design/svg');
 const { validateSpec, generateScaffold } = require('../design/scaffold');
 const { createContainedDirectories, cleanupDirectories } = require('../design/scaffold-paths');
+const { diffArchitectures } = require('../design/diff');
 
-const capabilities = ['doctor','project.list','project.inspect','project.create','project.add','project.set-top','format.preview','format.check','format.write','lint','vivado.status','vivado.report','vivado.run','task.start','task.list','task.status','task.logs','task.cancel','design.arch','design.scaffold','design.render'];
+const capabilities = ['doctor','project.list','project.inspect','project.create','project.add','project.set-top','format.preview','format.check','format.write','lint','vivado.status','vivado.report','vivado.run','task.start','task.list','task.status','task.logs','task.cancel','design.arch','design.scaffold','design.render','design.check','design.diff'];
 async function locateIverilog(options) {
     const executable = process.platform === 'win32' ? 'iverilog.exe' : 'iverilog';
     const configured = options.iverilog ? path.resolve(options.workspace,options.iverilog) : null;
@@ -128,6 +129,78 @@ async function arch(input) {
         snapshot = { name: input.save, path: file, sha256: data.archSha256 };
     }
     return result('design.arch',{ ...data, ...(snapshot ? { snapshot } : {}) },context);
+}
+/** 结构检查：把架构数据中的 checks 提升为诊断；有 error 级问题时命令结论为 failed（退出码 1）。 */
+async function check(input) {
+    if (!input.top) fail('INVALID_ARGUMENT','design check需要--top');
+    const resolved = await resolveContext(input);
+    const { options, context, contents } = resolved;
+    const files = [...contents].map(([file, value]) => ({ path: file, text: value.text }));
+    const data = await buildArchitecture({ workspace: options.workspace, files, top: input.top, includeDirs: context.includeDirs,
+        defines: context.defines, depth: input.depth ?? 1, timeoutMs: options.timeoutMs, contextRevision: context.revision });
+    await assertCurrent(resolved);
+    const errors = data.checks.filter(item => item.severity === 'error');
+    const warnings = data.checks.filter(item => item.severity === 'warning');
+    const response = result('design.check', {
+        status: errors.length ? 'errors' : warnings.length ? 'warnings' : 'clean',
+        errorCount: errors.length, warningCount: warnings.length,
+        top: data.top, designId: data.designId, archSha256: data.archSha256,
+        contextRevision: data.contextRevision, sourceFiles: data.sourceFiles,
+        unresolved: data.unresolved, checks: data.checks, limitations: data.limitations
+    }, context, data.checks);
+    if (errors.length) {
+        // 对齐 lint：检查完成但工程存在结构错误时结论为 failed，exitCode 1；仅警告不改变结论。
+        response.status = 'failed';
+        response.message = '工程存在 ' + errors.length + ' 个结构错误';
+    }
+    return response;
+}
+/** @param {string} workspace @param {string} value --baseline 参数（save 名或快照路径）。 @returns {Promise<{data:object,path:string,name:string|null}>} 基线快照。 */
+async function readBaseline(workspace, value) {
+    if (typeof value !== 'string' || !value.trim()) fail('INVALID_ARGUMENT','design diff需要--baseline <save名|快照路径>');
+    const trimmed = value.trim();
+    const byName = /^[\w.-]+$/.test(trimmed) ? path.join(await directory(workspace, 'design'), trimmed + '.json') : null;
+    const candidates = [...new Set([byName, path.resolve(workspace, trimmed)].filter(Boolean))];
+    let text = null, file = null;
+    for (const candidate of candidates) {
+        text = await fs.readFile(candidate, 'utf8').catch(error => error.code === 'ENOENT' ? null : fail('INVALID_ARGUMENT', 'design diff 基线读取失败：' + error.message, { baseline: candidate }));
+        if (text !== null) { file = candidate; break; }
+    }
+    if (text === null) {
+        fail('INVALID_ARGUMENT', 'design diff 基线快照不存在：' + candidates[candidates.length - 1] + '；先用 design arch --save <name> 保存', { baseline: candidates[candidates.length - 1] });
+    }
+    let baseline;
+    try {
+        baseline = JSON.parse(text);
+    } catch (error) {
+        fail('INVALID_ARGUMENT', 'design diff 基线不是合法 JSON：' + error.message, { baseline: file });
+    }
+    if (baseline.schemaVersion !== 1 || baseline.stage !== 'source' || !baseline.graph) {
+        fail('INVALID_ARGUMENT', 'design diff 基线不是架构快照（要求 schemaVersion=1 且 stage=source）', { baseline: file });
+    }
+    return { data: baseline, path: file, name: byName === file ? trimmed : null };
+}
+/** 比较基线快照与当前架构的结构差异（实例/模块/顶层端口/接口/源文件）。 */
+async function diff(input) {
+    if (!input.top) fail('INVALID_ARGUMENT','design diff需要--top');
+    const baseline = await readBaseline((await readOptions(input)).options.workspace, input.baseline);
+    const resolved = await resolveContext(input);
+    const { options, context, contents } = resolved;
+    if (baseline.data.top && baseline.data.top.name !== input.top) {
+        fail('INVALID_ARGUMENT','design diff 基线顶层 ' + baseline.data.top.name + ' 与 --top ' + input.top + ' 不一致，比较无意义', { baselineTop: baseline.data.top.name });
+    }
+    const files = [...contents].map(([file, value]) => ({ path: file, text: value.text }));
+    const current = await buildArchitecture({ workspace: options.workspace, files, top: input.top, includeDirs: context.includeDirs,
+        defines: context.defines, depth: input.depth ?? 1, timeoutMs: options.timeoutMs, contextRevision: context.revision });
+    await assertCurrent(resolved);
+    const differences = diffArchitectures(baseline.data, current);
+    const changed = Object.values(differences.summary).some(count => count > 0);
+    return result('design.diff', {
+        status: changed ? 'changed' : 'unchanged', top: current.top, designId: current.designId, archSha256: current.archSha256,
+        baseline: { name: baseline.name, path: path.relative(options.workspace, baseline.path).split(path.sep).join('/'),
+            top: baseline.data.top ? baseline.data.top.name : null, archSha256: baseline.data.archSha256 || null },
+        diff: differences
+    }, context);
 }
 /** @param {string[]} [values] --bundle-name 参数。 @returns {Record<string,string>} 前缀→显示名映射。 */
 function parseBundleNames(values = []) {
@@ -327,4 +400,4 @@ async function lint(input, {signal,onContext,onArtifacts} = {}) {
     }
     return response;
 }
-module.exports={doctor,projects,inspect,format,arch,scaffold,render,lint,capabilities};
+module.exports={doctor,projects,inspect,format,arch,scaffold,render,check,diff,lint,capabilities};
