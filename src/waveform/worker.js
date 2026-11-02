@@ -66,7 +66,7 @@ parentPort.on('message', async message => {
                 result = { roles: roles.vars.map(signal => ({ path: signal.path, role: signal.role || 'unknown', roleSource: signal.roleSource })),
                     sourceRoleNote: roles.sourceRoleNote, sourceRoleRetry: params?.invalidated === true };
             } else {
-                if (!['window', 'values', 'edge'].includes(method)) throw new Error('未知 VCD 请求：' + method);
+                if (!['window', 'values', 'edge', 'changes', 'sample'].includes(method)) throw new Error('未知 VCD 请求：' + method);
                 result = store[method](params);
             }
         }

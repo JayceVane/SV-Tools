@@ -22,8 +22,9 @@ const { createContainedDirectories, cleanupDirectories } = require('../design/sc
 const { diffArchitectures } = require('../design/diff');
 const { rasterizeSvg, DEFAULT_SCALE } = require('../graphics/rasterize');
 const { generateReportMarkdown } = require('../design/report');
+const wave = require('./wave');
 
-const capabilities = ['doctor','project.list','project.inspect','project.create','project.add','project.set-top','format.preview','format.check','format.write','lint','vivado.status','vivado.report','vivado.run','task.start','task.list','task.status','task.logs','task.cancel','design.arch','design.scaffold','design.render','design.check','design.diff','design.report'];
+const capabilities = ['doctor','project.list','project.inspect','project.create','project.add','project.set-top','format.preview','format.check','format.write','lint','vivado.status','vivado.report','vivado.run','task.start','task.list','task.status','task.logs','task.cancel','design.arch','design.scaffold','design.render','design.check','design.diff','design.report','wave.signals','wave.values','wave.changes','wave.edges','wave.sample','wave.diff'];
 async function locateIverilog(options) {
     const executable = process.platform === 'win32' ? 'iverilog.exe' : 'iverilog';
     const configured = options.iverilog ? path.resolve(options.workspace,options.iverilog) : null;
@@ -484,4 +485,5 @@ async function lint(input, {signal,onContext,onArtifacts} = {}) {
     }
     return response;
 }
-module.exports={doctor,projects,inspect,format,arch,scaffold,render,check,diff,report,lint,capabilities};
+module.exports={doctor,projects,inspect,format,arch,scaffold,render,check,diff,report,lint,capabilities,
+    waveSignals:wave.signals,waveValues:wave.values,waveChanges:wave.changes,waveEdges:wave.edges,waveSample:wave.sample,waveDiff:wave.diff};

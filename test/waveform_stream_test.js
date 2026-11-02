@@ -81,6 +81,47 @@ test('事件分块边界上的同刻回退不破坏后续写入与二分导航',
     assert.deepEqual(store.edge({ id: '!', time: 63, direction: 'next' }), { time: 65, value: '0' });
 });
 
+test('changes 全保真枚举窗口跳变：游标分页、total 计数与窗口边界', () => {
+    // bus(#) 在 0/10/20/30/40 五个时刻变化；clk(!) 同步翻转。
+    const { store } = storeFrom(header + 'b0 # 0! #10 1! b1 # #20 0! b10 # #30 1! b11 # #40 0! b100 #');
+    const page1 = store.changes({ ids: ['#'], from: -1, to: 40, limit: 2 });
+    assert.deepEqual(page1.series[0], { id: '#', total: 5, events: [{ t: 0, value: '0' }, { t: 10, value: '1' }], next: 10 });
+    const page2 = store.changes({ ids: ['#'], from: page1.series[0].next, to: 40, limit: 2 });
+    assert.deepEqual(page2.series[0].events, [{ t: 20, value: '10' }, { t: 30, value: '11' }]);
+    assert.equal(page2.series[0].next, 30);
+    const page3 = store.changes({ ids: ['#'], from: page2.series[0].next, to: 40, limit: 2 });
+    assert.deepEqual(page3.series[0].events, [{ t: 40, value: '100' }]);
+    assert.equal(page3.series[0].next, null);
+    // 左开区间：from=10 不重复 t=10 的事件；limit 截断时 total 仍为窗口全数。
+    const tail = store.changes({ ids: ['#'], from: 10, to: 40, limit: 1 });
+    assert.deepEqual(tail.series[0], { id: '#', total: 3, events: [{ t: 20, value: '10' }], next: 20 });
+    assert.deepEqual(store.changes({ ids: ['missing'], from: -1, to: 40 }).series[0], { id: 'missing', total: 0, events: [], next: null });
+    assert.throws(() => store.changes({ ids: ['#'], from: 40, to: 40, limit: 1 }), /from/);
+    assert.throws(() => store.changes({ ids: ['#'], from: -1, to: 40, limit: 0 }), /limit/);
+});
+
+test('sample 按时钟沿采样：rise/fall/both、X/Z 不构成沿、游标分页与时钟校验', () => {
+    const { store } = storeFrom(header + 'b0 # 0! #10 1! b1 # #20 0! b10 # #30 1! b11 # #40 0! b100 #');
+    const rising = store.sample({ clock: '!', edge: 'rise', ids: ['#'], from: -1, to: 40 });
+    assert.deepEqual(rising, { clock: '!', edge: 'rise', total: 2,
+        samples: [{ t: 10, values: Object.assign(Object.create(null), { '#': '1' }) }, { t: 30, values: Object.assign(Object.create(null), { '#': '11' }) }], next: null });
+    const falling = store.sample({ clock: '!', edge: 'fall', ids: ['#'], from: -1, to: 40 });
+    assert.deepEqual(falling.samples.map(sample => sample.t), [20, 40]);
+    const page = store.sample({ clock: '!', edge: 'both', ids: ['#'], from: -1, to: 40, limit: 2 });
+    assert.equal(page.total, 4);
+    assert.deepEqual(page.samples.map(sample => sample.t), [10, 20]);
+    assert.equal(page.next, 20);
+    const rest = store.sample({ clock: '!', edge: 'both', ids: ['#'], from: page.next, to: 40, limit: 2 });
+    assert.deepEqual(rest.samples.map(sample => sample.t), [30, 40]);
+    assert.equal(rest.next, null);
+    // 时钟经过 X 不构成沿：0 → x → 1 没有任何 rise/fall。
+    const glitch = storeFrom(header + '0! #10 x! #20 1! #30 z! #40 0!');
+    assert.deepEqual(glitch.store.sample({ clock: '!', edge: 'both', ids: ['#'], from: -1, to: 40 }).samples.map(sample => sample.t), []);
+    assert.throws(() => store.sample({ clock: 'missing', ids: ['#'], to: 40 }), /时钟信号不存在/);
+    assert.throws(() => store.sample({ clock: '#', ids: ['#'], to: 40 }), /1 位标量/);
+    assert.throws(() => store.sample({ clock: '!', edge: 'both', ids: ['#'], to: 40, limit: 0 }), /limit/);
+});
+
 test('密集窗口每像素只传真实首尾事件，dense 显式计数；值和边沿仍精确', () => {
     let source = header;
     for (let time = 0; time < 1000; time++) source += '#' + time + ' ' + (time % 2) + '! ';
@@ -93,6 +134,30 @@ test('密集窗口每像素只传真实首尾事件，dense 显式计数；值�
     assert.deepEqual(store.edge({ id: '!', time: 555, direction: 'next' }), { time: 556, value: '0' });
     assert.deepEqual(store.edge({ id: '!', time: 555, direction: 'previous' }), { time: 554, value: '0' });
     assert.deepEqual(store.values({ ids: ['missing'], time: 0 }).values, Object.assign(Object.create(null), { missing: null }));
+});
+
+test('快照序列化往返：查询结果一致、alias 共享、损坏与版本不符拒绝', () => {
+    const { store, metadata } = storeFrom(header + 'b0 # 0! #10 1! b1 # #20 0! b10 # #30 1! b11 # #40 0! b100 #');
+    const buffer = store.snapshot();
+    // 前置填充后 subarray，制造非零 byteOffset 且内容完整，验证对齐回退路径。
+    const shifted = Buffer.concat([Buffer.alloc(3), buffer]).subarray(3);
+    const restored = VcdStore.loadSnapshot(shifted, null);
+    const queries = [
+        s => s.changes({ ids: ['#'], from: -1, to: 40, limit: 2 }),
+        s => s.values({ ids: ['#', '!'], time: 35 }),
+        s => s.sample({ clock: '!', edge: 'rise', ids: ['#'], from: -1, to: 40 }),
+        s => s.edge({ id: '#', time: 0, direction: 'next' })
+    ];
+    for (const query of queries) assert.deepEqual(query(restored), query(store));
+    assert.equal(restored.eventCount, metadata.eventCount);
+    assert.equal(restored.signals.get('!').length, store.signals.get('!').length);
+    // 尾部最多 7 字节对齐填充，截 16 字节必然伤及真实数据段。
+    assert.throws(() => VcdStore.loadSnapshot(buffer.subarray(0, buffer.length - 16), null), { code: 'VCD_SNAPSHOT' });
+    const corrupted = Buffer.from(buffer); corrupted.write('XXXX', 0, 'ascii');
+    assert.throws(() => VcdStore.loadSnapshot(corrupted, null), { code: 'VCD_SNAPSHOT', message: /不是 SV Tools 波形索引快照/ });
+    const badVersion = Buffer.from(buffer); badVersion.writeUInt32LE(0, 4); badVersion.write('SVTW', 0, 'ascii');
+    // headerLength=0 时头解析直接失败，覆盖版本防御路径。
+    assert.throws(() => VcdStore.loadSnapshot(badVersion, null), { code: 'VCD_SNAPSHOT' });
 });
 
 test('查询边界和资源预算明确拒绝超限，不能默默截断精确数据', () => {

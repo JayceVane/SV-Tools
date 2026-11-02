@@ -11,6 +11,8 @@ const DEFAULT_MAX_STORE_BYTES = 512 * 1024 * 1024;
 const MAX_QUERY_IDS = 256;
 const MAX_QUERY_PIXELS = 4096;
 const MAX_QUERY_POINTS = 262144;
+const MAX_CHANGES = 10000;
+const MAX_SAMPLES = 4096;
 const MAX_RESULT_BYTES = 32 * 1024 * 1024;
 
 function queryError(message, code = 'VCD_QUERY') {
@@ -257,6 +259,12 @@ class VcdStore {
     checkTime(time) {
         if (!Number.isFinite(time) || time < 0 || time > Number.MAX_SAFE_INTEGER) throw queryError('查询时间必须是非负有限数值');
     }
+    /** 窗口枚举的时间界：from 为左开（上一页最后事件时间），-1 覆盖首事件。 */
+    checkRange(from, to, limit, maximum, label) {
+        this.checkTime(to);
+        if (!Number.isFinite(from) || from < -1 || from >= to) throw queryError(label + ' 的 from 必须为 -1 到 to 之间的开区间下界');
+        if (!Number.isSafeInteger(limit) || limit < 1 || limit > maximum) throw queryError(label + ' 的 limit 必须为 1–' + maximum + ' 的整数');
+    }
     window({ ids, start, end, pixels }) {
         ids = this.queryIds(ids);
         this.checkTime(start);
@@ -312,6 +320,69 @@ class VcdStore {
         }
         return { values };
     }
+    /** 窗口内全保真跳变枚举（与按像素降采样的 window 互补）：返回 t 满足 from < t <= to 的事件，
+     * 每信号最多 limit 条；total 为窗口内总数，next 为下一页应传的 from（最后返回事件时间），无更多时为 null。 */
+    changes({ ids, from = -1, to, limit = 200 }) {
+        ids = this.queryIds(ids);
+        this.checkRange(from, to, limit, MAX_CHANGES, 'changes');
+        const response = new ResponseBudget(this.maxResponseBytes);
+        const series = ids.map(id => {
+            response.id(id);
+            const signal = this.signals.get(id);
+            if (!signal || !signal.length) return { id, total: 0, events: [], next: null };
+            const first = signal.upperBound(from);
+            const last = signal.upperBound(to);
+            const end = Math.min(last, first + limit);
+            const events = [];
+            for (let index = first; index < end; index++) {
+                response.value(signal.valueLengthAt(index));
+                const event = signal.event(index);
+                events.push({ t: event.t, value: event.value });
+            }
+            return { id, total: last - first, events, next: end < last ? signal.timeAt(end - 1) : null };
+        });
+        return { series };
+    }
+
+    /** 指定时钟边沿采样：clock 必须为 1 位标量信号，X/Z 不构成沿；每个命中沿时刻读取 ids 的左闭值。
+     * next 为下一页应传的 from（最后采样时刻），total 为窗口内沿总数。 */
+    sample({ clock, edge = 'rise', ids, from = -1, to, limit = 256 }) {
+        if (typeof clock !== 'string') throw queryError('采样需要时钟信号 id');
+        if (!['rise', 'fall', 'both'].includes(edge)) throw queryError('采样边沿必须为 rise、fall 或 both');
+        ids = this.queryIds(ids);
+        this.checkRange(from, to, limit, MAX_SAMPLES, 'sample');
+        const clockSignal = this.signals.get(clock);
+        if (!clockSignal) throw queryError('时钟信号不存在：' + clock);
+        if (clockSignal.width !== 1) throw queryError('采样时钟必须是 1 位标量信号');
+        const response = new ResponseBudget(this.maxResponseBytes);
+        for (const id of ids) response.id(id);
+        const samples = [];
+        let total = 0, previous = null;
+        const first = clockSignal.upperBound(from), last = clockSignal.upperBound(to);
+        const initial = first - 1;
+        if (initial >= 0) previous = clockSignal.event(initial).value;
+        for (let index = first; index < last; index++) {
+            const value = clockSignal.event(index).value;
+            const rising = previous === '0' && value === '1';
+            const falling = previous === '1' && value === '0';
+            previous = value;
+            if (!(edge === 'rise' ? rising : edge === 'fall' ? falling : rising || falling)) continue;
+            total++;
+            if (samples.length >= limit) continue;
+            const t = clockSignal.timeAt(index);
+            const values = Object.create(null);
+            for (const id of ids) {
+                const signal = this.signals.get(id);
+                const at = signal ? signal.upperBound(t) - 1 : -1;
+                if (at >= 0) response.value(signal.valueLengthAt(at));
+                else response.reserve(16);
+                values[id] = at >= 0 ? signal.event(at).value : null;
+            }
+            samples.push({ t, values });
+        }
+        return { clock, edge, total, samples, next: total > samples.length && samples.length ? samples[samples.length - 1].t : null };
+    }
+
     edge({ id, time, direction, bitOffset, continuation }) {
         this.checkTime(time);
         if (typeof id !== 'string') throw queryError('边沿查询需要信号 id');
@@ -349,6 +420,99 @@ class VcdStore {
         response.value(signal.valueLengthAt(index));
         const event = signal.event(index);
         return { time: event.t, value: event.value };
+    }
+
+    /** @returns {object} 序列化视图：vars 由调用方（parser 元数据）持有，这里只存事件结构与值池。 */
+    describeSnapshot() {
+        return {
+            budgetBytes: this.budget.bytes, eventCount: this.eventCount, rawEventCount: this.rawEventCount,
+            pool: { valueCount: this.valuesPool.valueCount, byteCount: this.valuesPool.byteCount,
+                descriptors: this.valuesPool.descriptors.map(chunk => ({ count: chunk.offsets.length })) },
+            signals: [...this.signals.entries()].map(([id, signal]) => ({ id, width: signal.width, type: signal.type, length: signal.length,
+                chunks: signal.chunks.map(chunk => ({ start: chunk.start, length: chunk.length, capacity: chunk.times.length })) }))
+        };
+    }
+
+    /** 把当前事件存储与值池序列化为单个 Buffer；typed 数组按 8 字节对齐排布，反序列化可直接建立零拷贝视图。 */
+    snapshot() {
+        const blocks = [];
+        let length = 0;
+        const align = () => { const pad = (8 - length % 8) % 8; if (pad) { blocks.push(Buffer.alloc(pad)); length += pad; } };
+        const push = (typed, bytesPerElement) => {
+            align();
+            blocks.push(Buffer.from(typed.buffer, typed.byteOffset, typed.length * bytesPerElement));
+            length += typed.length * bytesPerElement;
+            return { offset: length - typed.length * bytesPerElement, count: typed.length };
+        };
+        const layout = { pool: { descriptors: [] }, bytes: [], signals: [] };
+        for (const chunk of this.valuesPool.descriptors) {
+            layout.pool.descriptors.push({ offsets: push(chunk.offsets, 4), lengths: push(chunk.lengths, 4), kinds: push(chunk.kinds, 1) });
+        }
+        for (const chunk of this.valuesPool.bytes) layout.bytes.push(push(chunk, 1));
+        for (const signal of this.signals.values()) {
+            const entry = [];
+            for (const chunk of signal.chunks) entry.push({ start: chunk.start, length: chunk.length, times: push(chunk.times, 8), values: push(chunk.values, 4) });
+            layout.signals.push(entry);
+        }
+        // 头部用空格补齐到 8 字节倍数，使数据段绝对偏移始终 8 对齐，反序列化可零拷贝建视图。
+        const json = JSON.stringify({ v: 1, ...this.describeSnapshot(), layout });
+        const headerLength = (Buffer.byteLength(json, 'utf8') + 7) & ~7;
+        const header = Buffer.alloc(headerLength, 0x20);
+        header.write(json, 0, 'utf8');
+        const prefix = Buffer.alloc(8);
+        prefix.write('SVTW', 0, 'ascii'); prefix.writeUInt32LE(headerLength, 4);
+        const total = 8 + headerLength + length;
+        let cursor = 0;
+        const out = Buffer.allocUnsafe((total + 7) & ~7);
+        for (const block of [prefix, header, ...blocks]) { block.copy(out, cursor); cursor += block.length; }
+        return out;
+    }
+
+    /** 从快照恢复事件存储（零拷贝视图）；结构与 magic/version 不匹配时拒绝。 */
+    static loadSnapshot(buffer, variables) {
+        if (buffer.length < 8 || buffer.toString('ascii', 0, 4) !== 'SVTW') throw queryError('不是 SV Tools 波形索引快照', 'VCD_SNAPSHOT');
+        const headerLength = buffer.readUInt32LE(4);
+        if (8 + headerLength > buffer.length) throw queryError('波形索引快照头不完整', 'VCD_SNAPSHOT');
+        let header;
+        try { header = JSON.parse(buffer.toString('utf8', 8, 8 + headerLength)); }
+        catch { throw queryError('波形索引快照头损坏', 'VCD_SNAPSHOT'); }
+        if (header.v !== 1) throw queryError('不支持的波形索引快照版本：' + header.v, 'VCD_SNAPSHOT');
+        const base = 8 + headerLength;
+        const view = (elementBytes, spot) => {
+            const offset = base + spot.offset, count = spot.count, bytes = count * elementBytes;
+            if (offset % elementBytes || offset + bytes > buffer.length) throw queryError('波形索引快照数据段越界', 'VCD_SNAPSHOT');
+            const kind = elementBytes === 8 ? Float64Array : elementBytes === 4 ? Uint32Array : Uint8Array;
+            // buffer 自身已按元素对齐时直接共享底层数组；否则复制进新分配的对齐数组。
+            if ((buffer.byteOffset + offset) % elementBytes === 0) return new kind(buffer.buffer, buffer.byteOffset + offset, count);
+            const copy = new kind(count);
+            Buffer.from(copy.buffer, 0, bytes).set(buffer.subarray(offset, offset + bytes));
+            return copy;
+        };
+        const store = new VcdStore({ maxStoreBytes: header.budgetBytes, maxResponseBytes: MAX_RESULT_BYTES, maxBitEdgeScan: 100000 });
+        store.budget.bytes = header.budgetBytes;
+        store.eventCount = header.eventCount;
+        store.rawEventCount = header.rawEventCount;
+        const pool = store.valuesPool;
+        pool.valueCount = header.pool.valueCount;
+        pool.byteCount = header.pool.byteCount;
+        pool.descriptors = header.layout.pool.descriptors.map(spots => ({
+            offsets: view(4, spots.offsets), lengths: view(4, spots.lengths), kinds: view(1, spots.kinds)
+        }));
+        pool.bytes = header.layout.bytes.map(spot => view(1, spot));
+        for (const [index, record] of header.signals.entries()) {
+            const signal = new SignalEvents({ width: record.width, type: record.type }, store.budget, pool);
+            signal.length = record.length;
+            signal.chunks = header.layout.signals[index].map(chunk => ({
+                start: chunk.start, length: chunk.length,
+                times: view(8, chunk.times), values: view(4, chunk.values)
+            }));
+            signal.lastValue = signal.length ? signal.semanticValue(signal.event(signal.length - 1).value) : null;
+            const existing = store.signals.get(record.id);
+            if (existing) { if (existing.width !== record.width) throw queryError('同 id alias 的位宽不一致：' + record.id, 'VCD_PARSE'); }
+            else store.signals.set(record.id, signal);
+        }
+        if (variables) for (const variable of variables) if (!store.signals.has(variable.id)) store.register(variable);
+        return store;
     }
 }
 

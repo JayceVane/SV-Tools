@@ -24,6 +24,14 @@ const help=`SV Tools headless CLI (API 1)
   design check --top <module>
   design diff --top <module> --baseline <save-name|snapshot-file>
   design report --top <module> [--out <dir>] [--style document|presentation] [--title <t>] (SVG+PNG+json+md bundle)
+  wave signals --file <vcd> [--query <q>] [--scope <s>] [--role input|output|inout|internal]
+              [--min-width <n>] [--max-width <n>] [--limit <n>]
+  wave values --file <vcd> --signals <a,b> --at <ticks|10ns>
+  wave changes --file <vcd> --signals <a,b> [--from <t>] [--to <t>] [--limit <n>]
+  wave edges --file <vcd> --signal <s> [--bit <i>] [--kind any|rise|fall|x|z] [--from <t>] [--to <t>]
+  wave sample --file <vcd> --clock <c> [--clock-edge rise|fall|both] --signals <a,b> [--where <cond>]
+              [--from <t>] [--to <t>] [--limit <n>]   (--where e.g. "dut.q != 8'hA5", "bus contains-x")
+  wave diff --file <a.vcd> --against <b.vcd> [--signals <a,b>] [--from <t>] [--to <t>] [--limit <n>]
   task start lint [lint options]
   task list|status|logs|cancel [task-id]
 
@@ -38,16 +46,16 @@ Output:  JSON on stdout; --help and --version return text.
 Node.js >=22. The existing Rust formatter CLI remains available in bin/.
 `;
 function argumentsFor(argv) {
-    const strings=['workspace','config','project','fileset','file','top','iverilog','cygwin','vivado','standard','run','timeout','offset','limit','log-index','max-paths','jobs','name','dir','part','sim-top','target-fileset','depth','save','spec','format','out','title','style','detail','baseline'];
+    const strings=['workspace','config','project','fileset','file','top','iverilog','cygwin','vivado','standard','run','timeout','offset','limit','log-index','max-paths','jobs','name','dir','part','sim-top','target-fileset','depth','save','spec','format','out','title','style','detail','baseline','against','clock','query','scope','role','bit','at','from','to','signal','signals','min-width','max-width','clock-edge','kind'];
     const options=Object.fromEntries(strings.map(name=>[name,{type:'string'}]));
     for(const name of ['help','version','json','write','check','fold-ports','force']) options[name]={type:'boolean'};
     options.include={type:'string',multiple:true}; options.define={type:'string',multiple:true}; options.source={type:'string',multiple:true};
-    options['bundle-name']={type:'string',multiple:true};
+    options['bundle-name']={type:'string',multiple:true}; options.where={type:'string',multiple:true};
     let parsed;
     try { parsed=parseArgs({args:argv,options,allowPositionals:true,strict:true}); }
     catch(error) { fail('INVALID_ARGUMENT',error.message); }
     const input={...parsed.values};
-    for(const [from,to] of [['timeout','timeoutMs'],['log-index','logIndex'],['max-paths','maxPaths'],['sim-top','simTop'],['source','sources'],['target-fileset','filesetTarget']]) if(input[from]!==undefined) {input[to]=input[from]; delete input[from];}
+    for(const [from,to] of [['timeout','timeoutMs'],['log-index','logIndex'],['max-paths','maxPaths'],['sim-top','simTop'],['source','sources'],['target-fileset','filesetTarget'],['clock-edge','clockEdge'],['min-width','minWidth'],['max-width','maxWidth']]) if(input[from]!==undefined) {input[to]=input[from]; delete input[from];}
     for(const field of ['timeoutMs','offset','limit','logIndex','maxPaths','jobs','depth']) if(input[field]!==undefined) {
         if(!/^\d+$/.test(input[field]) || !Number.isSafeInteger(Number(input[field]))) fail('INVALID_ARGUMENT',field+'必须为非负整数');
         input[field]=Number(input[field]);
@@ -69,7 +77,7 @@ async function run(argv) {
         const [command,action,id,...extra]=positionals; let output;
         if(extra.length) fail('INVALID_ARGUMENT','位置参数过多');
         if(command!=='format' && (input.write || input.check)) fail('INVALID_ARGUMENT','--write与--check仅用于format');
-        operation=command==='project' || command==='task' || command==='design'?command+'.'+action:command;
+        operation=command==='project' || command==='task' || command==='design' || command==='wave'?command+'.'+action:command;
         if(command==='doctor' && !action) output=await services.doctor(input);
         else if(command==='project' && !id && ['list','inspect'].includes(action)) output=await services[action==='list'?'projects':'inspect'](input);
         else if(command==='project' && action==='create' && !id) output=await vivado.createProject(input);
@@ -85,6 +93,7 @@ async function run(argv) {
         else if(command==='design' && action==='check' && !id) output=await services.check(input);
         else if(command==='design' && action==='diff' && !id) output=await services.diff(input);
         else if(command==='design' && action==='report' && !id) output=await services.report(input);
+        else if(command==='wave' && !id && ['signals','values','changes','edges','sample','diff'].includes(action)) output=await services[{signals:'waveSignals',values:'waveValues',changes:'waveChanges',edges:'waveEdges',sample:'waveSample',diff:'waveDiff'}[action]](input);
         else if(command==='lint' && !action) {
             const controller=new AbortController(), cancel=()=>controller.abort();
             process.once('SIGINT',cancel);process.once('SIGTERM',cancel);
