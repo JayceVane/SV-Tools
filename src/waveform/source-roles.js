@@ -111,7 +111,12 @@ function classifySignals(vars, units) {
         const direction = unique([...directions]);
         const role = DIRECTIONS.has(direction) ? direction : directions.size ? 'unknown'
             : declarations.some(symbol => ['net', 'variable'].includes(symbol.kind)) ? 'internal' : 'unknown';
-        const bit = !signal.range && !signal.referenceName && signal.width === 1 && name.match(/^([^\\\[\]]+)\[([+-]?\d+)\]$/);
+        // 位级声明有两种形态，都必须能参与 packed 总线恢复：
+        // ① JS parser 产出：name 形如 `data[3]`、range 为空、无 referenceName；
+        // ② Rust 后端按原始声明表拆出的：name/path 带 `[3]`、range='[3]'、referenceName='data'。
+        // 旧条件要求 `!signal.range && !signal.referenceName`，会把 ② 排除在外，
+        // 导致逐位 dump 在 Rust 后端下永远合不回总线。
+        const bit = signal.width === 1 && name.match(/^([^\\\[\]]+)\[([+-]?\d+)\]$/);
         const bounds = declarations[0]?.packedRange;
         const packedBit = bit && bounds && (Number.isSafeInteger(bounds.left) || Number.isSafeInteger(bounds.right))
             && declarations.every(symbol => !symbol.array && ['net', 'variable', 'port'].includes(symbol.kind)

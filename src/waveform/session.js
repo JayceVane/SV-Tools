@@ -94,8 +94,40 @@ class VcdSession {
         this.disposed = true;
         this.ready = false;
         this.rejectAll(sessionError('VCD 会话已关闭', 'VCD_DISPOSED'));
-        this.closing = this.worker ? this.worker.terminate() : Promise.resolve();
+        this.closing = this.worker ? this.closeWorker() : Promise.resolve();
         return this.closing;
+    }
+    /**
+     * 优雅关闭 worker。
+     *
+     * 不能直接 `terminate()`：worker 里可能正在执行异步 napi 查询（compute 跑在
+     * libuv 线程池），V8 拆 isolate 时 Rust 侧收尾会踩到已销毁的上下文——实测
+     * 概率性段错误（exit 139 / 0xC0000005，5 次里约 1 次）。
+     *
+     * 协议：发 `close` → worker 等在途请求计数归零后回 `closed` 并自行 exit。
+     * 宽限期只用于真卡死的兜底，设得足够长（大文件解析可达数秒）。
+     */
+    closeWorker() {
+        const worker = this.worker;
+        return new Promise(resolve => {
+            let settled = false;
+            const finish = () => {
+                if (settled) return;
+                settled = true;
+                clearTimeout(timer);
+                worker.off('message', onMessage);
+                resolve();
+            };
+            const onMessage = message => {
+                if (message?.type === 'closed') finish();
+            };
+            // 兜底：worker 内部计数若因异常永远不到 0，最多等 5 秒再强杀。
+            const timer = setTimeout(() => { worker.terminate().finally(finish); }, 5000);
+            worker.once('exit', finish);
+            worker.on('message', onMessage);
+            try { worker.postMessage({ requestId: -1, method: 'close', params: {} }); }
+            catch { worker.terminate().finally(finish); }
+        });
     }
 }
 

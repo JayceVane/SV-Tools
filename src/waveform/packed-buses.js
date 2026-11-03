@@ -37,9 +37,12 @@ function restorePackedBuses(vars, store) {
         const first = declarations[0], name = first.packedBit.name, path = first.scopePath ? first.scopePath + '.' + name : name;
         if (paths.has(path)) continue;
         const id = store.compose(bits.map(signal => signal.id));
+        // 合成结果是「总线」，不再是某条成员向量的位切片：必须清掉 packedBit 与
+        // packedSource，否则后端会把合成值当成单条向量的位投影去取
+        // （Rust 后端实测会因为走位切片分支而返回 null）。
         replaced.set(first, { ...first, id, name, path, width: bits.length,
             range: '[' + bits[0].packedBit.index + ':' + bits.at(-1).packedBit.index + ']',
-            packedBit: undefined, bitPaths: bits.map(signal => signal.path) });
+            packedBit: undefined, packedSource: undefined, bitPaths: bits.map(signal => signal.path) });
         declarations.filter(signal => signal !== first).forEach(signal => removed.add(signal));
     }
     return vars.filter(signal => !removed.has(signal)).map(signal => replaced.get(signal) || signal);
