@@ -442,8 +442,20 @@ pub fn wave_edge(file: String, id: String, time: i64, direction: String, bit_off
             return Err(Error::from_reason("位边沿下标无效"));
         }
     }
-    let _ = continuation;
-    let hit = wave::edge_hit(&mut session, &var, time, &direction, bit_offset, bit_width).map_err(wave_error)?;
+    // 续查起点：`edge_hit` 在耗尽逐事件扫描预算时返回 `continuation`（事件索引），
+    // 调用方原样回传即可从断点继续。此前这里丢弃该参数，导致：
+    // ① 每次续查都从头重扫（分页退化成 O(n²)）；
+    // ② webview 的 `do…while (continuation)` 拿到同一个 continuation 无限重发同一请求。
+    let hit = wave::edge_hit(
+        &mut session,
+        &var,
+        time,
+        &direction,
+        bit_offset,
+        bit_width,
+        continuation.map(|value| value as usize),
+    )
+    .map_err(wave_error)?;
     serde_json::to_string(&hit)
         .map_err(|error| Error::from_reason(format!("序列化失败：{}", error)))
 }

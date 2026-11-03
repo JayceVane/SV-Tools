@@ -68,6 +68,14 @@ pub struct WaveVar {
     pub var_type: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub range: Option<String>,
+    /// 位宽 1 且声明带显式范围（`$var wire 1 ! bus [3:3]`）时的「去掉范围的基名」。
+    ///
+    /// 与 JS parser 的 `referenceName` 同义，且**只在 width==1 && range 存在**时设置：
+    /// - `memory.js` 用 `referenceName ?? name` 推导数组地址，缺了它会把
+    ///   `$var reg 1 % mem[4] [0:0]`（`name` 应为 `mem[4][0]`）误判成二维存储器 `[4][0]`；
+    /// - `debug/signal-mapping.js` 需要「`[l:r]` 范围 或 `referenceName`」之一才能验证位映射。
+    #[serde(rename = "referenceName", skip_serializing_if = "Option::is_none")]
+    pub reference_name: Option<String>,
     /// 位下标方向（wellen `VarIndex`）。取值位串最左位对应 `msb`。
     /// 逐位 dump 展开要靠它还原每个位置的真实位号，不能依赖声明顺序。
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -292,6 +300,8 @@ fn expand_bit_dumps(vars: Vec<WaveVar>, declared: &[header::DeclaredVar]) -> Vec
                 width: 1,
                 var_type: var.var_type.clone(),
                 range: Some(suffix),
+                // 展开出来的位变量没有 [l:r] 范围，基名信息已由 packedSource 承载。
+                reference_name: None,
                 msb: Some(bit_index),
                 lsb: Some(bit_index),
                 change_count: var.change_count,
@@ -318,6 +328,29 @@ pub struct PackedSource {
     pub position: usize,
     /// 原位宽。
     pub width: u32,
+}
+
+/// 把「源向量的整条位串」按 `packed_source` 切成该单位变量对应的那一位。
+///
+/// 逐位 dump 展开项（`width == 1` 且 `packed_source` 有值）在 wellen 里没有独立信号，
+/// 取值必须回到源向量再切片。**所有读取值的地方都要过这一层**：
+/// `values_at`/`changes_for`/`edge_hit`/`window_series`/`bits_at`/采样时钟
+/// 若漏掉它，就会静默返回整条向量——表现为 rise/fall 永不命中、
+/// 采样数为 0、1 位行画出整条总线值，全是无声的错误结果。
+fn project_packed_source(bits: String, width: u32, packed: Option<&PackedSource>) -> String {
+    let Some(source) = packed else { return bits };
+    let lower = bits.to_ascii_lowercase();
+    let fill = lower.chars().next().unwrap_or('0');
+    let padded = pad_left(&lower, source.width as usize, fill);
+    // 越界时退回最左位，与 `bit_of` 的夹紧语义一致（不应发生，但不要 panic）。
+    padded
+        .chars()
+        .nth(source.position)
+        .map(|bit| bit.to_string())
+        .unwrap_or_else(|| {
+            let _ = width;
+            bits
+        })
 }
 
 /// 给 wellen 的变量分配稳定 id。
@@ -717,7 +750,19 @@ fn describe(file: &Path, wave: &mut simple::Waveform) -> WaveResult<WaveTrace> {
             let suffix = range.as_deref().unwrap_or_default();
             (format!("{}{}", base_path, suffix), format!("{}{}", base_name, suffix))
         } else {
-            (base_path, base_name)
+            (base_path, base_name.clone())
+        };
+        // `referenceName` 与 JS parser 同义：**只在位宽 1 且声明带 `[l:r]` 形式范围时**给出
+        // 「去掉范围的基名」。`$var wire 1 ! bus [3:3]` → name/path 为 `bus[3]`、
+        // referenceName 为 `bus`；而 `$var reg 8 # mem [7:0]`（多位向量）不给，
+        // 它的位宽信息已经在 range 里，不需要再拆基名。
+        let reference_name = if width == 1 {
+            range
+                .as_deref()
+                .filter(|text| text.contains(':'))
+                .map(|_| base_name.clone())
+        } else {
+            None
         };
         let scope = match path.rfind('.') {
             Some(index) => path[..index].to_string(),
@@ -738,6 +783,7 @@ fn describe(file: &Path, wave: &mut simple::Waveform) -> WaveResult<WaveTrace> {
             width,
             var_type: type_name(var),
             range,
+            reference_name,
             msb,
             lsb,
             packed_source: None,
@@ -1238,16 +1284,7 @@ pub fn values_at(
                 .map(|offset| signal.get_value_at(&offset, 0))
                 .and_then(value_bits);
             // 逐位变量：从来源向量的位串里切出对应位。
-            let value = match (&raw, packed) {
-                (Some(bits), Some(source)) => {
-                    let lower = bits.to_ascii_lowercase();
-                    let fill = lower.chars().next().unwrap_or('0');
-                    let padded = pad_left(&lower, source.width as usize, fill);
-                    padded.chars().nth(source.position).map(|bit| bit.to_string())
-                }
-                (raw, None) => raw.clone(),
-                _ => None,
-            };
+            let value = raw.map(|bits| project_packed_source(bits, *width, packed.as_ref()));
             let entry = value.map(|bits| {
                 // bits 保留 wellen 展开的全宽位串（`b1x` → `0000001x`），只把「整条
                 // 全 x / 全 z」压成单字符（VCD 允许 `bx` 表示整条总线未知）。
@@ -1330,15 +1367,7 @@ fn changes_for(
         let Some(offset) = signal.get_offset(*index) else { continue };
         let raw = value_bits(signal.get_value_at(&offset, 0)).unwrap_or_default();
         // 逐位变量：从源向量位串里切出该位（与 values_at 同一规则）。
-        let bits = match &var.packed_source {
-            Some(source) => {
-                let lower = raw.to_ascii_lowercase();
-                let fill = lower.chars().next().unwrap_or('0');
-                let padded = pad_left(&lower, source.width as usize, fill);
-                padded.chars().nth(source.position).map(|bit| bit.to_string()).unwrap_or(raw)
-            }
-            None => raw,
-        };
+        let bits = project_packed_source(raw, var.width, var.packed_source.as_ref());
         // changes 与 values 同口径：保留全宽位串（`compress_leading_state` 只在
         // `value_bits` 里处理「整条全 x/z」的压缩）。
         events.push(WaveChange { t: session.time_at(*index).to_string(), bits });
@@ -1418,7 +1447,9 @@ pub fn edges(
                 let time = session.time_at(index);
                 let offset = signal.get_offset(index)?;
                 let bits = value_bits(signal.get_value_at(&offset, 0))?;
-                Some((time, bits))
+                // 逐位 dump 展开项：raw 是源向量整串，必须切出本位再比较，
+                // 否则 rise/fall 永不命中、x/z 只要向量任意位含该态就误命中。
+                Some((time, project_packed_source(bits, var.width, var.packed_source.as_ref())))
             })
             .collect()
     };
@@ -1479,7 +1510,9 @@ pub fn sample(
                 let time = session.time_at(index);
                 let offset = signal.get_offset(index)?;
                 let bits = value_bits(signal.get_value_at(&offset, 0))?;
-                Some((time, bits))
+                // 逐位 dump 展开出来的时钟在 wellen 里没有独立信号，raw 是源向量整串。
+                // 不切片的话 `before == "0" && after == "1"` 永不成立，采样数恒为 0。
+                Some((time, project_packed_source(bits, clock.width, clock.packed_source.as_ref())))
             })
             .collect()
     };
@@ -1501,14 +1534,19 @@ pub fn sample(
     }
     let scanned = edge_times.len();
     // 条件里引用的信号必须一并加载求值，即便它们不在输出列。
-    let mut condition_ids: Vec<(String, u32)> = Vec::new();
+    // 带上 packed_source：逐位 dump 展开的信号求值时也要先切片。
+    let mut condition_ids: Vec<(String, u32, Option<PackedSource>)> = Vec::new();
     for condition in conditions {
-        if !condition_ids.iter().any(|(id, _)| *id == condition.variable_id) {
-            condition_ids.push((condition.variable_id.clone(), condition.variable_width));
+        if !condition_ids.iter().any(|(id, _, _)| *id == condition.variable_id) {
+            condition_ids.push((
+                condition.variable_id.clone(),
+                condition.variable_width,
+                condition.variable_packed.clone(),
+            ));
         }
-        if let Some((id, width)) = &condition.against {
-            if !condition_ids.iter().any(|(existing, _)| existing == id) {
-                condition_ids.push((id.clone(), *width));
+        if let Some((id, width, packed)) = &condition.against {
+            if !condition_ids.iter().any(|(existing, _, _)| existing == id) {
+                condition_ids.push((id.clone(), *width, packed.clone()));
             }
         }
     }
@@ -1701,10 +1739,13 @@ pub fn binary_value(bits: Option<&str>, width: u32) -> Option<String> {
 pub struct ResolvedWhere {
     pub variable_id: String,
     pub variable_width: u32,
+    /// 目标信号的逐位来源（逐位 dump 展开项才有）；求值时必须按它切片。
+    pub variable_packed: Option<PackedSource>,
     pub operator: String,
     /// 字面量已按信号位宽规范化；信号对信号比较时为 None。
     pub expected: Option<String>,
-    pub against: Option<(String, u32)>,
+    /// 信号对信号比较：`(id, 位宽, 该信号的逐位来源)`。
+    pub against: Option<(String, u32, Option<PackedSource>)>,
 }
 
 /// 把条件里的信号名/右值解析成 id。右值唯一命中一个信号时按「信号对信号」比较，
@@ -1744,7 +1785,7 @@ pub fn resolve_where(
                 None
             };
             if let Some(matched) = matches {
-                against = Some((matched.id.clone(), matched.width));
+                against = Some((matched.id.clone(), matched.width, matched.packed_source.clone()));
             }
         }
         let expected = match (&against, &condition.literal) {
@@ -1754,6 +1795,7 @@ pub fn resolve_where(
         resolved.push(ResolvedWhere {
             variable_id: variable.id.clone(),
             variable_width: variable.width,
+            variable_packed: variable.packed_source.clone(),
             operator: condition.operator.clone(),
             expected,
             against,
@@ -1784,7 +1826,8 @@ pub fn evaluate_where(
             operator => {
                 let equal = match &condition.against {
                     // 信号对信号：各自按位宽规范化后逐位比较，X/Z 参与比较而非通配。
-                    Some((against_id, against_width)) => {
+                    // `values` 已在 bits_at 里按各自 packed_source 归一，这里只管比较。
+                    Some((against_id, against_width, _)) => {
                         let other = values.get(against_id).and_then(|value| value.as_deref());
                         let other_bits = binary_value(other, *against_width);
                         bits.is_some() && other_bits.is_some() && bits == other_bits
@@ -1808,18 +1851,18 @@ pub fn evaluate_where(
 /// 按 id 取某时刻的原始位串（不构造解码值），供 where 求值与采样复用。
 fn bits_at(
     session: &mut WaveSession,
-    wanted: &[(String, u32)],
+    wanted: &[(String, u32, Option<PackedSource>)],
     time: i64,
 ) -> Vec<(String, Option<String>)> {
     let refs: Vec<SignalRef> = wanted
         .iter()
-        .filter_map(|(id, _)| session.signal_ref(id))
+        .filter_map(|(id, _, _)| session.signal_ref(id))
         .collect();
     session.load(&refs);
     let time_index = session.time_index_at(time.max(0) as u64);
     wanted
         .iter()
-        .map(|(id, _)| {
+        .map(|(id, width, packed)| {
             let value = session
                 .signal_ref(id)
                 .and_then(|signal_ref| session.signal(signal_ref))
@@ -1828,7 +1871,9 @@ fn bits_at(
                         .and_then(|index| signal.get_offset(index))
                         .map(|offset| signal.get_value_at(&offset, 0))
                 })
-                .and_then(value_bits);
+                .and_then(value_bits)
+                // 逐位 dump 展开项：条件求值也必须拿到该位自己的值，不是源向量整串。
+                .map(|bits| project_packed_source(bits, *width, packed.as_ref()));
             (id.clone(), value)
         })
         .collect()
@@ -1846,7 +1891,8 @@ fn event_series(session: &mut WaveSession, var: &WaveVar) -> Vec<(u64, String)> 
             let time = session.time_at(index);
             let offset = signal.get_offset(index)?;
             let bits = value_bits(signal.get_value_at(&offset, 0))?;
-            Some((time, bits))
+            // diff 也要按 packed_source 归一，否则逐位展开项会拿整条向量去比较。
+            Some((time, project_packed_source(bits, var.width, var.packed_source.as_ref())))
         })
         .collect()
 }
@@ -2122,6 +2168,7 @@ pub fn window_series(
             continue;
         };
         // 事件索引与时刻一次性取出：桶切分需要按时刻二分，逐次 get_offset 会重复走链。
+        // 位串先按 packed_source 归一，否则 1 位行会画出整条源向量的值。
         let events: Vec<(u64, String)> = signal
             .iter_changes()
             .map(|(index, _)| index)
@@ -2129,7 +2176,7 @@ pub fn window_series(
                 let time = session.time_at(index);
                 let offset = signal.get_offset(index)?;
                 let bits = value_bits(signal.get_value_at(&offset, 0))?;
-                Some((time, bits))
+                Some((time, project_packed_source(bits, var.width, var.packed_source.as_ref())))
             })
             .collect();
         let upper_bound = |time: u64| -> usize { events.partition_point(|(t, _)| *t <= time) };
@@ -2195,6 +2242,10 @@ pub fn edge_hit(
     direction: &str,
     bit_offset: Option<u32>,
     bit_width: u32,
+    // 续查起点：上一轮因 `MAX_BIT_EDGE_SCAN` 预算耗尽返回的 `continuation`。
+    // 调用方原样回传，这里从该事件索引继续扫，避免每次续查都从头重扫
+    // （否则 CLI/webview 的分页续查会退化成 O(n²)，且 webview 会无限重发同一请求）。
+    continuation: Option<usize>,
 ) -> WaveResult<WaveEdgeHit> {
     let next = matches!(direction, "next" | "forward");
     let previous = matches!(direction, "previous" | "backward");
@@ -2219,13 +2270,33 @@ pub fn edge_hit(
         })
         .collect();
     let time_value = time.max(0) as u64;
-    let mut cursor = events.partition_point(|(t, _)| *t <= time_value) as isize;
-    if previous {
-        cursor -= 1;
-        if cursor >= 0 && events[cursor as usize].0 == time_value {
-            cursor -= 1;
+    // 续查时从上一轮的中断位置继续；否则按 time 二分定位。
+    // continuation 是事件数组下标，越界视为无效（返回空结果，而不是悄悄从头扫）。
+    let mut cursor = match continuation {
+        Some(index) => {
+            if index >= events.len() {
+                return Ok(WaveEdgeHit { time: None, value: None, continuation: None });
+            }
+            index as isize
         }
-    }
+        None => {
+            let mut cursor = events.partition_point(|(t, _)| *t <= time_value) as isize;
+            if previous {
+                cursor -= 1;
+                if cursor >= 0 && events[cursor as usize].0 == time_value {
+                    cursor -= 1;
+                }
+            }
+            cursor
+        }
+    };
+    // 事件位串先按 packed_source 归一到「本变量自己的值」：
+    // 逐位 dump 的展开项在 wellen 里没有独立信号，`events` 存的是**源向量**的整串。
+    // 不先切片的话，下面会把整条向量当成 1 位变量的值。
+    let events: Vec<(u64, String)> = events
+        .into_iter()
+        .map(|(time, bits)| (time, project_packed_source(bits, var.width, var.packed_source.as_ref())))
+        .collect();
     let project = |bits: &str| -> String {
         match bit_offset {
             Some(offset) => {
@@ -2246,9 +2317,12 @@ pub fn edge_hit(
     if cursor < 0 || cursor as usize >= events.len() {
         return Ok(WaveEdgeHit { time: None, value: None, continuation: None });
     }
-    // 无位投影时直接返回该事件：VCD 只在值变化时产生事件，候选必然是一次变化
-    // （与 JS `edge` 的非投影分支一致，不做同值比较）。
-    if bit_offset.is_none() {
+    // 无位投影、且不是逐位展开项时，直接返回该事件：VCD 只在值变化时产生事件，
+    // 候选必然是一次变化（与 JS `edge` 的非投影分支一致，不做同值比较）。
+    //
+    // 逐位展开项**不能**走这条快路径：它的 events 是源向量的事件流，
+    // 源向量变化不代表这一位变化（其它位翻转也会产生事件），必须逐事件比较。
+    if bit_offset.is_none() && var.packed_source.is_none() {
         return Ok(WaveEdgeHit {
             time: Some(events[cursor as usize].0.to_string()),
             value: Some(events[cursor as usize].1.clone()),
@@ -2342,7 +2416,7 @@ mod tests {
     fn diff_counts_only_transitions_into_difference() {
         // A: 0→1→2→3，B: 0→1→9→3。持续不同只记一次，回到相同后再次分开才再记。
         let vars = [
-            WaveVar { id: "1".into(), path: "tb.q".into(), name: "q".into(), scope: "tb".into(), scope_id: None, width: 8, var_type: "wire".into(), range: None, msb: None, lsb: None, change_count: 0, packed_source: None, trace_only: false },
+            WaveVar { id: "1".into(), path: "tb.q".into(), name: "q".into(), scope: "tb".into(), scope_id: None, width: 8, var_type: "wire".into(), range: None, reference_name: None, msb: None, lsb: None, change_count: 0, packed_source: None, trace_only: false },
         ];
         let keys: Vec<(WaveVar, WaveVar)> = vec![(vars[0].clone(), vars[0].clone())];
         let series_a = vec![vec![
@@ -2369,7 +2443,7 @@ mod tests {
     #[test]
     fn diff_reports_initial_mismatch_at_from_time() {
         // 起点就不同：JS 在 from 时刻记一条，即使之后从未发生跳变。
-        let vars = [WaveVar { id: "1".into(), path: "tb.q".into(), name: "q".into(), scope: "tb".into(), scope_id: None, width: 4, var_type: "wire".into(), range: None, msb: None, lsb: None, change_count: 0, packed_source: None, trace_only: false }];
+        let vars = [WaveVar { id: "1".into(), path: "tb.q".into(), name: "q".into(), scope: "tb".into(), scope_id: None, width: 4, var_type: "wire".into(), range: None, reference_name: None, msb: None, lsb: None, change_count: 0, packed_source: None, trace_only: false }];
         let keys: Vec<(WaveVar, WaveVar)> = vec![(vars[0].clone(), vars[0].clone())];
         let series_a = vec![vec![(0u64, "0001".into())]];
         let series_b = vec![vec![(0u64, "0010".into())]];
@@ -2386,8 +2460,8 @@ mod tests {
     #[test]
     fn where_evaluation_supports_literal_signal_and_contains() {
         let vars = [
-            WaveVar { id: "1".into(), path: "tb.dout".into(), name: "dout".into(), scope: "tb".into(), scope_id: None, width: 8, var_type: "wire".into(), range: None, msb: None, lsb: None, change_count: 0, packed_source: None, trace_only: false },
-            WaveVar { id: "2".into(), path: "tb.model".into(), name: "model".into(), scope: "tb".into(), scope_id: None, width: 8, var_type: "wire".into(), range: None, msb: None, lsb: None, change_count: 0, packed_source: None, trace_only: false },
+            WaveVar { id: "1".into(), path: "tb.dout".into(), name: "dout".into(), scope: "tb".into(), scope_id: None, width: 8, var_type: "wire".into(), range: None, reference_name: None, msb: None, lsb: None, change_count: 0, packed_source: None, trace_only: false },
+            WaveVar { id: "2".into(), path: "tb.model".into(), name: "model".into(), scope: "tb".into(), scope_id: None, width: 8, var_type: "wire".into(), range: None, reference_name: None, msb: None, lsb: None, change_count: 0, packed_source: None, trace_only: false },
         ];
         // 字面量比较
         let conditions = resolve_where(&vars, &[parse_where("tb.dout != 8'hA5").unwrap()]).unwrap();
@@ -2440,8 +2514,8 @@ mod tests {
     #[test]
     fn signal_resolution_prefers_exact_path() {
         let vars = vec![
-            WaveVar { id: "1".into(), path: "tb.clk".into(), name: "clk".into(), scope: "tb".into(), scope_id: None, width: 1, var_type: "reg".into(), range: None, msb: None, lsb: None, change_count: 0, packed_source: None, trace_only: false },
-            WaveVar { id: "2".into(), path: "tb.dut.clk".into(), name: "clk".into(), scope: "tb.dut".into(), scope_id: None, width: 1, var_type: "reg".into(), range: None, msb: None, lsb: None, change_count: 0, packed_source: None, trace_only: false },
+            WaveVar { id: "1".into(), path: "tb.clk".into(), name: "clk".into(), scope: "tb".into(), scope_id: None, width: 1, var_type: "reg".into(), range: None, reference_name: None, msb: None, lsb: None, change_count: 0, packed_source: None, trace_only: false },
+            WaveVar { id: "2".into(), path: "tb.dut.clk".into(), name: "clk".into(), scope: "tb.dut".into(), scope_id: None, width: 1, var_type: "reg".into(), range: None, reference_name: None, msb: None, lsb: None, change_count: 0, packed_source: None, trace_only: false },
         ];
         let picked = resolve_ids(&vars, &["tb.clk"]).expect("exact path resolves");
         assert_eq!(picked[0].id, "1");
