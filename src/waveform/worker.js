@@ -85,9 +85,9 @@ async function compositeWindow(api, filePath, key, start, end, pixels) {
     const paths = members.map(id => allVariables().find(variable => variable.id === id)?.path).filter(Boolean);
     const widths = paths.map(item => allVariables().find(variable => variable.path === item)?.width ?? 1);
     // 逐成员取窗口内全部跳变，合并成合成时间轴。
-    const series = paths.length
-        ? JSON.parse(await api.waveChangesAsync(filePath, paths.join(','), start - 1, end, 1_000_000)).series
-        : [];
+    // 必须翻页取全（见 fetchAllChanges），并从 -1 起取以便拿到「≤ start」的起点值。
+    const collected = paths.length ? await fetchAllChanges(api, filePath, paths, end) : [];
+    const series = collected.map((events, index) => ({ index, events }));
     const merged = new Map();
     series.forEach((entry, index) => {
         for (const event of entry.events) {
@@ -142,9 +142,9 @@ async function compositeEdge(api, filePath, params) {
     if (!members.length) return { time: null, value: null };
     const paths = members.map(memberId => allVariables().find(variable => variable.id === memberId)?.path).filter(Boolean);
     const widths = paths.map(item => allVariables().find(variable => variable.path === item)?.width ?? 1);
-    const series = paths.length
-        ? JSON.parse(await api.waveChangesAsync(filePath, paths.join(','), -1, Number.MAX_SAFE_INTEGER, 10_000_000)).series
-        : [];
+    // 同 compositeWindow：翻页取全，避免被 Rust 绑定的 10000 上限静默截断。
+    const collected = paths.length ? await fetchAllChanges(api, filePath, paths, Number.MAX_SAFE_INTEGER) : [];
+    const series = collected.map((events, index) => ({ index, events }));
     const merged = new Map();
     series.forEach((entry, index) => {
         for (const event of entry.events) {
@@ -198,29 +198,28 @@ function codeOf(error) {
 
 
 /**
- * 合并向量的单位变量 → 该位的完整事件序列。
- * wellen 只能按整条向量取事件，这里投影到目标位并保留发生变化的时刻。
+ * 取若干信号在窗口内的**全部**跳变，按 `next` 游标自动翻页。
+ *
+ * 为什么不能一次给个大 limit：Rust 绑定把 limit 硬截到 10000（`bindings.rs`），
+ * 传 1e6/1e7 看似够用，实际会被静默截断且不回传 truncated——合成总线成员的
+ * 变化超一万条后，合并时间轴与 dense 计数就全错了。这里显式翻页到 `next === null`。
+ *
+ * `from = -1` 表示取全历史：调用方需要「≤ 窗口起点」的最后一个事件来确定起点值，
+ * 若从 `start - 1` 开始取，长期稳定的成员会取不到起点而退化成 `'x'`，
+ * 合成总线在窗口起点出现伪 X。
  */
-async function packedBitEvents(api, filePath, variable) {
-    const source = allVariables().find(item => item.id === variable.packedSource.id);
-    if (!source) return [];
-    const width = variable.packedSource.width;
-    const index = variable.packedSource.index;
-    const raw = JSON.parse(await api.waveChangesAsync(filePath, source.path, -1, Number.MAX_SAFE_INTEGER, 10_000_000));
-    const entry = raw.series[0];
-    if (!entry) return [];
-    const events = [];
-    let previous = null;
-    for (const event of entry.events) {
-        const text = String(event.bits).padStart(width, /^[xz]/i.test(String(event.bits)) ? String(event.bits)[0] : '0');
-        const position = text.length - 1 - index;
-        const bit = position >= 0 ? text[position] : text[0];
-        if (bit !== previous) {
-            events.push({ t: Number(event.t), value: bit });
-            previous = bit;
-        }
+async function fetchAllChanges(api, filePath, paths, to) {
+    const collected = paths.map(() => []);
+    let from = -1;
+    for (;;) {
+        const raw = JSON.parse(await api.waveChangesAsync(filePath, paths.join(','), from, to, 10000));
+        raw.series.forEach((entry, index) => collected[index].push(...entry.events));
+        // 所有成员都没有下一页时结束；否则用最小的非空 next 继续。
+        const nexts = raw.series.map(entry => entry.next).filter(value => value !== null && value !== undefined);
+        if (!nexts.length) break;
+        from = Math.min(...nexts.map(Number));
     }
-    return events;
+    return collected;
 }
 
 /** 惰性加载原生模块：缺失时给出与插件其它位置一致的诊断文案。 */
@@ -275,9 +274,14 @@ async function open(filePath, sourceContext) {
         // 取消时只是丢弃结果。
         const opened = JSON.parse(await api.waveOpenAsync(filePath));
         backend = { api, filePath, meta: opened };
-        // 存储预算沿用 JS 版口径（每事件约 12 B）：Rust 的事件数据由 wellen 管理，
-        // 但配置了很小 maxStoreBytes 的调用方仍应得到同样的 VCD_RESOURCE_LIMIT 拒绝。
-        const maxStoreBytes = options.maxStoreBytes || 32 * 1024 * 1024;
+        // 存储预算沿用 JS 版口径（每事件约 12 B）与旧 `VcdStore` 的默认值 512 MiB。
+        // Rust 的事件数据由 wellen 管理，但配置了很小 maxStoreBytes 的调用方
+        // 仍应得到同样的 VCD_RESOURCE_LIMIT 拒绝。
+        //
+        // 不能把默认值调小：host 从不传这个选项，判定式是 eventCount*12 > budget，
+        // 32 MiB 只够约 279 万次变化——而 CLI 文档宣称支持的 500 MiB 语料有 1463 万事件
+        // （约 175 MB），会被直接拒绝，与本轮性能论证的核心工作负载冲突。
+        const maxStoreBytes = options.maxStoreBytes || 512 * 1024 * 1024;
         if (opened.eventCount * 12 > maxStoreBytes) {
             throw Object.assign(
                 new Error('VCD 事件存储超过 ' + Math.round(maxStoreBytes / 1048576) + ' MiB 预算'),
