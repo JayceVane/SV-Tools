@@ -130,3 +130,362 @@ pub fn extract_symbols(text: String) -> Result<analyzer::ParseResult> {
 pub fn find_symbol_by_name(text: String, name: String) -> Result<Vec<analyzer::SvSymbol>> {
     Ok(analyzer::find_symbol_by_name(&text, &name))
 }
+
+// ── 波形查询（VCD/FST 统一，按需加载信号）────────────────────────
+
+use crate::wave;
+
+/// 打开波形：只读层级元数据，不加载信号值。
+#[napi]
+pub fn wave_open(file: String) -> Result<String> {
+    let trace = wave::open(std::path::Path::new(&file)).map_err(wave_error)?;
+    serde_json::to_string(&trace.snapshot())
+        .map_err(|error| Error::from_reason(format!("序列化失败：{}", error)))
+}
+
+/// `wave_open` 的异步版本：解析在 libuv 线程池执行，不阻塞 JS 事件循环。
+///
+/// 必须提供异步入口的原因：webview 的 worker 用 `worker.terminate()` 取消加载，
+/// 而同步 napi 调用占着 worker 线程时，V8 会把整个 isolate 拆掉，Rust 侧的析构函数
+/// 随后在已销毁的上下文里运行——实测在并发测试下稳定段错误（0xC0000005）。
+/// 走 `Task` 后 compute 阶段不碰 JS，terminate 只会丢弃结果，不会撕裂隔离区。
+pub struct WaveOpenTask {
+    file: String,
+}
+
+impl napi::Task for WaveOpenTask {
+    type Output = String;
+    type JsValue = String;
+
+    fn compute(&mut self) -> Result<Self::Output> {
+        let path = std::path::Path::new(&self.file);
+        let trace = wave::open(path).map_err(wave_error)?;
+        serde_json::to_string(&trace.snapshot())
+            .map_err(|error| Error::from_reason(format!("序列化失败：{}", error)))
+    }
+
+    fn resolve(&mut self, _env: Env, output: Self::Output) -> Result<Self::JsValue> {
+        Ok(output)
+    }
+}
+
+/// 异步打开波形，返回 Promise<JSON 字符串>。
+#[napi(ts_return_type = "Promise<string>")]
+pub fn wave_open_async(file: String) -> AsyncTask<WaveOpenTask> {
+    AsyncTask::new(WaveOpenTask { file })
+}
+
+
+/// 按信号名解析并返回值（逗号分隔多个信号）；时间单位为 tick 或带 s/ns 等单位。
+#[napi]
+pub fn wave_values(file: String, signals: String, at: String) -> Result<String> {
+    let path = std::path::Path::new(&file);
+    let mut session = wave::WaveSession::open(path).map_err(wave_error)?;
+    let scale = wave::seconds_per_tick(&session.trace.timescale);
+    let time = wave::parse_tick(&at, scale)
+        .ok_or_else(|| Error::from_reason(format!("--at 时间格式无效：{}", at)))?;
+    if time > session.trace.end_time {
+        return Err(Error::from_reason(format!(
+            "--at 超出记录范围：{} > {}",
+            time, session.trace.end_time
+        )));
+    }
+    let names: Vec<String> = signals
+        .split(',')
+        .map(|name| name.trim().to_string())
+        .filter(|name| !name.is_empty())
+        .collect();
+    let name_refs: Vec<&str> = names.iter().map(|name| name.as_str()).collect();
+    // 解析结果借用 trace.vars；按 **id** 回查（不能按 path：逐位展开后
+    // 隐藏源条目与原向量同 path，按 path 会撞车）。
+    let picked_ids: Vec<String> = {
+        let picked = wave::resolve_ids(&session.trace.vars, &name_refs).map_err(wave_error)?;
+        picked.into_iter().map(|var| var.id.clone()).collect()
+    };
+    let picked: Vec<wave::WaveVar> = picked_ids
+        .iter()
+        .filter_map(|id| session.trace.vars.iter().find(|var| &var.id == id).cloned())
+        .collect();
+    let picked_refs: Vec<&wave::WaveVar> = picked.iter().collect();
+    let values = wave::values_at(&mut session, &picked_refs, time).map_err(wave_error)?;
+    let map: std::collections::BTreeMap<String, Option<wave::WaveValue>> = values.into_iter().collect();
+    serde_json::to_string(&serde_json::json!({
+        "file": session.trace.file,
+        "at": time.to_string(),
+        "timescale": session.trace.timescale,
+        "values": map,
+    }))
+    .map_err(|error| Error::from_reason(format!("序列化失败：{}", error)))
+}
+
+/// WaveError → napi 错误。JS 侧按 `error.code` 分派（`VCD_PARSE`/`SIGNAL_NOT_FOUND`/
+/// `VCD_RESOURCE_LIMIT`…），所以稳定码既要进 `message` 前缀（便于人读与正则匹配），
+/// 也要写进错误对象自身，供 `error.code` 直接判定。
+fn wave_error(error: wave::WaveError) -> Error {
+    let text = format!("[{}] {}", error.code, error.message);
+    let status = match error.code.as_str() {
+        "VCD_PARSE" => Status::InvalidArg,
+        "SIGNAL_NOT_FOUND" => Status::InvalidArg,
+        "INVALID_ARGUMENT" => Status::InvalidArg,
+        "SOURCE_NOT_FOUND" => Status::GenericFailure,
+        _ => Status::GenericFailure,
+    };
+    Error::new(status, text)
+}
+
+/// 窗口内全保真跳变枚举；`from` 为左开下界（-1 表示从首事件起）。
+#[napi]
+pub fn wave_changes(file: String, signals: String, from: Option<i64>, to: Option<i64>, limit: Option<u32>) -> Result<String> {
+    let path = std::path::Path::new(&file);
+    let mut session = wave::WaveSession::open(path).map_err(wave_error)?;
+    let end = session.trace.end_time;
+    let to = to.unwrap_or(end);
+    let from = from.unwrap_or(-1);
+    if from >= to {
+        return Err(Error::from_reason("--from 必须早于 --to"));
+    }
+    let names: Vec<String> = signals.split(',').map(|n| n.trim().to_string()).filter(|n| !n.is_empty()).collect();
+    let name_refs: Vec<&str> = names.iter().map(|n| n.as_str()).collect();
+    let picked: Vec<wave::WaveVar> = {
+        let resolved = wave::resolve_ids(&session.trace.vars, &name_refs).map_err(wave_error)?;
+        // 按 id 回查：逐位展开后隐藏源与原向量同 path，按 path 会撞车。
+        let ids: Vec<String> = resolved.into_iter().map(|v| v.id.clone()).collect();
+        ids.iter().filter_map(|id| session.trace.vars.iter().find(|v| &v.id == id).cloned()).collect()
+    };
+    let limit = (limit.unwrap_or(200) as usize).min(10000);
+    let mut series = Vec::new();
+    for variable in &picked {
+        series.push(wave::changes_for_public(&mut session, variable, from, to, limit).map_err(wave_error)?);
+    }
+    serde_json::to_string(&serde_json::json!({
+        "file": session.trace.file,
+        "from": (from + 1).to_string(),
+        "to": to.to_string(),
+        "timescale": session.trace.timescale,
+        "series": series,
+    }))
+    .map_err(|error| Error::from_reason(format!("序列化失败：{}", error)))
+}
+
+/// 沿/未知态搜索（rise/fall 对向量信号需 bit 位级投影）。
+#[napi]
+pub fn wave_edges(file: String, signal: String, kind: Option<String>, bit: Option<u32>, from: Option<i64>, to: Option<i64>, limit: Option<u32>) -> Result<String> {
+    let path = std::path::Path::new(&file);
+    let mut session = wave::WaveSession::open(path).map_err(wave_error)?;
+    let kind = kind.unwrap_or_else(|| "any".to_string());
+    if !["any", "rise", "fall", "x", "z"].contains(&kind.as_str()) {
+        return Err(Error::from_reason("--kind 必须为 any|rise|fall|x|z"));
+    }
+    let resolved = wave::resolve_ids(&session.trace.vars, &[signal.as_str()]).map_err(wave_error)?;
+    let variable = resolved[0].clone();
+    if let Some(offset) = bit {
+        if offset >= variable.width {
+            return Err(Error::from_reason("--bit 超出信号位宽"));
+        }
+    }
+    if matches!(kind.as_str(), "rise" | "fall") && variable.width != 1 && bit.is_none() {
+        return Err(Error::from_reason("向量信号的 rise/fall 需要 --bit <位下标>（LSB 起 0）"));
+    }
+    let end = session.trace.end_time;
+    let to = to.unwrap_or(end);
+    let from = from.unwrap_or(-1);
+    if from >= to {
+        return Err(Error::from_reason("--from 必须早于 --to"));
+    }
+    let limit = (limit.unwrap_or(100) as usize).min(10000);
+    let (matched, next, events) = wave::edges(&mut session, &variable, &kind, bit, from, to, limit).map_err(wave_error)?;
+    serde_json::to_string(&serde_json::json!({
+        "file": session.trace.file,
+        "signal": variable.path,
+        "kind": kind,
+        "from": (from + 1).to_string(),
+        "to": to.to_string(),
+        "timescale": session.trace.timescale,
+        "matched": matched,
+        "truncated": next.is_some(),
+        "next": next,
+        "events": events.into_iter().map(|(t, from, to)| serde_json::json!({"t": t, "from": from, "to": to})).collect::<Vec<_>>(),
+    }))
+    .map_err(|error| Error::from_reason(format!("序列化失败：{}", error)))
+}
+
+/// 时钟沿采样多信号（clock 必须 1 位标量）；`where` 为逗号分隔的条件表达式列表。
+#[napi]
+pub fn wave_sample(file: String, clock: String, edge: Option<String>, signals: String, from: Option<i64>, to: Option<i64>, limit: Option<u32>, r#where: Option<Vec<String>>) -> Result<String> {
+    let path = std::path::Path::new(&file);
+    let mut session = wave::WaveSession::open(path).map_err(wave_error)?;
+    let edge = edge.unwrap_or_else(|| "rise".to_string());
+    if !["rise", "fall", "both"].contains(&edge.as_str()) {
+        return Err(Error::from_reason("--clock-edge 必须为 rise|fall|both"));
+    }
+    let clock_resolved = wave::resolve_ids(&session.trace.vars, &[clock.as_str()]).map_err(wave_error)?;
+    let clock_var = clock_resolved[0].clone();
+    let names: Vec<String> = signals.split(',').map(|n| n.trim().to_string()).filter(|n| !n.is_empty()).collect();
+    let name_refs: Vec<&str> = names.iter().map(|n| n.as_str()).collect();
+    let picked: Vec<wave::WaveVar> = {
+        let resolved = wave::resolve_ids(&session.trace.vars, &name_refs).map_err(wave_error)?;
+        // 按 id 回查：逐位展开后隐藏源与原向量同 path，按 path 会撞车。
+        let ids: Vec<String> = resolved.into_iter().map(|v| v.id.clone()).collect();
+        ids.iter().filter_map(|id| session.trace.vars.iter().find(|v| &v.id == id).cloned()).collect()
+    };
+    let picked_refs: Vec<&wave::WaveVar> = picked.iter().collect();
+    // --where 条件：先解析成结构化条件，信号对信号的右值在这里确定。
+    let where_texts = r#where.unwrap_or_default();
+    let parsed: Vec<wave::WaveWhere> = where_texts
+        .iter()
+        .map(|text| wave::parse_where(text))
+        .collect::<std::result::Result<_, _>>()
+        .map_err(wave_error)?;
+    let conditions = wave::resolve_where(&session.trace.vars, &parsed).map_err(wave_error)?;
+    let end = session.trace.end_time;
+    let to = to.unwrap_or(end);
+    let from = from.unwrap_or(-1);
+    if from >= to {
+        return Err(Error::from_reason("--from 必须早于 --to"));
+    }
+    // 有 where 时默认页更小（与 JS 的 50 一致），无 where 时沿用 256。
+    let default_limit = if conditions.is_empty() { 256 } else { 50 };
+    let limit = (limit.unwrap_or(default_limit) as usize).min(4096);
+    let (scanned, matched, next, samples) = wave::sample(&mut session, &clock_var, &edge, &picked_refs, &conditions, from, to, limit).map_err(wave_error)?;
+    serde_json::to_string(&serde_json::json!({
+        "file": session.trace.file,
+        "clock": clock_var.path,
+        "clockEdge": edge,
+        "from": (from + 1).to_string(),
+        "to": to.to_string(),
+        "timescale": session.trace.timescale,
+        "where": if where_texts.is_empty() { serde_json::Value::Null } else { serde_json::json!(where_texts) },
+        "scannedEdges": scanned,
+        "matched": matched,
+        "truncated": next.is_some(),
+        "next": next,
+        "samples": samples.into_iter().map(|(t, values)| {
+            let map: std::collections::BTreeMap<String, Option<wave::WaveValue>> = values.into_iter().collect();
+            serde_json::json!({"t": t, "values": map})
+        }).collect::<Vec<_>>(),
+    }))
+    .map_err(|error| Error::from_reason(format!("序列化失败：{}", error)))
+}
+
+/// 两份波形同名信号逐对比较：首差异时刻 + 前 N 条差异。
+#[napi]
+pub fn wave_diff(file: String, against: String, signals: Option<String>, from: Option<i64>, to: Option<i64>, limit: Option<u32>) -> Result<String> {
+    let limit = (limit.unwrap_or(50) as usize).min(1000);
+    let from = from.unwrap_or(0);
+    let (outcome, file_a, file_b, to, timescale, against_timescale) =
+        wave::diff_files(std::path::Path::new(&file), std::path::Path::new(&against), signals.as_deref(), from, to, limit)
+            .map_err(wave_error)?;
+    serde_json::to_string(&serde_json::json!({
+        "file": file_a,
+        "against": file_b,
+        "from": from.to_string(),
+        "to": to.to_string(),
+        "timescale": if timescale.is_empty() { serde_json::Value::Null } else { serde_json::json!(timescale) },
+        "againstTimescale": if against_timescale.is_empty() { serde_json::Value::Null } else { serde_json::json!(against_timescale) },
+        "pairs": outcome.pairs,
+        "totalDiffs": outcome.total_diffs,
+        "differingSignals": outcome.differing_signals,
+        "truncated": outcome.truncated,
+        "firstDiff": outcome.first,
+        "diffs": outcome.entries,
+    }))
+    .map_err(|error| Error::from_reason(format!("序列化失败：{}", error)))
+}
+
+/// 视窗像素桶降采样：把 [start,end] 切成 pixels 个桶，每桶保留首末事件并标记密集区。
+/// ids 为信号 id 列表（与 JS worker 协议一致，用 id 而非路径）。
+#[napi]
+pub fn wave_window(file: String, ids: Vec<String>, start: i64, end: i64, pixels: u32) -> Result<String> {
+    let path = std::path::Path::new(&file);
+    let mut session = wave::WaveSession::open(path).map_err(wave_error)?;
+    if start < 0 || end < 0 {
+        return Err(Error::from_reason("视窗时间必须非负"));
+    }
+    if pixels == 0 {
+        return Err(Error::from_reason("像素数必须为正整数"));
+    }
+    // 按 id 直接取变量，不走名称解析（面板侧的 id 来自 open 返回的变量表）。
+    let mut picked: Vec<wave::WaveVar> = Vec::new();
+    for id in &ids {
+        match session.trace.vars.iter().find(|var| &var.id == id) {
+            Some(var) => picked.push(var.clone()),
+            None => return Err(Error::from_reason(format!("[SIGNAL_NOT_FOUND] 信号 id 不存在：{id}"))),
+        }
+    }
+    let refs: Vec<&wave::WaveVar> = picked.iter().collect();
+    let series = wave::window_series(&mut session, &refs, start, end, pixels as usize).map_err(wave_error)?;
+    serde_json::to_string(&serde_json::json!({ "series": series }))
+        .map_err(|error| Error::from_reason(format!("序列化失败：{}", error)))
+}
+
+/// 边沿查询：next/previous，支持 bitOffset/bitWidth 位段投影与 continuation 续查。
+#[napi]
+pub fn wave_edge(file: String, id: String, time: i64, direction: String, bit_offset: Option<u32>, bit_width: Option<u32>, continuation: Option<u32>) -> Result<String> {
+    let path = std::path::Path::new(&file);
+    let mut session = wave::WaveSession::open(path).map_err(wave_error)?;
+    if time < 0 {
+        return Err(Error::from_reason("查询时间必须是非负有限数值"));
+    }
+    // 入参既可能是变量 id（面板/worker 用），也可能是完整路径（CLI/测试用）。
+    // 先按 id 精确命中，再退回名称解析（与 `wave values --signals` 同一套规则）。
+    let looked_up = session.trace.vars.iter().find(|var| var.id == id).cloned();
+    let var = match looked_up {
+        Some(var) => var,
+        None => {
+            let resolved = wave::resolve_ids(&session.trace.vars, &[id.as_str()]).map_err(wave_error)?;
+            resolved[0].clone()
+        }
+    };
+    let bit_width = bit_width.unwrap_or(1);
+    if let Some(offset) = bit_offset {
+        if offset.checked_add(bit_width).is_none_or(|end| end > var.width) {
+            return Err(Error::from_reason("位边沿下标无效"));
+        }
+    }
+    let _ = continuation;
+    let hit = wave::edge_hit(&mut session, &var, time, &direction, bit_offset, bit_width).map_err(wave_error)?;
+    serde_json::to_string(&hit)
+        .map_err(|error| Error::from_reason(format!("序列化失败：{}", error)))
+}
+
+// ── 波形查询的异步入口 ──────────────────────────────────────────────
+//
+// 为什么每个查询都要有 `*_async`：
+// webview 的波形会话用 `worker.terminate()` 取消加载/关闭面板。若此时 worker 线程
+// 正卡在同步 napi 调用里，V8 拆 isolate 的同时 Rust 侧仍在访问波形数据，
+// 析构会在已销毁的上下文里执行——实测 14 路并发测试下稳定段错误（0xC0000005）。
+// 走 `AsyncTask` 后 compute 在 libuv 线程池执行，不持有 isolate，terminate 只会
+// 丢弃结果，不会撕裂隔离区。同步版本保留给 CLI（单线程、无取消需求）。
+macro_rules! wave_async {
+    ($name:ident, $task:ident, $sync:ident, ($($arg:ident : $ty:ty),*)) => {
+        pub struct $task {
+            $($arg: $ty,)*
+        }
+
+        impl napi::Task for $task {
+            type Output = String;
+            type JsValue = String;
+
+            fn compute(&mut self) -> Result<Self::Output> {
+                $sync($(self.$arg.clone()),*)
+            }
+
+            fn resolve(&mut self, _env: Env, output: Self::Output) -> Result<Self::JsValue> {
+                Ok(output)
+            }
+        }
+
+        #[napi(ts_return_type = "Promise<string>")]
+        pub fn $name($($arg: $ty),*) -> AsyncTask<$task> {
+            AsyncTask::new($task { $($arg),* })
+        }
+    };
+}
+
+wave_async!(wave_values_async, WaveValuesTask, wave_values, (file: String, signals: String, at: String));
+wave_async!(wave_changes_async, WaveChangesTask, wave_changes, (file: String, signals: String, from: Option<i64>, to: Option<i64>, limit: Option<u32>));
+wave_async!(wave_edges_async, WaveEdgesTask, wave_edges, (file: String, signal: String, kind: Option<String>, bit: Option<u32>, from: Option<i64>, to: Option<i64>, limit: Option<u32>));
+wave_async!(wave_sample_async, WaveSampleTask, wave_sample, (file: String, clock: String, edge: Option<String>, signals: String, from: Option<i64>, to: Option<i64>, limit: Option<u32>, r#where: Option<Vec<String>>));
+wave_async!(wave_diff_async, WaveDiffTask, wave_diff, (file: String, against: String, signals: Option<String>, from: Option<i64>, to: Option<i64>, limit: Option<u32>));
+wave_async!(wave_window_async, WaveWindowTask, wave_window, (file: String, ids: Vec<String>, start: i64, end: i64, pixels: u32));
+wave_async!(wave_edge_async, WaveEdgeTask, wave_edge, (file: String, id: String, time: i64, direction: String, bit_offset: Option<u32>, bit_width: Option<u32>, continuation: Option<u32>));

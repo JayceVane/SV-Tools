@@ -111,5 +111,33 @@ export declare function generateHeader(template: string, fileName: string, tabSi
 export declare function extractSymbols(text: string): ParseResult
 /** Find symbols by name (for hover / goto definition). */
 export declare function findSymbolByName(text: string, name: string): Array<SvSymbol>
+/** 打开波形：只读层级元数据，不加载信号值。 */
+export declare function waveOpen(file: string): string
+/** 异步打开波形，返回 Promise<JSON 字符串>。 */
+export declare function waveOpenAsync(file: string): Promise<string>
+/** 按信号名解析并返回值（逗号分隔多个信号）；时间单位为 tick 或带 s/ns 等单位。 */
+export declare function waveValues(file: string, signals: string, at: string): string
+/** 窗口内全保真跳变枚举；`from` 为左开下界（-1 表示从首事件起）。 */
+export declare function waveChanges(file: string, signals: string, from?: number | undefined | null, to?: number | undefined | null, limit?: number | undefined | null): string
+/** 沿/未知态搜索（rise/fall 对向量信号需 bit 位级投影）。 */
+export declare function waveEdges(file: string, signal: string, kind?: string | undefined | null, bit?: number | undefined | null, from?: number | undefined | null, to?: number | undefined | null, limit?: number | undefined | null): string
+/** 时钟沿采样多信号（clock 必须 1 位标量）；`where` 为逗号分隔的条件表达式列表。 */
+export declare function waveSample(file: string, clock: string, edge: string | undefined | null, signals: string, from?: number | undefined | null, to?: number | undefined | null, limit?: number | undefined | null, r#where?: Array<string> | undefined | null): string
+/** 两份波形同名信号逐对比较：首差异时刻 + 前 N 条差异。 */
+export declare function waveDiff(file: string, against: string, signals?: string | undefined | null, from?: number | undefined | null, to?: number | undefined | null, limit?: number | undefined | null): string
+/**
+ * 视窗像素桶降采样：把 [start,end] 切成 pixels 个桶，每桶保留首末事件并标记密集区。
+ * ids 为信号 id 列表（与 JS worker 协议一致，用 id 而非路径）。
+ */
+export declare function waveWindow(file: string, ids: Array<string>, start: number, end: number, pixels: number): string
+/** 边沿查询：next/previous，支持 bitOffset/bitWidth 位段投影与 continuation 续查。 */
+export declare function waveEdge(file: string, id: string, time: number, direction: string, bitOffset?: number | undefined | null, bitWidth?: number | undefined | null, continuation?: number | undefined | null): string
+export declare function waveValuesAsync(file: string, signals: string, at: string): Promise<string>
+export declare function waveChangesAsync(file: string, signals: string, from?: number | undefined | null, to?: number | undefined | null, limit?: number | undefined | null): Promise<string>
+export declare function waveEdgesAsync(file: string, signal: string, kind?: string | undefined | null, bit?: number | undefined | null, from?: number | undefined | null, to?: number | undefined | null, limit?: number | undefined | null): Promise<string>
+export declare function waveSampleAsync(file: string, clock: string, edge: string | undefined | null, signals: string, from?: number | undefined | null, to?: number | undefined | null, limit?: number | undefined | null, r#where?: Array<string> | undefined | null): Promise<string>
+export declare function waveDiffAsync(file: string, against: string, signals?: string | undefined | null, from?: number | undefined | null, to?: number | undefined | null, limit?: number | undefined | null): Promise<string>
+export declare function waveWindowAsync(file: string, ids: Array<string>, start: number, end: number, pixels: number): Promise<string>
+export declare function waveEdgeAsync(file: string, id: string, time: number, direction: string, bitOffset?: number | undefined | null, bitWidth?: number | undefined | null, continuation?: number | undefined | null): Promise<string>
 /** 将有界PNG复制为系统图片。解码失败不触碰剪贴板，成功后数据由系统持有。 */
 export declare function writeClipboardPng(png: Buffer): Promise<unknown>
