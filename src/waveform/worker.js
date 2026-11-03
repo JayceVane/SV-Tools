@@ -425,17 +425,24 @@ async function query(method, params) {
 //
 // 不能直接 `worker.terminate()`：异步 napi 任务的 compute 跑在 libuv 线程池里，
 // 若此刻拆掉 isolate，Rust 侧收尾会踩到已销毁的 V8 上下文——实测概率性段错误
-// （exit 139 / 0xC0000005，约 3/5 复现率）。这里用「在途请求计数」决定退出时机：
-// 只有全部未完成请求的 Promise 落地后才 exit，在途任务因此不会被打断。
+// （exit 139 / 0xC0000005）。
+//
+// 也不能用 `process.exit(0)`：它是即时终止，不会等 libuv 线程池里的 Rust 任务
+// 走完析构。CI（2 核、慢盘）上稳定复现，本机 6 并发却复现不出来——差异就在
+// 「任务收尾在 exit 之后才完成」这个窗口。
+//
+// 正确做法是**关掉消息端口、让事件循环自然退出**：Node 只有在没有待处理句柄/
+// 请求时才会退出，而 libuv 线程池里的在途任务本身就是一个待处理请求，因此
+// 事件循环会一直转到最后一个 Rust 任务真正结束，isolate 才被销毁。
 let pendingRequests = 0;
 let closeRequested = false;
 const exitIfIdle = () => {
     if (!closeRequested || pendingRequests !== 0) return;
-    // 回执让宿主确认握手完成；随后主动退出——此刻所有在途 napi 任务都已落地，
-    // isolate 可以安全销毁（直接 terminate 会撕裂 libuv 线程里的 Rust 收尾）。
+    // 回执让宿主确认握手完成（它随后 await worker 的 exit）。
     try { parentPort.postMessage({ type: 'closed' }); }
-    catch { /* 端口已关就直接退，不影响正确性 */ }
-    process.exit(0);
+    catch { /* 端口已关，说明已经退到尾声 */ }
+    // 不再 process.exit：断开端口后事件循环会等所有在途 libuv 任务结束再自然退出。
+    try { parentPort.close(); } catch { /* 已关闭 */ }
 };
 
 parentPort.on('message', async message => {

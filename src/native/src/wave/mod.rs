@@ -1001,8 +1001,15 @@ impl WaveSession {
     }
 
     /// 批量按需加载信号值。
+    ///
+    /// 必须用单线程版 `load_signals`，不能用 `load_signals_multi_threaded`：
+    /// 后者内部是 `ids.par_iter()`，走 **rayon 全局线程池**。本模块跑在 napi 里，
+    /// 会被 Node worker_threads 与多个测试进程并发调用，rayon 全局池与 napi 的
+    /// 线程模型叠加会触发访问违例（`0xC0000005`）。`parse_once` 已关掉
+    /// `LoadOptions.multi_thread`，这条 load 路径是同一类问题的另一半——
+    /// 本机 6 并发虽能跑过，CI（2 核慢盘）稳定复现。
     pub fn load(&mut self, ids: &[SignalRef]) {
-        self.wave.load_signals_multi_threaded(ids);
+        self.wave.load_signals(ids);
     }
 
     pub fn signal(&self, id: SignalRef) -> Option<&wellen::Signal> {
