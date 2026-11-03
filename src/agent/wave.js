@@ -3,11 +3,7 @@
  * 时间输出一律整数 tick 字符串（JSON 内不出现浮点时标），物理换算并列展示；原始位值与 X/Z 原样保留。 */
 const fs = require('node:fs/promises');
 const path = require('node:path');
-const { createReadStream } = require('node:fs');
-const { TextDecoder } = require('node:util');
-const { createHash, randomUUID } = require('node:crypto');
-const { createVcdParser } = require('../waveform/parser');
-const { VcdStore } = require('../waveform/store');
+const { nativeApi, call } = require('../waveform/rust-backend');
 const model = require('../waveform/model');
 const rowLayout = require('../waveform/row-layout');
 const { bitValue } = require('../waveform/signal-display');
@@ -17,7 +13,6 @@ const { createWaveImage } = require('../waveform/node-export');
 const { createContainedDirectories, cleanupDirectories } = require('../design/scaffold-paths');
 const { rasterizeSvg, DEFAULT_SCALE } = require('../graphics/rasterize');
 const { readOptions, hash } = require('./context');
-const { directory, writeJson } = require('./storage');
 const { result, fail } = require('./protocol');
 
 const MAX_VCD_BYTES = 2 * 1024 * 1024 * 1024;
@@ -72,31 +67,12 @@ function requireSignals(trace, input) {
     return ids;
 }
 
-/** 主进程流式解析 VCD；解析期间文件变化即失败，不把半旧数据当本轮结果。 */
-async function parseVcdFile(file, stat) {
-    const store = new VcdStore();
-    const parser = createVcdParser({ onVariable: variable => store.register(variable), onChange: (id, time, value) => store.add(id, time, value) });
-    const decoder = new TextDecoder('utf-8', { fatal: true });
-    let read = 0;
-    try {
-        for await (const chunk of createReadStream(file, { highWaterMark: 256 * 1024 })) {
-            read += chunk.length;
-            if (read > MAX_VCD_BYTES) fail('SOURCE_LIMIT', 'VCD 文件读取超过 2048MiB 上限', { file });
-            parser.write(decoder.decode(chunk, { stream: true }));
-        }
-        parser.write(decoder.decode());
-    } catch (error) {
-        if (error.code === 'VCD_PARSE' || error.code === 'VCD_RESOURCE_LIMIT') fail(error.code, error.message, { file, line: error.line, column: error.column });
-        if (error.code === 'ERR_ENCODING_INVALID_ENCODED_DATA') fail('VCD_PARSE', 'VCD 不是有效的 UTF-8 文本', { file });
-        throw error;
-    }
-    const meta = parser.finish();
-    const after = await fs.stat(file);
-    if (after.size !== stat.size || Math.round(after.mtimeMs) !== Math.round(stat.mtimeMs)) fail('SOURCE_CHANGED', 'VCD 读取期间文件已变化，请在仿真结束后重试', { file });
-    return { store, meta };
-}
-
-/** 打开 VCD：按绝对路径哈希落索引缓存（size+mtime 身份），命中时零拷贝加载，否则解析后原子写缓存。 */
+/** 打开 VCD：Rust 一次解析建立索引，不再落盘缓存。
+ *
+ * 历史：这里曾按「绝对路径哈希 + size/mtime」落 `index.bin` 快照，命中时零拷贝加载。
+ * 实测 Rust（wellen）冷解析反而比 JS 快照命中更快（500 MiB：353 ms vs 5663 ms），
+ * 缓存既占磁盘又让「文件改了但 mtime 没变」这类情况多一条出错路径，故整体删除。
+ */
 async function openTrace(input) {
     const { options } = await readOptions(input);
     if (!input.file) fail('FILE_REQUIRED', 'wave 命令需要 --file <vcd>');
@@ -104,29 +80,96 @@ async function openTrace(input) {
     const stat = await fs.stat(file).catch(() => null);
     if (!stat?.isFile()) fail('SOURCE_NOT_FOUND', 'VCD 文件不存在：' + input.file, { file });
     if (stat.size > MAX_VCD_BYTES) fail('SOURCE_LIMIT', 'VCD 文件超过 2048MiB 上限', { file, size: stat.size });
-    const fileIdentity = { size: stat.size, mtimeMs: Math.round(stat.mtimeMs) };
-    const cacheKey = createHash('sha256').update(file.toLowerCase()).digest('hex').slice(0, 16);
-    const cacheDirectory = await directory(options.workspace, 'wave', cacheKey);
-    const indexFile = path.join(cacheDirectory, 'index.bin'), metaFile = path.join(cacheDirectory, 'meta.json');
     const startedAt = Date.now();
+    let meta;
     try {
-        const meta = JSON.parse(await fs.readFile(metaFile, 'utf8'));
-        if (meta.fileIdentity?.size === fileIdentity.size && meta.fileIdentity?.mtimeMs === fileIdentity.mtimeMs) {
-            const store = VcdStore.loadSnapshot(await fs.readFile(indexFile), null);
-            return { options, file, store, meta, stats: { cached: true, loadMs: Date.now() - startedAt, fileBytes: stat.size, eventCount: meta.eventCount } };
-        }
-    } catch { /* 缓存缺失或损坏时重新解析并覆盖。 */ }
-    const parsed = await parseVcdFile(file, stat);
-    const meta = parsed.store.metadata(parsed.meta, stat.size);
-    meta.fileIdentity = fileIdentity;
-    const temporary = indexFile + '.' + randomUUID() + '.tmp';
-    try {
-        await fs.writeFile(temporary, parsed.store.snapshot());
-        await fs.rename(temporary, indexFile);
-        await writeJson(metaFile, meta);
-    } catch { /* 索引缓存写失败不阻塞查询，仅失去复用。 */ await fs.rm(temporary, { force: true }); }
-    return { options, file, store: parsed.store, meta,
-        stats: { cached: false, parseMs: Date.now() - startedAt, loadMs: Date.now() - startedAt, fileBytes: stat.size, eventCount: meta.eventCount } };
+        meta = call(() => nativeApi().waveOpen(file));
+    } catch (error) {
+        // Rust 的错误码与 CLI 码基本同名；个别情况补映射说明。
+        if (error.code === 'WAVE_FORMAT_UNSUPPORTED') fail('VCD_PARSE', error.message, { file });
+        fail(error.code || 'VCD_PARSE', error.message, { file });
+    }
+    const after = await fs.stat(file);
+    if (after.size !== stat.size || Math.round(after.mtimeMs) !== Math.round(stat.mtimeMs)) {
+        fail('SOURCE_CHANGED', 'VCD 读取期间文件已变化，请在仿真结束后重试', { file });
+    }
+    // CLI 协定的 meta 形状：与旧 JS 版一致（endTime 仍是整数 tick）。
+    const normalized = {
+        ...meta,
+        endTime: Number(meta.endTime),
+        eventCount: Number(meta.eventCount),
+        fileBytes: Number(meta.fileBytes),
+        // source-roles 需要 vars；direction 标注在导出/查询输出里按需补。
+        vars: meta.vars,
+    };
+    return {
+        options, file, meta: normalized,
+        stats: { cached: false, parseMs: Date.now() - startedAt, loadMs: Date.now() - startedAt,
+            fileBytes: stat.size, eventCount: normalized.eventCount },
+    };
+}
+
+// ---------------------------------------------------------------------------
+// Rust 查询适配
+//
+// 三个查询方法（values/changes/sample）原来直接调 `VcdStore`，现在转发到 napi。
+// 统一约定：
+// - 输入是信号 **id**（`resolveIds` 的产物），这里翻译成 Rust 的 path；
+// - 输出保持 CLI 协定（`bits` 字段 → 调用方的 `value`，时间是 Number）。
+// ---------------------------------------------------------------------------
+
+/** id → Rust 查询用的路径。逐位展开项的 path 已含 `[n]`，Rust 会按 packedSource 切位。 */
+function pathOf(trace, id) {
+    const variable = trace.meta.vars.find(item => item.id === id);
+    if (!variable) fail('SIGNAL_NOT_FOUND', '信号不存在：' + id);
+    return variable.path;
+}
+
+/** @returns {Record<string, string|null>} id → 原始位串。 */
+function storeValues(trace, ids, time) {
+    const paths = ids.map(id => pathOf(trace, id));
+    const raw = call(() => nativeApi().waveValues(trace.file, paths.join(','), String(time)));
+    const byPath = new Map(Object.entries(raw.values || {}));
+    const out = {};
+    for (const id of ids) {
+        const path = pathOf(trace, id);
+        const entry = byPath.get(path);
+        out[id] = entry ? entry.bits ?? null : null;
+    }
+    return out;
+}
+
+/** @returns {{series: Array<{id:string,total:number,next:number|null,events:Array<{t:number,value:string}>}>}} */
+function storeChanges(trace, { ids, from, to, limit }) {
+    const paths = ids.map(id => pathOf(trace, id));
+    const raw = call(() => nativeApi().waveChanges(trace.file, paths.join(','), from ?? null, to, limit));
+    return {
+        series: raw.series.map((series, index) => ({
+            id: ids[index],
+            total: series.total,
+            next: series.next === null ? null : Number(series.next),
+            events: series.events.map(event => ({ t: Number(event.t), value: event.bits })),
+        })),
+    };
+}
+
+/** @returns {{total:number,next:number|null,samples:Array<{t:number,values:Record<string,string|null>}>}} */
+function storeSample(trace, { clock, edge, ids, from, to, limit }) {
+    const clockPath = pathOf(trace, clock);
+    const paths = ids.map(id => pathOf(trace, id));
+    const raw = call(() => nativeApi().waveSample(
+        trace.file, clockPath, edge, paths.join(','), from ?? null, to, limit, null));
+    return {
+        total: raw.scannedEdges,
+        next: raw.next === null ? null : Number(raw.next),
+        samples: raw.samples.map(sample => ({
+            t: Number(sample.t),
+            values: Object.fromEntries(ids.map(id => {
+                const entry = sample.values[pathOf(trace, id)];
+                return [id, entry ? entry.bits ?? null : null];
+            })),
+        })),
+    };
 }
 
 /** CLI 侧 RTL 发现：只读路径集合，交给 source-roles 做有界解析；失败仅降级方向标注。 */
@@ -245,7 +288,7 @@ async function values(input) {
     if (at > trace.meta.endTime) fail('INVALID_ARGUMENT', '--at 超出 VCD 记录范围', { at: tickString(at), endTime: tickString(trace.meta.endTime) });
     const ids = requireSignals(trace, input);
     const names = displayPaths(trace.meta);
-    const found = trace.store.values({ ids, time: at }).values;
+    const found = storeValues(trace, ids, at);
     const out = {};
     for (const id of ids) out[names.get(id).path] = decodedValue(found[id], names.get(id));
     return result('wave.values', {
@@ -262,21 +305,22 @@ async function changes(input) {
     if (from >= to) fail('INVALID_ARGUMENT', '--from 必须早于 --to');
     const ids = requireSignals(trace, input);
     const names = displayPaths(trace.meta);
-    const response = trace.store.changes({ ids, from, to, limit: Math.min(input.limit || 200, 10000) });
+    const response = storeChanges(trace, { ids, from, to, limit: Math.min(input.limit || 200, 10000) });
     return result('wave.changes', {
         file: trace.file, from: tickString(from + 1), to: tickString(to), timescale: trace.meta.timescale || null,
         series: response.series.map(series => {
             const variable = names.get(series.id);
             return { path: variable.path, width: variable.width, total: series.total,
-                // --from 含起点语义；next 给出下一页可直接使用的 --from（最后返回事件 tick + 1）。
-                next: series.next === null ? null : tickString(series.next + 1),
+                // Rust 侧的 next 已经是「下一页可直接使用的 --from」（最后返回事件 tick + 1），
+                // 这里不能再加一次，否则每翻一页会跳过一整 tick。
+                next: series.next === null ? null : tickString(series.next),
                 events: series.events.map(event => ({ t: tickString(event.t), bits: event.value })) };
         }),
         stats: trace.stats
     });
 }
 
-/** 沿/X/Z 搜索：分页拉取窗口事件流式过滤；rise/fall 需要标量信号或 --bit 位级投影。 */
+/** 沿/X/Z 搜索：交由 Rust 处理（含位级投影与分页续查）。 */
 async function edges(input) {
     const trace = await openTrace(input);
     const kind = input.kind || 'any';
@@ -292,35 +336,16 @@ async function edges(input) {
     const from = input.from === undefined ? -1 : parseTick(trace, input.from, '--from') - 1;
     if (from >= to) fail('INVALID_ARGUMENT', '--from 必须早于 --to');
     const limit = Math.min(input.limit || 100, 10000);
-    const project = value => bitOffset === null ? value : bitValue(value, bitOffset);
-    const matches = (before, after) => {
-        if (kind === 'any') return true;
-        const low = String(before).toLowerCase(), high = String(after).toLowerCase();
-        if (kind === 'rise') return low === '0' && high === '1';
-        if (kind === 'fall') return low === '1' && high === '0';
-        if (kind === 'x') return high.includes('x');
-        return high.includes('z');
-    };
-    const events = [];
-    let cursor = from, previous = null, total = 0, next = null, exhausted = false;
-    while (!exhausted && total < limit) {
-        const page = trace.store.changes({ ids, from: cursor, to, limit: ENUM_PAGE }).series[0];
-        for (const event of page.events) {
-            const current = project(event.value);
-            if (previous !== null && current !== previous && matches(previous, current)) {
-                total++;
-                if (events.length < limit) events.push({ t: tickString(event.t), from: previous, to: current });
-                else { next = tickString(event.t + 1); exhausted = true; break; }
-            }
-            previous = current;
-        }
-        if (page.next === null) exhausted = true; else cursor = page.next;
-    }
+    // 直接调 Rust：from/to 的 from-to 位串由 Rust 压成 VCD 短写，
+    // 与旧 JS 契约（保留 VCD 原文形态）一致；位投影与分页续查也在同一处完成。
+    const raw = call(() => nativeApi().waveEdges(
+        trace.file, variable.path, kind, bitOffset, from, to, limit));
     return result('wave.edges', {
         file: trace.file, signal: variable.path, ...(bitOffset !== null ? { bit: bitOffset } : {}), kind,
-        from: tickString(from + 1), to: tickString(to), timescale: trace.meta.timescale || null,
-        matched: total, truncated: next !== null, next,
-        events, stats: trace.stats
+        from: tickString(Number(raw.from)), to: tickString(Number(raw.to)), timescale: trace.meta.timescale || null,
+        matched: raw.matched, truncated: raw.truncated, next: raw.next === null ? null : tickString(Number(raw.next)),
+        events: raw.events.map(event => ({ t: tickString(Number(event.t)), from: event.from, to: event.to })),
+        stats: trace.stats
     });
 }
 
@@ -355,7 +380,7 @@ async function sample(input) {
     const hits = [];
     let cursor = from, scanned = 0, matched = 0, next = null, done = false;
     while (!done) {
-        const page = trace.store.sample({ clock: clockIds[0], edge: clockEdge, ids, from: cursor, to, limit: 4096 });
+        const page = storeSample(trace, { clock: clockIds[0], edge: clockEdge, ids, from: cursor, to, limit: 4096 });
         scanned += page.total;
         for (const point of page.samples) {
             if (!conditions.length || evaluateWhere(conditions, point.values, conditionNames)) {
@@ -376,70 +401,29 @@ async function sample(input) {
     });
 }
 
-/** 双指针逐对比较两个 VCD 的同名信号：首差异时刻 + 前 N 条差异；事件总量超预算时明确截断。 */
+/** 双 VCD 同名信号差异：Rust（wellen）双指针逐对比较，输出与 CLI 协定一致。 */
 async function diff(input) {
     if (input.against === undefined) fail('INVALID_ARGUMENT', 'wave diff 需要 --against <vcd>');
+    // 两次 openTrace 会各解析一遍文件；Rust 侧 `wave_diff` 内部也各自打开，
+    // 这里保留 openTrace 是为了沿用统一的路径校验、文件变化检测与 stats 输出。
     const traceA = await openTrace(input);
     const traceB = await openTrace({ ...input, file: input.against });
-    const namesA = displayPaths(traceA.meta), namesB = displayPaths(traceB.meta);
-    const byPathA = new Map(traceA.meta.vars.map(variable => [variable.path + (variable.range || ''), variable]));
-    const byPathB = new Map(traceB.meta.vars.map(variable => [variable.path + (variable.range || ''), variable]));
-    let keys = [...byPathA.keys()].filter(key => byPathB.has(key));
-    if (input.signals !== undefined) {
-        const wanted = new Set(String(input.signals).split(',').map(name => name.trim()).filter(Boolean));
-        // 键含向量 range 后缀（如 tb.q[7:0]），短名匹配先剥掉再比较。
-        const strip = key => key.replace(/\[[^\]]*\]$/, '');
-        keys = keys.filter(key => wanted.has(key) || wanted.has(strip(key))
-            || [...wanted].some(name => strip(key) === name || strip(key).endsWith('.' + name)));
-        if (!keys.length) fail('SIGNAL_NOT_FOUND', '两份 VCD 中没有可比对的指定信号', { signals: input.signals });
-    }
-    if (!keys.length) fail('SIGNAL_NOT_FOUND', '两份 VCD 没有同名信号可比较');
     const end = Math.min(traceA.meta.endTime, traceB.meta.endTime);
-    const to = parseTick(traceA, input.to ?? end, '--to');
+    const to = input.to === undefined ? end : parseTick(traceA, input.to, '--to');
     const from = input.from === undefined ? 0 : parseTick(traceA, input.from, '--from');
     if (from >= to) fail('INVALID_ARGUMENT', '--from 必须早于 --to');
-    const limit = Math.min(input.limit || 50, 1000);
-    const diffs = [];
-    let first = null, totalSignals = 0, totalDiffs = 0, truncated = false;
-    for (const key of keys) {
-        const a = traceA.store.signals.get(byPathA.get(key).id), b = traceB.store.signals.get(byPathB.get(key).id);
-        const width = Math.max(byPathA.get(key).width, byPathB.get(key).width);
-        let indexA = a.upperBound(from) - 1, indexB = b.upperBound(from) - 1;
-        let valueA = indexA >= 0 ? a.event(indexA).value : null, valueB = indexB >= 0 ? b.event(indexB).value : null;
-        let differing = model.binaryValue(valueA, width) !== model.binaryValue(valueB, width);
-        let hadDifference = differing;
-        let budget = Math.floor(MAX_DIFF_EVENTS / keys.length) + 1000;
-        if (differing) {
-            totalDiffs++;
-            if (!first) first = { path: key, t: tickString(from), a: valueA, b: valueB };
-            if (diffs.length < limit) diffs.push({ path: key, t: tickString(from), a: valueA, b: valueB });
-        }
-        while (budget-- > 0) {
-            const timeA = indexA + 1 < a.length ? a.timeAt(indexA + 1) : Infinity;
-            const timeB = indexB + 1 < b.length ? b.timeAt(indexB + 1) : Infinity;
-            const time = Math.min(timeA, timeB);
-            if (time > to || time === Infinity) break;
-            if (timeA === time) { indexA++; valueA = a.event(indexA).value; }
-            if (timeB === time) { indexB++; valueB = b.event(indexB).value; }
-            const nowDiffering = model.binaryValue(valueA, width) !== model.binaryValue(valueB, width);
-            if (nowDiffering !== differing) {
-                if (nowDiffering) {
-                    totalDiffs++;
-                    hadDifference = true;
-                    if (!first) first = { path: key, t: tickString(time), a: valueA, b: valueB };
-                    if (diffs.length < limit) diffs.push({ path: key, t: tickString(time), a: valueA, b: valueB });
-                }
-                differing = nowDiffering;
-            }
-        }
-        if (hadDifference) totalSignals++;
-        if (budget <= 0) truncated = true;
-    }
+    const signals = input.signals === undefined
+        ? null
+        : String(input.signals).split(',').map(name => name.trim()).filter(Boolean).join(',') || null;
+    const raw = call(() => nativeApi().waveDiff(
+        traceA.file, traceB.file, signals, from, to, Math.min(input.limit || 50, 1000)));
     return result('wave.diff', {
-        file: traceA.file, against: traceB.file, from: tickString(from), to: tickString(to),
-        timescale: traceA.meta.timescale || null, againstTimescale: traceB.meta.timescale || null,
-        pairs: keys.length, totalDiffs, differingSignals: totalSignals, truncated,
-        firstDiff: first, diffs, stats: { a: traceA.stats, b: traceB.stats }
+        ...raw,
+        from: tickString(Number(raw.from)),
+        to: tickString(Number(raw.to)),
+        firstDiff: raw.firstDiff ? { ...raw.firstDiff, t: tickString(Number(raw.firstDiff.t)) } : null,
+        diffs: raw.diffs.map(entry => ({ ...entry, t: tickString(Number(entry.t)) })),
+        stats: { a: traceA.stats, b: traceB.stats },
     });
 }
 
@@ -462,7 +446,21 @@ async function exportImage(input) {
         metadata: trace.meta, view: { start: from, span: to - from }, cursorA, cursorB,
         secondsPerTick: secondsPerTick(trace.meta.timescale), multi: new Set(), selected: [], formats: {},
         groups: {}, heights: {}, highlights: {}, fullName: false, activeKey: null, rowPresentation: null };
-    const request = (method, params) => Promise.resolve(trace.store[method](params));
+    // 导出器只用到 window/values 两个查询；直接转发到 Rust，不必假装成完整 store。
+    const request = async (method, params) => {
+        if (method === 'window') {
+            const raw = call(() => nativeApi().waveWindow(trace.file, params.ids, params.start, params.end, params.pixels));
+            return {
+                series: raw.series.map(series => ({
+                    id: series.id,
+                    changes: series.changes.map(change => ({ t: Number(change.t), value: change.bits })),
+                    dense: (series.dense || []).map(bucket => ({ start: Number(bucket.start), end: Number(bucket.end), count: bucket.count })),
+                })),
+            };
+        }
+        if (method === 'values') return { values: storeValues(trace, params.ids, params.time) };
+        fail('INVALID_ARGUMENT', '导出不支持的查询：' + method);
+    };
     const options = { range: cursorB !== null && cursorA !== cursorB ? 'ab' : 'view', signals: 'all' };
     const title = input.title || path.basename(trace.file);
     const image = await createWaveImage({ state, options, request, title });

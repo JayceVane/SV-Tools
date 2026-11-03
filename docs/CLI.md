@@ -121,7 +121,7 @@ node src/cli/main.js task cancel <task-id> --workspace D:/project
 | `SNAPSHOT_UNSUPPORTED`、`VIVADO_CONTEXT_MISMATCH` | 工程存在尚不能隔离的依赖，或所选源文件集与run不符 | 按返回的文件/属性修正输入；不回退到未绑定的实时源码运行 |
 | `ARTIFACT_INVALID` | 检查点已变化、越界或不可信 | 重新构建，不使用原来的输入绑定 |
 | `SIGNAL_NOT_FOUND` | wave 信号名未命中或匹配多个信号 | 用 `data.candidates` 的完整层级路径重试；alias 共享 id 不算歧义 |
-| `VCD_PARSE`、`VCD_RESOURCE_LIMIT` | VCD 语法/编码损坏或事件存储超预算 | 修复重新仿真或缩小记录范围；不得截断后继续 |
+| `VCD_PARSE`、`WAVE_FORMAT_UNSUPPORTED` | VCD 语法/编码损坏，或波形格式不受支持 | 修复重新仿真，或改用 VCD/FST；不得截断后继续 |
 | `SERVICE_FAILED` | 未分类失败 | 读 `diagnostics` 与对应日志产物 |
 
 ## Vivado（M2）
@@ -238,7 +238,7 @@ node src/cli/main.js wave diff --workspace D:/project --file broken.vcd --agains
 node src/cli/main.js wave export --workspace D:/project --file sim/wave.vcd --signals clk,q --out report --at 1250ns --format png
 ```
 
-所有命令先打开 VCD 并复用索引缓存：首次流式解析后把紧凑事件存储落盘到 `.svtools/agent/wave/<路径哈希>/`（`index.bin` + `meta.json`），后续命令按文件 size+mtime 身份命中后零拷贝加载（实测 500 MiB/1463 万事件：冷解析 8.8 s，命中加载 211–290 ms）；文件变化或缓存损坏时自动重新解析覆盖，不复活旧数据。解析期间文件变化返回 `SOURCE_CHANGED`；文件超过 2048 MiB 或事件存储超预算返回 `SOURCE_LIMIT`/`VCD_RESOURCE_LIMIT`。
+所有命令都用 Rust（wellen）一次解析建立索引，不落盘缓存：实测 500 MiB/1463 万事件冷解析 353 ms，比原 JS 实现的缓存命中（211–290 ms 加载 + 5.7 s 首次解析）更快，因此 `.svtools/agent/wave/` 索引缓存已移除。解析期间文件变化返回 `SOURCE_CHANGED`；文件超过 2048 MiB 返回 `SOURCE_LIMIT`；格式不受支持或语法损坏返回 `WAVE_FORMAT_UNSUPPORTED`/`VCD_PARSE`。
 
 时间输入接受裸整数 ticks 或带 `s/ms/us/ns/ps/fs` 单位的物理时间（物理单位要求 VCD 声明 timescale）；输出中的时刻一律为整数 tick 字符串（`t`、`from`、`to`、`next`），并列 `timescale` 与人类可读换算，浮点 JSON 不承载时标精度。信号名解析优先完整层级路径，其次唯一短名/后缀（同一 net 的 alias 共享 id，不算歧义），未命中或多个 id 歧义返回 `SIGNAL_NOT_FOUND` 并附 `candidates`。
 

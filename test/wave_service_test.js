@@ -33,7 +33,7 @@ async function workspace(t, name, text) {
     return directory;
 }
 
-test('wave signals/values/changes：tick 字符串、解码值、游标分页与缓存复用', async t => {
+test('wave signals/values/changes：tick 字符串、解码值、游标分页与文件更新感知', async t => {
     const directory = await workspace(t, 'trace.vcd', VCD_A);
     const first = (await run(['wave', 'signals', '--workspace', directory, '--file', 'trace.vcd', '--query', 'q'])).output;
     assert.equal(first.status, 'success');
@@ -41,11 +41,12 @@ test('wave signals/values/changes：tick 字符串、解码值、游标分页与
     assert.equal(first.data.endTime, '40');
     assert.deepEqual(first.data.signals.map(signal => signal.path), ['tb.q']);
     assert.equal(first.data.signals[0].changes, 5);
-    assert.equal(first.data.stats.cached, false, '首次解析');
+    // 索引缓存已删除：Rust 冷解析实测比旧 JS 快照命中更快（500 MiB：353 ms vs 5663 ms），
+    // 缓存只多出「文件改了但 mtime 没变」这条出错路径。因此 stats.cached 恒为 false。
+    assert.equal(first.data.stats.cached, false, '无缓存，每次都是真实解析');
     const second = (await run(['wave', 'signals', '--workspace', directory, '--file', 'trace.vcd'])).output;
-    assert.equal(second.data.stats.cached, true, '第二次命中索引缓存');
-    assert.ok(second.data.stats.loadMs < 500, '缓存加载是轻量操作');
-    // 修改文件后身份失效：缓存不能复活旧数据。
+    assert.equal(second.data.stats.cached, false, '重复调用不产生缓存，仍走解析');
+    // 修改文件后必须看到新值：不存在陈旧索引复活旧数据的问题。
     await fsp.writeFile(path.join(directory, 'trace.vcd'), VCD_A.replace('b100 #', 'b111 #'));
     const renewed = (await run(['wave', 'values', '--workspace', directory, '--file', 'trace.vcd', '--signals', 'tb.q', '--at', '40ns'])).output;
     assert.equal(renewed.status, 'success');
