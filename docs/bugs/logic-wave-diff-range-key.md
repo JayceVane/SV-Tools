@@ -47,8 +47,12 @@ fn diff_key(var: &WaveVar) -> String {
 
 ## 验证与复发预防
 
-- `cargo test --lib wave::` 11 项通过。
-- `node --test test/wave_parity_test.js` 12 项全绿，其中 3 项覆盖 `diff`：首差异/差异序列逐字段对拍、`--signals` 过滤、自我比对零差异。
-- 回归测试位置：`test/wave_parity_test.js` 的「对拍 wave_diff」两例 + Rust 单测 `diff_counts_only_transitions_into_difference` / `diff_reports_initial_mismatch_at_from_time`。
+- `cargo test --lib wave::` 通过。
+- 回归测试位置：Rust 单测 `diff_counts_only_transitions_into_difference` /
+  `diff_reports_initial_mismatch_at_from_time`；CLI 端到端见
+  `test/wave_service_test.js` 的「wave diff：首差异时刻与差异计数，短名剥 range 匹配」。
+- 说明：本轮修复曾借助 `test/wave_parity_test.js`（JS/Rust 双实现对拍）暴露问题，
+  该文件在 JS `VcdStore` 删除后已移除——两侧实现同源后对拍失去意义，
+  相关断言已并入上面的 CLI 端到端用例。
 
 **下次遇到向量信号相关的输出字段对不上，先检查「键是否同时包含 path 与 range」**，并且确认这个键只有一个构造点。

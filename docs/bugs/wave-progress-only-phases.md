@@ -23,13 +23,21 @@ JS 版 worker 是流式读文件，每 64 KiB 报一次 `progress.loading`（带
 
 ## 取消语义
 
-`waveOpen` 是同步的，解析期间 worker 的事件循环被占满，`cancel` 消息收不到。
-但取消仍然有效——它发生在**下一阶段边界**：
+worker 一律走 `*_async` 入口（`waveOpenAsync` / `waveValuesAsync` …），解析与查询的
+`compute` 跑在 libuv 线程池里，**不再占满 worker 线程**，因此 `close` 消息随时收得到。
 
-1. host 收到 `cancel` → `session.dispose()` → `worker.terminate()`；
-2. 同步的 `waveOpen` 随 worker 一起被杀掉，不会留下僵尸解析；
+关闭走握手而非强杀：
+
+1. host 收到 `cancel` → `session.dispose()` → 发 `{ method: 'close' }`；
+2. worker 侧等在途请求计数归零后回执 `{ type: 'closed' }` 并关闭消息端口，
+   事件循环在最后一个 libuv 任务结束后自然退出；
 3. `session.request` 的 pending promise 在 dispose 时统一 reject，
-   已发出的 `progress` 消息因 `this.disposed` 被丢弃。
+   已发出的 `progress` 消息因 `this.disposed` 被丢弃；
+4. 5 秒宽限期只作兜底（真卡死才 `terminate()`）。
+
+**为什么不能直接 `worker.terminate()`**：`compute` 正在 libuv 线程池里跑 Rust 代码，
+拆 isolate 会让 Rust 侧收尾踩到已销毁的 V8 上下文。详见
+[`wave-worker-concurrency-segfault.md`](wave-worker-concurrency-segfault.md)。
 
 因此「取消后不再发 ready」由 session 层保证，worker 不需要自己检查取消标志。
 
