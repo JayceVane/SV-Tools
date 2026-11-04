@@ -6,7 +6,6 @@ const path = require('node:path');
 const { nativeApi, call } = require('../waveform/rust-backend');
 const model = require('../waveform/model');
 const rowLayout = require('../waveform/row-layout');
-const { bitValue } = require('../waveform/signal-display');
 const { readSignalRoles } = require('../waveform/source-roles');
 const { isExcludedSourcePath } = require('../workspace/source-policy');
 const { createWaveImage } = require('../waveform/node-export');
@@ -18,8 +17,6 @@ const { result, fail } = require('./protocol');
 const MAX_VCD_BYTES = 2 * 1024 * 1024 * 1024;
 const MAX_SIGNALS_OUTPUT = 2000;
 const MAX_RTL_FILES = 512;
-const MAX_DIFF_EVENTS = 2000000;
-const ENUM_PAGE = 10000;
 
 const UNITS = { s: 1, ms: 1e-3, us: 1e-6, ns: 1e-9, ps: 1e-12, fs: 1e-15 };
 /** @returns {number} 秒/tick；timescale 缺失或非法时为 0（此时不接受物理单位输入）。 */
@@ -102,8 +99,9 @@ async function openTrace(input) {
         handle = opened.handle;
         meta = opened.meta;
     } catch (error) {
-        // Rust 的错误码与 CLI 码基本同名；个别情况补映射说明。
-        if (error.code === 'WAVE_FORMAT_UNSUPPORTED') fail('VCD_PARSE', error.message, { file });
+        // Rust 的错误码与 CLI 码同名，直接透传：`WAVE_FORMAT_UNSUPPORTED` 在
+        // docs/CLI.md 里是独立条目（格式不支持），不能再折叠回 `VCD_PARSE`（语法损坏）——
+        // 两者的处置不同（换格式 vs 重新仿真），折叠后调用方无法分派。
         fail(error.code || 'VCD_PARSE', error.message, { file });
     }
     const after = await fs.stat(file);
@@ -325,15 +323,17 @@ async function changes(input) {
     if (from >= to) fail('INVALID_ARGUMENT', '--from 必须早于 --to');
     const ids = requireSignals(trace, input);
     const names = displayPaths(trace.meta);
+    // Rust/worker 的 `next` 是内部左开游标（最后一条已返回事件的时刻），可直接回传；
+    // 返回给调用方的 `next` 才是对外 `--from`（闭区间下界），在收尾处 +1。
     const response = storeChanges(trace, { ids, from, to, limit: Math.min(input.limit || 200, 10000) });
     return result('wave.changes', {
         file: trace.file, from: tickString(from + 1), to: tickString(to), timescale: trace.meta.timescale || null,
         series: response.series.map(series => {
             const variable = names.get(series.id);
             return { path: variable.path, width: variable.width, total: series.total,
-                // Rust 侧的 next 已经是「下一页可直接使用的 --from」（最后返回事件 tick + 1），
-                // 这里不能再加一次，否则每翻一页会跳过一整 tick。
-                next: series.next === null ? null : tickString(series.next),
+                // Rust 的 next 是「最后一条已返回事件的时刻」（内部左开游标），
+                // 对外契约 `--from` 是闭区间下界，所以展示时 +1。
+                next: series.next === null ? null : tickString(series.next + 1),
                 events: series.events.map(event => ({ t: tickString(event.t), bits: event.value })) };
         }),
         stats: trace.stats
@@ -409,10 +409,12 @@ async function sample(input) {
                     const values = {};
                     for (const id of ids) values[names.get(id).path] = decodedValue(point.values[id], names.get(id));
                     hits.push({ t: tickString(point.t), values });
+                // 对外 `next` 是对外 `--from`（闭区间下界），此时这条沿还没返回，+1 就是它。
                 } else { next = tickString(point.t + 1); done = true; break; }
             }
         }
-        if (page.next === null) done = true; else cursor = page.next;
+        // 内部 cursor 与 Rust/worker 的 next 同为左开游标（最后一条已返回的沿时刻），直接复用。
+        if (page.next === null) done = true; else cursor = Number(page.next);
     }
     return result('wave.sample', {
         file: trace.file, clock: names.get(clockIds[0]).path, clockEdge, from: tickString(from + 1), to: tickString(to),

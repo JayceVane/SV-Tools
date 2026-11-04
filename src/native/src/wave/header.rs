@@ -6,6 +6,8 @@
 
 use std::path::Path;
 
+use super::{WaveError, WaveResult};
+
 /// VCD 头里的一条声明。
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct WaveHeaderEntry {
@@ -15,6 +17,20 @@ pub struct WaveHeaderEntry {
 
 /// 扫描上限：头声明正常只有几百字节，这里给足余量但不无限读。
 const MAX_SCAN_BYTES: u64 = 8 * 1024 * 1024;
+
+/// 头部声明的解析级资源上限（与旧 JS parser 同口径）。
+///
+/// 这些护栏防的是**损坏或恶意头部**，不是正常大设计：
+/// 一条位宽 40 亿的 `$var` 在逐位展开时会按下标申请等量内存；
+/// 十万层嵌套作用域会让路径拼接退化成 O(n²)。
+const MAX_VARIABLES: usize = 1_000_000;
+const MAX_SIGNAL_WIDTH: u32 = 16 * 1024 * 1024 - 1;
+const MAX_SCOPE_DEPTH: usize = 256;
+const MAX_REFERENCE_LENGTH: usize = 65536;
+
+fn limit_error(message: String) -> WaveError {
+    WaveError::new("VCD_RESOURCE_LIMIT", message)
+}
 
 /// 读取文件开头若干字节（截断到 `MAX_SCAN_BYTES`）。
 fn read_prefix(file: &Path) -> Option<String> {
@@ -117,11 +133,16 @@ pub struct DeclaredScope {
 /// 两者必须同源：Icarus 会为每条 `$var` 各开一个同名 `$scope module x`，
 /// 按路径回查作用域会把所有变量都指到最后一条同名 entry 上，
 /// 前端 `signal-mapping` 的 `paths[scopeId]` 校验随即失败。
-pub fn declared_hierarchy(file: &Path, format: &str) -> (Vec<DeclaredScope>, Vec<DeclaredVar>) {
+///
+/// 返回错误只用于资源上限（`VCD_RESOURCE_LIMIT`）：正常头部不会触发。
+pub fn declared_hierarchy(
+    file: &Path,
+    format: &str,
+) -> WaveResult<(Vec<DeclaredScope>, Vec<DeclaredVar>)> {
     if format != "vcd" {
-        return (Vec::new(), Vec::new());
+        return Ok((Vec::new(), Vec::new()));
     }
-    let Some(text) = read_prefix(file) else { return (Vec::new(), Vec::new()) };
+    let Some(text) = read_prefix(file) else { return Ok((Vec::new(), Vec::new())) };
     let header = match text.find("$enddefinitions") {
         Some(position) => &text[..position],
         None => text.as_str(),
@@ -141,6 +162,13 @@ pub fn declared_hierarchy(file: &Path, format: &str) -> (Vec<DeclaredScope>, Vec
                     Some((id, parent)) => (format!("{}.{}", parent, name), Some(*id)),
                     None => (name.clone(), None),
                 };
+                // 深度与路径长度都要有界：二者都是 O(深度²) 的隐患，
+                // 且损坏头部可以轻易构造上万层嵌套。
+                if stack.len() >= MAX_SCOPE_DEPTH || path.len() > MAX_REFERENCE_LENGTH {
+                    return Err(limit_error(format!(
+                        "VCD 作用域超过安全上限（深度 ≤ {MAX_SCOPE_DEPTH}，路径 ≤ {MAX_REFERENCE_LENGTH} 字节）"
+                    )));
+                }
                 stack.push((scopes.len(), path.clone()));
                 scopes.push(DeclaredScope { scope_type, name, path, parent_id });
                 index += 3;
@@ -151,6 +179,16 @@ pub fn declared_hierarchy(file: &Path, format: &str) -> (Vec<DeclaredScope>, Vec
             }
             "$var" if index + 4 < tokens.len() => {
                 let width = tokens[index + 2].parse::<u32>().unwrap_or(1);
+                if width > MAX_SIGNAL_WIDTH {
+                    return Err(limit_error(format!(
+                        "VCD 声明位宽 {width} 超过 {MAX_SIGNAL_WIDTH} 位安全上限"
+                    )));
+                }
+                if declared.len() >= MAX_VARIABLES {
+                    return Err(limit_error(format!(
+                        "VCD 信号声明数超过 {MAX_VARIABLES} 条安全上限"
+                    )));
+                }
                 let symbol = tokens[index + 3].to_string();
                 let name = tokens[index + 4].to_string();
                 let mut cursor = index + 5;
@@ -179,20 +217,20 @@ pub fn declared_hierarchy(file: &Path, format: &str) -> (Vec<DeclaredScope>, Vec
             _ => index += 1,
         }
     }
-    (scopes, declared)
+    Ok((scopes, declared))
 }
 
 /// 按声明顺序读出全部 `$var`，跟踪作用域嵌套。
 ///
 /// 用 token 流而不是 `split("$var")`：作用域是顺序上下文，
 /// 且最后一个 `$var` 与 `$enddefinitions` 会落在同一片段里。
-pub fn declared_vars(file: &Path, format: &str) -> Vec<DeclaredVar> {
-    declared_hierarchy(file, format).1
+pub fn declared_vars(file: &Path, format: &str) -> WaveResult<Vec<DeclaredVar>> {
+    declared_hierarchy(file, format).map(|hierarchy| hierarchy.1)
 }
 
 /// 按声明顺序读出全部 `$scope`，输出扁平表。
-pub fn declared_scopes(file: &Path, format: &str) -> Vec<DeclaredScope> {
-    declared_hierarchy(file, format).0
+pub fn declared_scopes(file: &Path, format: &str) -> WaveResult<Vec<DeclaredScope>> {
+    declared_hierarchy(file, format).map(|hierarchy| hierarchy.0)
 }
 
 /// 读取 `$timescale` 的**原文**（`1 ns` / `10ps`），保留原始排版。
@@ -226,11 +264,9 @@ fn parse_index(token: &str) -> Option<i64> {
 }
 
 /// 按声明顺序抽取符号标识。
-pub fn read_symbols(file: &Path, format: &str) -> Vec<String> {
+pub fn read_symbols(file: &Path, format: &str) -> WaveResult<Vec<String>> {
     declared_vars(file, format)
-        .into_iter()
-        .map(|declaration| declaration.symbol)
-        .collect()
+        .map(|declarations| declarations.into_iter().map(|declaration| declaration.symbol).collect())
 }
 
 #[cfg(test)]
@@ -265,7 +301,7 @@ mod tests {
             "symbols.vcd",
             "$scope module tb $end\n$var wire 1 ! clk $end\n$var wire 8 # bus [7:0] $end\n$var real 1 % temp $end\n$upscope $end\n$enddefinitions $end\nb101 #\n",
         );
-        let symbols = read_symbols(&path, "vcd");
+        let symbols = read_symbols(&path, "vcd").expect("read symbols");
         let _ = std::fs::remove_file(&path);
         assert_eq!(symbols, vec!["!", "#", "%"]);
     }
@@ -274,8 +310,32 @@ mod tests {
     fn non_vcd_formats_yield_no_headers() {
         let path = write_temp("ignored.fst", "$date x $end");
         assert!(read_headers(&path, "fst").is_empty());
-        assert!(read_symbols(&path, "fst").is_empty());
+        assert!(read_symbols(&path, "fst").expect("fst symbols").is_empty());
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn oversized_signal_width_is_rejected() {
+        let path = write_temp(
+            "wide.vcd",
+            "$scope module tb $end\n$var wire 4294967295 ! huge $end\n$upscope $end\n$enddefinitions $end\n",
+        );
+        let error = declared_hierarchy(&path, "vcd").expect_err("位宽超限必须拒绝");
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(error.code, "VCD_RESOURCE_LIMIT");
+    }
+
+    #[test]
+    fn overdeep_scope_nesting_is_rejected() {
+        let mut text = String::new();
+        for depth in 0..300 {
+            text.push_str(&format!("$scope module s{} $end\n", depth));
+        }
+        text.push_str("$enddefinitions $end\n");
+        let path = write_temp("deep.vcd", &text);
+        let error = declared_hierarchy(&path, "vcd").expect_err("作用域过深必须拒绝");
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(error.code, "VCD_RESOURCE_LIMIT");
     }
 }
 

@@ -135,6 +135,37 @@ pub fn find_symbol_by_name(text: String, name: String) -> Result<Vec<analyzer::S
 
 use crate::wave;
 
+// 查询级资源上限（与旧 JS VcdStore 的口径一致）。
+// 这些护栏在「后端下沉」时一度全部丢失：宽总线或稠密信号可以在一次查询里
+// 物化出上百 MB 的位串，把宿主内存吃穿。上限必须在**取数之前**判定，
+// 不能等构造完响应再检查。
+const MAX_QUERY_IDS: usize = 256;
+const MAX_QUERY_PIXELS: u32 = 4096;
+const MAX_QUERY_POINTS: usize = 262_144;
+const MAX_RESULT_BYTES: usize = 32 * 1024 * 1024;
+const MAX_SAMPLES: u32 = 4096;
+
+/// ids 数量上限检查。
+fn check_ids(count: usize) -> Result<()> {
+    if count > MAX_QUERY_IDS {
+        return Err(Error::from_reason(format!(
+            "[VCD_RESOURCE_LIMIT] 查询 ids 必须为最多 {MAX_QUERY_IDS} 个信号"
+        )));
+    }
+    Ok(())
+}
+
+/// 序列化前检查响应体积：超预算直接拒绝，而不是把巨型 JSON 交给 JS。
+fn check_payload(text: String) -> Result<String> {
+    if text.len() > MAX_RESULT_BYTES {
+        return Err(Error::from_reason(format!(
+            "[VCD_RESOURCE_LIMIT] 查询响应超过 {} MiB 预算，请减少信号或缩小窗口",
+            MAX_RESULT_BYTES / 1048576
+        )));
+    }
+    Ok(text)
+}
+
 /// 打开波形：只读层级元数据，不加载信号值。
 #[napi]
 pub fn wave_open(file: String) -> Result<String> {
@@ -310,6 +341,7 @@ fn values_impl(session: &mut wave::WaveSession, signals: &str, at: &str) -> Resu
         .map(|name| name.trim().to_string())
         .filter(|name| !name.is_empty())
         .collect();
+    check_ids(names.len())?;
     let name_refs: Vec<&str> = names.iter().map(|name| name.as_str()).collect();
     // 解析结果借用 trace.vars；按 **id** 回查（不能按 path：逐位展开后
     // 隐藏源条目与原向量同 path，按 path 会撞车）。
@@ -331,6 +363,7 @@ fn values_impl(session: &mut wave::WaveSession, signals: &str, at: &str) -> Resu
         "values": map,
     }))
     .map_err(|error| Error::from_reason(format!("序列化失败：{}", error)))
+    .and_then(check_payload)
 }
 
 /// WaveError → napi 错误。JS 侧按 `error.code` 分派（`VCD_PARSE`/`SIGNAL_NOT_FOUND`/
@@ -359,6 +392,7 @@ pub fn wave_changes(handle: Option<i64>, file: Option<String>, signals: String, 
             return Err(Error::from_reason("--from 必须早于 --to"));
         }
         let names: Vec<String> = signals.split(',').map(|n| n.trim().to_string()).filter(|n| !n.is_empty()).collect();
+        check_ids(names.len())?;
         let name_refs: Vec<&str> = names.iter().map(|n| n.as_str()).collect();
         let picked: Vec<wave::WaveVar> = {
             let resolved = wave::resolve_ids(&session.trace.vars, &name_refs).map_err(wave_error)?;
@@ -379,6 +413,7 @@ pub fn wave_changes(handle: Option<i64>, file: Option<String>, signals: String, 
             "series": series,
         }))
         .map_err(|error| Error::from_reason(format!("序列化失败：{}", error)))
+        .and_then(check_payload)
     })
 }
 
@@ -421,6 +456,7 @@ pub fn wave_edges(handle: Option<i64>, file: Option<String>, signal: String, kin
         "events": events.into_iter().map(|(t, from, to)| serde_json::json!({"t": t, "from": from, "to": to})).collect::<Vec<_>>(),
     }))
     .map_err(|error| Error::from_reason(format!("序列化失败：{}", error)))
+    .and_then(check_payload)
     })
 }
 
@@ -435,6 +471,7 @@ pub fn wave_sample(handle: Option<i64>, file: Option<String>, clock: String, edg
     let clock_resolved = wave::resolve_ids(&session.trace.vars, &[clock.as_str()]).map_err(wave_error)?;
     let clock_var = clock_resolved[0].clone();
     let names: Vec<String> = signals.split(',').map(|n| n.trim().to_string()).filter(|n| !n.is_empty()).collect();
+    check_ids(names.len())?;
     let name_refs: Vec<&str> = names.iter().map(|n| n.as_str()).collect();
     let picked: Vec<wave::WaveVar> = {
         let resolved = wave::resolve_ids(&session.trace.vars, &name_refs).map_err(wave_error)?;
@@ -459,7 +496,7 @@ pub fn wave_sample(handle: Option<i64>, file: Option<String>, clock: String, edg
     }
     // 有 where 时默认页更小（与 JS 的 50 一致），无 where 时沿用 256。
     let default_limit = if conditions.is_empty() { 256 } else { 50 };
-    let limit = (limit.unwrap_or(default_limit) as usize).min(4096);
+    let limit = (limit.unwrap_or(default_limit) as usize).min(MAX_SAMPLES as usize);
     let (scanned, matched, next, samples) = wave::sample(session, &clock_var, &edge, &picked_refs, &conditions, from, to, limit).map_err(wave_error)?;
     serde_json::to_string(&serde_json::json!({
         "file": session.trace.file,
@@ -479,6 +516,7 @@ pub fn wave_sample(handle: Option<i64>, file: Option<String>, clock: String, edg
         }).collect::<Vec<_>>(),
     }))
     .map_err(|error| Error::from_reason(format!("序列化失败：{}", error)))
+    .and_then(check_payload)
     })
 }
 
@@ -505,6 +543,7 @@ pub fn wave_diff(file: String, against: String, signals: Option<String>, from: O
         "diffs": outcome.entries,
     }))
     .map_err(|error| Error::from_reason(format!("序列化失败：{}", error)))
+    .and_then(check_payload)
 }
 
 /// 视窗像素桶降采样：把 [start,end] 切成 pixels 个桶，每桶保留首末事件并标记密集区。
@@ -518,6 +557,14 @@ pub fn wave_window(handle: Option<i64>, file: Option<String>, ids: Vec<String>, 
     if pixels == 0 {
         return Err(Error::from_reason("像素数必须为正整数"));
     }
+    // 与旧 VcdStore 同口径：像素数与「信号数 × 像素数」都要有界，
+    // 否则一次视窗查询就能把每个信号切成上百万桶、物化出巨量首末事件。
+    check_ids(ids.len())?;
+    if pixels > MAX_QUERY_PIXELS || ids.len() * pixels as usize > MAX_QUERY_POINTS {
+        return Err(Error::from_reason(format!(
+            "[VCD_RESOURCE_LIMIT] 视窗像素预算无效：pixels ≤ {MAX_QUERY_PIXELS} 且 信号数×像素数 ≤ {MAX_QUERY_POINTS}"
+        )));
+    }
     // 按 id 直接取变量，不走名称解析（面板侧的 id 来自 open 返回的变量表）。
     let mut picked: Vec<wave::WaveVar> = Vec::new();
     for id in &ids {
@@ -530,6 +577,7 @@ pub fn wave_window(handle: Option<i64>, file: Option<String>, ids: Vec<String>, 
     let series = wave::window_series(session, &refs, start, end, pixels as usize).map_err(wave_error)?;
     serde_json::to_string(&serde_json::json!({ "series": series }))
         .map_err(|error| Error::from_reason(format!("序列化失败：{}", error)))
+        .and_then(check_payload)
     })
 }
 
@@ -572,6 +620,7 @@ pub fn wave_edge(handle: Option<i64>, file: Option<String>, id: String, time: i6
     .map_err(wave_error)?;
     serde_json::to_string(&hit)
         .map_err(|error| Error::from_reason(format!("序列化失败：{}", error)))
+        .and_then(check_payload)
     })
 }
 

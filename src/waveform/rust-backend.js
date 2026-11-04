@@ -12,9 +12,6 @@
  * 3. 把 Rust 的 `bits`/字符串时间统一转成 CLI 协定（整数 tick + 原始位串）。
  */
 
-const path = require('node:path');
-const { createHash } = require('node:crypto');
-
 /** 惰性加载原生模块：波形命令之外的路径不会被 .node 加载失败拖累。 */
 let nativeCache = null;
 function nativeApi() {
@@ -40,6 +37,4 @@ function call(fn) {
     }
 }
 
-const fileCacheKey = file => createHash('sha256').update(file.toLowerCase()).digest('hex').slice(0, 16);
-
-module.exports = { nativeApi, call, codeOf, fileCacheKey };
+module.exports = { nativeApi, call, codeOf };

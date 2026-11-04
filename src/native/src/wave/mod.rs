@@ -102,23 +102,18 @@ pub struct WaveTrace {
     pub vars: Vec<WaveVar>,
     /// 扁平作用域表（索引即 WaveVar.scopeId）。
     pub scopes: Vec<header::DeclaredScope>,
-    /// 文件内符号 → 变量下标（同 id 的 alias 只保留首个用于展示）。
-    pub by_id: HashMap<String, usize>,
     /// wellen 变量引用，用于按需加载取值。
     pub var_refs: Vec<VarRef>,
     pub timescale: String,
     pub end_time: i64,
     pub format: String,
     pub file_bytes: u64,
-    /// 时间步数（wellen 的 time_table 长度）。注意**不是** JS 合同的 `eventCount`。
+    /// 唯一信号的事件总数（JS 合同的 `eventCount`：**不是**时间步数）。
     pub event_count: usize,
-    /// 时间步数（wellen 的 time_table 长度，不是事件数）。
-    pub time_steps: usize,
     /// VCD 头声明（$date/$version/$comment）；FST 为空。
     pub headers: Vec<WaveHeaderEntry>,
     /// 未合并的原始 $var 声明表（JS 侧按 RTL 范围重建总线时使用）。
     pub declarations: Vec<header::DeclaredVar>,
-    pub cached: bool,
 }
 
 /// 解析 timescale 字符串为「秒/tick」；无效或缺失返回 None（此时拒绝物理单位输入）。
@@ -685,7 +680,6 @@ fn describe(file: &Path, wave: &mut simple::Waveform) -> WaveResult<WaveTrace> {
 
     let mut vars = Vec::new();
     let mut var_refs = Vec::new();
-    let mut by_id = HashMap::new();
     // 信号身份有两个来源：
     // - VCD：用 `$var` 的符号标识（`!`/`#`/`%`…），这是 JS 版、前端缓存与既有测试共同建立的
     //   稳定身份，跨实现可对拍；
@@ -695,7 +689,7 @@ fn describe(file: &Path, wave: &mut simple::Waveform) -> WaveResult<WaveTrace> {
     // （为兼容 ModelSim/Questa 的逐位 dump），变量数因此少于 `$var` 声明数。
     // 合并后的向量语义上对应「该组逐位声明的整体」，因此取**首个成员的符号**作为其身份；
     // 逐一按声明顺序对齐会整体错位（实测 `#` 被标成 `%`）。
-    let (scopes, declared) = header::declared_hierarchy(file, format_name(hierarchy));
+    let (scopes, declared) = header::declared_hierarchy(file, format_name(hierarchy))?;
     let matched = match_declarations(hierarchy, &declared);
     let ids = assign_ids(hierarchy, &declared, &matched);
     // wellen 用 VarRef 迭代全部变量（含各层级），每个 alias 是独立 VarRef。
@@ -793,9 +787,6 @@ fn describe(file: &Path, wave: &mut simple::Waveform) -> WaveResult<WaveTrace> {
             // 真实变化次数在 describe 末尾统一回填（需要先扫一遍事件）。
             change_count: 0,
         };
-        if !by_id.contains_key(&id) {
-            by_id.insert(id, vars.len());
-        }
         vars.push(entry);
         var_refs.push(var_ref);
     }
@@ -817,7 +808,6 @@ fn describe(file: &Path, wave: &mut simple::Waveform) -> WaveResult<WaveTrace> {
     // 逐信号事件数：JS 的 `changeCount`/`eventCount` 语义是「该信号实际发生的变化次数」，
     // wellen 不缓存这个统计，必须扫一遍。用 stream 接口而不是 load_signals 全量装载，
     // 避免为计数把每个信号的事件序列都物化一遍（500 MiB 语料实测内存差 3 倍以上）。
-    let wave_time_steps = wave.time_table().len();
     let (signal_event_count, per_signal) = count_signal_events(wave);
     ensure_body_not_silently_empty(file, format, signal_event_count)?;
     let vars = attach_change_counts(vars, &var_refs, wave.hierarchy(), &per_signal);
@@ -828,18 +818,14 @@ fn describe(file: &Path, wave: &mut simple::Waveform) -> WaveResult<WaveTrace> {
         file: file.display().to_string(),
         vars,
         scopes,
-        by_id,
         var_refs,
         timescale,
         end_time,
         format: format.to_string(),
         file_bytes: metadata.len(),
         event_count: signal_event_count,
-        // 时间步数单独保留：dense/window 的像素预算按时间轴刻度算，不按事件数。
-        time_steps: wave_time_steps,
         headers,
         declarations: declared,
-        cached: false,
     })
 }
 
@@ -891,12 +877,11 @@ fn ensure_body_not_silently_empty(file: &Path, format: &str, event_count: usize)
 ///
 /// `eventCount` 与 JS 同义：**按唯一信号累加**，alias 共享同一 SignalRef、不重复计数。
 fn count_signal_events(wave: &mut simple::Waveform) -> (usize, HashMap<usize, usize>) {
-    let mut seen: Vec<SignalRef> = Vec::new();
+    // 去重用 HashSet：`Vec::contains` 在万级变量表上是 O(V²)，
+    // 真实设计（Icarus 每信号一条 $var）实测能占到打开耗时的可观比例。
+    let mut seen: std::collections::HashSet<SignalRef> = std::collections::HashSet::new();
     for var_ref in wave.hierarchy().all_vars() {
-        let signal_ref = wave.hierarchy()[var_ref].signal_ref();
-        if !seen.contains(&signal_ref) {
-            seen.push(signal_ref);
-        }
+        seen.insert(wave.hierarchy()[var_ref].signal_ref());
     }
     let mut per_signal: HashMap<usize, usize> = HashMap::new();
     let mut total = 0usize;
@@ -1375,9 +1360,12 @@ fn changes_for(
         events.push(WaveChange { t: session.time_at(*index).to_string(), bits });
     }
 
-    // next：下一页可直接使用的 --from（最后返回事件的 tick + 1），与 JS 一致。
+    // next：**最后一条已返回事件**的时刻（与旧 JS VcdStore 一致）。
+    // 它是 Rust 内部左开窗口（`t > from`）可直接复用的续查起点：
+    // 同一时刻不会重复返回，也不会跳过紧随其后的事件。
+    // 面向用户的 `--from` 是闭区间下界，由调用方转成 next + 1。
     let next = if total > events.len() {
-        events.last().map(|event| (event.t.parse::<i64>().unwrap_or(0) + 1).to_string())
+        events.last().map(|event| event.t.clone())
     } else {
         None
     };
@@ -1468,7 +1456,10 @@ pub fn edges(
                 if events.len() < limit {
                     events.push((time.to_string(), before, current.clone()));
                 } else {
-                    next = Some((time as i64 + 1).to_string());
+                    // `next` 是**最后一条已返回事件**的时刻（旧 JS VcdStore 契约）：
+                    // 内部左开窗口可直接用它续查，同一时刻不重复、后续事件不跳过。
+                    // 对外 `--from` 是闭区间下界，由 CLI 侧 +1 展示。
+                    next = events.last().map(|(tick, _, _)| tick.clone());
                     break;
                 }
             }
@@ -1566,7 +1557,15 @@ pub fn sample(
         }
         matched += 1;
         if samples.len() >= limit {
-            next = Some((*time as i64 + 1).to_string());
+            // 与 `changes` 同一约定：`next` 是**最后一条已返回采样**的时刻，
+            // 供内部左开窗口直接续查（同一时刻不重复），CLI 侧展示时 +1。
+            // 此刻当前这条沿尚未入列，游标取已返回的末条；首条即超限时退回当前时刻。
+            next = Some(
+                samples
+                    .last()
+                    .map(|sample: &(String, Vec<(String, Option<WaveValue>)>)| sample.0.clone())
+                    .unwrap_or_else(|| time.to_string()),
+            );
             break;
         }
         let values = values_at(session, ids, *time as i64)?;
@@ -2078,9 +2077,12 @@ fn pair_signals(
 ) -> WaveResult<Vec<(WaveVar, WaveVar)>> {
     let key_of = diff_key;
     let index_b: HashMap<String, &WaveVar> =
-        vars_b.iter().map(|var| (key_of(var), var)).collect();
+        vars_b.iter().filter(|var| !var.trace_only).map(|var| (key_of(var), var)).collect();
     let mut keys: Vec<(WaveVar, WaveVar)> = vars_a
         .iter()
+        // 隐藏的「原向量」条目（逐位展开的取值回溯源）不是用户可见信号：
+        // 放进 diff 会凭空多出一对 `bus<...>` 的差异行，且它的 path 与展开位共享。
+        .filter(|var| !var.trace_only)
         .filter_map(|var| index_b.get(&key_of(var)).map(|other| (var.clone(), (*other).clone())))
         .collect();
     if let Some(text) = signals {

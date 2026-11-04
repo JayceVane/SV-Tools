@@ -6,7 +6,6 @@
 // 下沉 Rust 后，解析器/存储/查询都由原生模块提供；worker 仍然是线程边界，
 // 保证 200 MiB 级解析不阻塞扩展宿主。
 const fs = require('fs');
-const path = require('path');
 const { parentPort, workerData } = require('worker_threads');
 const { readSignalRoles } = require('./source-roles');
 const { restorePackedBuses } = require('./packed-buses');
@@ -219,6 +218,7 @@ async function fetchAllChanges(api, filePath, paths, to) {
         // 所有成员都没有下一页时结束；否则用最小的非空 next 继续。
         const nexts = raw.series.map(entry => entry.next).filter(value => value !== null && value !== undefined);
         if (!nexts.length) break;
+        // Rust 的 `next` 是内部左开游标（最后一条已返回事件的时刻），可直接复用。
         from = Math.min(...nexts.map(Number));
     }
     return collected;
@@ -396,7 +396,13 @@ async function query(method, params) {
             return { time: raw.time === undefined ? null : Number(raw.time), value: raw.value ?? null, ...(raw.continuation === undefined ? {} : { continuation: raw.continuation }) };
         }
         case 'changes': {
-            const paths = params.ids.map(id => allVariables().find(variable => variable.id === id)?.path).filter(Boolean);
+            // 逐个换算路径，未知 id 显式报错：静默 filter 会让 series 与 ids 下标错位，
+            // 调用方拿到的 id 就会张冠李戴（比缺行更难排查）。
+            const paths = params.ids.map(id => {
+                const variable = allVariables().find(item => item.id === id);
+                if (!variable) throw Object.assign(new Error('信号不存在：' + id), { code: 'SIGNAL_NOT_FOUND' });
+                return variable.path;
+            });
             const raw = JSON.parse(await api.waveChangesAsync(handleOf(), filePath, paths.join(','), params.from ?? null, params.to, params.limit ?? 200));
             return {
                 series: raw.series.map((series, index) => ({
@@ -408,10 +414,14 @@ async function query(method, params) {
             };
         }
         case 'sample': {
-            const clock = idOf(params.clockPath ?? allVariables().find(variable => variable.id === params.clock)?.path);
+            // Rust 的 `wave_sample` 按**名称**解析时钟（与 CLI 同一规则）：必须给完整路径，
+            // 给 id 会直接 SIGNAL_NOT_FOUND。面板侧传的是 id，这里换算回路径再交出去。
+            const clockName = params.clockPath
+                ?? allVariables().find(variable => variable.id === params.clock || variable.path === params.clock)?.path;
+            if (!clockName) throw Object.assign(new Error('信号不存在：' + params.clock), { code: 'SIGNAL_NOT_FOUND' });
             const paths = params.ids.map(id => allVariables().find(variable => variable.id === id)?.path).filter(Boolean);
             const raw = JSON.parse(await api.waveSampleAsync(
-                handleOf(), filePath, clock, params.edge ?? 'rise', paths.join(','),
+                handleOf(), filePath, clockName, params.edge ?? 'rise', paths.join(','),
                 params.from ?? null, params.to, params.limit ?? 256, params.where ?? null
             ));
             return {
