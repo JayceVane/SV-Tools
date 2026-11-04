@@ -12,6 +12,8 @@ const { readSignalRoles } = require('./source-roles');
 const { restorePackedBuses } = require('./packed-buses');
 
 let backend = null;      // Rust 侧会话（每个 worker 一个文件）
+/** 当前会话的 Rust 句柄；查询用它复用同一次解析，不再重开文件。 */
+const handleOf = () => backend?.handle ?? null;
 let variables = null;    // 拆分后的逐位变量表（含 packedSource，取值要用）
 let displayVariables = null;
 /** 稳定变量索引：拆分表 ∪ 合成表。合成会把成员移出 displayVariables，取值仍需反查成员。 */
@@ -49,7 +51,7 @@ async function compositeValue(api, filePath, key, time) {
     const packed = allVariables().find(variable => variable.id === key)?.packedSource;
     if (packed) {
         const variable = allVariables().find(item => item.id === key);
-        const raw = JSON.parse(await api.waveValuesAsync(filePath, variable.path, String(time)));
+        const raw = JSON.parse(await api.waveValuesAsync(handleOf(), filePath, variable.path, String(time)));
         return raw.values[variable.path]?.bits ?? null;
     }
     // 2) packed-buses 合成的总线：拼接成员值。
@@ -64,7 +66,7 @@ async function compositeValue(api, filePath, key, time) {
         if (variable.packedSource) {
             return (await compositeValue(api, filePath, id, time)) ?? 'x';
         }
-        const raw = JSON.parse(await api.waveValuesAsync(filePath, variable.path, String(time)));
+        const raw = JSON.parse(await api.waveValuesAsync(handleOf(), filePath, variable.path, String(time)));
         const bits = raw.values[variable.path]?.bits ?? 'x';
         return String(bits).padStart(variable.width, /^[xz]/.test(String(bits)) ? String(bits)[0] : '0');
     }));
@@ -212,7 +214,7 @@ async function fetchAllChanges(api, filePath, paths, to) {
     const collected = paths.map(() => []);
     let from = -1;
     for (;;) {
-        const raw = JSON.parse(await api.waveChangesAsync(filePath, paths.join(','), from, to, 10000));
+        const raw = JSON.parse(await api.waveChangesAsync(handleOf(), filePath, paths.join(','), from, to, 10000));
         raw.series.forEach((entry, index) => collected[index].push(...entry.events));
         // 所有成员都没有下一页时结束；否则用最小的非空 next 继续。
         const nexts = raw.series.map(entry => entry.next).filter(value => value !== null && value !== undefined);
@@ -229,8 +231,8 @@ function nativeApi() {
 }
 
 /** 让 roles 之后的总线恢复仍能拿到 id：Rust 的 id 是 VarRef 序号，与 JS 侧变量表一致写入。 */
-function withRustIds(vars, opened) {
-    const byPath = new Map(opened.vars.map(variable => [variable.path, variable]));
+function withRustIds(vars, meta) {
+    const byPath = new Map(meta.vars.map(variable => [variable.path, variable]));
     return vars.map(variable => {
         const match = byPath.get(variable.path);
         return match ? { ...variable, id: match.id } : variable;
@@ -270,10 +272,15 @@ async function open(filePath, sourceContext) {
         //
         // 必须用异步入口：`waveOpen` 是同步 napi 调用，解析期间占满 worker 线程，
         // 此时 worker.terminate()（取消加载）会拆掉 isolate，Rust 析构在已销毁的
-        // 上下文里执行，实测稳定段错误。`waveOpenAsync` 把解析放到 libuv 线程池，
+        // 上下文里执行，实测稳定段错误。`*Async` 把解析放到 libuv 线程池，
         // 取消时只是丢弃结果。
-        const opened = JSON.parse(await api.waveOpenAsync(filePath));
-        backend = { api, filePath, meta: opened };
+        //
+        // 用 `waveSessionOpenAsync` 拿句柄：后续所有查询都带着 handle 复用这一次解析。
+        // 原先每个查询都 `WaveSession::open`，实测 7.1 MiB 文件单次就要 78.8 ms
+        // （window/values/edge 各自重解析一遍），句柄化后降到毫秒级。
+        const opened = JSON.parse(await api.waveSessionOpenAsync(filePath));
+        backend = { api, filePath, handle: opened.handle, meta: opened.meta };
+        const meta = opened.meta;
         // 存储预算沿用 JS 版口径（每事件约 12 B）与旧 `VcdStore` 的默认值 512 MiB。
         // Rust 的事件数据由 wellen 管理，但配置了很小 maxStoreBytes 的调用方
         // 仍应得到同样的 VCD_RESOURCE_LIMIT 拒绝。
@@ -282,7 +289,7 @@ async function open(filePath, sourceContext) {
         // 32 MiB 只够约 279 万次变化——而 CLI 文档宣称支持的 500 MiB 语料有 1463 万事件
         // （约 175 MB），会被直接拒绝，与本轮性能论证的核心工作负载冲突。
         const maxStoreBytes = options.maxStoreBytes || 512 * 1024 * 1024;
-        if (opened.eventCount * 12 > maxStoreBytes) {
+        if (meta.eventCount * 12 > maxStoreBytes) {
             throw Object.assign(
                 new Error('VCD 事件存储超过 ' + Math.round(maxStoreBytes / 1048576) + ' MiB 预算'),
                 { code: 'VCD_RESOURCE_LIMIT' }
@@ -297,7 +304,7 @@ async function open(filePath, sourceContext) {
         // 让 restorePackedBuses 能按 RTL 范围重排位序、区分数组元素。
         // Rust 已在 describe 里按 msb/lsb 精确展开逐位 dump；wellen 的合并是声明顺序
         // 贪心、位集合不完整，不能直接当位来源。
-        variables = opened.vars.map(variable => ({ ...variable, changeCount: variable.changeCount || 0 }));
+        variables = meta.vars.map(variable => ({ ...variable, changeCount: variable.changeCount || 0 }));
         progress('ready');
         let roles = {};
         if (sourceContext) {
@@ -305,23 +312,23 @@ async function open(filePath, sourceContext) {
             try { roles = await readSignalRoles(variables, sourceContext); }
             catch (error) { roles.sourceRoleNote = '方向匹配不可用：' + error.message; }
         }
-        const annotated = withRustIds(roles.vars || variables, opened);
+        const annotated = withRustIds(roles.vars || variables, meta);
         const vars = restorePackedBuses(annotated, { compose: ids => composeId(api, ids) });
         displayVariables = vars;
         indexedVariables = [...annotated, ...vars];
         return {
-            file: opened.file,
-            format: opened.format,
-            timescale: opened.timescale,
-            endTime: Number(opened.endTime),
-            eventCount: opened.eventCount,
-            fileBytes: opened.fileBytes,
+            file: meta.file,
+            format: meta.format,
+            timescale: meta.timescale,
+            endTime: Number(meta.endTime),
+            eventCount: meta.eventCount,
+            fileBytes: meta.fileBytes,
             vars,
-            headers: opened.headers || [],
+            headers: meta.headers || [],
             // 作用域表必须来自 Rust 的扁平结构（含 type/name/path/parentId）：
             // 前端 buildSignalTree 与 signal-mapping 都按 parentId 校验层级完整性，
             // 只给路径字符串会让两者都判定为「缺少可验证的层级分段」。
-            scopes: opened.scopes || [],
+            scopes: meta.scopes || [],
             sourceRoleNote: roles.sourceRoleNote,
             sourceRoleRetry: sourceContext?.invalidated === true,
             fileIdentity: { size: stat.size, mtimeMs: stat.mtimeMs },
@@ -347,7 +354,7 @@ async function query(method, params) {
             const compositesRequested = params.ids.filter(id => composites.has(id));
             const plainIds = params.ids.filter(id => !composites.has(id));
             const raw = plainIds.length
-                ? JSON.parse(await api.waveWindowAsync(filePath, plainIds, params.start, params.end, params.pixels))
+                ? JSON.parse(await api.waveWindowAsync(handleOf(), filePath, plainIds, params.start, params.end, params.pixels))
                 : { series: [] };
             const byId = new Map(raw.series.map(series => [series.id, {
                 id: series.id,
@@ -366,7 +373,7 @@ async function query(method, params) {
             const isComputed = id => composites.has(id) || !!allVariables().find(variable => variable.id === id)?.packedSource;
             const plainIds = params.ids.filter(id => !isComputed(id));
                     const paths = plainIds.map(id => allVariables().find(variable => variable.id === id)?.path).filter(Boolean);
-            const raw = paths.length ? JSON.parse(await api.waveValuesAsync(filePath, paths.join(','), at)) : { values: {} };
+            const raw = paths.length ? JSON.parse(await api.waveValuesAsync(handleOf(), filePath, paths.join(','), at)) : { values: {} };
             for (const id of params.ids) {
                 if (isComputed(id)) { values[id] = await compositeValue(api, filePath, id, params.time); continue; }
                 const variable = allVariables().find(item => item.id === id);
@@ -383,14 +390,14 @@ async function query(method, params) {
             const variable = allVariables().find(item => item.id === params.id);
             const target = variable?.path ?? params.id;
             const raw = JSON.parse(await api.waveEdgeAsync(
-                filePath, target, params.time, params.direction,
+                handleOf(), filePath, target, params.time, params.direction,
                 params.bitOffset ?? null, params.bitWidth ?? null, params.continuation ?? null
             ));
             return { time: raw.time === undefined ? null : Number(raw.time), value: raw.value ?? null, ...(raw.continuation === undefined ? {} : { continuation: raw.continuation }) };
         }
         case 'changes': {
             const paths = params.ids.map(id => allVariables().find(variable => variable.id === id)?.path).filter(Boolean);
-            const raw = JSON.parse(await api.waveChangesAsync(filePath, paths.join(','), params.from ?? null, params.to, params.limit ?? 200));
+            const raw = JSON.parse(await api.waveChangesAsync(handleOf(), filePath, paths.join(','), params.from ?? null, params.to, params.limit ?? 200));
             return {
                 series: raw.series.map((series, index) => ({
                     id: params.ids[index],
@@ -404,7 +411,7 @@ async function query(method, params) {
             const clock = idOf(params.clockPath ?? allVariables().find(variable => variable.id === params.clock)?.path);
             const paths = params.ids.map(id => allVariables().find(variable => variable.id === id)?.path).filter(Boolean);
             const raw = JSON.parse(await api.waveSampleAsync(
-                filePath, clock, params.edge ?? 'rise', paths.join(','),
+                handleOf(), filePath, clock, params.edge ?? 'rise', paths.join(','),
                 params.from ?? null, params.to, params.limit ?? 256, params.where ?? null
             ));
             return {
@@ -453,6 +460,11 @@ parentPort.on('message', async message => {
     const { requestId, method, params } = message;
     if (method === 'close') {
         closeRequested = true;
+        // 释放 Rust 句柄：worker 退不退出都不该让会话继续占着解析结果。
+        if (backend?.handle != null) {
+            try { backend.api.waveSessionClose(backend.handle); } catch { /* 已释放或模块已卸载 */ }
+            backend.handle = null;
+        }
         // 让已排队的 microtask/macrotask 先跑完，再把退出判断交给 exitIfIdle。
         setImmediate(exitIfIdle);
         return;

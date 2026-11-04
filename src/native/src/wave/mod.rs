@@ -11,6 +11,8 @@ use wellen::{simple, Hierarchy, SignalRef, VarRef};
 
 pub mod header;
 pub mod normalize;
+/// 会话句柄注册表：同一文件的多次查询复用一次解析。
+pub mod session;
 pub use header::WaveHeaderEntry;
 
 /// 与 JS `UNITS` 一致：各时间单位对应的秒数。

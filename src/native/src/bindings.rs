@@ -143,6 +143,109 @@ pub fn wave_open(file: String) -> Result<String> {
         .map_err(|error| Error::from_reason(format!("序列化失败：{}", error)))
 }
 
+/// 打开波形并**登记为可复用会话**，返回 `{ handle, meta }`。
+///
+/// 与 `wave_open` 的区别：句柄让后续查询复用这一次解析（见 `wave/session.rs`）。
+/// `wave_open` 保留给只读一次元数据、不做后续查询的场景。
+#[napi]
+pub fn wave_session_open(file: String) -> Result<String> {
+    let session = wave::WaveSession::open(std::path::Path::new(&file)).map_err(wave_error)?;
+    let meta = session.trace.snapshot();
+    let handle = wave::session::insert(session);
+    serde_json::to_string(&serde_json::json!({ "handle": handle, "meta": meta }))
+        .map_err(|error| Error::from_reason(format!("序列化失败：{}", error)))
+}
+
+/// 异步版的 `wave_session_open`：解析在 libuv 线程池执行，不阻塞 JS 事件循环。
+pub struct WaveSessionOpenTask {
+    file: String,
+}
+
+impl napi::Task for WaveSessionOpenTask {
+    type Output = String;
+    type JsValue = String;
+
+    fn compute(&mut self) -> Result<Self::Output> {
+        wave_session_open(self.file.clone())
+    }
+
+    fn resolve(&mut self, _env: Env, output: Self::Output) -> Result<Self::JsValue> {
+        Ok(output)
+    }
+}
+
+#[napi(ts_return_type = "Promise<string>")]
+pub fn wave_session_open_async(file: String) -> AsyncTask<WaveSessionOpenTask> {
+    AsyncTask::new(WaveSessionOpenTask { file })
+}
+
+/// 释放会话句柄。幂等：重复关闭返回 false 而不是报错。
+#[napi]
+pub fn wave_session_close(handle: i64) -> bool {
+    if handle < 0 {
+        return false;
+    }
+    wave::session::remove(handle as u64)
+}
+
+/// 当前活跃会话数（诊断用）。
+#[napi]
+pub fn wave_session_count() -> u32 {
+    wave::session::active_count() as u32
+}
+
+/// 按句柄取出会话并执行查询；句柄无效时给出可诊断错误而不是静默失败。
+fn with_session<T>(
+    handle: i64,
+    task: impl FnOnce(&mut wave::WaveSession) -> Result<T>,
+) -> Result<T> {
+    if handle < 0 {
+        return Err(Error::from_reason("[INVALID_ARGUMENT] 会话句柄无效"));
+    }
+    let shared = wave::session::get(handle as u64)
+        .ok_or_else(|| Error::from_reason("[SESSION_CLOSED] 波形会话已关闭，请重新打开"))?;
+    let mut guard = shared
+        .lock()
+        .map_err(|_| Error::from_reason("[SESSION_CLOSED] 波形会话状态损坏，请重新打开"))?;
+    task(&mut guard)
+}
+
+/// 查询入口的会话来源：**给了 handle 就复用它，否则按 file 新开一次**。
+///
+/// 两种用法共用同一段实现体，避免每个查询写两遍（那样最容易在修一处时漏另一处）：
+/// - 给了 handle：不解析文件，直接锁住已登记的会话；
+/// - 只给 file：临时开一个（CLI 单次命令的路径），用完释放。
+#[derive(Clone)]
+enum SessionSource {
+    Handle(i64),
+    File(String),
+}
+
+impl SessionSource {
+    /// 句柄优先；两者都没有时报参数错误。
+    fn from(handle: Option<i64>, file: Option<String>) -> Result<Self> {
+        match (handle, file) {
+            (Some(handle), _) => Ok(Self::Handle(handle)),
+            (None, Some(file)) => Ok(Self::File(file)),
+            (None, None) => Err(Error::from_reason(
+                "[INVALID_ARGUMENT] 需要 file 或 handle 之一",
+            )),
+        }
+    }
+
+    /// 在会话上执行一段查询。
+    fn run<T>(&self, task: impl FnOnce(&mut wave::WaveSession) -> Result<T>) -> Result<T> {
+        match self {
+            Self::Handle(handle) => with_session(*handle, task),
+            Self::File(file) => {
+                let mut session =
+                    wave::WaveSession::open(std::path::Path::new(file)).map_err(wave_error)?;
+                task(&mut session)
+            }
+        }
+    }
+}
+
 /// `wave_open` 的异步版本：解析在 libuv 线程池执行，不阻塞 JS 事件循环。
 ///
 /// 必须提供异步入口的原因：webview 的 worker 用 `worker.terminate()` 取消加载，
@@ -177,10 +280,22 @@ pub fn wave_open_async(file: String) -> AsyncTask<WaveOpenTask> {
 
 
 /// 按信号名解析并返回值（逗号分隔多个信号）；时间单位为 tick 或带 s/ns 等单位。
+///
+/// `handle` 有值时复用已打开的会话（不重新解析）；否则按 `file` 临时开一个。
+/// 二选一，两者都给时以 handle 为准。
 #[napi]
-pub fn wave_values(file: String, signals: String, at: String) -> Result<String> {
-    let path = std::path::Path::new(&file);
-    let mut session = wave::WaveSession::open(path).map_err(wave_error)?;
+pub fn wave_values(
+    handle: Option<i64>,
+    file: Option<String>,
+    signals: String,
+    at: String,
+) -> Result<String> {
+    SessionSource::from(handle, file)?.run(|session| values_impl(session, &signals, &at))
+}
+
+fn values_impl(session: &mut wave::WaveSession, signals: &str, at: &str) -> Result<String> {
+    let at = at.to_string();
+    let signals = signals.to_string();
     let scale = wave::seconds_per_tick(&session.trace.timescale);
     let time = wave::parse_tick(&at, scale)
         .ok_or_else(|| Error::from_reason(format!("--at 时间格式无效：{}", at)))?;
@@ -207,7 +322,7 @@ pub fn wave_values(file: String, signals: String, at: String) -> Result<String> 
         .filter_map(|id| session.trace.vars.iter().find(|var| &var.id == id).cloned())
         .collect();
     let picked_refs: Vec<&wave::WaveVar> = picked.iter().collect();
-    let values = wave::values_at(&mut session, &picked_refs, time).map_err(wave_error)?;
+    let values = wave::values_at(session, &picked_refs, time).map_err(wave_error)?;
     let map: std::collections::BTreeMap<String, Option<wave::WaveValue>> = values.into_iter().collect();
     serde_json::to_string(&serde_json::json!({
         "file": session.trace.file,
@@ -235,43 +350,42 @@ fn wave_error(error: wave::WaveError) -> Error {
 
 /// 窗口内全保真跳变枚举；`from` 为左开下界（-1 表示从首事件起）。
 #[napi]
-pub fn wave_changes(file: String, signals: String, from: Option<i64>, to: Option<i64>, limit: Option<u32>) -> Result<String> {
-    let path = std::path::Path::new(&file);
-    let mut session = wave::WaveSession::open(path).map_err(wave_error)?;
-    let end = session.trace.end_time;
-    let to = to.unwrap_or(end);
-    let from = from.unwrap_or(-1);
-    if from >= to {
-        return Err(Error::from_reason("--from 必须早于 --to"));
-    }
-    let names: Vec<String> = signals.split(',').map(|n| n.trim().to_string()).filter(|n| !n.is_empty()).collect();
-    let name_refs: Vec<&str> = names.iter().map(|n| n.as_str()).collect();
-    let picked: Vec<wave::WaveVar> = {
-        let resolved = wave::resolve_ids(&session.trace.vars, &name_refs).map_err(wave_error)?;
-        // 按 id 回查：逐位展开后隐藏源与原向量同 path，按 path 会撞车。
-        let ids: Vec<String> = resolved.into_iter().map(|v| v.id.clone()).collect();
-        ids.iter().filter_map(|id| session.trace.vars.iter().find(|v| &v.id == id).cloned()).collect()
-    };
-    let limit = (limit.unwrap_or(200) as usize).min(10000);
-    let mut series = Vec::new();
-    for variable in &picked {
-        series.push(wave::changes_for_public(&mut session, variable, from, to, limit).map_err(wave_error)?);
-    }
-    serde_json::to_string(&serde_json::json!({
-        "file": session.trace.file,
-        "from": (from + 1).to_string(),
-        "to": to.to_string(),
-        "timescale": session.trace.timescale,
-        "series": series,
-    }))
-    .map_err(|error| Error::from_reason(format!("序列化失败：{}", error)))
+pub fn wave_changes(handle: Option<i64>, file: Option<String>, signals: String, from: Option<i64>, to: Option<i64>, limit: Option<u32>) -> Result<String> {
+    SessionSource::from(handle, file)?.run(|session| {
+        let end = session.trace.end_time;
+        let to = to.unwrap_or(end);
+        let from = from.unwrap_or(-1);
+        if from >= to {
+            return Err(Error::from_reason("--from 必须早于 --to"));
+        }
+        let names: Vec<String> = signals.split(',').map(|n| n.trim().to_string()).filter(|n| !n.is_empty()).collect();
+        let name_refs: Vec<&str> = names.iter().map(|n| n.as_str()).collect();
+        let picked: Vec<wave::WaveVar> = {
+            let resolved = wave::resolve_ids(&session.trace.vars, &name_refs).map_err(wave_error)?;
+            // 按 id 回查：逐位展开后隐藏源与原向量同 path，按 path 会撞车。
+            let ids: Vec<String> = resolved.into_iter().map(|v| v.id.clone()).collect();
+            ids.iter().filter_map(|id| session.trace.vars.iter().find(|v| &v.id == id).cloned()).collect()
+        };
+        let limit = (limit.unwrap_or(200) as usize).min(10000);
+        let mut series = Vec::new();
+        for variable in &picked {
+            series.push(wave::changes_for_public(session, variable, from, to, limit).map_err(wave_error)?);
+        }
+        serde_json::to_string(&serde_json::json!({
+            "file": session.trace.file,
+            "from": (from + 1).to_string(),
+            "to": to.to_string(),
+            "timescale": session.trace.timescale,
+            "series": series,
+        }))
+        .map_err(|error| Error::from_reason(format!("序列化失败：{}", error)))
+    })
 }
 
 /// 沿/未知态搜索（rise/fall 对向量信号需 bit 位级投影）。
 #[napi]
-pub fn wave_edges(file: String, signal: String, kind: Option<String>, bit: Option<u32>, from: Option<i64>, to: Option<i64>, limit: Option<u32>) -> Result<String> {
-    let path = std::path::Path::new(&file);
-    let mut session = wave::WaveSession::open(path).map_err(wave_error)?;
+pub fn wave_edges(handle: Option<i64>, file: Option<String>, signal: String, kind: Option<String>, bit: Option<u32>, from: Option<i64>, to: Option<i64>, limit: Option<u32>) -> Result<String> {
+    SessionSource::from(handle, file)?.run(|session| {
     let kind = kind.unwrap_or_else(|| "any".to_string());
     if !["any", "rise", "fall", "x", "z"].contains(&kind.as_str()) {
         return Err(Error::from_reason("--kind 必须为 any|rise|fall|x|z"));
@@ -293,7 +407,7 @@ pub fn wave_edges(file: String, signal: String, kind: Option<String>, bit: Optio
         return Err(Error::from_reason("--from 必须早于 --to"));
     }
     let limit = (limit.unwrap_or(100) as usize).min(10000);
-    let (matched, next, events) = wave::edges(&mut session, &variable, &kind, bit, from, to, limit).map_err(wave_error)?;
+    let (matched, next, events) = wave::edges(session, &variable, &kind, bit, from, to, limit).map_err(wave_error)?;
     serde_json::to_string(&serde_json::json!({
         "file": session.trace.file,
         "signal": variable.path,
@@ -307,13 +421,13 @@ pub fn wave_edges(file: String, signal: String, kind: Option<String>, bit: Optio
         "events": events.into_iter().map(|(t, from, to)| serde_json::json!({"t": t, "from": from, "to": to})).collect::<Vec<_>>(),
     }))
     .map_err(|error| Error::from_reason(format!("序列化失败：{}", error)))
+    })
 }
 
 /// 时钟沿采样多信号（clock 必须 1 位标量）；`where` 为逗号分隔的条件表达式列表。
 #[napi]
-pub fn wave_sample(file: String, clock: String, edge: Option<String>, signals: String, from: Option<i64>, to: Option<i64>, limit: Option<u32>, r#where: Option<Vec<String>>) -> Result<String> {
-    let path = std::path::Path::new(&file);
-    let mut session = wave::WaveSession::open(path).map_err(wave_error)?;
+pub fn wave_sample(handle: Option<i64>, file: Option<String>, clock: String, edge: Option<String>, signals: String, from: Option<i64>, to: Option<i64>, limit: Option<u32>, r#where: Option<Vec<String>>) -> Result<String> {
+    SessionSource::from(handle, file)?.run(|session| {
     let edge = edge.unwrap_or_else(|| "rise".to_string());
     if !["rise", "fall", "both"].contains(&edge.as_str()) {
         return Err(Error::from_reason("--clock-edge 必须为 rise|fall|both"));
@@ -346,7 +460,7 @@ pub fn wave_sample(file: String, clock: String, edge: Option<String>, signals: S
     // 有 where 时默认页更小（与 JS 的 50 一致），无 where 时沿用 256。
     let default_limit = if conditions.is_empty() { 256 } else { 50 };
     let limit = (limit.unwrap_or(default_limit) as usize).min(4096);
-    let (scanned, matched, next, samples) = wave::sample(&mut session, &clock_var, &edge, &picked_refs, &conditions, from, to, limit).map_err(wave_error)?;
+    let (scanned, matched, next, samples) = wave::sample(session, &clock_var, &edge, &picked_refs, &conditions, from, to, limit).map_err(wave_error)?;
     serde_json::to_string(&serde_json::json!({
         "file": session.trace.file,
         "clock": clock_var.path,
@@ -365,6 +479,7 @@ pub fn wave_sample(file: String, clock: String, edge: Option<String>, signals: S
         }).collect::<Vec<_>>(),
     }))
     .map_err(|error| Error::from_reason(format!("序列化失败：{}", error)))
+    })
 }
 
 /// 两份波形同名信号逐对比较：首差异时刻 + 前 N 条差异。
@@ -395,9 +510,8 @@ pub fn wave_diff(file: String, against: String, signals: Option<String>, from: O
 /// 视窗像素桶降采样：把 [start,end] 切成 pixels 个桶，每桶保留首末事件并标记密集区。
 /// ids 为信号 id 列表（与 JS worker 协议一致，用 id 而非路径）。
 #[napi]
-pub fn wave_window(file: String, ids: Vec<String>, start: i64, end: i64, pixels: u32) -> Result<String> {
-    let path = std::path::Path::new(&file);
-    let mut session = wave::WaveSession::open(path).map_err(wave_error)?;
+pub fn wave_window(handle: Option<i64>, file: Option<String>, ids: Vec<String>, start: i64, end: i64, pixels: u32) -> Result<String> {
+    SessionSource::from(handle, file)?.run(|session| {
     if start < 0 || end < 0 {
         return Err(Error::from_reason("视窗时间必须非负"));
     }
@@ -413,16 +527,16 @@ pub fn wave_window(file: String, ids: Vec<String>, start: i64, end: i64, pixels:
         }
     }
     let refs: Vec<&wave::WaveVar> = picked.iter().collect();
-    let series = wave::window_series(&mut session, &refs, start, end, pixels as usize).map_err(wave_error)?;
+    let series = wave::window_series(session, &refs, start, end, pixels as usize).map_err(wave_error)?;
     serde_json::to_string(&serde_json::json!({ "series": series }))
         .map_err(|error| Error::from_reason(format!("序列化失败：{}", error)))
+    })
 }
 
 /// 边沿查询：next/previous，支持 bitOffset/bitWidth 位段投影与 continuation 续查。
 #[napi]
-pub fn wave_edge(file: String, id: String, time: i64, direction: String, bit_offset: Option<u32>, bit_width: Option<u32>, continuation: Option<u32>) -> Result<String> {
-    let path = std::path::Path::new(&file);
-    let mut session = wave::WaveSession::open(path).map_err(wave_error)?;
+pub fn wave_edge(handle: Option<i64>, file: Option<String>, id: String, time: i64, direction: String, bit_offset: Option<u32>, bit_width: Option<u32>, continuation: Option<u32>) -> Result<String> {
+    SessionSource::from(handle, file)?.run(|session| {
     if time < 0 {
         return Err(Error::from_reason("查询时间必须是非负有限数值"));
     }
@@ -447,7 +561,7 @@ pub fn wave_edge(file: String, id: String, time: i64, direction: String, bit_off
     // ① 每次续查都从头重扫（分页退化成 O(n²)）；
     // ② webview 的 `do…while (continuation)` 拿到同一个 continuation 无限重发同一请求。
     let hit = wave::edge_hit(
-        &mut session,
+        session,
         &var,
         time,
         &direction,
@@ -458,6 +572,7 @@ pub fn wave_edge(file: String, id: String, time: i64, direction: String, bit_off
     .map_err(wave_error)?;
     serde_json::to_string(&hit)
         .map_err(|error| Error::from_reason(format!("序列化失败：{}", error)))
+    })
 }
 
 // ── 波形查询的异步入口 ──────────────────────────────────────────────
@@ -494,10 +609,10 @@ macro_rules! wave_async {
     };
 }
 
-wave_async!(wave_values_async, WaveValuesTask, wave_values, (file: String, signals: String, at: String));
-wave_async!(wave_changes_async, WaveChangesTask, wave_changes, (file: String, signals: String, from: Option<i64>, to: Option<i64>, limit: Option<u32>));
-wave_async!(wave_edges_async, WaveEdgesTask, wave_edges, (file: String, signal: String, kind: Option<String>, bit: Option<u32>, from: Option<i64>, to: Option<i64>, limit: Option<u32>));
-wave_async!(wave_sample_async, WaveSampleTask, wave_sample, (file: String, clock: String, edge: Option<String>, signals: String, from: Option<i64>, to: Option<i64>, limit: Option<u32>, r#where: Option<Vec<String>>));
+wave_async!(wave_values_async, WaveValuesTask, wave_values, (handle: Option<i64>, file: Option<String>, signals: String, at: String));
+wave_async!(wave_changes_async, WaveChangesTask, wave_changes, (handle: Option<i64>, file: Option<String>, signals: String, from: Option<i64>, to: Option<i64>, limit: Option<u32>));
+wave_async!(wave_edges_async, WaveEdgesTask, wave_edges, (handle: Option<i64>, file: Option<String>, signal: String, kind: Option<String>, bit: Option<u32>, from: Option<i64>, to: Option<i64>, limit: Option<u32>));
+wave_async!(wave_sample_async, WaveSampleTask, wave_sample, (handle: Option<i64>, file: Option<String>, clock: String, edge: Option<String>, signals: String, from: Option<i64>, to: Option<i64>, limit: Option<u32>, r#where: Option<Vec<String>>));
 wave_async!(wave_diff_async, WaveDiffTask, wave_diff, (file: String, against: String, signals: Option<String>, from: Option<i64>, to: Option<i64>, limit: Option<u32>));
-wave_async!(wave_window_async, WaveWindowTask, wave_window, (file: String, ids: Vec<String>, start: i64, end: i64, pixels: u32));
-wave_async!(wave_edge_async, WaveEdgeTask, wave_edge, (file: String, id: String, time: i64, direction: String, bit_offset: Option<u32>, bit_width: Option<u32>, continuation: Option<u32>));
+wave_async!(wave_window_async, WaveWindowTask, wave_window, (handle: Option<i64>, file: Option<String>, ids: Vec<String>, start: i64, end: i64, pixels: u32));
+wave_async!(wave_edge_async, WaveEdgeTask, wave_edge, (handle: Option<i64>, file: Option<String>, id: String, time: i64, direction: String, bit_offset: Option<u32>, bit_width: Option<u32>, continuation: Option<u32>));

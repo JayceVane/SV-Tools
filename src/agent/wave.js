@@ -67,6 +67,18 @@ function requireSignals(trace, input) {
     return ids;
 }
 
+/** 已打开会话：绝对路径 → Rust 句柄。CLI 单次进程里最多一条；agent 服务长驻，靠重开与 close 收敛。 */
+const openHandles = new Map();
+
+/** 释放某个文件的会话句柄（幂等，无句柄时无操作）。 */
+function closeTrace(file) {
+    const handle = openHandles.get(file);
+    if (handle === undefined) return;
+    openHandles.delete(file);
+    try { nativeApi().waveSessionClose(handle); }
+    catch { /* 关闭失败不应影响命令结果；进程退出时资源随之释放。 */ }
+}
+
 /** 打开 VCD：Rust 一次解析建立索引，不再落盘缓存。
  *
  * 历史：这里曾按「绝对路径哈希 + size/mtime」落 `index.bin` 快照，命中时零拷贝加载。
@@ -81,9 +93,14 @@ async function openTrace(input) {
     if (!stat?.isFile()) fail('SOURCE_NOT_FOUND', 'VCD 文件不存在：' + input.file, { file });
     if (stat.size > MAX_VCD_BYTES) fail('SOURCE_LIMIT', 'VCD 文件超过 2048MiB 上限', { file, size: stat.size });
     const startedAt = Date.now();
-    let meta;
+    // 一个命令通常只开一份波形；同名文件重复打开时先释放旧句柄，
+    // 避免长驻进程（agent 服务）里的注册表累积。
+    closeTrace(file);
+    let meta, handle = null;
     try {
-        meta = call(() => nativeApi().waveOpen(file));
+        const opened = call(() => nativeApi().waveSessionOpen(file));
+        handle = opened.handle;
+        meta = opened.meta;
     } catch (error) {
         // Rust 的错误码与 CLI 码基本同名；个别情况补映射说明。
         if (error.code === 'WAVE_FORMAT_UNSUPPORTED') fail('VCD_PARSE', error.message, { file });
@@ -91,8 +108,11 @@ async function openTrace(input) {
     }
     const after = await fs.stat(file);
     if (after.size !== stat.size || Math.round(after.mtimeMs) !== Math.round(stat.mtimeMs)) {
+        // 文件在解析期间变了：句柄指向的是旧内容，必须丢弃，避免后续查询读到半旧数据。
+        try { nativeApi().waveSessionClose(handle); } catch { /* 忽略 */ }
         fail('SOURCE_CHANGED', 'VCD 读取期间文件已变化，请在仿真结束后重试', { file });
     }
+    openHandles.set(file, handle);
     // CLI 协定的 meta 形状：与旧 JS 版一致（endTime 仍是整数 tick）。
     const normalized = {
         ...meta,
@@ -103,7 +123,7 @@ async function openTrace(input) {
         vars: meta.vars,
     };
     return {
-        options, file, meta: normalized,
+        options, file, handle, meta: normalized,
         stats: { cached: false, parseMs: Date.now() - startedAt, loadMs: Date.now() - startedAt,
             fileBytes: stat.size, eventCount: normalized.eventCount },
     };
@@ -128,7 +148,7 @@ function pathOf(trace, id) {
 /** @returns {Record<string, string|null>} id → 原始位串。 */
 function storeValues(trace, ids, time) {
     const paths = ids.map(id => pathOf(trace, id));
-    const raw = call(() => nativeApi().waveValues(trace.file, paths.join(','), String(time)));
+    const raw = call(() => nativeApi().waveValues(trace.handle, null, paths.join(','), String(time)));
     const byPath = new Map(Object.entries(raw.values || {}));
     const out = {};
     for (const id of ids) {
@@ -142,7 +162,7 @@ function storeValues(trace, ids, time) {
 /** @returns {{series: Array<{id:string,total:number,next:number|null,events:Array<{t:number,value:string}>}>}} */
 function storeChanges(trace, { ids, from, to, limit }) {
     const paths = ids.map(id => pathOf(trace, id));
-    const raw = call(() => nativeApi().waveChanges(trace.file, paths.join(','), from ?? null, to, limit));
+    const raw = call(() => nativeApi().waveChanges(trace.handle, null, paths.join(','), from ?? null, to, limit));
     return {
         series: raw.series.map((series, index) => ({
             id: ids[index],
@@ -158,7 +178,7 @@ function storeSample(trace, { clock, edge, ids, from, to, limit }) {
     const clockPath = pathOf(trace, clock);
     const paths = ids.map(id => pathOf(trace, id));
     const raw = call(() => nativeApi().waveSample(
-        trace.file, clockPath, edge, paths.join(','), from ?? null, to, limit, null));
+        trace.handle, null, clockPath, edge, paths.join(','), from ?? null, to, limit, null));
     return {
         total: raw.scannedEdges,
         next: raw.next === null ? null : Number(raw.next),
@@ -339,7 +359,7 @@ async function edges(input) {
     // 直接调 Rust：from/to 的 from-to 位串由 Rust 压成 VCD 短写，
     // 与旧 JS 契约（保留 VCD 原文形态）一致；位投影与分页续查也在同一处完成。
     const raw = call(() => nativeApi().waveEdges(
-        trace.file, variable.path, kind, bitOffset, from, to, limit));
+        trace.handle, null, variable.path, kind, bitOffset, from, to, limit));
     return result('wave.edges', {
         file: trace.file, signal: variable.path, ...(bitOffset !== null ? { bit: bitOffset } : {}), kind,
         from: tickString(Number(raw.from)), to: tickString(Number(raw.to)), timescale: trace.meta.timescale || null,
@@ -408,6 +428,8 @@ async function diff(input) {
     // 这里保留 openTrace 是为了沿用统一的路径校验、文件变化检测与 stats 输出。
     const traceA = await openTrace(input);
     const traceB = await openTrace({ ...input, file: input.against });
+    // A 的句柄可能被 B 的 openTrace 关掉（同文件自比对时），而下面的 waveDiff
+    // 直接用路径、不走句柄，所以这里不需要补开。
     const end = Math.min(traceA.meta.endTime, traceB.meta.endTime);
     const to = input.to === undefined ? end : parseTick(traceA, input.to, '--to');
     const from = input.from === undefined ? 0 : parseTick(traceA, input.from, '--from');
@@ -449,7 +471,7 @@ async function exportImage(input) {
     // 导出器只用到 window/values 两个查询；直接转发到 Rust，不必假装成完整 store。
     const request = async (method, params) => {
         if (method === 'window') {
-            const raw = call(() => nativeApi().waveWindow(trace.file, params.ids, params.start, params.end, params.pixels));
+            const raw = call(() => nativeApi().waveWindow(trace.handle, null, params.ids, params.start, params.end, params.pixels));
             return {
                 series: raw.series.map(series => ({
                     id: series.id,
