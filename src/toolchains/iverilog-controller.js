@@ -47,6 +47,7 @@ function activateIverilog(context, deps) {
         prepareWaveforms: options => deps.waveViewer?.prepareForSimulation?.(options),
         postprocessWaveforms: (files, task, document) => postprocessWaveforms(files, {
             enabled: vscode.workspace.getConfiguration('svtools.waveform', document.uri).get('convertVcdToFst', false),
+            overwrite: vscode.workspace.getConfiguration('svtools.waveform', document.uri).get('convertVcdToFstOverwrite', true),
             signal: task.signal, sourceFile: document.uri.fsPath,
             prepare: options => deps.waveViewer?.prepareForSimulation?.(options),
             onProgress: text => channel.appendLine(text),

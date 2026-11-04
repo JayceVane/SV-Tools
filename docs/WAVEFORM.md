@@ -234,7 +234,7 @@ SVG适合技术文档和后续编辑。PNG默认2倍分辨率，在16384像素�
 
 ## 可选 VCD → FST 仿真后转换
 
-`svtools.waveform.convertVcdToFst` 默认 `false`，可按工作区/资源设置。开启后，Icarus 成功仿真的本轮 VCD 在归档后使用内嵌 Rust `wavefst 0.4.0` 转为 FST。无需 GTKWave、`vcd2fst` 或脚本进程；仍使用 `.svtools/vcd` 归档目录。转换完成并验证层级后才移除 VCD，同名 FST 不覆盖，以递增编号保存新文件。失败/取消保留 VCD，详细信息写入仿真输出通道。
+`svtools.waveform.convertVcdToFst` 默认 `false`，可按工作区/资源设置。开启后，Icarus 成功仿真的本轮 VCD 在归档后使用内嵌 Rust `wavefst 0.4.0` 转为 FST。无需 GTKWave、`vcd2fst` 或脚本进程；仍使用 `.svtools/vcd` 归档目录。转换完成并验证层级后才移除 VCD；默认以同目录 rename 原子覆盖同名 FST（`svtools.waveform.convertVcdToFstOverwrite`，默认 `true`），关闭后保留既有 FST、新文件以递增编号保存。失败/取消保留 VCD，详细信息写入仿真输出通道。
 
 VCD 按 token 流式解析，FST 事件块限制约 16 MiB/50 万事件。输入上限 2 GiB、头部 64 MiB、单 token 16 MiB、累计固定宽状态 256 MiB；这些是转换预算，并非查看器的容量承诺。数字信号、范围、别名、数组元素、实数与 X/Z 保真。字符串扩展、EVCD、缺少 timescale、部分信号未初始化/延迟初始化等无法可靠保真的文件保留原 VCD。
 

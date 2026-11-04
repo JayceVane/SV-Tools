@@ -1041,6 +1041,13 @@
           "scope": "resource",
           "description": "%cfg.waveform_convertVcdToFst.desc%"
         },
+        "svtools.waveform.convertVcdToFstOverwrite": {
+          "order": 90,
+          "type": "boolean",
+          "default": true,
+          "scope": "resource",
+          "description": "%cfg.waveform_convertVcdToFstOverwrite.desc%"
+        },
         "svtools.iverilog.autoOpenWaveform": {
           "order": 90,
           "type": "boolean",

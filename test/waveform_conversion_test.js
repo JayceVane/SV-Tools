@@ -104,18 +104,30 @@ test('默认关闭：不加载转换器、不碰输入文件', async () => {
     assert.equal(require('../package.json').contributes.configuration.properties['svtools.waveform.convertVcdToFst'].default, false);
 });
 
-test('成功后才删 VCD，释放写入租约后打开 FST，既有同名文件不覆盖', async t => {
+test('默认覆盖同名 FST：rename 原子替换，租约同时覆盖目标，既有文件让位', async t => {
     const f = await fixture(t), existing = path.join(f.directory, 'trace.fst'), progress = [];
-    await fs.writeFile(existing, 'keep existing');
-    let released = false;
+    await fs.writeFile(existing, 'stale fst to replace');
+    let prepared, released = false;
     const waves = await postprocessWaveforms([f.file], { enabled: true, onProgress: text => progress.push(text),
-        prepare: async () => ({ dispose() { released = true; } }) });
-    assert.deepEqual(waves, [path.join(f.directory, 'trace-2.fst')]);
+        prepare: async options => { prepared = options; return { dispose() { released = true; } }; } });
+    assert.deepEqual(waves, [existing]);
+    // 覆盖模式下租约包含目标 FST：Windows 上被查看器打开的文件无法被 rename 替换。
+    assert.deepEqual(prepared.paths, [f.file, existing]);
     assert.ok(released); assert.ok(progress.some(text => text.includes('FST 已保存')));
     await assert.rejects(fs.stat(f.file), { code: 'ENOENT' });
+    assert.equal(metadata(waves[0]).endTime, '25');
+    assert.deepEqual((await fs.readdir(f.directory)).sort(), ['trace.fst'], '旧内容被替换，不产生 -2 副本');
+});
+
+test('关闭覆盖时保留既有 FST，新输出使用递增编号', async t => {
+    const f = await fixture(t), existing = path.join(f.directory, 'trace.fst');
+    await fs.writeFile(existing, 'keep existing');
+    const waves = await postprocessWaveforms([f.file], { enabled: true, overwrite: false,
+        prepare: async () => ({ dispose() {} }) });
+    assert.deepEqual(waves, [path.join(f.directory, 'trace-2.fst')]);
     assert.equal(await fs.readFile(existing, 'utf8'), 'keep existing');
     assert.deepEqual((await fs.readdir(f.directory)).sort(), ['trace-2.fst', 'trace.fst']);
-    assert.equal(metadata(waves[0]).endTime, '25');
+    await assert.rejects(fs.stat(f.file), { code: 'ENOENT' });
 });
 
 test('已有 FST 按内容跳过转换，即使后缀为 VCD', async t => {
@@ -154,20 +166,21 @@ test('底层转换不能覆盖现有目标或源文件', async t => {
 });
 
 
-test('不支持硬链接的文件系统回退排他复制，仍保留既有同名文件', async t => {
-    const f = await fixture(t); await fs.writeFile(path.join(f.directory,'trace.fst'),'keep');
+test('关闭覆盖且不支持硬链接时回退排他复制，仍保留既有同名文件', async t => {
+    const f=await fixture(t); await fs.writeFile(path.join(f.directory,'trace.fst'),'keep');
     t.mock.method(fs,'link',async () => { throw Object.assign(new Error('hard link unsupported'),{code:'EPERM'}); });
-    const waves = await postprocessWaveforms([f.file],{enabled:true});
+    const waves=await postprocessWaveforms([f.file],{enabled:true,overwrite:false});
     assert.deepEqual(waves,[path.join(f.directory,'trace-2.fst')]);
     assert.equal(await fs.readFile(path.join(f.directory,'trace.fst'),'utf8'),'keep');
     assert.equal(metadata(waves[0]).endTime,'25'); await assert.rejects(fs.stat(f.file),{code:'ENOENT'});
 });
 
-test('VCD内容即使使用fst后缀也正常转换，避开源路径冲突', async t => {
+test('VCD内容即使使用fst后缀也原地替换为FST，不再产生 -2 副本', async t=>{
     const f=await fixture(t,TRACE,'trace.fst');
     const waves=await postprocessWaveforms([f.file],{enabled:true});
-    assert.deepEqual(waves,[path.join(f.directory,'trace-2.fst')]);
-    assert.equal(metadata(waves[0]).endTime,'25');await assert.rejects(fs.stat(f.file),{code:'ENOENT'});
+    assert.deepEqual(waves,[f.file]);
+    assert.equal(metadata(waves[0]).endTime,'25');
+    assert.deepEqual(await fs.readdir(f.directory),['trace.fst'],'目标与源同路径，rename 一步完成发布与替换');
 });
 
 

@@ -47,7 +47,7 @@ node <svtools-root>/src/cli/main.js wave export --workspace <ws> --file sim/wave
 - VCD↔源码/电路的实例映射与驱动锥联动尚未交付；沿驱动关系定位源码用 `design arch` 的连接事实与 `wave signals --role` 的 RTL 匹配组合完成。波形查询是数据事实，不构成功能验证结论；复验通过以同一规则再次仿真的结果为准。
 
 
-编辑器设置 `svtools.waveform.convertVcdToFst` 默认关闭。开启后仅对成功仿真的本轮 VCD 进行内嵌转换，转换验证成功才删除源文件；失败/取消保留原 VCD。该设置不改变 CLI 只读查询的输入，不会在查询时转换用户文件。FST 与 VCD 使用相同查询命令；读取时以实际文件内容识别格式。
+编辑器设置 `svtools.waveform.convertVcdToFst` 默认关闭。开启后仅对成功仿真的本轮 VCD 进行内嵌转换，转换验证成功才删除源文件；失败/取消保留原 VCD。默认覆盖同名 FST（`convertVcdToFstOverwrite`，原子替换），关闭后新输出用递增编号。该设置不改变 CLI 只读查询的输入，不会在查询时转换用户文件。FST 与 VCD 使用相同查询命令；读取时以实际文件内容识别格式。
 
 
 ## ΔCycle 记录诊断：wave glitches

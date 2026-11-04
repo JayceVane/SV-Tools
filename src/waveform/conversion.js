@@ -20,7 +20,8 @@ async function isFst(file) {
 
 /**
  * 共用的仿真后处理：只处理本轮实际改变的波形，转换完成才删除 VCD。
- * 不覆盖既有 FST；同名输出使用递增后缀，避免误删用户保存的历史波形。
+ * 默认覆盖同名 FST（rename 原子替换）；`overwrite:false` 时保留既有 FST，
+ * 同名输出改用递增后缀，避免误删用户保存的历史波形。
  * @param {string[]} files 本轮新生成的波形路径。
  * @param {object} options 设置、取消信号、视图写入租约与日志边界。
  * @returns {Promise<string[]>} 可交给查看器打开的最终文件。
@@ -37,8 +38,14 @@ async function postprocessWaveforms(files, options = {}) {
             if (!before.isFile()) throw new Error('只转换普通 VCD 文件');
             temporary = await fs.mkdtemp(path.join(path.dirname(file), '.svtools-fst-'));
             const target = path.join(temporary, 'wave.fst');
+            const base = path.join(path.dirname(file), path.basename(file, path.extname(file)));
+            const overwrite = options.overwrite !== false;
+            const destination = base + '.fst';
+            // 覆盖模式下把目标 FST 一并纳入租约：Windows 上被查看器打开的文件
+            // 无法被 rename 替换，先关闭其读取者再发布。
+            const leasePaths = [...new Set(overwrite ? [file, destination] : [file])];
             // 关闭 VCD 读取者并保持写入租约，转换在 libuv 线程池执行。
-            lease = await options.prepare?.({ paths: [file], sourceFile: options.sourceFile });
+            lease = await options.prepare?.({ paths: leasePaths, sourceFile: options.sourceFile });
             cancelled(options.signal);
             options.onProgress?.('正在转换 VCD → FST：' + file);
             let stats;
@@ -47,25 +54,35 @@ async function postprocessWaveforms(files, options = {}) {
             cancelled(options.signal);
             if (!await isFst(target) || !(stats.outputBytes > 0)) throw new Error('FST 输出验证失败');
             if (identity(before) !== identity(await fs.lstat(file, { bigint: true }))) throw new Error('转换期间 VCD 发生变化');
-            const base = path.join(path.dirname(file), path.basename(file, path.extname(file)));
-            for (let suffix = 1; suffix <= 10000; suffix++) {
-                const candidate = base + (suffix === 1 ? '' : '-' + suffix) + '.fst';
-                // 硬链接提供同目录的原子、排他发布；不会替换同名文件。
-                try {
-                    try { await fs.link(target, candidate); }
-                    catch (error) {
-                        if (!['ENOSYS', 'ENOTSUP', 'EOPNOTSUPP', 'EPERM'].includes(error.code)) throw error;
-                        // exFAT/部分网络盘没有硬链接，排他复制完成前始终保留源 VCD。
-                        await fs.copyFile(target, candidate, COPYFILE_EXCL);
+            if (overwrite) {
+                cancelled(options.signal);
+                if (identity(before) !== identity(await fs.lstat(file, { bigint: true }))) throw new Error('发布前 VCD 发生变化');
+                // 同目录 rename 原子替换既有 FST。目标与源同路径（VCD 内容顶着 .fst
+                // 后缀）时，rename 一步完成发布与替换，不再另行删除源文件。
+                await fs.rename(target, destination);
+                published = destination;
+                if (destination !== file) await fs.unlink(file);
+                committed = true;
+            } else {
+                for (let suffix = 1; suffix <= 10000; suffix++) {
+                    const candidate = base + (suffix === 1 ? '' : '-' + suffix) + '.fst';
+                    // 硬链接提供同目录的原子、排他发布；不会替换同名文件。
+                    try {
+                        try { await fs.link(target, candidate); }
+                        catch (error) {
+                            if (!['ENOSYS', 'ENOTSUP', 'EOPNOTSUPP', 'EPERM'].includes(error.code)) throw error;
+                            // exFAT/部分网络盘没有硬链接，排他复制完成前始终保留源 VCD。
+                            await fs.copyFile(target, candidate, COPYFILE_EXCL);
+                        }
+                        published = candidate; break;
                     }
-                    published = candidate; break;
+                    catch (error) { if (error.code !== 'EEXIST') throw error; }
                 }
-                catch (error) { if (error.code !== 'EEXIST') throw error; }
+                if (!published) throw new Error('FST 同名文件数量过多');
+                cancelled(options.signal);
+                if (identity(before) !== identity(await fs.lstat(file, { bigint: true }))) throw new Error('发布前 VCD 发生变化');
+                await fs.unlink(file); committed = true;
             }
-            if (!published) throw new Error('FST 同名文件数量过多');
-            cancelled(options.signal);
-            if (identity(before) !== identity(await fs.lstat(file, { bigint: true }))) throw new Error('发布前 VCD 发生变化');
-            await fs.unlink(file); committed = true;
             const saved = Math.round((1 - stats.outputBytes / Math.max(1, stats.sourceBytes)) * 100);
             options.onProgress?.('FST 已保存：' + published + '（' + stats.sourceBytes + ' → ' + stats.outputBytes + ' 字节，节省 ' + saved + '%）');
             result.push(published);
