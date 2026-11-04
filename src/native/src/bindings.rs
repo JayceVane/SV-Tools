@@ -674,3 +674,21 @@ pub fn wave_convert_vcd_to_fst(source: String, target: String) -> Result<String>
     serde_json::to_string(&result).map_err(|e| Error::from_reason(e.to_string()))
 }
 wave_async!(wave_convert_vcd_to_fst_async, WaveConvertTask, wave_convert_vcd_to_fst, (source: String, target: String));
+
+
+/// 记录级同刻变化诊断；不改变稳定值查询语义，不推测真实仿真调度区。
+#[napi]
+pub fn wave_glitches(handle: i64, ids: Vec<String>, from: i64, to: i64, limit: u32, max_values: u32) -> Result<String> {
+    check_ids(ids.len())?;
+    if ids.is_empty() || from<0 || to<from || limit==0 || limit>1000 || max_values==0 || max_values>256 {
+        return Err(Error::from_reason("[INVALID_ARGUMENT] 无效的诊断窗口/信号/预算：limit 1..1000，max-values 1..256"));
+    }
+    SessionSource::from(Some(handle),None)?.run(|session| {
+        if to>session.trace.end_time {return Err(Error::from_reason("[INVALID_ARGUMENT] --to 超出记录范围"));}
+        let variables: Vec<wave::WaveVar> = ids.iter().map(|id|session.trace.vars.iter().find(|var|&var.id==id && !var.trace_only).cloned()
+            .ok_or_else(||Error::from_reason(format!("[SIGNAL_NOT_FOUND] 信号 id 不存在：{id}")))).collect::<Result<_>>()?;
+        let refs: Vec<_> = variables.iter().collect();
+        let series=wave::glitches::scan(session,&refs,from as u64,to as u64,limit as usize,max_values as usize).map_err(wave_error)?;
+        serde_json::to_string(&serde_json::json!({"series":series})).map_err(|error|Error::from_reason(error.to_string())).and_then(check_payload)
+    })
+}

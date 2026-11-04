@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use wellen::{simple, Hierarchy, SignalRef, VarRef};
 
 pub mod convert;
+pub mod glitches;
 pub mod header;
 pub mod normalize;
 /// 会话句柄注册表：同一文件的多次查询复用一次解析。

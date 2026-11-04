@@ -3,6 +3,8 @@
  * 时间输出一律整数 tick 字符串（JSON 内不出现浮点时标），物理换算并列展示；原始位值与 X/Z 原样保留。 */
 const fs = require('node:fs/promises');
 const path = require('node:path');
+const { createReadStream } = require('node:fs');
+const { createHash } = require('node:crypto');
 const { nativeApi, call } = require('../waveform/rust-backend');
 const model = require('../waveform/model');
 const rowLayout = require('../waveform/row-layout');
@@ -123,7 +125,7 @@ async function openTrace(input) {
         vars: meta.vars,
     };
     return {
-        options, file, handle, close, meta: normalized,
+        options, file, handle, close, sourceStat: stat, meta: normalized,
         stats: { cached: false, parseMs: Date.now() - startedAt, loadMs: Date.now() - startedAt,
             fileBytes: stat.size, eventCount: normalized.eventCount },
     };
@@ -269,6 +271,43 @@ async function changes(trace, input) {
                 events: series.events.map(event => ({ t: tickString(event.t), bits: event.value })) };
         }),
         stats: trace.stats
+    });
+}
+
+
+/** 波形 SHA-256 只证明文件身份；不推断它由当前 RTL 或某次仿真生成。 */
+async function waveformEvidence(trace) {
+    const same = stat => ['dev','ino','size','mtimeMs','ctimeMs'].every(key => stat[key] === trace.sourceStat[key]);
+    if (!same(await fs.stat(trace.file))) fail('SOURCE_CHANGED','诊断期间波形文件已变化');
+    const digest=createHash('sha256'); let bytes=0;
+    for await (const chunk of createReadStream(trace.file)) {
+        bytes+=chunk.length;
+        if (bytes>MAX_VCD_BYTES) fail('SOURCE_CHANGED','诊断期间波形超出输入预算');
+        digest.update(chunk);
+    }
+    if (!same(await fs.stat(trace.file)) || bytes!==trace.sourceStat.size) fail('SOURCE_CHANGED','诊断期间波形文件已变化');
+    return { waveformSha256:digest.digest('hex'), fileBytes:bytes, sourceBinding:'unverified', toolVersion:require('../../package.json').version };
+}
+
+/** 检查记录中的同刻多次变化；序号不代表 delta cycle，命中不自动判为 RTL 缺陷。 */
+async function glitches(trace,input) {
+    const ids=requireSignals(trace,input);
+    const from=parseTick(trace,input.from??0,'--from'),to=parseTick(trace,input.to??trace.meta.endTime,'--to');
+    const limit=input.limit??100,maxValues=input.maxValues??32;
+    if (!Number.isSafeInteger(from) || !Number.isSafeInteger(to) || from>to || to>trace.meta.endTime
+        || !Number.isSafeInteger(limit) || limit<1 || limit>1000 || !Number.isSafeInteger(maxValues) || maxValues<1 || maxValues>256) {
+        fail('INVALID_ARGUMENT','无效的诊断范围/预算：limit 1..1000，max-values 1..256，时间必须是安全整数 tick');
+    }
+    const raw=call(()=>nativeApi().waveGlitches(trace.handle,ids,from,to,limit,maxValues));
+    const complete=raw.series.every(series=>series.complete);
+    const evidence=await waveformEvidence(trace);
+    return result('wave.glitches',{
+        file:trace.file,format:trace.meta.format,timescale:trace.meta.timescale||null,from:tickString(from),to:tickString(to),
+        complete,truncated:!complete,matched:raw.series.reduce((sum,series)=>sum+series.matched,0),matchedIsExact:complete,
+        series:raw.series,evidence,
+        semantics:{scope:'recorded-same-timestamp-transitions',recordIndex:'per-signal-record-order',schedulerDeltaIndices:false,
+            crossSignalOrdering:false,physicalPulseWidths:false,recordingCompleteness:'unknown',absenceProvesNoGlitches:false,acceptance:false},
+        stats:trace.stats
     });
 }
 
@@ -426,4 +465,4 @@ async function exportImage(trace, input) {
 
 module.exports = { openTrace, secondsPerTick,
     signals: ownedQuery(signals), values: ownedQuery(values), changes: ownedQuery(changes),
-    edges: ownedQuery(edges), sample: ownedQuery(sample), diff: ownedQuery(diff), exportImage: ownedQuery(exportImage) };
+    edges: ownedQuery(edges), glitches: ownedQuery(glitches), sample: ownedQuery(sample), diff: ownedQuery(diff), exportImage: ownedQuery(exportImage) };

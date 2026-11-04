@@ -251,3 +251,22 @@ node src/cli/main.js wave export --workspace D:/project --file sim/wave.vcd --si
 - `wave export`：时间窗波形图（document 黑白风格，无编辑器宿主；与插件导出共用同一渲染器）；`--at/--at-b` 画 A/B 游标（默认导出窗口首尾），`--format svg|png`（PNG 为 2x 内置 resvg 栅格化），`--out` 与 design render 同一目录安全模型；产物为 `artifacts[]`（SVG 必产，PNG 可选）。
 
 波形查询返回原始位值与解码值，不改变或推断波形内容；密集区在 `changes` 中不降采样（与查看器像素窗口的 `dense` 标记不同）。失败日志解析取窗尚未实现，`--at` 时刻由调用者从仿真日志/断言提供。
+
+
+## ΔCycle / 同一时间戳瞬态诊断
+
+```powershell
+node src/cli/main.js wave glitches --workspace D:/project --file sim/wave.vcd --signals tb.clk,tb.rst_n,tb.dut.o_empty --from 200ns --to 400ns --limit 100 --max-values 32
+```
+
+`doctor.data.capabilities` 包含 `wave.glitches`。该只读查询检查 VCD/FST 中实际记录的同刻多次变化，普通 `values/changes/edges/sample` 继续使用该时刻终值。`--signals` 必填；`--from/--to` 闭区间、可相等，要求安全整数 tick（或能准确换算的物理时间）；实数、字符串、event 返回 `INVALID_ARGUMENT`。
+
+返回 `series[]`（path/width/windowRecords/scannedRecords/complete/next/stopReason/findings），每组 finding 包含 `t`、`before`、`settled`、`recordedChanges`、`effectiveTransitions`、`classification`（initialization/returning/settling）、`hasUnknown` 与 `sequence[{recordIndex,bits}]`。序号仅代表该信号该时刻的记录顺序，不是仿真调度区/真实 delta 编号，不能跨信号对齐，也不推导物理脉宽。
+
+`--limit` 为每信号命中组上限 1..1000（默认 100）；`--max-values` 为每组返回条数 1..256（默认 32），超出时保留尾条并标 `sequenceTruncated`。整个查询最多扫描 200 万条、数字值译码预算 16 MiB，按完整同刻组消费预算。未完成时 `complete=false`、`truncated=true`、`matchedIsExact=false`；每信号 `next` 是下一页可直接使用的闭区间 `--from`，`stopReason` 为 result-limit/query-record-budget/query-decode-budget。整组超出译码预算时须调整对象或记录未覆盖，重复相同请求不会推进。
+
+结果包含 `evidence.waveformSha256` 和文件字节数；查询和哈希期间变化返回 `SOURCE_CHANGED`。SHA-256 仅标识文件，`sourceBinding=unverified` 不证明当前 RTL 产生该波形，需由报告的实际仿真输入/命令/运行记录建立关联。
+
+`semantics.recordingCompleteness=unknown`、`absenceProvesNoGlitches=false`、`acceptance=false` 明确证据边界：采集/转换可能折叠中间值。查询成功和零命中都不是功能、CDC、时序或物理无毛刺证明；有命中也不自动判 RTL 缺陷。模块验证报告必须包含该项的信号/窗口、扫描完整性、逐项处置、波形身份与限制，详见 [设计与验证交付约定](../skills/svtools-agent/references/delivery.md)。
+
+底层按信号原始事件索引读取，避免稳定值折叠抹掉记录证据：[wellen Signal API](https://docs.rs/wellen/0.25.7/wellen/struct.Signal.html)。

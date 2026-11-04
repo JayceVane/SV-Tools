@@ -153,6 +153,8 @@ M3 评审记录（2026-11-02）：空模块、packed struct 骨架与 SVG 已有
 
 4.2 中期审查记录（2026-11-02，M3 完成后全量审查）：结论 pass-with-conditions。已处置：Skill 能力边界文案过期（`design check/diff/report` 与无宿主 PNG 已交付）；`cacheMiB` 预算此前无消费者——内容寻址缓存现按每工程保留最近 5 份输入清单封顶（失败/损坏清单同样按时间淘汰，不再无限累积），被引用对象超过 `cacheMiB` 时从最旧清单开始整体解除引用，Vivado run 成功后触发；约束/源文件缺失时的裸 ENOENT 改为 `SOURCE_NOT_FOUND`；缓存临时文件名加随机后缀避免跨工程并发竞争；binary 输入不再绕过单文件与总量预算。已知待办：`task status` 每次查询都全量重算输入指纹（与 run 流程重复 `captureInputs`），大工程下查询会放大 IO，M5 验收前评估指纹缓存。
 
+历史基线说明：下段记录 2026-11-02 首轮 JS 实现；当前已迁移 Rust/wellen、移除落盘波形索引缓存，使用操作级会话，并支持 FST 和内嵌可选转换。
+
 M4 评审记录（2026-11-02）：交付 `wave` 命令族七操作——`signals`（query/scope/role/位宽过滤，RTL 方向匹配复用 readSignalRoles）、`values`（时间点左闭取值，原始位串+解码值）、`changes`（窗口全保真跳变枚举，`next` 游标分页）、`edges`（rise/fall/x/z，位级投影，X 后回 1 不构成 rise）、`sample`（时钟沿采样，`--where` 受限条件支持信号对信号比较定位首个不一致）、`diff`（两 VCD 同名信号双指针对齐，首差异+差异计数）、`export`（无宿主波形图，document 风格，Node 沙箱复用 webview renderer + svg-canvas，A/B 游标，SVG/PNG）。底层新增 VcdStore `changes`/`sample` 原语与二进制快照（typed 数组 8 字节对齐零拷贝加载）；索引缓存落盘 `.svtools/agent/wave/<路径哈希>/`，size+mtime 身份失效、原子写、损坏自动重建；时间输出一律整数 tick 字符串。验收：注入输出级位翻转缺陷的流水线，纯波形（不读 TB 日志）`sample --where "dout != model_dout"` 定位首个不一致于 t=25000 ticks（25ns 沿，dout=0xA4 vs 0xA5，比 TB 的 #1 延迟检查精确一拍），`wave diff` 复验首差异同刻、修复后条件命中 0；错误窗口 PNG 经视觉检查（四行信号/方波/总线段/标尺/游标正常）。资源边界（合成 VCD，100 信号）：100 MiB/293 万事件冷解析 1.8 s、命中加载 72–89 ms；500 MiB/1464 万事件冷解析 8.8 s、命中加载 211–290 ms、全沿 where 扫描（69 万沿）216 ms。已知边界：失败日志自动解析取窗未实现（时刻由调用者提供）、export 仅 document 风格、VCD↔电路映射联动未交付（用 design arch 连接事实组合）、diff 窗口事件超 200 万标记 truncated。
 
 ## 技术依据
@@ -161,3 +163,21 @@ M4 评审记录（2026-11-02）：交付 `wave` 命令族七操作——`signals
 - [Agent Skills格式](https://agentskills.io/specification)。
 - [Vivado时序汇总](https://docs.amd.com/r/en-US/ug835-vivado-tcl-commands/report_timing_summary)、[路径对象查询](https://docs.amd.com/r/en-US/ug835-vivado-tcl-commands/get_timing_paths)。
 - [Vivado DRC报告](https://docs.amd.com/r/en-US/ug835-vivado-tcl-commands/report_drc)、[CDC报告](https://docs.amd.com/r/en-US/ug835-vivado-tcl-commands/report_cdc)。
+
+
+## M5 前置：Agent 交付与 ΔCycle 排查（2026-11-04）
+
+先完成同刻瞬态诊断和设计/验证交付约定，再启动完整 M5 联合验收。当前以 CLI + 一个可移植 Skill 为主，不新增 MCP 或专用多 Agent 编排依赖。
+
+- **工具与证据**：`wave glitches` 检查原始同刻记录，稳定查询仍按终值；分页、预算、文件身份、未知录制完整性均显式返回。查询不是功能验收，不能输出伪造的全局 delta 编号或零毛刺证明。
+- **角色与产出**：设计侧交付需求/接口/假设、RTL 和设计说明；验证侧依据同一规格独立建立参考模型/断言/TB，交付计划、回归、ΔCycle 处置和证据索引；主 Agent 汇总需求追踪与裁决。复杂 CDC/协议/多模块任务优先独立验证子 Agent，小改动允许单 Agent 分阶段完成并披露独立性限制。
+- **模块报告必需项**：已检查信号与窗口、完整性/未 dump 项、每项同刻活动的预期/缺陷/待判结论、修复复验和文件身份。无波形/未执行/扫描不完整不能宣称完整验证通过；不把组合收敛一律判错。
+- **交接约定**：需求 ID→用例 ID→检查规则→输入/运行身份→日志/波形/图表，DUT 与 TB 文件归属分开；任何影响结果的输入变化重新验证，旧证据不自动继承。
+
+可执行的 Skill 流程和默认交付清单见 [delivery.md](../skills/svtools-agent/references/delivery.md)。
+
+随后 M5 分三批验证，结果逐批记录，不能以流程文档代替完成证据：
+
+1. **同步模块试点**：规格、独立 TB、受控缺陷、稳定查询与 ΔCycle 诊断、修复复验、报告/JSON 身份一致；缺信号/截断/旧波形必须暴露。
+2. **FIFO / 多时钟试点**：参数边界、满空/同时读写、背压、单边和双边复位、时钟公共沿，解释允许组合瞬态并发现错误使能/复位行为；按同一条件复验，记录单/多 Agent 执行方式及独立性。
+3. **工程与客户端联合验收**：真实 Vivado 创建/运行/报告闭环，源变更后的证据失效，CLI 与插件打开同一图表/波形，目标 IDE/Node 兼容矩阵、发行文件与许可检查。既有四个端到端场景继续作为最终发行门禁。

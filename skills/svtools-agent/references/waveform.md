@@ -29,7 +29,7 @@ node <svtools-root>/src/cli/main.js wave export --workspace <ws> --file sim/wave
 
 适用：标志/控制信号出现窄脉冲或意外翻转，需判定「显示伪影 / 真实事件 / 设计缺陷」。提炼自异步 FIFO 空标志实战（完整判决见下）。
 
-1. **定性真伪**：`wave changes` 拉疑点窗口内该信号的全部事件。查看器像素级毛刺在事件表里不存在；存在则逐条记 `(t, 值)`。同一时间戳多信号齐变时回原始 VCD 看桶内容（`awk` 按 `#时间戳` 切段），多字符符号 id 不能裸眼猜。
+1. **分别检查稳定事件与同刻瞬态**：`wave changes` 给出疑点窗口的时间戳终值，`wave glitches` 给出已记录的同刻多次变化、前值与终值。不能因稳定事件表没有变化就断言“只是显示伪影”；录制过程可能已折叠中间值。保存两类结果，记录范围与证据限制。
 2. **定时钟沿**：按 timescale 把疑点时刻换算回各时钟域，判定落在哪个域的哪种沿（正/负/沿间）。非采样沿上的变化只能来自组合逻辑或异步复位，驱动面直接减半。
 3. **沿前后快照**：`wave values --at <t-1>` 与 `--at <t>` 取比较方程两侧输入（指针/灰码/使能/复位），看哪边变了哪边保持；计数类用二进制值核对到笔。
 4. **判责**：真实且正确 → 行为性毛刺（例：异步 FIFO 两 burst 之间的短真空窗口，宽度=TB 检查+复位+首写同步开销，正常）；真实且错误 → 回驱动 RTL 定位（例：`cdc_gray_bits` B 域同步链缺复位，复位窗口内 stale 灰码造成假非空，复位释放后两个采样沿内存在幻影读风险）。
@@ -48,3 +48,18 @@ node <svtools-root>/src/cli/main.js wave export --workspace <ws> --file sim/wave
 
 
 编辑器设置 `svtools.waveform.convertVcdToFst` 默认关闭。开启后仅对成功仿真的本轮 VCD 进行内嵌转换，转换验证成功才删除源文件；失败/取消保留原 VCD。该设置不改变 CLI 只读查询的输入，不会在查询时转换用户文件。FST 与 VCD 使用相同查询命令；读取时以实际文件内容识别格式。
+
+
+## ΔCycle 记录诊断：wave glitches
+
+```text
+node <svtools-root>/src/cli/main.js wave glitches --workspace <ws> --file sim/wave.vcd --signals tb.clk,tb.rst_n,tb.dut.o_empty --from 200ns --to 400ns --limit 100 --max-values 32
+```
+
+检查数字信号，返回 `series[].findings`：`t`、`before`、`settled`、`recordedChanges`、`effectiveTransitions`、`sequence[{recordIndex,bits}]` 和 `hasUnknown`。`classification` 为 initialization（无前值的初始化活动）、returning（瞬态后回到前值）或 settling（多次变化后终值改变）。`recordIndex` 只是该信号该时刻的记录顺序，不是实际 delta cycle，也不能跨信号对齐。
+
+`complete` 表示所选记录是否扫描完；每信号 `next` 可直接作为下一页闭区间 `--from`，完整同刻组不拆页。每信号最多返回 `--limit`（1..1000，默认 100）组；每组最多 `--max-values`（1..256，默认 32）条，截断时保留尾条真实序号并标 `sequenceTruncated`。命中数量在未完整扫描时只是下界（`matchedIsExact=false`）。单查询最多扫描 200 万条、译码预算 16 MiB；`stopReason` 明示结果数量/扫描/译码预算，超限不得记“无毛刺”。实数、字符串、event 不作电平毛刺判断。
+
+`evidence.waveformSha256` 标识实际波形文件；`sourceBinding=unverified` 表示 CLI 没有证明它来自当前 RTL/某次运行，报告须结合实际仿真输入和日志建立关联。文件变化则拒绝结果。`semantics` 明确记录完整性未知、没有真实调度区编号/跨信号 delta 顺序/物理脉宽、查询不提供功能验收结论。
+
+即使 FST 或转换产物无命中，也不能声称从未发生过中间变化；采集/转换可能已经折叠它们。同刻瞬态、实际非零宽度窄脉冲与物理器件毛刺需要分别判断。模块验证报告中的必需项与处置方式见 [delivery.md](delivery.md)。
