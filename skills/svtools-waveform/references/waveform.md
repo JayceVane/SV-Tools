@@ -62,4 +62,4 @@ node <svtools-root>/src/cli/main.js wave glitches --workspace <ws> --file sim/wa
 
 `evidence.waveformSha256` 标识实际波形文件；`sourceBinding=unverified` 表示 CLI 没有证明它来自当前 RTL/某次运行，报告须结合实际仿真输入和日志建立关联。文件变化则拒绝结果。`semantics` 明确记录完整性未知、没有真实调度区编号/跨信号 delta 顺序/物理脉宽、查询不提供功能验收结论。
 
-即使 FST 或转换产物无命中，也不能声称从未发生过中间变化；采集/转换可能已经折叠它们。同刻瞬态、实际非零宽度窄脉冲与物理器件毛刺需要分别判断。模块验证报告中的必需项与处置方式见 [delivery.md](delivery.md)。
+即使 FST 或转换产物无命中，也不能声称从未发生过中间变化；采集/转换可能已经折叠它们。同刻瞬态、实际非零宽度窄脉冲与物理器件毛刺需要分别判断。模块验证报告中的必需项与处置方式见 svtools-delivery 技能（[delivery.md](../../svtools-delivery/references/delivery.md)）。

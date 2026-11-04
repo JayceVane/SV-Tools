@@ -186,7 +186,7 @@ node src/cli/main.js design arch --workspace D:/project --top top --depth 1 --sa
 
 `design scaffold --spec <json|file> [--out <dir>] [--force]` 按 schemaVersion=1 规格生成架构骨架（默认 `rtl/<top>.sv`）：`typedef struct packed {...} <type>_t;` 虚拟接口、只含 struct 端口的空模块、顶层 struct 总线 wire 与实例化连线。`--spec` 可为规格 JSON 文件路径（相对工作区解析）或内联 JSON（以 `{` 开头）；文件不存在返回 `INVALID_ARGUMENT` 并提示解析后的绝对路径。`--out` 必须是工作区内的目录（创建后按 realpath 复核，拒绝 symlink/junction 逃逸）；目标文件已存在且无 `--force` 时返回 `FILE_EXISTS`，`--out` 指向已有普通文件或非法路径返回 `INVALID_ARGUMENT`，写入失败返回 `DESIGN_FAILED`。主设备 `m_`/从设备 `s_` 命名是 Skill 建议而非门禁：不合建议时生成照常成功，并在 `data.suggestions[]` 返回 `{code:"PORT_NAMING",module,port,message}`，不产生 error diagnostics；其余规格问题返回 `INVALID_ARGUMENT`。规格结构：
 
-默认接口级示例见 [architecture-interface-spec.json](../skills/svtools-agent/assets/architecture-interface-spec.json)：每个模块用一个整体 inout packed struct 端口连接逻辑接口，成员内容和收发约定写入架构文档。需要按通道区分方向时，可参考 [architecture-spec.json](../skills/svtools-agent/assets/architecture-spec.json)。`master/slave` 是接口角色，不等同于输出/输入。每个端口必须显式指定 `direction`，每个实例必须列出所有端口；显式 `null` 表示有意悬空并产生 `UNCONNECTED_PORT` 提示。生成前拒绝遗漏连接、已知方向的总线多驱动与无驱动输入；整体 inout 的成员方向不在这项检查范围内。
+默认接口级示例见 [architecture-interface-spec.json](../skills/svtools-design/assets/architecture-interface-spec.json)：每个模块用一个整体 inout packed struct 端口连接逻辑接口，成员内容和收发约定写入架构文档。需要按通道区分方向时，可参考 [architecture-spec.json](../skills/svtools-design/assets/architecture-spec.json)。`master/slave` 是接口角色，不等同于输出/输入。每个端口必须显式指定 `direction`，每个实例必须列出所有端口；显式 `null` 表示有意悬空并产生 `UNCONNECTED_PORT` 提示。生成前拒绝遗漏连接、已知方向的总线多驱动与无驱动输入；整体 inout 的成员方向不在这项检查范围内。
 
 工作流：`design scaffold` 生成虚拟端口与空模块 → `design arch --top <top>` 检查结构 → `design render` 查看架构 → 按模块补充实现。时钟/复位独立声明，当前 scaffold 仅支持 struct 端口，板级顶层端口需要补充 RTL。架构图是源级结构事实，不得当作综合、时序或功能验证证据。
 
@@ -243,12 +243,15 @@ node src/cli/main.js wave export --workspace D:/project --file sim/wave.vcd --si
 时间输入接受裸整数 ticks 或带 `s/ms/us/ns/ps/fs` 单位的物理时间（物理单位要求 VCD 声明 timescale）；输出中的时刻一律为整数 tick 字符串（`t`、`from`、`to`、`next`），并列 `timescale` 与人类可读换算，浮点 JSON 不承载时标精度。信号名解析优先完整层级路径，其次唯一短名/后缀（同一 net 的 alias 共享 id，不算歧义），未命中或多个 id 歧义返回 `SIGNAL_NOT_FOUND` 并附 `candidates`。
 
 - `wave signals`：信号清单（路径/短名/位宽/类型/变更计数），`--query` 子串、`--scope` 层级前缀、`--min-width/--max-width` 过滤；`--role input|output|inout|internal` 用工作区 RTL 做方向匹配（唯一层级匹配才标注，其余 unknown，附 `sourceRoleNote`）。
-- `wave values --at`：时间点左闭取值，输出原始位串（`bits`，保留 X/Z）、位宽与解码值（≤64 位整数给 `value` 十六进制）。
+- `wave values --at`：时间点左闭取值，输出原始位串（`bits`，保留 X/Z）、位宽与解码值（≤64 位整数给 `value` 十六进制；整数类且宽度 2..=64、无 X/Z 时另给 `signed` 补码十进制）。
 - `wave changes`：窗口内全保真跳变枚举（`--from/--to` 含起点，`(from,to]` 之外的完整窗口语义见 `next`），每信号 `limit`（≤10000）+ `total` + `next` 游标（下一页直接作 `--from`）。
 - `wave edges`：`--kind any|rise|fall|x|z` 沿/未知态搜索；rise/fall 对向量信号需 `--bit`（LSB 起 0）位级投影，X 之后回到 1 不构成 rise；`--limit` 为命中数上限，超出时 `next` 续查。
 - `wave sample`：按 `--clock` 的 `--clock-edge rise|fall|both` 沿采样多信号（时钟必须 1 位标量，X/Z 不构成沿）；`--where` 可重复且为 AND，条件为 `信号 op 字面量|信号`，op ∈ `==`/`!=`/`contains-x`/`contains-z`，字面量支持 `0b/0x/十进制/8'hA5`，右值唯一命中信号名时做信号对信号比较（首个数据不一致定位）；返回 `scannedEdges`/`matched`/`next`。
 - `wave diff --against`：两份 VCD 同名信号（键为路径+向量 range）双指针对齐比较，默认全部交集或 `--signals` 子集；返回 `firstDiff`（首个差异时刻与双方值）、差异区间计数、`differingSignals` 与前 `--limit` 条差异；窗口事件总量超 200 万返回 `truncated=true`。
 - `wave export`：时间窗波形图（document 黑白风格，无编辑器宿主；与插件导出共用同一渲染器）；`--at/--at-b` 画 A/B 游标（默认导出窗口首尾），`--format svg|png`（PNG 为 2x 内置 resvg 栅格化），`--out` 与 design render 同一目录安全模型；产物为 `artifacts[]`（SVG 必产，PNG 可选）。
+- `wave stats`：多信号窗口统计（形态参考 pywellen `signal_get_statistics`）——每信号 `events`（折叠后事件数，与 changes 同口径）、`transitions`（终值实际跳变数，同值冗余不计）、`firstChange/lastChange`、`hasX/hasZ`、`windowRecords`；预算与分页同 glitches。`from=0` 时窗口首组的初值不算跳变。用于错误窗口分诊"谁最活跃、谁进入未知态"。
+- `wave timeline`：多信号合并时间线（形态参考 pywellen `debug_build_timeline`）——只含终值跳变，按时间戳归组（同刻多信号变化同组返回，组内按路径排序），每条变化带 `before`（窗口首事件取窗口前一时刻终值，`from=0` 无前值为 null）；`--limit` 为返回组数上限（1..2000，默认 1000），`next` 是首个未返回组时刻、直接作下一页闭区间 `--from`，整查询预算统一截断保证不重不漏。
+- `wave export --format csv`：数据矩阵导出（形态参考 pywellen `export_to_csv`）——行=窗口内任一信号终值跳变时刻，列=各信号该时刻终值位串（含 X/Z，证据口径；`from=0` 时首行前基线为空单元格）；行预算 10 万，超出 `truncated=true`；忽略游标参数，`--out` 与图像导出同一目录安全模型，产物计入 `artifacts[]`（kind `data`，含 sha256 与行数）。
 
 波形查询返回原始位值与解码值，不改变或推断波形内容；密集区在 `changes` 中不降采样（与查看器像素窗口的 `dense` 标记不同）。失败日志解析取窗尚未实现，`--at` 时刻由调用者从仿真日志/断言提供。
 
@@ -267,6 +270,6 @@ node src/cli/main.js wave glitches --workspace D:/project --file sim/wave.vcd --
 
 结果包含 `evidence.waveformSha256` 和文件字节数；查询和哈希期间变化返回 `SOURCE_CHANGED`。SHA-256 仅标识文件，`sourceBinding=unverified` 不证明当前 RTL 产生该波形，需由报告的实际仿真输入/命令/运行记录建立关联。
 
-`semantics.recordingCompleteness=unknown`、`absenceProvesNoGlitches=false`、`acceptance=false` 明确证据边界：采集/转换可能折叠中间值。查询成功和零命中都不是功能、CDC、时序或物理无毛刺证明；有命中也不自动判 RTL 缺陷。模块验证报告必须包含该项的信号/窗口、扫描完整性、逐项处置、波形身份与限制，详见 [设计与验证交付约定](../skills/svtools-agent/references/delivery.md)。
+`semantics.recordingCompleteness=unknown`、`absenceProvesNoGlitches=false`、`acceptance=false` 明确证据边界：采集/转换可能折叠中间值。查询成功和零命中都不是功能、CDC、时序或物理无毛刺证明；有命中也不自动判 RTL 缺陷。模块验证报告必须包含该项的信号/窗口、扫描完整性、逐项处置、波形身份与限制，详见 [设计与验证交付约定](../skills/svtools-delivery/references/delivery.md)。
 
 底层按信号原始事件索引读取，避免稳定值折叠抹掉记录证据：[wellen Signal API](https://docs.rs/wellen/0.25.7/wellen/struct.Signal.html)。

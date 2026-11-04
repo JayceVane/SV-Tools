@@ -174,7 +174,7 @@ M4 评审记录（2026-11-02）：交付 `wave` 命令族七操作——`signals
 - **模块报告必需项**：已检查信号与窗口、完整性/未 dump 项、每项同刻活动的预期/缺陷/待判结论、修复复验和文件身份。无波形/未执行/扫描不完整不能宣称完整验证通过；不把组合收敛一律判错。
 - **交接约定**：需求 ID→用例 ID→检查规则→输入/运行身份→日志/波形/图表，DUT 与 TB 文件归属分开；任何影响结果的输入变化重新验证，旧证据不自动继承。
 
-可执行的 Skill 流程和默认交付清单见 [delivery.md](../skills/svtools-agent/references/delivery.md)。
+可执行的 Skill 流程和默认交付清单见 [delivery.md](../skills/svtools-delivery/references/delivery.md)。
 
 随后 M5 分三批验证，结果逐批记录，不能以流程文档代替完成证据：
 

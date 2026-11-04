@@ -10,7 +10,7 @@ const { run } = require('../src/cli/main');
 const { createContainedDirectories, cleanupDirectories } = require('../src/design/scaffold-paths');
 
 const FIXTURES = path.join(__dirname, 'fixtures', 'design', 'scaffold');
-const VALID = path.resolve(__dirname, '../skills/svtools-agent/assets/architecture-spec.json');
+const VALID = path.resolve(__dirname, '../skills/svtools-design/assets/architecture-spec.json');
 const NAMING = path.join(FIXTURES, 'naming.json');
 
 /** @param {object} t 测试上下文。 @returns {Promise<string>} 临时工作区。 */
@@ -66,7 +66,7 @@ test('design scaffold 非 m_/s_ 命名仍成功，只返回 PORT_NAMING 建议',
 
 test('Skill接口级示例使用整体inout struct，每个模块一个虚拟端口', async t => {
     const directory=await workspace(t);
-    const spec=path.resolve(__dirname,'../skills/svtools-agent/assets/architecture-interface-spec.json');
+    const spec=path.resolve(__dirname,'../skills/svtools-design/assets/architecture-interface-spec.json');
     const generated=await run(['design','scaffold','--workspace',directory,'--spec',spec]);
     assert.equal(generated.exitCode,0);
     assert.ok(generated.output.data.modules.every(module=>module.ports.length===1 && module.ports[0].direction==='inout'));

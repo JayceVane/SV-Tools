@@ -30,11 +30,13 @@ const help=`SV Tools headless CLI (API 1)
   wave changes --file <vcd> --signals <a,b> [--from <t>] [--to <t>] [--limit <n>]
   wave edges --file <vcd> --signal <s> [--bit <i>] [--kind any|rise|fall|x|z] [--from <t>] [--to <t>]
   wave glitches --file <vcd|fst> --signals <a,b> [--from <t>] [--to <t>] [--limit <n>] [--max-values <n>]
+  wave stats --file <vcd|fst> --signals <a,b> [--from <t>] [--to <t>]
+  wave timeline --file <vcd|fst> --signals <a,b> [--from <t>] [--to <t>] [--limit <n>]
   wave sample --file <vcd> --clock <c> [--clock-edge rise|fall|both] --signals <a,b> [--where <cond>]
               [--from <t>] [--to <t>] [--limit <n>]   (--where e.g. "dut.q != 8'hA5", "bus contains-x")
   wave diff --file <a.vcd> --against <b.vcd> [--signals <a,b>] [--from <t>] [--to <t>] [--limit <n>]
   wave export --file <vcd> --signals <a,b> --out <dir> [--from <t>] [--to <t>] [--at <t>] [--at-b <t>]
-              [--format svg|png] [--title <t>] (document-style waveform image)
+              [--format svg|png|csv] [--title <t>] (image, or csv data matrix)
   task start lint [lint options]
   task list|status|logs|cancel [task-id]
 
@@ -96,7 +98,7 @@ async function run(argv) {
         else if(command==='design' && action==='check' && !id) output=await services.check(input);
         else if(command==='design' && action==='diff' && !id) output=await services.diff(input);
         else if(command==='design' && action==='report' && !id) output=await services.report(input);
-        else if(command==='wave' && !id && ['signals','values','changes','edges','glitches','sample','diff','export'].includes(action)) output=await services[{signals:'waveSignals',values:'waveValues',changes:'waveChanges',edges:'waveEdges',glitches:'waveGlitches',sample:'waveSample',diff:'waveDiff',export:'waveExport'}[action]](input);
+        else if(command==='wave' && !id && ['signals','values','changes','edges','glitches','stats','timeline','sample','diff','export'].includes(action)) output=await services[{signals:'waveSignals',values:'waveValues',changes:'waveChanges',edges:'waveEdges',glitches:'waveGlitches',stats:'waveStats',timeline:'waveTimeline',sample:'waveSample',diff:'waveDiff',export:'waveExport'}[action]](input);
         else if(command==='lint' && !action) {
             const controller=new AbortController(), cancel=()=>controller.abort();
             process.once('SIGINT',cancel);process.once('SIGTERM',cancel);

@@ -232,6 +232,12 @@ function decodedValue(raw, variable) {
     const bits = model.binaryValue(raw, variable.width);
     if (bits && variable.width <= 64 && !/[xz]/.test(bits)) entry.value = model.formatValue(raw, variable, 'hex');
     else if (bits) entry.hex = model.formatValue(raw, variable, 'hex');
+    // 有符号补码解释：仅整数类、宽度 2..=64 且不含 X/Z（形态参考 pywellen format_as_signed）。
+    if (bits && variable.width >= 2 && variable.width <= 64 && !/[xz]/.test(bits)
+        && !['real', 'realtime', 'string', 'event', 'time'].includes((variable.type || '').toLowerCase())) {
+        const magnitude = BigInt('0b' + bits);
+        entry.signed = String(bits.startsWith('1') ? magnitude - (1n << BigInt(variable.width)) : magnitude);
+    }
     return entry;
 }
 
@@ -308,6 +314,38 @@ async function glitches(trace,input) {
         semantics:{scope:'recorded-same-timestamp-transitions',recordIndex:'per-signal-record-order',schedulerDeltaIndices:false,
             crossSignalOrdering:false,physicalPulseWidths:false,recordingCompleteness:'unknown',absenceProvesNoGlitches:false,acceptance:false},
         stats:trace.stats
+    });
+}
+
+/** 窗口统计：事件数/终值跳变数/首末跳变/X·Z；稳定值口径，供错误窗口分诊"谁最活跃"。 */
+async function stats(trace, input) {
+    const ids = requireSignals(trace, input);
+    const from = parseTick(trace, input.from ?? 0, '--from'), to = parseTick(trace, input.to ?? trace.meta.endTime, '--to');
+    if (from > to || to > trace.meta.endTime) fail('INVALID_ARGUMENT', '无效的统计窗口：--from 必须 ≤ --to 且不超出记录范围');
+    const raw = call(() => nativeApi().waveStats(trace.handle, ids, from, to));
+    const complete = raw.series.every(series => series.complete);
+    return result('wave.stats', {
+        file: trace.file, format: trace.meta.format, timescale: trace.meta.timescale || null,
+        from: tickString(from), to: tickString(to), complete, truncated: !complete,
+        series: raw.series, stats: trace.stats
+    });
+}
+
+/** 合并时间线：多信号终值跳变按时间戳归组，同刻多信号变化同组；分页不拆组、不重叠。 */
+async function timeline(trace, input) {
+    const ids = requireSignals(trace, input);
+    const from = parseTick(trace, input.from ?? 0, '--from'), to = parseTick(trace, input.to ?? trace.meta.endTime, '--to');
+    const limit = input.limit ?? 1000;
+    if (from > to || to > trace.meta.endTime || !Number.isSafeInteger(limit) || limit < 1 || limit > 2000)
+        fail('INVALID_ARGUMENT', '无效的时间线窗口/预算：limit 1..2000，--from ≤ --to 且不超出记录范围');
+    const raw = call(() => nativeApi().waveTimeline(trace.handle, ids, from, to, limit));
+    return result('wave.timeline', {
+        file: trace.file, format: trace.meta.format, timescale: trace.meta.timescale || null,
+        from: tickString(from), to: tickString(to), limit,
+        complete: raw.complete, truncated: !raw.complete,
+        // next 是首个未返回组的时刻，直接作为下一页闭区间 --from。
+        next: raw.next || null, stopReason: raw.stopReason || null,
+        groups: raw.groups, stats: trace.stats
     });
 }
 
@@ -394,6 +432,66 @@ async function diff(traceA, input) {
     } finally { traceB.close(); }
 }
 
+/** CSV 单元格转义：逗号/引号/换行才加引号，引号翻倍。 */
+function csvCell(text) {
+    const value = String(text ?? '');
+    return /[",\r\n]/.test(value) ? '"' + value.replace(/"/g, '""') + '"' : value;
+}
+
+const MAX_CSV_ROWS = 100000;
+
+/** CSV 导出（形态参考 pywellen export_to_csv）：行=窗口内任一信号的终值跳变时刻，
+ * 列=各信号该时刻的终值位串（含 X/Z，证据口径）；行预算 10 万，超出标 truncated。 */
+async function exportCsv(trace, input, { ids, names, from, to }) {
+    // 分页取合并时间线（单页上限与 timeline 命令一致），总行预算 MAX_CSV_ROWS。
+    const rows = [];
+    let cursor = from, complete = false;
+    for (;;) {
+        const raw = call(() => nativeApi().waveTimeline(trace.handle, ids, cursor, to, 2000));
+        const room = MAX_CSV_ROWS - rows.length;
+        for (const group of raw.groups.slice(0, room)) rows.push(group);
+        if (room < raw.groups.length) break; // 行预算耗尽，本页仍有组未装下
+        if (raw.next === null) { complete = true; break; }
+        cursor = Number(raw.next);
+    }
+    const truncated = !complete;
+    const paths = ids.map(id => names.get(id).path);
+    // 窗口前基线：from=0 时首行前的值为 null（用空单元格表示）。
+    const baseline = from > 0 ? storeValues(trace, ids, from - 1) : {};
+    const current = new Map();
+    ids.forEach((id, index) => current.set(paths[index], baseline[id] ?? null));
+    const lines = ['time,' + paths.map(csvCell).join(',')];
+    for (const group of rows) {
+        for (const change of group.changes) current.set(change.path, change.bits);
+        lines.push(group.t + ',' + paths.map(p => csvCell(current.get(p) ?? '')).join(','));
+    }
+    const text = lines.join('\r\n') + '\r\n';
+    const base = (input.title ? input.title.replace(/[\\/:*?"<>|]/g, '_') : path.basename(trace.file).replace(/\.(?:vcd|fst)$/i, '')) || 'waveform';
+    const outputDirectory = path.resolve(trace.options.workspace, input.out);
+    const artifacts = [];
+    try {
+        const created = (await createContainedDirectories(outputDirectory, trace.options.workspace)).created;
+        try {
+            const csvFile = path.join(outputDirectory, base + '.csv');
+            await fs.writeFile(csvFile, text, 'utf8');
+            artifacts.push({ kind: 'data', path: csvFile, sha256: hash(text), bytes: Buffer.byteLength(text), rows: rows.length, truncated });
+        } catch (error) {
+            await cleanupDirectories(created, trace.options.workspace);
+            throw error;
+        }
+    } catch (error) {
+        if (error.code === 'OUTSIDE_WORKSPACE') fail('INVALID_ARGUMENT', 'wave export 的 --out 通过符号链接逃逸出工作区', { out: input.out });
+        if (error.code === 'OUT_NOT_DIRECTORY') fail('INVALID_ARGUMENT', 'wave export 的 --out 必须是工作区内的目录：' + input.out, { out: input.out });
+        if (error.code === 'EACCES' || error.code === 'EPERM') fail('INVALID_ARGUMENT', 'wave export 的 --out 不可写：' + input.out, { out: input.out, reason: error.code });
+        throw error;
+    }
+    return result('wave.export', {
+        file: trace.file, from: tickString(from), to: tickString(to), timescale: trace.meta.timescale || null,
+        out: outputDirectory, format: 'csv', rows: rows.length, truncated, signals: paths,
+        stats: trace.stats
+    }, null, [], artifacts);
+}
+
 /** 时间窗波形图导出：无宿主渲染（document 黑白风格），SVG/PNG 落入工作区目录并返回产物身份。 */
 async function exportImage(trace, input) {
     if (input.out === undefined) fail('INVALID_ARGUMENT', 'wave export 需要 --out <dir>');
@@ -402,6 +500,7 @@ async function exportImage(trace, input) {
     const to = parseTick(trace, input.to ?? trace.meta.endTime, '--to');
     const from = input.from === undefined ? 0 : parseTick(trace, input.from, '--from');
     if (from >= to) fail('INVALID_ARGUMENT', '--from 必须早于 --to');
+    if ((input.imageFormat || 'svg') === 'csv') return exportCsv(trace, input, { ids, names, from, to });
     const cursorA = input.at !== undefined ? parseTick(trace, input.at, '--at') : from;
     const cursorB = input.atB !== undefined ? parseTick(trace, input.atB, '--at-b') : null;
     if (cursorA > to || cursorB !== null && cursorB > to) fail('INVALID_ARGUMENT', '游标时间超出导出窗口');
@@ -465,4 +564,5 @@ async function exportImage(trace, input) {
 
 module.exports = { openTrace, secondsPerTick,
     signals: ownedQuery(signals), values: ownedQuery(values), changes: ownedQuery(changes),
-    edges: ownedQuery(edges), glitches: ownedQuery(glitches), sample: ownedQuery(sample), diff: ownedQuery(diff), exportImage: ownedQuery(exportImage) };
+    edges: ownedQuery(edges), glitches: ownedQuery(glitches), stats: ownedQuery(stats), timeline: ownedQuery(timeline),
+    sample: ownedQuery(sample), diff: ownedQuery(diff), exportImage: ownedQuery(exportImage) };

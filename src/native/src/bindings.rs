@@ -692,3 +692,37 @@ pub fn wave_glitches(handle: i64, ids: Vec<String>, from: i64, to: i64, limit: u
         serde_json::to_string(&serde_json::json!({"series":series})).map_err(|error|Error::from_reason(error.to_string())).and_then(check_payload)
     })
 }
+
+/// 多信号窗口统计（事件数/终值跳变数/首末跳变/X·Z），稳定值口径。
+#[napi]
+pub fn wave_stats(handle: i64, ids: Vec<String>, from: i64, to: i64) -> Result<String> {
+    check_ids(ids.len())?;
+    if ids.is_empty() || from<0 || to<from {
+        return Err(Error::from_reason("[INVALID_ARGUMENT] 无效的统计窗口：需要 from ≥ 0 且 to ≥ from"));
+    }
+    SessionSource::from(Some(handle),None)?.run(|session| {
+        if to>session.trace.end_time {return Err(Error::from_reason("[INVALID_ARGUMENT] --to 超出记录范围"));}
+        let variables: Vec<wave::WaveVar> = ids.iter().map(|id|session.trace.vars.iter().find(|var|&var.id==id && !var.trace_only).cloned()
+            .ok_or_else(||Error::from_reason(format!("[SIGNAL_NOT_FOUND] 信号 id 不存在：{id}")))).collect::<Result<_>>()?;
+        let refs: Vec<_> = variables.iter().collect();
+        let series=wave::survey::stats(session,&refs,from as u64,to as u64).map_err(wave_error)?;
+        serde_json::to_string(&serde_json::json!({"series":series})).map_err(|error|Error::from_reason(error.to_string())).and_then(check_payload)
+    })
+}
+
+/// 多信号合并时间线：只含终值跳变，按时间戳归组；整查询统一预算截断保证分页不重不漏。
+#[napi]
+pub fn wave_timeline(handle: i64, ids: Vec<String>, from: i64, to: i64, limit: u32) -> Result<String> {
+    check_ids(ids.len())?;
+    if ids.is_empty() || from<0 || to<from || limit==0 || limit>2000 {
+        return Err(Error::from_reason("[INVALID_ARGUMENT] 无效的时间线窗口/预算：limit 1..2000，from ≥ 0，to ≥ from"));
+    }
+    SessionSource::from(Some(handle),None)?.run(|session| {
+        if to>session.trace.end_time {return Err(Error::from_reason("[INVALID_ARGUMENT] --to 超出记录范围"));}
+        let variables: Vec<wave::WaveVar> = ids.iter().map(|id|session.trace.vars.iter().find(|var|&var.id==id && !var.trace_only).cloned()
+            .ok_or_else(||Error::from_reason(format!("[SIGNAL_NOT_FOUND] 信号 id 不存在：{id}")))).collect::<Result<_>>()?;
+        let refs: Vec<_> = variables.iter().collect();
+        let timeline=wave::survey::timeline(session,&refs,from as u64,to as u64,limit as usize).map_err(wave_error)?;
+        serde_json::to_string(&timeline).map_err(|error|Error::from_reason(error.to_string())).and_then(check_payload)
+    })
+}

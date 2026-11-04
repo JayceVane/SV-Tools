@@ -161,5 +161,9 @@ export declare function waveConvertVcdToFst(source: string, target: string): str
 export declare function waveConvertVcdToFstAsync(source: string, target: string): Promise<string>
 /** 记录级同刻变化诊断；不改变稳定值查询语义，不推测真实仿真调度区。 */
 export declare function waveGlitches(handle: number, ids: Array<string>, from: number, to: number, limit: number, maxValues: number): string
+/** 多信号窗口统计（事件数/终值跳变数/首末跳变/X·Z），稳定值口径。 */
+export declare function waveStats(handle: number, ids: Array<string>, from: number, to: number): string
+/** 多信号合并时间线：只含终值跳变，按时间戳归组；整查询统一预算截断保证分页不重不漏。 */
+export declare function waveTimeline(handle: number, ids: Array<string>, from: number, to: number, limit: number): string
 /** 将有界PNG复制为系统图片。解码失败不触碰剪贴板，成功后数据由系统持有。 */
 export declare function writeClipboardPng(png: Buffer): Promise<unknown>

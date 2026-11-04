@@ -310,7 +310,7 @@ if (!nativeBinding) {
   throw new Error(`Failed to load native binding`)
 }
 
-const { SymbolKind, formatText, generateModuleInst, generateTestbench, repeatCode, alignCode, generateHeader, extractSymbols, findSymbolByName, waveOpen, waveSessionOpen, waveSessionOpenAsync, waveSessionClose, waveSessionCount, waveOpenAsync, waveValues, waveChanges, waveEdges, waveSample, waveDiff, waveWindow, waveEdge, waveValuesAsync, waveChangesAsync, waveEdgesAsync, waveSampleAsync, waveDiffAsync, waveWindowAsync, waveEdgeAsync, waveConvertVcdToFst, waveConvertVcdToFstAsync, waveGlitches, writeClipboardPng } = nativeBinding
+const { SymbolKind, formatText, generateModuleInst, generateTestbench, repeatCode, alignCode, generateHeader, extractSymbols, findSymbolByName, waveOpen, waveSessionOpen, waveSessionOpenAsync, waveSessionClose, waveSessionCount, waveOpenAsync, waveValues, waveChanges, waveEdges, waveSample, waveDiff, waveWindow, waveEdge, waveValuesAsync, waveChangesAsync, waveEdgesAsync, waveSampleAsync, waveDiffAsync, waveWindowAsync, waveEdgeAsync, waveConvertVcdToFst, waveConvertVcdToFstAsync, waveGlitches, waveStats, waveTimeline, writeClipboardPng } = nativeBinding
 
 module.exports.SymbolKind = SymbolKind
 module.exports.formatText = formatText
@@ -344,4 +344,6 @@ module.exports.waveEdgeAsync = waveEdgeAsync
 module.exports.waveConvertVcdToFst = waveConvertVcdToFst
 module.exports.waveConvertVcdToFstAsync = waveConvertVcdToFstAsync
 module.exports.waveGlitches = waveGlitches
+module.exports.waveStats = waveStats
+module.exports.waveTimeline = waveTimeline
 module.exports.writeClipboardPng = writeClipboardPng

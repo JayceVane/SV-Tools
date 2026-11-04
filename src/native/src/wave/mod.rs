@@ -13,6 +13,7 @@ pub mod convert;
 pub mod glitches;
 pub mod header;
 pub mod normalize;
+pub mod survey;
 /// 会话句柄注册表：同一文件的多次查询复用一次解析。
 pub mod session;
 pub use header::WaveHeaderEntry;
