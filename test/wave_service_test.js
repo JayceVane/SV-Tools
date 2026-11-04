@@ -154,3 +154,95 @@ test('wave signals --role：RTL 匹配到唯一端口才标方向，垃圾条件
     assert.equal(none.status, 'success');
     assert.deepEqual(none.data.signals, []);
 });
+
+
+const nativeWave = require('../src/waveform/rust-backend').nativeApi;
+const reviewTrace = '$timescale 1 ns $end\n$scope module tb $end\n'
+    + '$var wire 1 ! clk $end\n$var wire 1 " q $end\n$var wire 1 # d $end\n'
+    + '$upscope $end\n$enddefinitions $end\n#0\n0!\n0"\n0#\n'
+    + '#10\n1!\n1"\n1#\n#20\n0!\n#30\n1!\n0"\n0#\n#40\n0!\n#50\n1!\n1"\n0#\n#60\n0!\n';
+
+test('wave sample：条件读取与输出列无关，分页逐条返回全部命中沿', async t => {
+    const directory = await workspace(t, 'trace.vcd', reviewTrace);
+    const command = ['wave', 'sample', '--workspace', directory, '--file', 'trace.vcd', '--clock', 'clk'];
+    const collect = async (signals, where) => {
+        const output = (await run([...command, '--signals', signals, '--where', where])).output;
+        assert.equal(output.status, 'success', JSON.stringify(output));
+        return output.data.samples.map(sample => sample.t);
+    };
+    assert.deepEqual(await collect('q', 'q != d'), ['50']);
+    assert.deepEqual(await collect('q,d', 'q != d'), ['50']);
+    assert.deepEqual(await collect('clk', 'q == d'), ['10', '30']);
+    assert.deepEqual(await collect('clk', "q == 1'b0"), ['30']);
+    const times = [];
+    let cursor;
+    do {
+        const args = [...command, '--signals', 'q', '--limit', '1'];
+        if (cursor !== undefined) args.push('--from', cursor);
+        const page = (await run(args)).output;
+        assert.equal(page.status, 'success', JSON.stringify(page));
+        times.push(...page.data.samples.map(sample => sample.t));
+        cursor = page.data.next;
+    } while (cursor !== null);
+    assert.deepEqual(times, ['10', '30', '50']);
+});
+
+test('wave diff：按全局时间报告首差异，limit 截断仍保留最早差异', async t => {
+    const header = '$timescale 1 ns $end\n$scope module tb $end\n$var wire 1 ! a $end\n$var wire 1 " b $end\n$upscope $end\n$enddefinitions $end\n';
+    const directory = await workspace(t, 'a.vcd', header + '#0\n0!\n0"\n#10\n1"\n#50\n1!\n#60\n');
+    await fsp.writeFile(path.join(directory, 'b.vcd'), header + '#0\n0!\n0"\n#60\n');
+    for (const limit of ['1', '10']) {
+        const response = await run(['wave', 'diff', '--workspace', directory, '--file', 'a.vcd', '--against', 'b.vcd', '--signals', 'a,b', '--limit', limit]);
+        assert.equal(response.exitCode, 0, JSON.stringify(response.output));
+        const data = response.output.data;
+        assert.equal(data.firstDiff.t, '10');
+        assert.equal(data.firstDiff.path, 'tb.b');
+        assert.deepEqual(data.diffs.map(entry => entry.t), limit === '1' ? ['10'] : ['10', '50']);
+        assert.equal(data.totalDiffs, 2);
+    }
+});
+
+test('wave 服务：成功、失败、不同文件及同文件并发均释放各自句柄', async t => {
+    const directory = await workspace(t, 'trace.vcd', reviewTrace);
+    const api = nativeWave(), before = api.waveSessionCount();
+    for (let index = 0; index < 3; index++) {
+        const file = 'trace-' + index + '.vcd';
+        await fsp.writeFile(path.join(directory, file), reviewTrace);
+        assert.equal((await run(['wave', 'signals', '--workspace', directory, '--file', file])).exitCode, 0);
+        assert.equal(api.waveSessionCount(), before);
+    }
+    const failures = [
+        ['wave', 'values', '--workspace', directory, '--file', 'trace.vcd', '--signals', 'missing', '--at', '10'],
+        ['wave', 'diff', '--workspace', directory, '--file', 'trace.vcd', '--against', 'missing.vcd']
+    ];
+    for (const args of failures) {
+        assert.equal((await run(args)).exitCode, 2);
+        assert.equal(api.waveSessionCount(), before);
+    }
+    const results = await Promise.all(['10', '30', '50'].map(time => run([
+        'wave', 'values', '--workspace', directory, '--file', 'trace.vcd', '--signals', 'q', '--at', time
+    ])));
+    assert.ok(results.every(response => response.exitCode === 0));
+    assert.equal(api.waveSessionCount(), before);
+});
+
+test('真实 FST：同一信号的别名共享身份，短名及条件查询与 VCD 一致', async t => {
+    const directory = await workspace(t, 'alias.fst', await fsp.readFile(path.join(__dirname, 'fixtures/waveform/aliases.fst')));
+    const api = nativeWave(), before = api.waveSessionCount();
+    const opened = JSON.parse(api.waveSessionOpen(path.join(directory, 'alias.fst')));
+    try {
+        assert.equal(opened.meta.format, 'fst');
+        const original = opened.meta.vars.find(variable => variable.path === 'tb.q');
+        const alias = opened.meta.vars.find(variable => variable.path === 'tb.dut.q');
+        const other = opened.meta.vars.find(variable => variable.path === 'tb.other');
+        assert.equal(original.id, alias.id);
+        assert.notEqual(original.id, other.id, '相同数值不能被当作同一信号');
+        assert.equal(JSON.parse(api.waveValues(opened.handle, null, 'q', '5000')).values['tb.q'].bits, '1');
+        const sampled = JSON.parse(api.waveSample(opened.handle, null, 'q', 'rise', 'other', -1, null, 10, ['other == q']));
+        assert.deepEqual(sampled.samples.map(sample => sample.t), ['5000']);
+    } finally { api.waveSessionClose(opened.handle); }
+    const response = await run(['wave', 'values', '--workspace', directory, '--file', 'alias.fst', '--signals', 'q', '--at', '5ns']);
+    assert.equal(response.exitCode, 0, JSON.stringify(response.output));
+    assert.equal(response.output.data.values['tb.q'].bits, '1');
+    assert.equal(api.waveSessionCount(), before);
+});

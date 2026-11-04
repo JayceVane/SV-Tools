@@ -11,6 +11,11 @@ const { readSignalRoles } = require('./source-roles');
 const { restorePackedBuses } = require('./packed-buses');
 
 let backend = null;      // Rust 侧会话（每个 worker 一个文件）
+function releaseBackend() {
+    if (backend?.handle == null) return;
+    backend.api.waveSessionClose(backend.handle);
+    backend.handle = null;
+}
 /** 当前会话的 Rust 句柄；查询用它复用同一次解析，不再重开文件。 */
 const handleOf = () => backend?.handle ?? null;
 let variables = null;    // 拆分后的逐位变量表（含 packedSource，取值要用）
@@ -334,6 +339,10 @@ async function open(filePath, sourceContext) {
             fileIdentity: { size: stat.size, mtimeMs: stat.mtimeMs },
             parseMs: Date.now() - startedAt,
         };
+    } catch (error) {
+        releaseBackend();
+        backend = null;
+        throw error;
     } finally {
         loading = false;
     }
@@ -459,6 +468,8 @@ let pendingRequests = 0;
 let closeRequested = false;
 const exitIfIdle = () => {
     if (!closeRequested || pendingRequests !== 0) return;
+    // 在最后一个请求结束后释放，涵盖取消时尚未返回的 open 句柄。
+    releaseBackend();
     // 回执让宿主确认握手完成（它随后 await worker 的 exit）。
     try { parentPort.postMessage({ type: 'closed' }); }
     catch { /* 端口已关，说明已经退到尾声 */ }
@@ -470,15 +481,11 @@ parentPort.on('message', async message => {
     const { requestId, method, params } = message;
     if (method === 'close') {
         closeRequested = true;
-        // 释放 Rust 句柄：worker 退不退出都不该让会话继续占着解析结果。
-        if (backend?.handle != null) {
-            try { backend.api.waveSessionClose(backend.handle); } catch { /* 已释放或模块已卸载 */ }
-            backend.handle = null;
-        }
         // 让已排队的 microtask/macrotask 先跑完，再把退出判断交给 exitIfIdle。
         setImmediate(exitIfIdle);
         return;
     }
+    if (closeRequested) return;
     pendingRequests++;
     try {
         let result;
@@ -511,7 +518,7 @@ parentPort.on('message', async message => {
             if (!backend || loading) throw Object.assign(new Error('VCD 尚未完成加载'), { code: 'VCD_NOT_READY' });
             result = await query(method, params);
         }
-        parentPort.postMessage({ requestId, result });
+        if (!closeRequested) parentPort.postMessage({ requestId, result });
     } catch (error) {
         parentPort.postMessage({
             requestId,

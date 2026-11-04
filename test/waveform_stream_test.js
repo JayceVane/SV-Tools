@@ -68,11 +68,15 @@ test('worker 以单字节流正确处理 UTF-8、元数据、精确查询和进�
 
 test('dispose 取消正在加载的文件并拒绝所有 pending；重复关闭无副作用', async t => {
     const filePath = await fixture(t, header + body);
+    const api = require('../src/waveform/rust-backend').nativeApi();
+    const before = api.waveSessionCount();
     const session = new VcdSession();
     const opening = session.open(filePath);
     const rejected = assert.rejects(opening, error => error.code === 'VCD_DISPOSED');
     await session.dispose();
     await rejected;
+    assert.equal(session.worker.threadId, -1, 'dispose 必须等待 worker 真正退出');
+    assert.equal(api.waveSessionCount(), before, '取消时晚到的 open 句柄也必须释放');
     await assert.rejects(session.values({ ids: ['!'], time: 0 }), error => error.code === 'VCD_DISPOSED');
     await session.dispose();
 });
@@ -196,4 +200,24 @@ test('window 路由：每像素只传真实首末事件，dense 显式计数，�
     await assert.rejects(session.window({ ids: [clockId], start: 3, end: 2, pixels: 10 }), /视窗/);
     await assert.rejects(session.window({ ids: [clockId], start: 0, end: 2, pixels: 10000 }), /像素/);
 });
-
+
+
+
+test('worker 打开后资源校验失败，以及查询中关闭，均释放原生会话', async t => {
+    const file = await fixture(t, header + body);
+    const api = require('../src/waveform/rust-backend').nativeApi();
+    const before = api.waveSessionCount();
+    const rejected = new VcdSession({ maxStoreBytes: 1 });
+    try {
+        await assert.rejects(rejected.open(file), error => error.code === 'VCD_RESOURCE_LIMIT');
+        assert.equal(api.waveSessionCount(), before, '打开失败后即释放，不依赖调用者随后 dispose');
+    } finally { await rejected.dispose(); }
+    const session = new VcdSession();
+    await session.open(file);
+    const query = session.window({ ids: ['!'], start: 0, end: 20, pixels: 10 });
+    const pending = assert.rejects(query, error => error.code === 'VCD_DISPOSED');
+    await session.dispose();
+    await pending;
+    assert.equal(session.worker.threadId, -1);
+    assert.equal(api.waveSessionCount(), before);
+});

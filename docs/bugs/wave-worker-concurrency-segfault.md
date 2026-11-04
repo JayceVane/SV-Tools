@@ -46,7 +46,7 @@ rayon 的全局线程池与 napi 的线程模型叠加后触发访问违例。
    worker 一律走异步入口，不长时间持有 worker 线程；
 2. `session.closeWorker()` 发 `{ method: 'close' }` 而非 `terminate()`，
    等 worker 回执 `{ type: 'closed' }`；
-3. 5 秒宽限期只作兜底（真卡死才强杀）。
+3. 关闭等待真实 `exit`；不按超时强杀仍有原生任务的 worker。取消加载时晚到的句柄在请求排空后释放，见 [波形查询与会话所有权](wave-query-ownership-and-contracts.md)。
 
 ## 复盘：一次归因错误
 

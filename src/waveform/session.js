@@ -105,30 +105,19 @@ class VcdSession {
      * 概率性段错误（exit 139 / 0xC0000005，5 次里约 1 次）。
      *
      * 协议：发 `close` → worker 等在途请求计数归零后回 `closed` 并自行 exit。
-     * 宽限期只用于真卡死的兜底，设得足够长（大文件解析可达数秒）。
+     * 解析不可中断，等待其完成并自然退出，不强制拆除仍有原生任务的 isolate。
      */
     closeWorker() {
         const worker = this.worker;
+        if (worker.threadId === -1) return Promise.resolve();
         return new Promise(resolve => {
-            let settled = false;
-            const finish = () => {
-                if (settled) return;
-                settled = true;
-                clearTimeout(timer);
-                worker.off('message', onMessage);
-                resolve();
-            };
-            const onMessage = message => {
-                if (message?.type === 'closed') finish();
-            };
-            // 兜底：worker 内部计数若因异常永远不到 0，最多等 5 秒再强杀。
-            const timer = setTimeout(() => { worker.terminate().finally(finish); }, 5000);
-            worker.once('exit', finish);
-            worker.on('message', onMessage);
-            try { worker.postMessage({ requestId: -1, method: 'close', params: {} }); }
-            catch { worker.terminate().finally(finish); }
+            // closed 回执只表示请求排空，dispose 还需等原生任务收尾及 isolate 自然退出。
+            // Rust 解析不可中断，不能因超时强杀仍有 napi 任务的 worker。
+            worker.once('exit', resolve);
+            worker.postMessage({ requestId: -1, method: 'close', params: {} });
         });
     }
+
 }
 
 module.exports = { VcdSession };

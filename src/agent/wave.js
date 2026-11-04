@@ -1,5 +1,5 @@
 'use strict';
-/** M4 波形查询服务：VCD 打开与索引缓存、信号/取值/跳变/沿/采样/差异查询。
+/** M4 波形查询服务：VCD/FST 会话、信号/取值/跳变/沿/采样/差异查询。
  * 时间输出一律整数 tick 字符串（JSON 内不出现浮点时标），物理换算并列展示；原始位值与 X/Z 原样保留。 */
 const fs = require('node:fs/promises');
 const path = require('node:path');
@@ -64,16 +64,13 @@ function requireSignals(trace, input) {
     return ids;
 }
 
-/** 已打开会话：绝对路径 → Rust 句柄。CLI 单次进程里最多一条；agent 服务长驻，靠重开与 close 收敛。 */
-const openHandles = new Map();
-
-/** 释放某个文件的会话句柄（幂等，无句柄时无操作）。 */
-function closeTrace(file) {
-    const handle = openHandles.get(file);
-    if (handle === undefined) return;
-    openHandles.delete(file);
-    try { nativeApi().waveSessionClose(handle); }
-    catch { /* 关闭失败不应影响命令结果；进程退出时资源随之释放。 */ }
+/** 单次操作持有独立句柄；成功、失败及并发调用均在自身 finally 中释放。 */
+function ownedQuery(operation) {
+    return async input => {
+        const trace = await openTrace(input);
+        try { return await operation(trace, input); }
+        finally { trace.close(); }
+    };
 }
 
 /** 打开 VCD：Rust 一次解析建立索引，不再落盘缓存。
@@ -90,9 +87,6 @@ async function openTrace(input) {
     if (!stat?.isFile()) fail('SOURCE_NOT_FOUND', 'VCD 文件不存在：' + input.file, { file });
     if (stat.size > MAX_VCD_BYTES) fail('SOURCE_LIMIT', 'VCD 文件超过 2048MiB 上限', { file, size: stat.size });
     const startedAt = Date.now();
-    // 一个命令通常只开一份波形；同名文件重复打开时先释放旧句柄，
-    // 避免长驻进程（agent 服务）里的注册表累积。
-    closeTrace(file);
     let meta, handle = null;
     try {
         const opened = call(() => nativeApi().waveSessionOpen(file));
@@ -104,13 +98,21 @@ async function openTrace(input) {
         // 两者的处置不同（换格式 vs 重新仿真），折叠后调用方无法分派。
         fail(error.code || 'VCD_PARSE', error.message, { file });
     }
-    const after = await fs.stat(file);
-    if (after.size !== stat.size || Math.round(after.mtimeMs) !== Math.round(stat.mtimeMs)) {
-        // 文件在解析期间变了：句柄指向的是旧内容，必须丢弃，避免后续查询读到半旧数据。
-        try { nativeApi().waveSessionClose(handle); } catch { /* 忽略 */ }
-        fail('SOURCE_CHANGED', 'VCD 读取期间文件已变化，请在仿真结束后重试', { file });
+    const close = () => {
+        if (handle === null) return;
+        const owned = handle;
+        handle = null;
+        nativeApi().waveSessionClose(owned);
+    };
+    try {
+        const after = await fs.stat(file);
+        if (after.size !== stat.size || after.mtimeMs !== stat.mtimeMs) {
+            fail('SOURCE_CHANGED', 'VCD 读取期间文件已变化，请在仿真结束后重试', { file });
+        }
+    } catch (error) {
+        close();
+        throw error;
     }
-    openHandles.set(file, handle);
     // CLI 协定的 meta 形状：与旧 JS 版一致（endTime 仍是整数 tick）。
     const normalized = {
         ...meta,
@@ -121,7 +123,7 @@ async function openTrace(input) {
         vars: meta.vars,
     };
     return {
-        options, file, handle, meta: normalized,
+        options, file, handle, close, meta: normalized,
         stats: { cached: false, parseMs: Date.now() - startedAt, loadMs: Date.now() - startedAt,
             fileBytes: stat.size, eventCount: normalized.eventCount },
     };
@@ -171,25 +173,6 @@ function storeChanges(trace, { ids, from, to, limit }) {
     };
 }
 
-/** @returns {{total:number,next:number|null,samples:Array<{t:number,values:Record<string,string|null>}>}} */
-function storeSample(trace, { clock, edge, ids, from, to, limit }) {
-    const clockPath = pathOf(trace, clock);
-    const paths = ids.map(id => pathOf(trace, id));
-    const raw = call(() => nativeApi().waveSample(
-        trace.handle, null, clockPath, edge, paths.join(','), from ?? null, to, limit, null));
-    return {
-        total: raw.scannedEdges,
-        next: raw.next === null ? null : Number(raw.next),
-        samples: raw.samples.map(sample => ({
-            t: Number(sample.t),
-            values: Object.fromEntries(ids.map(id => {
-                const entry = sample.values[pathOf(trace, id)];
-                return [id, entry ? entry.bits ?? null : null];
-            })),
-        })),
-    };
-}
-
 /** CLI 侧 RTL 发现：只读路径集合，交给 source-roles 做有界解析；失败仅降级方向标注。 */
 async function collectRtl(workspace) {
     const files = [];
@@ -212,56 +195,7 @@ async function collectRtl(workspace) {
     return { roots: [workspace], files, ...(truncated ? { truncated: true } : {}) };
 }
 
-/** --where 受限条件：`信号 op [字面量]`，op ∈ == != contains-x contains-z；字面量支持 0b/0x/SV 进制与十进制。 */
-function parseWhere(text) {
-    const match = /^(.+?)\s+(==|!=|contains-x|contains-z)(?:\s+(.+))?$/.exec(String(text).trim());
-    if (!match || (!match[3] && !match[2].includes('contains'))) fail('INVALID_ARGUMENT', '--where 格式无效：' + text + '（示例 "dut.q != 8\'hA5" 或 "dut.bus contains-x"）');
-    return { name: match[1].trim(), operator: match[2], literal: match[3]?.trim() ?? null };
-}
-function literalBits(literal, width) {
-    const text = String(literal).replace(/\s+/g, '');
-    let digits = null, radix = 10;
-    const sv = /^(\d+)'([hbd])([0-9a-f_]+)$/i.exec(text);
-    if (sv) { radix = { h: 16, b: 2, d: 10 }[sv[2].toLowerCase()]; digits = sv[3].replace(/_/g, ''); }
-    else if (/^0b[01_]+$/i.test(text)) { radix = 2; digits = text.slice(2).replace(/_/g, ''); }
-    else if (/^0x[0-9a-f_]+$/i.test(text)) { radix = 16; digits = text.slice(2).replace(/_/g, ''); }
-    else if (/^[0-9_]+$/.test(text)) digits = text.replace(/_/g, '');
-    if (digits === null) fail('INVALID_ARGUMENT', '--where 字面量无效：' + literal + '（支持 0b/0x/十进制与 8\'hA5 风格）');
-    const normalized = digits.replace(/^0+/, '') || '0';
-    let value;
-    try { value = BigInt(radix === 16 ? '0x' + normalized : radix === 2 ? '0b' + normalized : normalized); }
-    catch { fail('INVALID_ARGUMENT', '--where 字面量无效：' + literal); }
-    const bits = value.toString(2);
-    if (bits.length > width) fail('INVALID_ARGUMENT', '--where 字面量超过信号位宽 ' + width, { width });
-    return bits.padStart(width, '0');
-}
-function evaluateWhere(conditions, valuesById, names) {
-    for (const condition of conditions) {
-        const entry = names.get(condition.name);
-        if (!entry) fail('SIGNAL_NOT_FOUND', '--where 引用的信号不存在：' + condition.name);
-        const variable = entry.variable;
-        const raw = valuesById[variable.id];
-        const bits = raw === null || raw === undefined ? null : model.binaryValue(raw, variable.width);
-        if (condition.operator === 'contains-x') { if (!bits || !bits.includes('x')) return false; }
-        else if (condition.operator === 'contains-z') { if (!bits || !bits.includes('z')) return false; }
-        else if (entry.against) {
-            // 信号对信号：按各自位宽规范化后逐位比较，X/Z 参与比较而非通配。
-            const other = valuesById[entry.against.id];
-            const otherBits = other === null || other === undefined ? null : model.binaryValue(other, entry.against.width);
-            const equal = bits !== null && otherBits !== null && otherBits === bits;
-            if (equal !== (condition.operator === '==')) return false;
-        }
-        else {
-            const expected = literalBits(condition.literal, variable.width);
-            const equal = bits !== null && model.binaryValue(expected, variable.width) === bits;
-            if (equal !== (condition.operator === '==')) return false;
-        }
-    }
-    return true;
-}
-
-async function signals(input) {
-    const trace = await openTrace(input);
+async function signals(trace, input) {
     let vars = trace.meta.vars;
     const needle = String(input.query || '').toLowerCase().trim();
     if (needle) vars = vars.filter(variable => (variable.path + (variable.range || '')).toLowerCase().includes(needle));
@@ -299,8 +233,7 @@ function decodedValue(raw, variable) {
     return entry;
 }
 
-async function values(input) {
-    const trace = await openTrace(input);
+async function values(trace, input) {
     if (input.at === undefined) fail('INVALID_ARGUMENT', 'wave values 需要 --at <ticks|时间>');
     const at = parseTick(trace, input.at, '--at');
     if (at > trace.meta.endTime) fail('INVALID_ARGUMENT', '--at 超出 VCD 记录范围', { at: tickString(at), endTime: tickString(trace.meta.endTime) });
@@ -316,8 +249,7 @@ async function values(input) {
     });
 }
 
-async function changes(input) {
-    const trace = await openTrace(input);
+async function changes(trace, input) {
     const to = parseTick(trace, input.to ?? trace.meta.endTime, '--to');
     const from = input.from === undefined ? -1 : parseTick(trace, input.from, '--from') - 1;
     if (from >= to) fail('INVALID_ARGUMENT', '--from 必须早于 --to');
@@ -341,8 +273,7 @@ async function changes(input) {
 }
 
 /** 沿/X/Z 搜索：交由 Rust 处理（含位级投影与分页续查）。 */
-async function edges(input) {
-    const trace = await openTrace(input);
+async function edges(trace, input) {
     const kind = input.kind || 'any';
     if (!['any', 'rise', 'fall', 'x', 'z'].includes(kind)) fail('INVALID_ARGUMENT', '--kind 必须为 any|rise|fall|x|z');
     if (input.signal === undefined) fail('INVALID_ARGUMENT', 'wave edges 需要 --signal <信号>');
@@ -371,91 +302,61 @@ async function edges(input) {
     });
 }
 
-async function sample(input) {
-    const trace = await openTrace(input);
+async function sample(trace, input) {
     if (input.clock === undefined) fail('INVALID_ARGUMENT', 'wave sample 需要 --clock <信号>');
     const clockEdge = input.clockEdge || 'rise';
     if (!['rise', 'fall', 'both'].includes(clockEdge)) fail('INVALID_ARGUMENT', '--clock-edge 必须为 rise|fall|both');
     const clockIds = resolveIds(trace.meta.vars, [input.clock]);
     const ids = requireSignals(trace, input);
     const names = displayPaths(trace.meta);
-    const conditions = (input.where || []).map(parseWhere);
-    const conditionNames = new Map(conditions.map(condition => {
-        const id = resolveIds(trace.meta.vars, [condition.name])[0];
-        const entry = { name: condition.name, variable: displayPaths(trace.meta).get(id) };
-        // 比较右值若唯一命中一个信号则按信号对信号比较，否则按字面量解析。
-        if (condition.literal) {
-            const name = condition.literal;
-            const exact = trace.meta.vars.filter(variable => variable.path === name);
-            const loose = trace.meta.vars.filter(variable => variable.path.endsWith('.' + name) || variable.name === name);
-            const matches = exact.length === 1 ? exact : loose.length === 1 ? loose : exact.length + loose.length > 1 ? [] : null;
-            if (matches === null) entry.against = null;
-            else if (matches.length === 1) entry.against = displayPaths(trace.meta).get(matches[0].id);
-            else fail('SIGNAL_NOT_FOUND', '--where 右值匹配多个信号，请使用完整路径：' + name, { name, candidates: [...new Set([...exact, ...loose])].slice(0, 20).map(variable => variable.path) });
-        }
-        return [condition.name, entry];
-    }));
     const to = parseTick(trace, input.to ?? trace.meta.endTime, '--to');
     const from = input.from === undefined ? -1 : parseTick(trace, input.from, '--from') - 1;
     if (from >= to) fail('INVALID_ARGUMENT', '--from 必须早于 --to');
+    const conditions = input.where || [];
     const limit = Math.min(input.limit || (conditions.length ? 50 : 256), 4096);
-    const hits = [];
-    let cursor = from, scanned = 0, matched = 0, next = null, done = false;
-    while (!done) {
-        const page = storeSample(trace, { clock: clockIds[0], edge: clockEdge, ids, from: cursor, to, limit: 4096 });
-        scanned += page.total;
-        for (const point of page.samples) {
-            if (!conditions.length || evaluateWhere(conditions, point.values, conditionNames)) {
-                matched++;
-                if (hits.length < limit) {
-                    const values = {};
-                    for (const id of ids) values[names.get(id).path] = decodedValue(point.values[id], names.get(id));
-                    hits.push({ t: tickString(point.t), values });
-                // 对外 `next` 是对外 `--from`（闭区间下界），此时这条沿还没返回，+1 就是它。
-                } else { next = tickString(point.t + 1); done = true; break; }
-            }
-        }
-        // 内部 cursor 与 Rust/worker 的 next 同为左开游标（最后一条已返回的沿时刻），直接复用。
-        if (page.next === null) done = true; else cursor = Number(page.next);
-    }
+    // 条件信号由 Rust 按需加载，与输出列无关；同一实现负责条件、采样及分页。
+    const raw = call(() => nativeApi().waveSample(trace.handle, null, pathOf(trace, clockIds[0]),
+        clockEdge, ids.map(id => pathOf(trace, id)).join(','), from, to, limit, conditions));
     return result('wave.sample', {
         file: trace.file, clock: names.get(clockIds[0]).path, clockEdge, from: tickString(from + 1), to: tickString(to),
-        timescale: trace.meta.timescale || null, ...(conditions.length ? { where: input.where } : {}),
-        scannedEdges: scanned, matched, truncated: next !== null, next, samples: hits, stats: trace.stats
+        timescale: trace.meta.timescale || null, ...(conditions.length ? { where: conditions } : {}),
+        scannedEdges: raw.scannedEdges, matched: raw.matched, truncated: raw.next !== null,
+        next: raw.next === null ? null : tickString(Number(raw.next) + 1),
+        samples: raw.samples.map(point => ({ t: point.t, values: Object.fromEntries(ids.map(id => {
+            const variable = names.get(id);
+            return [variable.path, decodedValue(point.values[pathOf(trace, id)]?.bits ?? null, variable)];
+        })) })),
+        stats: trace.stats
     });
 }
 
 /** 双 VCD 同名信号差异：Rust（wellen）双指针逐对比较，输出与 CLI 协定一致。 */
-async function diff(input) {
+async function diff(traceA, input) {
     if (input.against === undefined) fail('INVALID_ARGUMENT', 'wave diff 需要 --against <vcd>');
-    // 两次 openTrace 会各解析一遍文件；Rust 侧 `wave_diff` 内部也各自打开，
-    // 这里保留 openTrace 是为了沿用统一的路径校验、文件变化检测与 stats 输出。
-    const traceA = await openTrace(input);
     const traceB = await openTrace({ ...input, file: input.against });
-    // A 的句柄可能被 B 的 openTrace 关掉（同文件自比对时），而下面的 waveDiff
-    // 直接用路径、不走句柄，所以这里不需要补开。
-    const end = Math.min(traceA.meta.endTime, traceB.meta.endTime);
-    const to = input.to === undefined ? end : parseTick(traceA, input.to, '--to');
-    const from = input.from === undefined ? 0 : parseTick(traceA, input.from, '--from');
-    if (from >= to) fail('INVALID_ARGUMENT', '--from 必须早于 --to');
-    const signals = input.signals === undefined
-        ? null
-        : String(input.signals).split(',').map(name => name.trim()).filter(Boolean).join(',') || null;
-    const raw = call(() => nativeApi().waveDiff(
-        traceA.file, traceB.file, signals, from, to, Math.min(input.limit || 50, 1000)));
-    return result('wave.diff', {
-        ...raw,
-        from: tickString(Number(raw.from)),
-        to: tickString(Number(raw.to)),
-        firstDiff: raw.firstDiff ? { ...raw.firstDiff, t: tickString(Number(raw.firstDiff.t)) } : null,
-        diffs: raw.diffs.map(entry => ({ ...entry, t: tickString(Number(entry.t)) })),
-        stats: { a: traceA.stats, b: traceB.stats },
-    });
+    try {
+        const end = Math.min(traceA.meta.endTime, traceB.meta.endTime);
+        const to = input.to === undefined ? end : parseTick(traceA, input.to, '--to');
+        const from = input.from === undefined ? 0 : parseTick(traceA, input.from, '--from');
+        if (from >= to) fail('INVALID_ARGUMENT', '--from 必须早于 --to');
+        const signals = input.signals === undefined
+            ? null
+            : String(input.signals).split(',').map(name => name.trim()).filter(Boolean).join(',') || null;
+        const raw = call(() => nativeApi().waveDiff(
+            traceA.file, traceB.file, signals, from, to, Math.min(input.limit || 50, 1000)));
+        return result('wave.diff', {
+            ...raw,
+            from: tickString(Number(raw.from)),
+            to: tickString(Number(raw.to)),
+            firstDiff: raw.firstDiff ? { ...raw.firstDiff, t: tickString(Number(raw.firstDiff.t)) } : null,
+            diffs: raw.diffs.map(entry => ({ ...entry, t: tickString(Number(entry.t)) })),
+            stats: { a: traceA.stats, b: traceB.stats },
+        });
+    } finally { traceB.close(); }
 }
 
 /** 时间窗波形图导出：无宿主渲染（document 黑白风格），SVG/PNG 落入工作区目录并返回产物身份。 */
-async function exportImage(input) {
-    const trace = await openTrace(input);
+async function exportImage(trace, input) {
     if (input.out === undefined) fail('INVALID_ARGUMENT', 'wave export 需要 --out <dir>');
     const ids = requireSignals(trace, input);
     const names = displayPaths(trace.meta);
@@ -523,4 +424,6 @@ async function exportImage(input) {
     }, null, [], artifacts);
 }
 
-module.exports = { openTrace, signals, values, changes, edges, sample, diff, exportImage, secondsPerTick };
+module.exports = { openTrace, secondsPerTick,
+    signals: ownedQuery(signals), values: ownedQuery(values), changes: ownedQuery(changes),
+    edges: ownedQuery(edges), sample: ownedQuery(sample), diff: ownedQuery(diff), exportImage: ownedQuery(exportImage) };

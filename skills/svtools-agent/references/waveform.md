@@ -24,7 +24,7 @@ node <svtools-root>/src/cli/main.js wave export --workspace <ws> --file sim/wave
 
 ## 能力边界
 
-- 索引缓存按文件 size+mtime 失效：文件变化后旧查询结果与缓存不得再引用；解析期间文件变化返回 `SOURCE_CHANGED`。
+- 每次 CLI 操作独立持有并释放 Rust 会话，在该次操作内复用解析结果；没有落盘索引缓存。解析期间文件变化返回 `SOURCE_CHANGED`，修改波形后需重新查询。
 - 失败日志自动解析取窗尚未实现：`--at/--from/--to` 时刻由调用者从仿真日志、断言或 TB 输出提供。
 - `wave export` 只有 document 黑白风格（与插件导出共用同一渲染器）；`--out` 必须在工作区内。
 - `wave diff` 比较同名信号（路径+向量 range 配对），窗口事件总量超 200 万标记 `truncated`，此时缩小窗口而不是外推结论。

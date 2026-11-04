@@ -455,7 +455,7 @@ fn declared_path(declaration: &header::DeclaredVar) -> String {
     }
 }
 
-/// 给 wellen 的变量分配稳定 id：有匹配声明时用其符号，否则用 VarRef 序号。
+/// 给 wellen 的变量分配稳定 id：有匹配声明时用其符号，否则用实际 SignalRef（alias 共享同一信号）。
 fn assign_ids(
     hierarchy: &Hierarchy,
     declared: &[header::DeclaredVar],
@@ -466,7 +466,7 @@ fn assign_ids(
         .zip(matched)
         .map(|(var_ref, hit)| match hit {
             Some(item) => declared[item.index].symbol.clone(),
-            None => var_ref.index().to_string(),
+            None => hierarchy[var_ref].signal_ref().index().to_string(),
         })
         .collect()
 }
@@ -683,7 +683,7 @@ fn describe(file: &Path, wave: &mut simple::Waveform) -> WaveResult<WaveTrace> {
     // 信号身份有两个来源：
     // - VCD：用 `$var` 的符号标识（`!`/`#`/`%`…），这是 JS 版、前端缓存与既有测试共同建立的
     //   稳定身份，跨实现可对拍；
-    // - FST：没有等价概念，退回 VarRef 序号（同文件内稳定）。
+    // - FST：使用实际 SignalRef 序号，保持同一信号的别名共享身份。
     //
     // 关键约束：wellen 会把「同名 + 相邻位号」的逐位声明**合并成一个向量**
     // （为兼容 ModelSim/Questa 的逐位 dump），变量数因此少于 `$var` 声明数。
@@ -1766,24 +1766,11 @@ pub fn resolve_where(
                 .iter()
                 .filter(|var| var.path.ends_with(&format!(".{}", literal)) || var.name == *literal)
                 .collect();
-            let matches = if exact.len() == 1 {
-                Some(exact[0])
-            } else if loose.len() == 1 {
-                Some(loose[0])
-            } else if exact.len() + loose.len() > 1 {
-                let candidates: Vec<String> = exact
-                    .iter()
-                    .chain(loose.iter())
-                    .map(|var| var.path.clone())
-                    .take(20)
-                    .collect();
-                return Err(WaveError::new(
-                    "SIGNAL_NOT_FOUND",
-                    format!("--where 右值匹配多个信号，请使用完整路径：{}", literal),
-                )
-                .with_candidates(candidates));
-            } else {
+            let matches = if exact.is_empty() && loose.is_empty() {
                 None
+            } else {
+                // 别名按实际信号身份判重，不能把同一个 RHS 信号的两条声明当成歧义。
+                Some(resolve_ids(vars, &[literal.as_str()])?[0])
             };
             if let Some(matched) = matches {
                 against = Some((matched.id.clone(), matched.width, matched.packed_source.clone()));
@@ -1902,7 +1889,7 @@ fn event_series(session: &mut WaveSession, var: &WaveVar) -> Vec<(u64, String)> 
 ///
 /// 语义对照 JS 版 `diff`：以 `from` 时刻的「≤ from 的最后一次取值」为初始状态，
 /// 然后双指针按时刻合并推进，只在「相同→不同」的跳变处记一条差异（不重复计持续差异）。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq, PartialOrd, Ord)]
 pub struct WaveDiffEntry {
     pub path: String,
     pub t: String,
@@ -1955,8 +1942,20 @@ pub fn diff_pair_series(
     limit: usize,
 ) -> WaveDiffOutcome {
     let start = from.max(0) as u64;
-    let mut entries = Vec::new();
-    let mut first: Option<WaveDiffEntry> = None;
+    let mut entries = std::collections::BinaryHeap::new();
+    let mut first: Option<(u64, WaveDiffEntry)> = None;
+    let mut record = |time: u64, entry: WaveDiffEntry| {
+        let ranked = (time, entry);
+        if first.as_ref().is_none_or(|current| ranked < *current) {
+            first = Some(ranked.clone());
+        }
+        if entries.len() < limit {
+            entries.push(ranked);
+        } else if entries.peek().is_some_and(|last| ranked < *last) {
+            entries.pop();
+            entries.push(ranked);
+        }
+    };
     let mut total_diffs = 0usize;
     let mut differing_signals = 0usize;
     let mut truncated = false;
@@ -1980,13 +1979,7 @@ pub fn diff_pair_series(
 
         if differing {
             total_diffs += 1;
-            let entry = diff_entry(var_a, start, &value_a, &value_b);
-            if first.is_none() {
-                first = Some(entry.clone());
-            }
-            if entries.len() < limit {
-                entries.push(entry);
-            }
+            record(start, diff_entry(var_a, start, &value_a, &value_b));
         }
 
         while budget > 0 {
@@ -2016,13 +2009,7 @@ pub fn diff_pair_series(
                 if now_differing {
                     total_diffs += 1;
                     had_difference = true;
-                    let entry = diff_entry(var_a, time, &value_a, &value_b);
-                    if first.is_none() {
-                        first = Some(entry.clone());
-                    }
-                    if entries.len() < limit {
-                        entries.push(entry);
-                    }
+                    record(time, diff_entry(var_a, time, &value_a, &value_b));
                 }
                 differing = now_differing;
             }
@@ -2035,6 +2022,8 @@ pub fn diff_pair_series(
         }
     }
 
+    let first = first.map(|(_, entry)| entry);
+    let entries = entries.into_sorted_vec().into_iter().map(|(_, entry)| entry).collect();
     WaveDiffOutcome { pairs: keys.len(), total_diffs, differing_signals, truncated, first, entries }
 }
 
@@ -2171,21 +2160,17 @@ pub fn window_series(
             series.push(WaveWindowSeries { id: var.id.clone(), changes, dense });
             continue;
         };
-        // 事件索引与时刻一次性取出：桶切分需要按时刻二分，逐次 get_offset 会重复走链。
-        // 位串先按 packed_source 归一，否则 1 位行会画出整条源向量的值。
-        let events: Vec<(u64, String)> = signal
-            .iter_changes()
-            .map(|(index, _)| index)
-            .filter_map(|index| {
-                let time = session.time_at(index);
-                let offset = signal.get_offset(index)?;
-                let bits = value_bits(signal.get_value_at(&offset, 0))?;
-                Some((time, project_packed_source(bits, var.width, var.packed_source.as_ref())))
-            })
-            .collect();
-        let upper_bound = |time: u64| -> usize { events.partition_point(|(t, _)| *t <= time) };
+        // 直接二分 wellen 的索引，只解码像素桶的首末事件；不复制整条历史。
+        let indices = signal.time_indices();
+        let upper_bound = |time: u64| indices.partition_point(|index| session.time_at(*index) <= time);
         let push = |changes: &mut Vec<WaveChange>, index: usize| {
-            changes.push(WaveChange { t: events[index].0.to_string(), bits: events[index].1.clone() });
+            let time_index = indices[index];
+            if let Some(offset) = signal.get_offset(time_index) {
+                if let Some(raw) = value_bits(signal.get_value_at(&offset, 0)) {
+                    let bits = project_packed_source(raw, var.width, var.packed_source.as_ref());
+                    changes.push(WaveChange { t: session.time_at(time_index).to_string(), bits });
+                }
+            }
         };
         let mut left = upper_bound(start_time);
         if left > 0 {
@@ -2207,8 +2192,8 @@ pub fn window_series(
                         push(&mut changes, right - 1);
                         if count > 2 {
                             dense.push(WaveDense {
-                                start: events[left].0.to_string(),
-                                end: events[right - 1].0.to_string(),
+                                start: session.time_at(indices[left]).to_string(),
+                                end: session.time_at(indices[right - 1]).to_string(),
                                 count,
                             });
                         }

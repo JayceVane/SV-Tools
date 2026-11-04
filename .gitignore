@@ -53,6 +53,11 @@ test/helpers/*
 !test/helpers/waveform-client-harness.js
 !test/fixtures/
 test/fixtures/*
+!test/fixtures/waveform/
+test/fixtures/waveform/*
+!test/fixtures/waveform/*.sv
+!test/fixtures/waveform/*.vcd
+!test/fixtures/waveform/*.fst
 !test/fixtures/memory_dump.sv
 !test/fixtures/memory_dump.vcd
 !test/fixtures/circuit-demo.sv
