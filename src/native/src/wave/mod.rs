@@ -9,6 +9,7 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 use wellen::{simple, Hierarchy, SignalRef, VarRef};
 
+pub mod convert;
 pub mod header;
 pub mod normalize;
 /// 会话句柄注册表：同一文件的多次查询复用一次解析。
@@ -214,7 +215,7 @@ fn format_name(hierarchy: &Hierarchy) -> &'static str {
     }
 }
 
-fn is_bit_dump(var: &WaveVar, declared: &[header::DeclaredVar]) -> bool {
+fn is_bit_dump(var: &WaveVar, bit_counts: &HashMap<(&str, &str), usize>) -> bool {
     if var.range.is_none() || var.msb.is_none() {
         return false;
     }
@@ -230,11 +231,7 @@ fn is_bit_dump(var: &WaveVar, declared: &[header::DeclaredVar]) -> bool {
     // `[-1:-3]`，`-4` 孤立）。只要这一组是逐位声明，就把向量按 msb/lsb 展开成位，
     // 未合并的位由它们自己的单位变量承担，上层再一起按 RTL 重排。
     let base = var.name.split('[').next().unwrap_or(&var.name);
-    let bits: Vec<&header::DeclaredVar> = declared
-        .iter()
-        .filter(|item| item.scope == var.scope && item.name == base && item.width == 1 && item.msb.is_some())
-        .collect();
-    bits.len() > 1
+    bit_counts.get(&(var.scope.as_str(), base)).copied().unwrap_or(0) > 1
 }
 
 
@@ -266,9 +263,14 @@ fn bit_layout(var: &WaveVar) -> Vec<(i64, usize)> {
 ///
 /// 展开后的单位变量 id 形如 `<原id>#<位号>`，并带 `packedSource` 供取值时按位切片。
 fn expand_bit_dumps(vars: Vec<WaveVar>, declared: &[header::DeclaredVar]) -> Vec<WaveVar> {
+    // 同一声明表只统计一次，避免大规模逐位 dump 的 O(变量数×声明数) 扫描。
+    let mut bit_counts = HashMap::new();
+    for item in declared.iter().filter(|item| item.width == 1 && item.msb.is_some()) {
+        *bit_counts.entry((item.scope.as_str(), item.name.as_str())).or_insert(0usize) += 1;
+    }
     let mut expanded = Vec::with_capacity(vars.len());
     for var in vars {
-        if !is_bit_dump(&var, declared) {
+        if !is_bit_dump(&var, &bit_counts) {
             expanded.push(var);
             continue;
         }
@@ -356,7 +358,7 @@ fn project_packed_source(bits: String, width: u32, packed: Option<&PackedSource>
 /// 1. **符号精确匹配**：wellen 的变量（路径 + 位宽）恰好对应一条 `$var` 声明时，用其符号。
 /// 2. **合并向量匹配**：wellen 把「同作用域 + 同名 + 相邻位号」的逐位声明合并成一个向量
 ///    （ModelSim/Questa 逐位 dump），此时用**首个成员声明的符号**作为该向量身份。
-/// 3. **回退序号**：FST 无符号概念，或结构对不上时用 VarRef 序号（同文件内稳定）。
+/// 3. **回退序号**：FST 无符号概念，或结构对不上时用实际 SignalRef 序号（别名共享身份）。
 ///
 /// 这条规则是从实测错位反推出来的：曾按「声明顺序逐一对齐」，合并后变量数变少，
 /// 导致后续所有 id 整体偏移（`#` 被标成 `%`），查询与别名判定全部失效。
@@ -372,12 +374,34 @@ struct Match {
     exact: bool,
 }
 
-/// 由 wellen 的层级树生成扁平作用域表（JS 合同：`{type,name,path,parentId}`）。
-///
-/// 必须遍历 wellen 的作用域而不是从变量表反推：空作用域（没有任何 `$var`）也要
-/// 出现在信号树里，否则前端层级会缺分支。父下标用 `path` 前缀匹配填，这样与
-
-
+/// FST 没有 VCD 文本头，直接遍历真实 ScopeRef，并记录变量所属作用域。
+/// 不从点分路径猜父级：实例名可含点，空作用域也必须保留。
+fn waveform_hierarchy(hierarchy: &Hierarchy) -> WaveResult<(Vec<header::DeclaredScope>, HashMap<VarRef, usize>)> {
+    let mut scopes: Vec<header::DeclaredScope> = Vec::new();
+    let mut variables = HashMap::new();
+    let mut pending: Vec<_> = hierarchy.scopes().map(|scope| (scope, None::<usize>, 0usize)).collect();
+    pending.reverse();
+    while let Some((scope_ref, parent_id, depth)) = pending.pop() {
+        let scope = &hierarchy[scope_ref];
+        let name = scope.name(hierarchy).to_string();
+        let path = match parent_id {
+            Some(parent) => format!("{}.{}", scopes[parent].path, name),
+            None => name.clone(),
+        };
+        if depth >= header::MAX_SCOPE_DEPTH || path.len() > header::MAX_REFERENCE_LENGTH
+            || scopes.len() >= header::MAX_VARIABLES {
+            return Err(WaveError::new("VCD_RESOURCE_LIMIT", "波形作用域超过安全深度、路径长度或数量上限"));
+        }
+        let id = scopes.len();
+        scopes.push(header::DeclaredScope {
+            scope_type: format!("{:?}", scope.scope_type()).to_ascii_lowercase(), name, path, parent_id,
+        });
+        for variable in scope.vars(hierarchy) { variables.insert(variable, id); }
+        let children: Vec<_> = scope.scopes(hierarchy).collect();
+        pending.extend(children.into_iter().rev().map(|child| (child, Some(id), depth + 1)));
+    }
+    Ok((scopes, variables))
+}
 
 /// 为 wellen 的每个变量找到它对应的 `$var` 声明（若有）。
 ///
@@ -689,7 +713,16 @@ fn describe(file: &Path, wave: &mut simple::Waveform) -> WaveResult<WaveTrace> {
     // （为兼容 ModelSim/Questa 的逐位 dump），变量数因此少于 `$var` 声明数。
     // 合并后的向量语义上对应「该组逐位声明的整体」，因此取**首个成员的符号**作为其身份；
     // 逐一按声明顺序对齐会整体错位（实测 `#` 被标成 `%`）。
-    let (scopes, declared) = header::declared_hierarchy(file, format_name(hierarchy))?;
+    let (declared_scopes, declared) = header::declared_hierarchy(file, format_name(hierarchy))?;
+    let binary_hierarchy = format_name(hierarchy) != "vcd";
+    let (fst_bit_declarations, fst_end) = if format_name(hierarchy) == "fst" {
+        header::fst_bit_declarations(file)?
+    } else { (Vec::new(), 0) };
+    let (scopes, variable_scopes) = if binary_hierarchy {
+        waveform_hierarchy(hierarchy)?
+    } else {
+        (declared_scopes, HashMap::new())
+    };
     let matched = match_declarations(hierarchy, &declared);
     let ids = assign_ids(hierarchy, &declared, &matched);
     // wellen 用 VarRef 迭代全部变量（含各层级），每个 alias 是独立 VarRef。
@@ -768,8 +801,12 @@ fn describe(file: &Path, wave: &mut simple::Waveform) -> WaveResult<WaveTrace> {
         // `$scope module x`，按路径查只会命中最后一条，前端层级校验就断了。
         let scope_id = match matched.get(position).copied().flatten().map(|item| &declared[item.index]) {
             Some(item) => item.scope_id,
+            None if binary_hierarchy => variable_scopes.get(&var_ref).copied(),
             None => scopes.iter().position(|entry| entry.path == scope),
         };
+        let scope = if binary_hierarchy {
+            scope_id.map(|id| scopes[id].path.clone()).unwrap_or_default()
+        } else { scope };
         let entry = WaveVar {
             id: id.clone(),
             path,
@@ -797,7 +834,8 @@ fn describe(file: &Path, wave: &mut simple::Waveform) -> WaveResult<WaveTrace> {
 
     // wellen 的 Time 是 u64；JS 合同用整数 tick 字符串，超出 i64 的记录极少见，
     // 这里饱和到 i64::MAX 而不是 panic。
-    let end_time = wave.time_table().last().copied().unwrap_or(0).min(i64::MAX as u64) as i64;
+    // FST 的结束时刻可晚于最后一个 value-change（尤其是 event-only 波形）。
+    let end_time = wave.time_table().last().copied().unwrap_or(0).max(fst_end).min(i64::MAX as u64) as i64;
     let format = match hierarchy.file_format() {
         wellen::FileFormat::Vcd => "vcd",
         wellen::FileFormat::Fst => "fst",
@@ -813,7 +851,7 @@ fn describe(file: &Path, wave: &mut simple::Waveform) -> WaveResult<WaveTrace> {
     let vars = attach_change_counts(vars, &var_refs, wave.hierarchy(), &per_signal);
     // 逐位 dump：按 msb/lsb 精确展开成单位变量，交给上层按 RTL 范围重排。
     // wellen 的合并是声明顺序贪心，位集合不完整，不能直接当位来源。
-    let vars = expand_bit_dumps(vars, &declared);
+    let vars = expand_bit_dumps(vars, if binary_hierarchy { &fst_bit_declarations } else { &declared });
     Ok(WaveTrace {
         file: file.display().to_string(),
         vars,

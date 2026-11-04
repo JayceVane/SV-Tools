@@ -122,16 +122,19 @@ function createIcarusRunner(deps) {
     }
     function runtimeInvocation(prep) {
         const { flags, extended } = simulationArguments(prep.config.get('simArgs', []));
-        const dumper = String(prep.toolchain.env?.IVERILOG_DUMPER || 'vcd').toLowerCase();
-        const vcd = dumper === 'vcd'
-            && !extended.some(value => /^-(?:fst|lxt2?)(?:-(?:none|off))?$/.test(value));
+        let dumper = String(prep.toolchain.env?.IVERILOG_DUMPER || 'vcd').toLowerCase();
+        for (const argument of extended) {
+            const selected = /^-(vcd|fst(?:-(?:speed|space))?|lxt2?)(?:-(?:none|off))?$/.exec(argument);
+            if (selected) dumper = selected[1];
+        }
+        const vcd = dumper === 'vcd';
         const automatic = vcd && !extended.some(value => value.startsWith('-dumpfile='));
         if (automatic) extended.push('-dumpfile=' + prep.defaultVcd);
         const args = [...(prep.toolchain.vvpPrefix || []), '-n', ...flags, prep.vvpFile, ...extended];
         const stdbuf = prep.toolchain.cygwinDir && path.join(prep.toolchain.cygwinDir, 'stdbuf.exe');
         return process.platform === 'win32' && stdbuf && fs.existsSync(stdbuf)
-            ? { command: stdbuf, args: ['-oL', prep.toolchain.vvp, ...args], extended, automatic, vcd, wrappedProcessName: 'vvp.exe' }
-            : { command: prep.toolchain.vvp, args, extended, automatic, vcd };
+            ? { command: stdbuf, args: ['-oL', prep.toolchain.vvp, ...args], extended, automatic, vcd, dumper, wrappedProcessName: 'vvp.exe' }
+            : { command: prep.toolchain.vvp, args, extended, automatic, vcd, dumper };
     }
     async function simulate(task, document) {
         const prep = await prepareSimulation(task, document);
@@ -147,8 +150,10 @@ function createIcarusRunner(deps) {
         const overridden = invocation.extended.filter(value => value.startsWith('-dumpfile=')).map(value => value.slice(10)).filter(Boolean);
         // 不同vvp/dumper可能保留原名或补后缀；条件dumpfile仍可能不执行，保守保护所有候选。
         const defaultDumpfiles = overridden.length ? overridden.flatMap(name => path.extname(name) ? [name]
-            : [name, ...['vcd', 'fst', 'lxt', 'lxt2'].map(extension => name + '.' + extension)]) : ['dump.vcd'];
+            : [name, ...['vcd', 'fst', 'lxt', 'lxt2'].map(extension => name + '.' + extension)]) : [invocation.dumper.startsWith('fst') ? 'dump.fst' : 'dump.vcd'];
         const waveforms = await simulationWaveforms({ files: files || prep.files, directory: prep.fileDir, includePaths, defaultDumpfiles, signal: task.signal });
+        const extension = invocation.dumper.startsWith('fst') ? '.fst' : '.vcd';
+        waveforms.paths = [...new Set(waveforms.paths.flatMap(file => path.extname(file) ? [file] : [file, file + extension]))];
         // 宏内的dumpvars可能无法静态识别，明确的运行参数目标仍必须关闭、保护并查询。
         if (overridden.length) waveforms.paths = [...new Set([...waveforms.paths, ...defaultDumpfiles.map(file => path.resolve(prep.fileDir, file))])];
         if (waveforms.uncertain) channel.appendLine('波形路径含动态表达式或未完整解析：本次仿真目录内已打开的波形将先关闭。');
@@ -180,6 +185,8 @@ function createIcarusRunner(deps) {
                 if (target !== file) { await archiveVcd(file, target); channel.appendLine('波形已归档：' + target); }
                 waves.push(target);
             }
+            if (deps.postprocessWaveforms) waves = await deps.postprocessWaveforms(waves, task, document);
+            task.throwIfCancelled();
         } finally {
             try { await archiveLease?.dispose(); } finally { await lease?.dispose(); }
         }

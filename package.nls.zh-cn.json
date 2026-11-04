@@ -54,7 +54,7 @@
   "cmd.iverilog_lint.title": "Icarus Verilog: 语法检查当前文件",
   "cmd.iverilog_simulate.title": "Icarus Verilog: 运行仿真",
   "cmd.iverilog_stopSimulation.title": "Icarus Verilog: 停止仿真",
-  "cmd.iverilog_openWaveform.title": "Icarus Verilog: 打开 VCD 波形查看器",
+  "cmd.iverilog_openWaveform.title": "Icarus Verilog: 打开 VCD/FST 波形查看器",
   "cmd.iverilog_waveformFromText.title": "VCD: 以波形打开",
   "cmd.iverilog_showText.title": "VCD: 以文本显示",
   "cmd.vivado_runScript.title": "Vivado: 运行 TCL 脚本",
@@ -129,5 +129,6 @@
   "cmd.project.refresh.title": "刷新工程",
   "cfg.project.traceTrigger.desc": "工程信号走向的触发方式，也可在工程操作菜单中切换。",
   "cfg.project.traceTrigger.selection": "选中信号后自动追踪，短暂防抖并复用静态模型。",
-  "cfg.project.traceTrigger.manual": "仅通过编辑器右键或工程命令手动追踪。"
+  "cfg.project.traceTrigger.manual": "仅通过编辑器右键或工程命令手动追踪。",
+  "cfg.waveform_convertVcdToFst.desc": "仿真成功后，使用内嵌转换器将本轮生成的 VCD 转为 FST（无需安装 GTKWave）。默认关闭；转换成功后才删除 VCD，失败保留原文件。已有同名 FST 不覆盖，新文件使用递增编号。"
 }

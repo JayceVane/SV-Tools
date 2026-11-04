@@ -665,3 +665,12 @@ wave_async!(wave_sample_async, WaveSampleTask, wave_sample, (handle: Option<i64>
 wave_async!(wave_diff_async, WaveDiffTask, wave_diff, (file: String, against: String, signals: Option<String>, from: Option<i64>, to: Option<i64>, limit: Option<u32>));
 wave_async!(wave_window_async, WaveWindowTask, wave_window, (handle: Option<i64>, file: Option<String>, ids: Vec<String>, start: i64, end: i64, pixels: u32));
 wave_async!(wave_edge_async, WaveEdgeTask, wave_edge, (handle: Option<i64>, file: Option<String>, id: String, time: i64, direction: String, bit_offset: Option<u32>, bit_width: Option<u32>, continuation: Option<u32>));
+
+
+/// 异步流式压缩；只创建新目标，不覆盖或删除源文件。
+#[napi]
+pub fn wave_convert_vcd_to_fst(source: String, target: String) -> Result<String> {
+    let result = wave::convert::convert(std::path::Path::new(&source), std::path::Path::new(&target)).map_err(wave_error)?;
+    serde_json::to_string(&result).map_err(|e| Error::from_reason(e.to_string()))
+}
+wave_async!(wave_convert_vcd_to_fst_async, WaveConvertTask, wave_convert_vcd_to_fst, (source: String, target: String));

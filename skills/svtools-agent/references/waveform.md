@@ -1,8 +1,10 @@
 # 波形查询与调试取证
 
-用于「仿真失败 → 定位首个错误窗口 → 修复 → 复验 → 取证」。CLI 的 `wave` 命令族直接查询 VCD 事件数据，返回原始位值与整数 tick 字符串；不要把完整波形或大窗口原始数据整段交给模型。
+用于「仿真失败 → 定位首个错误窗口 → 修复 → 复验 → 取证」。CLI 的 `wave` 命令族直接查询 VCD/FST 事件数据，返回原始位值与整数 tick 字符串；不要把完整波形或大窗口原始数据整段交给模型。
 
 ## 查询约束
+
+`wave signals --scope tb.dut` 对 VCD/FST 均按真实作用域筛选，包含所选实例的子层级；别名保留各自声明路径。
 
 - 信号用完整层级路径最稳（`tb.u_dut.q`）；短名只有唯一命中才有效，同一 net 的 alias（如 `tb.clk` 与 `tb.u_dut.clk`）共享 id，不算歧义。未命中与多 id 歧义都会返回 `SIGNAL_NOT_FOUND` 与候选列表，不要猜名字重试。
 - 时间输入裸整数 ticks 或带单位物理时间（`1250ns`）；物理单位要求 VCD 声明 timescale。输出时刻一律是整数 tick 字符串，浮点 JSON 不承载 fs 精度。
@@ -29,3 +31,6 @@ node <svtools-root>/src/cli/main.js wave export --workspace <ws> --file sim/wave
 - `wave export` 只有 document 黑白风格（与插件导出共用同一渲染器）；`--out` 必须在工作区内。
 - `wave diff` 比较同名信号（路径+向量 range 配对），窗口事件总量超 200 万标记 `truncated`，此时缩小窗口而不是外推结论。
 - VCD↔源码/电路的实例映射与驱动锥联动尚未交付；沿驱动关系定位源码用 `design arch` 的连接事实与 `wave signals --role` 的 RTL 匹配组合完成。波形查询是数据事实，不构成功能验证结论；复验通过以同一规则再次仿真的结果为准。
+
+
+编辑器设置 `svtools.waveform.convertVcdToFst` 默认关闭。开启后仅对成功仿真的本轮 VCD 进行内嵌转换，转换验证成功才删除源文件；失败/取消保留原 VCD。该设置不改变 CLI 只读查询的输入，不会在查询时转换用户文件。FST 与 VCD 使用相同查询命令；读取时以实际文件内容识别格式。

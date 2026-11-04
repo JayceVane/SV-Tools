@@ -156,5 +156,8 @@ export declare function waveSampleAsync(handle: number | undefined | null, file:
 export declare function waveDiffAsync(file: string, against: string, signals?: string | undefined | null, from?: number | undefined | null, to?: number | undefined | null, limit?: number | undefined | null): Promise<string>
 export declare function waveWindowAsync(handle: number | undefined | null, file: string | undefined | null, ids: Array<string>, start: number, end: number, pixels: number): Promise<string>
 export declare function waveEdgeAsync(handle: number | undefined | null, file: string | undefined | null, id: string, time: number, direction: string, bitOffset?: number | undefined | null, bitWidth?: number | undefined | null, continuation?: number | undefined | null): Promise<string>
+/** 异步流式压缩；只创建新目标，不覆盖或删除源文件。 */
+export declare function waveConvertVcdToFst(source: string, target: string): string
+export declare function waveConvertVcdToFstAsync(source: string, target: string): Promise<string>
 /** 将有界PNG复制为系统图片。解码失败不触碰剪贴板，成功后数据由系统持有。 */
 export declare function writeClipboardPng(png: Buffer): Promise<unknown>

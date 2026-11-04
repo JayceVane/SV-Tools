@@ -23,10 +23,10 @@ const MAX_SCAN_BYTES: u64 = 8 * 1024 * 1024;
 /// 这些护栏防的是**损坏或恶意头部**，不是正常大设计：
 /// 一条位宽 40 亿的 `$var` 在逐位展开时会按下标申请等量内存；
 /// 十万层嵌套作用域会让路径拼接退化成 O(n²)。
-const MAX_VARIABLES: usize = 1_000_000;
+pub(super) const MAX_VARIABLES: usize = 1_000_000;
 const MAX_SIGNAL_WIDTH: u32 = 16 * 1024 * 1024 - 1;
-const MAX_SCOPE_DEPTH: usize = 256;
-const MAX_REFERENCE_LENGTH: usize = 65536;
+pub(super) const MAX_SCOPE_DEPTH: usize = 256;
+pub(super) const MAX_REFERENCE_LENGTH: usize = 65536;
 
 fn limit_error(message: String) -> WaveError {
     WaveError::new("VCD_RESOURCE_LIMIT", message)
@@ -339,4 +339,72 @@ mod tests {
     }
 }
 
-
+/// FST 读取器也会贪心合并逐位声明。补读原始声明用于展开位来源；
+/// 作用域 identity 仍取 wellen 的 ScopeRef，不以字符串猜测父子关系。
+pub fn fst_bit_declarations(file: &Path) -> WaveResult<(Vec<DeclaredVar>, u64)> {
+    use fst_reader::{FstHierarchyEntry, FstReader};
+    let input =
+        std::fs::File::open(file).map_err(|e| WaveError::new("VCD_PARSE", e.to_string()))?;
+    let checked = super::catch_library_panic(|| -> WaveResult<_> {
+        let mut reader = FstReader::open(std::io::BufReader::new(input))
+            .map_err(|e| WaveError::new("VCD_PARSE", e.to_string()))?;
+        let header = reader.get_header();
+        if header.var_count > MAX_VARIABLES as u64 {
+            return Err(limit_error("FST 信号声明过多".into()));
+        }
+        let mut stack: Vec<String> = Vec::new();
+        let mut declarations = Vec::new();
+        let mut error = None;
+        reader
+            .read_hierarchy(|entry| {
+                if error.is_some() {
+                    return;
+                }
+                match entry {
+                    FstHierarchyEntry::Scope { name, .. } => {
+                        let path = stack
+                            .last()
+                            .map(|parent| format!("{parent}.{name}"))
+                            .unwrap_or(name);
+                        if stack.len() >= MAX_SCOPE_DEPTH || path.len() > MAX_REFERENCE_LENGTH {
+                            error = Some(limit_error("FST 作用域超过安全上限".into()));
+                            return;
+                        }
+                        stack.push(path);
+                    }
+                    FstHierarchyEntry::UpScope => {
+                        stack.pop();
+                    }
+                    FstHierarchyEntry::Var {
+                        name,
+                        length,
+                        handle,
+                        ..
+                    } if length == 1 => {
+                        // 有独立 packed 下标才认作逐位 dump；mem[addr] 不据此猜成总线。
+                        if let Some((base, index)) = name.rsplit_once(char::is_whitespace) {
+                            if let Some(msb) = parse_index(index) {
+                                declarations.push(DeclaredVar {
+                                    symbol: handle.get_index().to_string(),
+                                    name: base.trim_end().to_string(),
+                                    width: 1,
+                                    msb: Some(msb),
+                                    range: Some(index.to_string()),
+                                    scope: stack.last().cloned().unwrap_or_default(),
+                                    scope_id: None,
+                                });
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            })
+            .map_err(|e| WaveError::new("VCD_PARSE", e.to_string()))?;
+        if let Some(error) = error {
+            return Err(error);
+        }
+        Ok((declarations, header.end_time))
+    })
+    .map_err(|detail| WaveError::new("VCD_PARSE", format!("FST 声明读取失败：{detail}")))?;
+    checked
+}

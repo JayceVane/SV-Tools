@@ -8,7 +8,7 @@ const { createImageFiles } = require('../graphics/image-files');
 const { createLayoutFiles } = require('./layout-files');
 const { createWaveformRegistry } = require('./registry');
 
-/** 注册 VCD 自定义编辑器、仿真联动入口和文本/波形切换命令。 */
+/** 注册 VCD/FST 自定义编辑器、仿真联动入口和文本/波形切换命令。 */
 function activateWaveViewer(context, deps) {
     const vscode = deps?.vscode || require('vscode');
     const registry = createWaveformRegistry();
@@ -53,9 +53,9 @@ function activateWaveViewer(context, deps) {
         try {
             const tabs = (vscode.window.tabGroups?.all || []).flatMap(group => group.tabs).filter(tab => {
                 const uri = tab.input?.uri;
-                return uri?.scheme === 'file' && /\.vcd$/i.test(uri.fsPath) && registry.isWriting(uri.fsPath);
+                return uri?.scheme === 'file' && /\.(vcd|fst)$/i.test(uri.fsPath) && registry.isWriting(uri.fsPath);
             });
-            if (tabs.length && !await vscode.window.tabGroups.close(tabs, true)) throw new Error('对应VCD标签未关闭，仿真未启动。');
+            if (tabs.length && !await vscode.window.tabGroups.close(tabs, true)) throw new Error('对应波形标签未关闭，仿真未启动。');
             return lease;
         } catch (error) { lease.dispose(); throw error; }
     }
@@ -72,7 +72,7 @@ function activateWaveViewer(context, deps) {
     context.subscriptions.push(
         vscode.commands.registerCommand('svtools.iverilog.waveformFromText', () => {
             const uri = activeUri();
-            if (!uri) { vscode.window.showWarningMessage('没有打开的 VCD 文件。'); return; }
+            if (!uri) { vscode.window.showWarningMessage('没有打开的波形文件。'); return; }
             return vscode.commands.executeCommand('vscode.openWith', uri, 'svtoolsWaveViewer');
         }),
         vscode.commands.registerCommand('svtools.iverilog.showText', () => {
@@ -81,7 +81,7 @@ function activateWaveViewer(context, deps) {
         }),
         vscode.commands.registerCommand('svtools.iverilog.openWaveform', async () => {
             const picked = await vscode.window.showOpenDialog({ canSelectMany: false,
-                filters: { 'VCD Waveform': ['vcd'], 'All Files': ['*'] } });
+                filters: { 'Waveform (VCD/FST)': ['vcd', 'fst'], 'All Files': ['*'] } });
             if (picked?.[0]) await openWaveform(picked[0].fsPath);
         })
     );

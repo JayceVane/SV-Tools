@@ -246,3 +246,40 @@ test('真实 FST：同一信号的别名共享身份，短名及条件查询与 
     assert.equal(response.output.data.values['tb.q'].bits, '1');
     assert.equal(api.waveSessionCount(), before);
 });
+
+
+test('FST真实层级与VCD一致，面板下拉支持实例、子层与空作用域筛选', async t => {
+    const { VcdSession } = require('../src/waveform/session');
+    const { clientHarness } = require('./helpers/waveform-client-harness');
+    const fixtures = path.join(__dirname, 'fixtures/waveform');
+    const sessions = [];
+    try {
+        const data = [];
+        for (const extension of ['fst', 'vcd']) {
+            const session = new VcdSession(); sessions.push(session);
+            data.push(await session.open(path.join(fixtures, 'hierarchy.' + extension)));
+        }
+        const [fst, vcd] = data;
+        assert.ok(fst.scopes.length >= 6, '至少包括顶层、两组双层实例和空实例');
+        assert.deepEqual(fst.scopes, vcd.scopes, '相同设计的真实父子层级与类型一致');
+        for (const variable of fst.vars) {
+            assert.ok(Number.isInteger(variable.scopeId));
+            assert.equal(fst.scopes[variable.scopeId].path, variable.scopePath);
+        }
+        const top = fst.scopes.findIndex(scope => scope.name === 'tb');
+        const dotted = fst.scopes.find(scope => scope.name.includes('u.dot'));
+        assert.equal(dotted.parentId, top, '含点的实例名仍是一个真实层级，不能凭路径切分父级');
+        const harness = clientHarness(null, { vars: fst.vars, scopes: fst.scopes });
+        await harness.flush();
+        const selector = harness.node('scope');
+        assert.deepEqual(selector.children.map(option => option.value), [...new Set(fst.scopes.map(scope => scope.path))]);
+        selector.value = 'tb.dut'; selector.onchange();
+        assert.deepEqual(harness.node('catalogSpace').children.map(row => row.title.split(' · ')[0]).sort(), ['tb.dut.data', 'tb.dut.u_leaf.data']);
+        selector.value = fst.scopes.find(scope => scope.name === 'u_empty').path; selector.onchange();
+        assert.equal(harness.node('catalogSpace').children.length, 0, '空实例仍可选，列表正确为空');
+        const directory = await workspace(t, 'hierarchy.fst', await fsp.readFile(path.join(fixtures, 'hierarchy.fst')));
+        const selected = await run(['wave', 'signals', '--workspace', directory, '--file', 'hierarchy.fst', '--scope', 'tb.dut']);
+        assert.equal(selected.exitCode, 0, JSON.stringify(selected.output));
+        assert.deepEqual(selected.output.data.signals.map(signal => signal.path).sort(), ['tb.dut.data', 'tb.dut.u_leaf.data']);
+    } finally { await Promise.all(sessions.map(session => session.dispose())); }
+});

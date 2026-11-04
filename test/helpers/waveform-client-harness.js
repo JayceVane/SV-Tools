@@ -9,7 +9,7 @@ const layout = require('../../src/waveform/row-layout');
 const columns = require('../../src/waveform/column-layout');
 
 /** 运行真实 client 和 Pointer 控制器；只替换 DOM、Canvas 和消息边界。 */
-function clientHarness(saved, { vars, height = 400, width = 900, reducedMotion = false } = {}) {
+function clientHarness(saved, { vars, scopes, height = 400, width = 900, reducedMotion = false } = {}) {
     const nodes = new Map(), messages = [], documentListeners = {}, windowListeners = {}, frames = new Map(), saves = [], paints = [];
     let clock = 0, frameId = 0, state, menuOptions, preferenceListener, viewportWidth = width + 252;
     const document = { activeElement: null, addEventListener(name, callback) { documentListeners[name] = callback; } };
@@ -54,7 +54,7 @@ function clientHarness(saved, { vars, height = 400, width = 900, reducedMotion =
         }, createMemoryInspector: () => ({ refresh() {}, initialize() {}, toggle() {}, snapshot: () => ({}) }),
         createWaveMenu(options) { menuOptions = options; return { contains: () => false, close: () => options.onClose() }; } };
     const metadata = { vars: vars || ['a', 'b', 'c'].map(name => ({ name, path: 'tb.' + name, scopePath: 'tb', width: 32, type: 'reg', id: name, changeCount: 2 })),
-        endTime: 100, secondsPerTick: 1e-9, timescale: '1 ns', scopes: [{ path: 'tb' }], fileBytes: 1000 };
+        endTime: 100, secondsPerTick: 1e-9, timescale: '1 ns', scopes: scopes || [{ path: 'tb' }], fileBytes: 1000 };
     const catalogPane = document.getElementById('catalogPane');
     for (const id of ['tracks', 'right', 'ruler']) Object.defineProperty(document.getElementById(id), 'clientWidth',
         { get: () => viewportWidth - (parseFloat(catalogPane.style.width) || 252) });

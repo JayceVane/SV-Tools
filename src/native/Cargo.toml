@@ -22,6 +22,8 @@ chrono = "0.4"
 tree-sitter = "0.25"
 tree-sitter-systemverilog = "0.3"
 wellen = "0.25.7"
+fst-reader = "=0.17.1"
+wavefst = { version = "=0.4.0", default-features = false, features = ["writer", "lz4"] }
 
 [target.'cfg(windows)'.dependencies]
 png = "=0.18.0"
