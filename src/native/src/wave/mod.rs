@@ -927,7 +927,19 @@ fn count_signal_events(wave: &mut simple::Waveform) -> (usize, HashMap<usize, us
         wave.load_signals(&[signal_ref]);
         let count = wave
             .get_signal(signal_ref)
-            .map(|signal| signal.iter_changes().count())
+            .map(|signal| {
+                // changeCount 按用户可见的变化计：同一时刻的ΔCycle 多条只算一条。
+                // 逐条流式去重，不把整条索引物化成 Vec（保持单信号峰值驻留策略）。
+                let mut total = 0usize;
+                let mut previous: Option<wellen::TimeTableIdx> = None;
+                for (index, _) in signal.iter_changes() {
+                    if previous != Some(index) {
+                        total += 1;
+                        previous = Some(index);
+                    }
+                }
+                total
+            })
             .unwrap_or(0);
         wave.unload_signals(&[signal_ref]);
         per_signal.insert(signal_ref.index(), count);
@@ -1304,9 +1316,12 @@ pub fn values_at(
                 output.push((path.clone(), None));
                 continue;
             };
+            // ΔCycle 终值：同一 #t 内的多次变化（QuestaSim 会倾倒Δ中间值）在 wellen 里
+            // 是同一 DataOffset 组（elements>1），组末才是该时刻的稳定值；element=0
+            // 是Δ中间值，会把 0→1→0 脉冲永久显示成高电平。
             let raw = time_index
                 .and_then(|index| signal.get_offset(index))
-                .map(|offset| signal.get_value_at(&offset, 0))
+                .map(|offset| signal.get_value_at(&offset, offset.elements.saturating_sub(1)))
                 .and_then(value_bits);
             // 逐位变量：从来源向量的位串里切出对应位。
             let value = raw.map(|bits| project_packed_source(bits, *width, packed.as_ref()));
@@ -1378,7 +1393,7 @@ fn changes_for(
         return Ok(WaveChangeSeries { path: var.path.clone(), width: var.width, total: 0, next: None, events: Vec::new() });
     };
     // 窗口语义：from 为左开下界（JS 传 from-1 后的值），to 为闭区间上界。
-    let indices: Vec<wellen::TimeTableIdx> = signal
+    let mut indices: Vec<wellen::TimeTableIdx> = signal
         .iter_changes()
         .map(|(index, _)| index)
         .filter(|index| {
@@ -1386,11 +1401,14 @@ fn changes_for(
             in_window(time, from, to as u64)
         })
         .collect();
+    // 同一时刻的ΔCycle 多条变化折叠成一条：dedup 保留组首索引，但下面取值
+    // 走组末终值，所以折叠后事件值仍是该时刻的稳定值。
+    indices.dedup();
     let total = indices.len();
     let mut events = Vec::new();
     for index in indices.iter().take(limit) {
         let Some(offset) = signal.get_offset(*index) else { continue };
-        let raw = value_bits(signal.get_value_at(&offset, 0)).unwrap_or_default();
+        let raw = value_bits(signal.get_value_at(&offset, offset.elements.saturating_sub(1))).unwrap_or_default();
         // 逐位变量：从源向量位串里切出该位（与 values_at 同一规则）。
         let bits = project_packed_source(raw, var.width, var.packed_source.as_ref());
         // changes 与 values 同口径：保留全宽位串（`compress_leading_state` 只在
@@ -1474,7 +1492,8 @@ pub fn edges(
             .filter_map(|index| {
                 let time = session.time_at(index);
                 let offset = signal.get_offset(index)?;
-                let bits = value_bits(signal.get_value_at(&offset, 0))?;
+                // ΔCycle 终值（组末）：否则同刻 0→1→0 的Δ脉冲会伪造出 rise/fall 沿。
+                let bits = value_bits(signal.get_value_at(&offset, offset.elements.saturating_sub(1)))?;
                 // 逐位 dump 展开项：raw 是源向量整串，必须切出本位再比较，
                 // 否则 rise/fall 永不命中、x/z 只要向量任意位含该态就误命中。
                 Some((time, project_packed_source(bits, var.width, var.packed_source.as_ref())))
@@ -1540,7 +1559,8 @@ pub fn sample(
             .filter_map(|index| {
                 let time = session.time_at(index);
                 let offset = signal.get_offset(index)?;
-                let bits = value_bits(signal.get_value_at(&offset, 0))?;
+                // ΔCycle 终值（组末）：时钟上的同刻Δ脉冲不得产生幻影采样沿。
+                let bits = value_bits(signal.get_value_at(&offset, offset.elements.saturating_sub(1)))?;
                 // 逐位 dump 展开出来的时钟在 wellen 里没有独立信号，raw 是源向量整串。
                 // 不切片的话 `before == "0" && after == "1"` 永不成立，采样数恒为 0。
                 Some((time, project_packed_source(bits, clock.width, clock.packed_source.as_ref())))
@@ -1895,7 +1915,8 @@ fn bits_at(
                 .and_then(|signal| {
                     time_index
                         .and_then(|index| signal.get_offset(index))
-                        .map(|offset| signal.get_value_at(&offset, 0))
+                        // ΔCycle 终值（组末），与 values_at 同口径。
+                        .map(|offset| signal.get_value_at(&offset, offset.elements.saturating_sub(1)))
                 })
                 .and_then(value_bits)
                 // 逐位 dump 展开项：条件求值也必须拿到该位自己的值，不是源向量整串。
@@ -1910,17 +1931,21 @@ fn event_series(session: &mut WaveSession, var: &WaveVar) -> Vec<(u64, String)> 
     let Some(signal_ref) = session.signal_ref(&var.id) else { return Vec::new() };
     session.load(&[signal_ref]);
     let Some(signal) = session.signal(signal_ref) else { return Vec::new() };
-    signal
+    let mut series: Vec<(u64, String)> = signal
         .iter_changes()
         .map(|(index, _)| index)
         .filter_map(|index| {
             let time = session.time_at(index);
             let offset = signal.get_offset(index)?;
-            let bits = value_bits(signal.get_value_at(&offset, 0))?;
+            // ΔCycle 终值（组末）：同刻多次变化只留下稳定值参与差异比较。
+            let bits = value_bits(signal.get_value_at(&offset, offset.elements.saturating_sub(1)))?;
             // diff 也要按 packed_source 归一，否则逐位展开项会拿整条向量去比较。
             Some((time, project_packed_source(bits, var.width, var.packed_source.as_ref())))
         })
-        .collect()
+        .collect();
+    // 折叠后同刻相邻条目完全相同，dedup 即消除ΔCycle 重复索引。
+    series.dedup();
+    series
 }
 
 /// 两份波形同名信号逐对比较：返回首差异、差异条数、涉差信号数、是否截断。
@@ -2204,7 +2229,8 @@ pub fn window_series(
         let push = |changes: &mut Vec<WaveChange>, index: usize| {
             let time_index = indices[index];
             if let Some(offset) = signal.get_offset(time_index) {
-                if let Some(raw) = value_bits(signal.get_value_at(&offset, 0)) {
+                // ΔCycle 终值（组末）：窗口取值与 changes/values 同口径。
+                if let Some(raw) = value_bits(signal.get_value_at(&offset, offset.elements.saturating_sub(1))) {
                     let bits = project_packed_source(raw, var.width, var.packed_source.as_ref());
                     changes.push(WaveChange { t: session.time_at(time_index).to_string(), bits });
                 }
@@ -2292,7 +2318,8 @@ pub fn edge_hit(
         .filter_map(|index| {
             let time = session.time_at(index);
             let offset = signal.get_offset(index)?;
-            let bits = value_bits(signal.get_value_at(&offset, 0))?;
+            // ΔCycle 终值（组末）：同刻 0→1→0 的Δ脉冲不得被当成真实边沿命中。
+            let bits = value_bits(signal.get_value_at(&offset, offset.elements.saturating_sub(1)))?;
             Some((time, bits))
         })
         .collect();

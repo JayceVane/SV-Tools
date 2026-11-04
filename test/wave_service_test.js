@@ -283,3 +283,28 @@ test('FST真实层级与VCD一致，面板下拉支持实例、子层与空作�
         assert.deepEqual(selected.output.data.signals.map(signal => signal.path).sort(), ['tb.dut.data', 'tb.dut.u_leaf.data']);
     } finally { await Promise.all(sessions.map(session => session.dispose())); }
 });
+
+test('ΔCycle：同一时间戳多次变化折叠为终值，不产生幻影沿与虚高计数', async t => {
+    // QuestaSim 会倾倒同一 #t 内的ΔCycle 中间值（实测 0→1→0 脉冲）；
+    // 展示/采样语义必须取组末稳定值，否则脉冲被显示成持续高电平、还伪造出 rise/fall 沿。
+    const text = `$timescale 1 ns $end
+$scope module tb $end $var wire 1 ! q $end $upscope $end $enddefinitions $end
+#0 $dumpvars 0! $end
+#100 1!
+#100 0!
+#200 1!
+`;
+    const directory = await workspace(t, 'delta.vcd', text);
+    const changes = (await run(['wave', 'changes', '--workspace', directory, '--file', 'delta.vcd', '--signals', 'tb.q'])).output;
+    assert.deepEqual(changes.data.series[0].events, [{ t: '0', bits: '0' }, { t: '100', bits: '0' }, { t: '200', bits: '1' }]);
+    for (const at of ['100', '150', '199']) {
+        const value = (await run(['wave', 'values', '--workspace', directory, '--file', 'delta.vcd', '--signals', 'tb.q', '--at', at])).output;
+        assert.equal(value.data.values['tb.q'].value, '0', 'Δ脉冲时刻取终值：' + at);
+    }
+    const settled = (await run(['wave', 'values', '--workspace', directory, '--file', 'delta.vcd', '--signals', 'tb.q', '--at', '200'])).output;
+    assert.equal(settled.data.values['tb.q'].value, '1');
+    const rise = (await run(['wave', 'edges', '--workspace', directory, '--file', 'delta.vcd', '--signal', 'tb.q', '--kind', 'rise'])).output;
+    assert.deepEqual(rise.data.events, [{ t: '200', from: '0', to: '1' }], 't=100 的Δ脉冲不构成沿');
+    const meta = (await run(['wave', 'signals', '--workspace', directory, '--file', 'delta.vcd', '--query', 'q'])).output;
+    assert.equal(meta.data.signals[0].changes, 3, 'changeCount 按折叠后的可见变化计');
+});
