@@ -71,6 +71,13 @@ test('wave edges：rise/fall/X 搜索，向量沿需要位级投影', async t =>
     // bit0 序列 0→1→x→1→0：X 之后回到 1 不构成 rise，与采样沿的未知态语义一致。
     const bit = (await run(['wave', 'edges', '--workspace', directory, '--file', 'trace.vcd', '--signal', 'q', '--bit', '0', '--kind', 'rise'])).output;
     assert.deepEqual(bit.data.events.map(event => event.t), ['10']);
+    // 分页：next 是对外 `--from`（闭区间下界），直接回传不能重复也不能跳过命中沿。
+    const paged = (await run(['wave', 'edges', '--workspace', directory, '--file', 'trace.vcd', '--signal', 'clk', '--kind', 'rise', '--limit', '1'])).output;
+    assert.equal(paged.data.truncated, true);
+    assert.equal(paged.data.next, '11', 'next 是首个未返回沿的时刻，可直接作 --from');
+    const rest = (await run(['wave', 'edges', '--workspace', directory, '--file', 'trace.vcd', '--signal', 'clk', '--kind', 'rise', '--from', paged.data.next])).output;
+    assert.deepEqual(rest.data.events.map(event => event.t), ['30'], '续查必须取到剩余那条沿');
+    assert.equal(rest.data.next, null);
 });
 
 test('wave sample：时钟沿采样与 where 条件定位首个异常', async t => {

@@ -363,7 +363,9 @@ async function edges(input) {
     return result('wave.edges', {
         file: trace.file, signal: variable.path, ...(bitOffset !== null ? { bit: bitOffset } : {}), kind,
         from: tickString(Number(raw.from)), to: tickString(Number(raw.to)), timescale: trace.meta.timescale || null,
-        matched: raw.matched, truncated: raw.truncated, next: raw.next === null ? null : tickString(Number(raw.next)),
+        // Rust 的 next 是内部左开游标（最后一条已返回事件的时刻）；对外 `--from`
+        // 是闭区间下界，所以展示时 +1，与 `wave changes` 保持一致。
+        matched: raw.matched, truncated: raw.truncated, next: raw.next === null ? null : tickString(Number(raw.next) + 1),
         events: raw.events.map(event => ({ t: tickString(Number(event.t)), from: event.from, to: event.to })),
         stats: trace.stats
     });
