@@ -44,6 +44,7 @@ __pycache__/**
 .opencode/**
 .sisyphus/**
 .zcode/**
+.workbuddy/**
 .vscode-test/**
 .codeartsdoer/**
 test_project/**
