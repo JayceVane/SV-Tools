@@ -16,7 +16,7 @@ description: SV Tools CLI 的通用入口：doctor 能力发现、RTL 工程与�
 | Vivado 工程/运行/时序资源 DRC 报告 | `svtools-vivado` |
 | RTL 架构建模、结构检查、架构图/报告 | `svtools-design` |
 | 波形查询、仿真失败定位、ΔCycle 排查 | `svtools-waveform` |
-| RTL 模块开发、功能修改、验证交付、模块验证报告 | `svtools-delivery` |
+| RTL 模块开发、架构任务交接、功能修改、验证交付、模块验证报告 | `svtools-delivery` |
 
 跨域任务（如"实现并验证一个模块"）同时读取涉及的技能；交付物口径以 `svtools-delivery` 为准。
 

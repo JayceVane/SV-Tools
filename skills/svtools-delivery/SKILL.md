@@ -27,6 +27,10 @@ description: RTL 设计/验证交付规范：设计与验证职责分离、需�
 
 原始产物可放 `.svtools/verification/<module>/<run-id>/`。已有等价文件时补充，不另建重复体系。判定使用 `passed/failed/blocked/not_run/not_applicable`（后者须有适用性依据）；必需检查有失败、未执行、受阻、来源不明或未处置命中时交付为未完成并给出下一步。
 
+## 模块任务交接
+
+采用架构计划和 Agent 交接时，读取 [workflow.md](references/workflow.md)：`design plan/tasks/claim/submit/return/review/evidence` 提供可执行状态、候选与证据当前性；不要只在聊天中宣称任务完成。插件设计进展只读展示相同记录。它校验本地产物一致性，不能自动证明工具运行、独立性或功能正确。
+
 ## M5 联合验收
 
 先在一个简单同步模块验证交付链，再用参数化 FIFO/多时钟设计验证复位、握手和瞬态处置，最后进入真实 Vivado 工程与插件/CLI 对照。通过条件是需求、独立检查、运行身份、图表和报告互相可追溯，且注入缺陷能被发现、修复后能按原规则复验。MCP 和自动多 Agent 编排不作为这套流程的前提。完整分批计划见 [references/delivery.md](references/delivery.md) 与 `docs/V4_2_PLAN.md`。

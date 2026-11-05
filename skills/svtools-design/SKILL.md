@@ -7,6 +7,8 @@ description: RTL 架构建模与图表交付：packed struct 虚拟端口骨架�
 
 入口技能 `svtools-agent` 提供 CLI 调用约定；执行架构设计或图表交付前，先读取 [references/architecture.md](references/architecture.md)（生成规格、方向约束、时钟/复位处理、验收与当前限制）。
 
+架构任务化交付可用 `design plan --spec <json|file>` 生成稳定需求/模块 ID 和 Markdown 报告，`design tasks` 查询；既有 scaffold 规格可附 `workflow` 字段复用模块/接口名单。职责、需求与必需 ΔCycle 信号不能从空骨架臆造。交接与证据协议使用 `svtools-delivery` 的工作流约定；修改计划后用 `design plan-report --force` 更新报告。
+
 新建骨架默认声明 **packed struct 虚拟端口**，一个逻辑接口一个端口、一条连接；整体 inout 可用于架构中的双向接口，成员内容和收发约定写入架构文档。不要为出图强制拆开请求/响应或展开完整协议引脚，不要把主/从角色等同于电气方向。分析已有 RTL 则保留其真实端口。
 
 实际命令为 `design scaffold --spec <json|file>`、`design arch --top <module>` 和 `design render --top <module>`。SVG 默认采用接口级连线（--detail interfaces）：接口表外一条汇总线，方向缩写（`i`/`o`/`io`）在表内逐行标注；--detail signals 用于信号级排查。`--format png` 用内置 resvg 2x 栅格化（`sourceSha256` 关联源 SVG；中文依赖系统字体，文档首选 SVG）。默认黑白 document 风格；`--style presentation` 用于演示。`--fold-ports` 仅作可选的显示折叠，不能替代虚拟端口声明；`--bundle-name` 仅与折叠选项同时生效。输入快照及哈希绑定生成模型，源码变化后应重新运行。

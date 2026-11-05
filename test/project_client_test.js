@@ -21,7 +21,7 @@ class Element {
 function client() {
     let document;
     const createElement = tag => { const element = new Element(tag); element.focus = () => { document.activeElement = element; }; return element; };
-    const elements = new Map(['tree','menu','choose','projectName','projectKind','files','instances','add','vivadoTools','tools','toggleTools','addVivado','toolBody','toolActions','toolReports','diagnostics','refresh','actions','trace','traceRoot','pin','clear','message','issues'].map(id=>[id,createElement()]));
+    const elements = new Map(['progress','tree','menu','choose','projectName','projectKind','files','instances','add','vivadoTools','tools','toggleTools','addVivado','toolBody','toolActions','toolReports','diagnostics','refresh','actions','trace','traceRoot','pin','clear','message','issues'].map(id=>[id,createElement()]));
     elements.get('menu').hidden = true;
     for (const id of ['actions', 'toolReports']) { elements.get(id).setAttribute('aria-haspopup', 'menu'); elements.get(id).setAttribute('aria-expanded', 'false'); }
     const messages=[],events={},documentEvents={}; let saved;
@@ -128,4 +128,14 @@ test('工程切换分别记忆展开状态，文件名不会作为HTML执行',()
     c.elements.get('instances').click();assert.equal(c.messages.at(-1).projection,'instances');
     c.receive({project:{id:'other',name:'other'},nodes:[{...node,id:'other-src'}]});c.elements.get('files').click();
     assert.equal(c.state().first.projection,'instances');assert.equal(c.state().other.projection,'files');
+});
+
+test('进展页只读显示过期证据并保留展开状态，打开证据只发宿主令牌',()=>{
+    const c=client(),module={id:'m',name:'<module>',stage:'verification-submitted',verification:'stale',designCurrent:true,candidateId:'c',responsibility:'<script>',owner:{actor:'verifier',role:'verification'},requirements:['R1'],blockedBy:[],references:[{id:'link',label:'Evidence'}]};
+    const payload={projection:'progress',progress:{available:true,title:'Design',top:'top',revision:3,summary:{total:1,designSubmitted:1,accepted:0,stale:1},modules:[module]}};
+    c.receive(payload);const tree=c.elements.get('tree');assert.equal(tree.getAttribute('role'),'region');const card=tree.children.find(item=>item.tagName==='details');assert.match(card.children[0].textContent,/待复验/);
+    card.open=true;card.events.toggle();c.receive(payload);const restored=tree.children.find(item=>item.tagName==='details');assert.equal(restored.open,true);
+    restored.children[1].children.find(item=>item.tagName==='button').click();assert.equal(c.messages.at(-1).action,'openProgress');assert.equal(c.messages.at(-1).linkId,'link');
+    for(const id of ['tools','add','vivadoTools'])assert.equal(c.elements.get(id).hidden,true);
+    c.receive({projection:'files'});assert.equal(tree.getAttribute('role'),'tree');assert.equal(c.elements.get('add').hidden,false);
 });

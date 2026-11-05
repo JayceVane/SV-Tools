@@ -2,6 +2,7 @@
 'use strict';
 const { parseArgs } = require('node:util');
 const services = require('../agent/operations');
+const workflow = require('../design/workflow');
 const tasks = require('../agent/tasks');
 const vivado = require('../agent/vivado');
 const { fail, failure } = require('../agent/protocol');
@@ -18,6 +19,12 @@ const help=`SV Tools headless CLI (API 1)
   vivado report timing|utilization|drc [--run synth_1|impl_1]
   vivado run [--run synth_1|impl_1] [--jobs <n>]
   design arch --top <module> [--depth <n>] [--save <name>]
+  design plan --spec <json|file> [--plan svtools.design.json]
+  design tasks [--plan <file>]
+  design plan-report [--plan <file>] [--out <file.md>] [--force]
+  design claim|submit|return|review --module <id> --actor <name> --revision <n>
+       [--role design|verification] [--token <claim-token>] [--evidence <file>] [--reason <text>]
+  design evidence --module <id> --evidence <file>
   design scaffold --spec <json|file> [--out <dir>] [--force]
   design render --top <module> [--format svg] [--style document|presentation] [--out <dir>] [--title <t>]
                 [--detail interfaces|signals] [--fold-ports] [--bundle-name <prefix=display>] (repeatable)
@@ -51,7 +58,7 @@ Output:  JSON on stdout; --help and --version return text.
 Node.js >=22. The existing Rust formatter CLI remains available in bin/.
 `;
 function argumentsFor(argv) {
-    const strings=['workspace','config','project','fileset','file','top','iverilog','cygwin','vivado','standard','run','timeout','offset','limit','log-index','max-paths','jobs','name','dir','part','sim-top','target-fileset','depth','save','spec','format','out','title','style','detail','baseline','against','clock','query','scope','role','bit','at','at-b','from','to','signal','signals','min-width','max-width','clock-edge','kind','max-values'];
+    const strings=['workspace','config','project','fileset','file','top','iverilog','cygwin','vivado','standard','run','timeout','offset','limit','log-index','max-paths','jobs','name','dir','part','sim-top','target-fileset','depth','save','spec','format','out','title','style','detail','baseline','against','clock','query','scope','role','bit','at','at-b','from','to','signal','signals','min-width','max-width','clock-edge','kind','max-values','plan','module','actor','revision','token','evidence','reason'];
     const options=Object.fromEntries(strings.map(name=>[name,{type:'string'}]));
     for(const name of ['help','version','json','write','check','fold-ports','force']) options[name]={type:'boolean'};
     options.include={type:'string',multiple:true}; options.define={type:'string',multiple:true}; options.source={type:'string',multiple:true};
@@ -61,7 +68,7 @@ function argumentsFor(argv) {
     catch(error) { fail('INVALID_ARGUMENT',error.message); }
     const input={...parsed.values};
     for(const [from,to] of [['timeout','timeoutMs'],['log-index','logIndex'],['max-paths','maxPaths'],['sim-top','simTop'],['source','sources'],['target-fileset','filesetTarget'],['clock-edge','clockEdge'],['min-width','minWidth'],['max-width','maxWidth'],['at-b','atB'],['max-values','maxValues']]) if(input[from]!==undefined) {input[to]=input[from]; delete input[from];}
-    for(const field of ['timeoutMs','offset','limit','logIndex','maxPaths','jobs','depth','maxValues']) if(input[field]!==undefined) {
+    for(const field of ['timeoutMs','offset','limit','logIndex','maxPaths','jobs','depth','maxValues','revision']) if(input[field]!==undefined) {
         if(!/^\d+$/.test(input[field]) || !Number.isSafeInteger(Number(input[field]))) fail('INVALID_ARGUMENT',field+'必须为非负整数');
         input[field]=Number(input[field]);
     }
@@ -92,6 +99,11 @@ async function run(argv) {
         else if(command==='vivado' && action==='status' && !id) output=await vivado.status(input);
         else if(command==='vivado' && action==='report' && ['timing','utilization','drc'].includes(id)) output=await vivado.report({...input,kind:id});
         else if(command==='vivado' && action==='run' && !id) output=await tasks.start({...input,operation:'vivado.run'});
+        else if(command==='design' && action==='plan' && !id) output=await workflow.createPlan(input);
+        else if(command==='design' && action==='plan-report' && !id) output=await workflow.planReport(input);
+        else if(command==='design' && action==='tasks' && !id) output=await workflow.tasks(input);
+        else if(command==='design' && action==='evidence' && !id) output=await workflow.checkEvidence(input);
+        else if(command==='design' && ['claim','submit','return','review'].includes(action) && !id) output=await workflow.mutate(action,input);
         else if(command==='design' && action==='arch' && !id) output=await services.arch(input);
         else if(command==='design' && action==='scaffold' && !id) output=await services.scaffold(input);
         else if(command==='design' && action==='render' && !id) output=await services.render(input);

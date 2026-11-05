@@ -273,3 +273,8 @@ node src/cli/main.js wave glitches --workspace D:/project --file sim/wave.vcd --
 `semantics.recordingCompleteness=unknown`、`absenceProvesNoGlitches=false`、`acceptance=false` 明确证据边界：采集/转换可能折叠中间值。查询成功和零命中都不是功能、CDC、时序或物理无毛刺证明；有命中也不自动判 RTL 缺陷。模块验证报告必须包含该项的信号/窗口、扫描完整性、逐项处置、波形身份与限制，详见 [设计与验证交付约定](../skills/svtools-delivery/references/delivery.md)。
 
 底层按信号原始事件索引读取，避免稳定值折叠抹掉记录证据：[wellen Signal API](https://docs.rs/wellen/0.25.7/wellen/struct.Signal.html)。
+
+
+## 架构计划与模块交接
+
+`design plan --spec` 生成架构报告和模块任务；`design tasks` 只读查询；`design claim/submit/return/review` 按 revision 和令牌变更；`design evidence` 校验当前候选的编译/仿真/ΔCycle 证据；`design plan-report --force` 更新同名 Markdown 报告。详细命令、输入格式与信任范围见 [设计工作流](DESIGN_WORKFLOW.md)。这些命令不自动执行仿真，不调用 Yosys/Vivado。插件原工程侧栏新增只读“设计进展”，通过 `svtools.design.planFile` 选择计划。

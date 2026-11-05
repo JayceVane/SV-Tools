@@ -2,6 +2,7 @@
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const { projectHtml } = require('./view');
+const { projectProgress, openProgressLink } = require('./progress');
 const { projectTree } = require('./tree-model');
 const { createProjectFlowController } = require('./flow-controller');
 const { topCandidates } = require('../circuit/source-request');
@@ -28,6 +29,7 @@ const RUN_ACTIONS = [
  */
 function activateProjectView(context, { vscode, projects, vivado }) {
     let view, project, nodes = [], revision = 0, refreshGeneration = 0, disposed = false, message, busy = false, timer, selectionTimer;
+    let progress=null, progressLinks=new Map(), progressTimer;
     const nodeIndex = new Map(), projections = new Map(), expandedState = context.workspaceState.get('svtools.project.views', {});
     const traceTrigger = () => vscode.workspace.getConfiguration('svtools.project', vscode.window.activeTextEditor?.document.uri).get('traceTrigger', 'selection');
     const report = error => {
@@ -72,7 +74,7 @@ function activateProjectView(context, { vscode, projects, vivado }) {
             return;
         }
         const currentFlow = flow.get(), projection = projections.get(project?.id) || expandedState[project?.id]?.projection || 'files';
-        void view.webview.postMessage({ type: 'snapshot', revision, project: project ? { id: project.id, name: project.name, kind: project.kind } : null, nodes, projection,
+        void view.webview.postMessage({ type: 'snapshot', revision, project: project ? { id: project.id, name: project.name, kind: project.kind } : null, nodes, projection, progress,
             tracing: !!currentFlow, traceId: currentFlow?.traceId, traceRoot: currentFlow ? `${currentFlow.contextKind === 'simulation' ? '仿真' : '设计'}追踪根：${currentFlow.top}${currentFlow.rootFallback ? '（所选模块）' : ''}` : '', pinned: currentFlow?.pinned, busy, message,
             actions: actionList().filter(action => !action.group), toolActions: project?.kind === 'vivado' ? RUN_ACTIONS : [], issues: currentFlow?.issues ||
                 (projection === 'instances' ? ['源码引用预览；执行信号追踪后显示静态RTL连接中可确定的实例层级'] : []) });
@@ -99,6 +101,14 @@ function activateProjectView(context, { vscode, projects, vivado }) {
         }
         project = current;
         const projection = projections.get(project?.id) || expandedState[project?.id]?.projection || 'files';
+        if(projection==='progress') {
+            const configured=vscode.workspace.getConfiguration('svtools.design',project?.path?vscode.Uri.file(project.path):undefined).get('planFile','svtools.design.json');
+            const selectedPlan=typeof configured==='string'&&configured.endsWith('.json')?configured:'svtools.design.json';
+            const loaded=await projectProgress(project,selectedPlan);
+            if(disposed||version!==refreshGeneration)return;
+            progress=loaded.snapshot;progressLinks=loaded.links;nodes=[];nodeIndex.clear();revision++;send();return;
+        }
+        progress=null;progressLinks.clear();
         let next = projectTree(project, { projection, flow: flow.get() });
         if (project && projection === 'instances' && !flow.get()) {
             const preview = await buildProjectTree(project.parsed || { path: project.path, dir: project.root, sets: project.sets }, { workspaceFiles: [] });
@@ -285,12 +295,16 @@ function activateProjectView(context, { vscode, projects, vivado }) {
         else if (data.action === 'add') {
             await add();
         }
+        else if(data.action==='openProgress') {
+            await openProgressLink(progressLinks,data.linkId,project,vscode);
+        }
         else if (data.action === 'refresh') {
+            if((projections.get(project?.id)||expandedState[project?.id]?.projection)==='progress'){await refresh();return;}
             flow.clear('正在刷新工程，旧追踪标记已失效');
             await vivado.projectTree?.refresh();
             await refresh();
         }
-        else if (data.action === 'projection' && ['files', 'instances'].includes(data.projection)) {
+        else if (data.action === 'projection' && ['files', 'instances', 'progress'].includes(data.projection)) {
             projections.set(project?.id, data.projection);
             expandedState[project?.id] = { projection: data.projection };
             await context.workspaceState.update('svtools.project.views', expandedState);
@@ -353,8 +367,12 @@ function activateProjectView(context, { vscode, projects, vivado }) {
             report(error);
         });
     }));
-    const watcher = vscode.workspace.createFileSystemWatcher('**/*.{sv,v,svh,vh,xpr,json}');
+    const watcher = vscode.workspace.createFileSystemWatcher('**/*.{sv,v,svh,vh,xpr,json,md,log,vcd,fst,xdc,tcl,hex,mem,txt,bin}');
     const changed = uri => {
+        if((projections.get(project?.id)||expandedState[project?.id]?.projection)==='progress'){
+            if(!progressTimer)progressTimer=setTimeout(()=>{progressTimer=undefined;void refresh().catch(report);},250);
+            return;
+        }
         if (/\.svtools[\\/]projects[\\/][^\\/]+\.json$/i.test(uri.fsPath) || /\.(sv|v|svh|vh|xpr)$/i.test(uri.fsPath) && !/[\\/]\.svtools[\\/]/.test(uri.fsPath)) {
             clearTimeout(timer);
             timer = setTimeout(() => projects.invalidate(), 250);
@@ -365,6 +383,7 @@ function activateProjectView(context, { vscode, projects, vivado }) {
         context.subscriptions.push(vscode.window.onDidChangeTextEditorSelection(event => {
             clearTimeout(selectionTimer);
             flow.cancelFollow();
+            if((projections.get(project?.id)||expandedState[project?.id]?.projection)==='progress')return;
             if (traceTrigger() === 'selection') {
                 const editor = { document: event.textEditor.document, selection: event.textEditor.selection };
                 selectionTimer = setTimeout(() => void Promise.resolve(flow.follow(editor)).catch(report), 300);
@@ -385,9 +404,10 @@ function activateProjectView(context, { vscode, projects, vivado }) {
         refreshGeneration++;
         clearTimeout(timer);
         clearTimeout(selectionTimer);
+        clearTimeout(progressTimer);
         flow.dispose();
     };
     context.subscriptions.push({ dispose });
-    return { refresh, trace, dispose, setPinned:flow.setPinned, getSnapshot: () => ({ project, nodes, revision, flow: flow.get() }) };
+    return { refresh, trace, dispose, setPinned:flow.setPinned, getSnapshot: () => ({ project, nodes, revision, progress, flow: flow.get() }) };
 }
 module.exports = { activateProjectView };
