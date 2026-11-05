@@ -13,6 +13,8 @@ const { isExcludedSourcePath } = require('../workspace/source-policy');
 const { createWaveImage } = require('../waveform/node-export');
 const { createContainedDirectories, cleanupDirectories } = require('../design/scaffold-paths');
 const { rasterizeSvg, DEFAULT_SCALE } = require('../graphics/rasterize');
+const layoutState = require('../waveform/layout-state');
+const { assertExportTarget } = require('../workspace/export-target');
 const { readOptions, hash } = require('./context');
 const { result, fail } = require('./protocol');
 
@@ -492,15 +494,69 @@ async function exportCsv(trace, input, { ids, names, from, to }) {
     }, null, [], artifacts);
 }
 
+/** 布局导出：--signals 的声明身份 + 窗口/游标写成 .svwave.json；查看器打开同名波形时自动套用。
+ * 默认落在波形自己的目录（同名约定），--out 仍可指向工作区内其他目录；已存在需 --force。 */
+async function exportLayout(trace, input, { ids, names, from, to }) {
+    const cursorA = input.at !== undefined ? parseTick(trace, input.at, '--at') : from;
+    const cursorB = input.atB !== undefined ? parseTick(trace, input.atB, '--at-b') : null;
+    if (cursorA > to || cursorB !== null && cursorB > to) fail('INVALID_ARGUMENT', '游标时间超出导出窗口');
+    const layout = { kind: 'svtools-wave-layout', version: 1,
+        tracks: ids.map(id => { const variable = names.get(id);
+            return { signal: { path: variable.path, range: variable.range || '', width: variable.width }, visible: true }; }),
+        collapsedGroups: [], view: { start: from, span: to - from }, cursorA, cursorB,
+        secondsPerTick: secondsPerTick(trace.meta.timescale), fullName: false, snap: true };
+    try { layoutState.validate(layout); }
+    catch (error) { fail('INVALID_ARGUMENT', 'wave export 布局无效：' + error.message); }
+    const base = (input.title ? input.title.replace(/[\\/:*?"<>|]/g, '_') : path.basename(trace.file).replace(/\.(?:vcd|fst)$/i, '')) || 'waveform';
+    const outputDirectory = path.resolve(trace.options.workspace, input.out ?? path.dirname(trace.file));
+    // 与 createContainedDirectories 的 inside() 同口径：跨盘符时 path.relative 返回绝对路径，也要拒绝。
+    const relative = path.relative(trace.options.workspace, outputDirectory);
+    if (input.out === undefined && (relative === '..' || relative.startsWith('..' + path.sep) || path.isAbsolute(relative)))
+        fail('INVALID_ARGUMENT', '波形文件不在工作区内：布局导出默认写波形同目录，请用 --out 指定工作区内目录');
+    const artifacts = [];
+    try {
+        const created = (await createContainedDirectories(outputDirectory, trace.options.workspace)).created;
+        try {
+            const file = path.join(outputDirectory, base + '.svwave.json');
+            const text = JSON.stringify(layout, null, 2) + '\n';
+            // --force 覆盖时不能跟随已存在的链接/别名写出工作区外。
+            try { await assertExportTarget(file, trace.file); }
+            catch (error) { fail('INVALID_ARGUMENT', 'wave export 布局目标不是独立普通文件：' + error.message, { file }); }
+            try { await fs.writeFile(file, text, { encoding: 'utf8', flag: input.force ? 'w' : 'wx' }); }
+            catch (error) { if (error.code === 'EEXIST') fail('FILE_EXISTS', '布局文件已存在，使用 --force 覆盖：' + file, { file }); throw error; }
+            artifacts.push({ kind: 'layout', path: file, sha256: hash(text), bytes: Buffer.byteLength(text), tracks: layout.tracks.length });
+        } catch (error) {
+            await cleanupDirectories(created, trace.options.workspace);
+            throw error;
+        }
+    } catch (error) {
+        if (error.code === 'OUTSIDE_WORKSPACE') fail('INVALID_ARGUMENT', 'wave export 的 --out 通过符号链接逃逸出工作区', { out: input.out });
+        if (error.code === 'OUT_NOT_DIRECTORY') fail('INVALID_ARGUMENT', 'wave export 的 --out 必须是工作区内的目录：' + input.out, { out: input.out });
+        if (error.code === 'EACCES' || error.code === 'EPERM') fail('INVALID_ARGUMENT', 'wave export 的 --out 不可写：' + input.out, { out: input.out, reason: error.code });
+        throw error;
+    }
+    return result('wave.export', {
+        file: trace.file, from: tickString(from), to: tickString(to), timescale: trace.meta.timescale || null,
+        out: outputDirectory, format: 'layout', tracks: layout.tracks.length,
+        signals: layout.tracks.map(track => track.signal.path),
+        cursor: { a: tickString(cursorA), ...(cursorB !== null ? { b: tickString(cursorB) } : {}) },
+        viewer: input.out === undefined ? '打开同名波形时自动套用该布局' : '需用查看器“加载布局”手动打开该文件',
+        stats: trace.stats
+    }, null, [], artifacts);
+}
+
 /** 时间窗波形图导出：无宿主渲染（document 黑白风格），SVG/PNG 落入工作区目录并返回产物身份。 */
 async function exportImage(trace, input) {
-    if (input.out === undefined) fail('INVALID_ARGUMENT', 'wave export 需要 --out <dir>');
+    const format = input.imageFormat || 'svg';
+    if (!['svg', 'png', 'csv', 'layout'].includes(format)) fail('INVALID_ARGUMENT', 'wave export 的 --format 只支持 svg|png|csv|layout：' + format);
+    if (input.out === undefined && format !== 'layout') fail('INVALID_ARGUMENT', 'wave export 需要 --out <dir>');
     const ids = requireSignals(trace, input);
     const names = displayPaths(trace.meta);
     const to = parseTick(trace, input.to ?? trace.meta.endTime, '--to');
     const from = input.from === undefined ? 0 : parseTick(trace, input.from, '--from');
     if (from >= to) fail('INVALID_ARGUMENT', '--from 必须早于 --to');
-    if ((input.imageFormat || 'svg') === 'csv') return exportCsv(trace, input, { ids, names, from, to });
+    if (format === 'csv') return exportCsv(trace, input, { ids, names, from, to });
+    if (format === 'layout') return exportLayout(trace, input, { ids, names, from, to });
     const cursorA = input.at !== undefined ? parseTick(trace, input.at, '--at') : from;
     const cursorB = input.atB !== undefined ? parseTick(trace, input.atB, '--at-b') : null;
     if (cursorA > to || cursorB !== null && cursorB > to) fail('INVALID_ARGUMENT', '游标时间超出导出窗口');
@@ -556,7 +612,7 @@ async function exportImage(trace, input) {
     }
     return result('wave.export', {
         file: trace.file, from: tickString(from), to: tickString(to), timescale: trace.meta.timescale || null,
-        out: outputDirectory, format: input.imageFormat || 'svg', width: image.width, height: image.height,
+        out: outputDirectory, format, width: image.width, height: image.height,
         signals: prepared.map(variable => variable.path), cursor: { a: tickString(cursorA), ...(cursorB !== null ? { b: tickString(cursorB) } : {}) },
         stats: trace.stats
     }, null, [], artifacts);

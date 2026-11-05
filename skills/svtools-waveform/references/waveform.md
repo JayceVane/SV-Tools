@@ -21,6 +21,7 @@ node <svtools-root>/src/cli/main.js wave sample --workspace <ws> --file sim/wave
 node <svtools-root>/src/cli/main.js wave values --workspace <ws> --file sim/wave.vcd --signals dut.q,dut.stage --at <首命中 tick>
 node <svtools-root>/src/cli/main.js wave diff --workspace <ws> --file broken.vcd --against fixed.vcd --signals q
 node <svtools-root>/src/cli/main.js wave export --workspace <ws> --file sim/wave.vcd --signals clk,q,model.q --out report --from <t1> --to <t2> --at <错误时刻> --format png
+node <svtools-root>/src/cli/main.js wave export --workspace <ws> --file sim/wave.vcd --signals clk,q --from <t1> --to <t2> --at <错误时刻> --format layout
 ```
 
 复验标准：修复后同一 `--where` 条件命中数为 0；`wave diff` 的 `firstDiff.t` 应落在注入缺陷开始传播的时钟沿，差异区间数与缺陷传播窗口一致。取证图必须有明确时间窗与游标时刻，不要导出全程波形冒充分析。
@@ -41,7 +42,8 @@ node <svtools-root>/src/cli/main.js wave export --workspace <ws> --file sim/wave
 
 - 每次 CLI 操作独立持有并释放 Rust 会话，在该次操作内复用解析结果；没有落盘索引缓存。解析期间文件变化返回 `SOURCE_CHANGED`，修改波形后需重新查询。
 - 失败日志自动解析取窗尚未实现：`--at/--from/--to` 时刻由调用者从仿真日志、断言或 TB 输出提供。
-- `wave export` 只有 document 黑白风格（与插件导出共用同一渲染器）；`--out` 必须在工作区内。
+- `wave export` 只有 document 黑白风格（与插件导出共用同一渲染器）；`--out` 必须在工作区内，只有 `--format layout` 可省略并默认写波形同目录。
+- `wave export --format layout` 生成 v1 `.svwave.json`：信号声明身份 + 时间窗 + A/B 游标，供查看器复用，不含波形数据、不构成功能验证证据。省略 `--out` 时以波形名命名，打开同名 VCD/FST 会自动套用（至少一条声明命中才应用；0 命中静默保留默认视图，会覆盖上次会话状态）；文件缺失/损坏/超预算静默跳过。已有同名文件需 `--force` 覆盖；指定 `--out` 的布局需手动「加载布局」。
 - `wave diff` 比较同名信号（路径+向量 range 配对），窗口事件总量超 200 万标记 `truncated`，此时缩小窗口而不是外推结论。
 - QuestaSim 会把含 generate 块的实例作用域重复倾倒，同一信号出现两个符号 id（如 `T` 与 `T!`），子实例信号按名查询报 SIGNAL_NOT_FOUND；改用测试台顶层别名（同一 net 共享 id）、`wave signals --query` 条目或原始 VCD 符号表定位。
 - VCD↔源码/电路的实例映射与驱动锥联动尚未交付；沿驱动关系定位源码用 `design arch` 的连接事实与 `wave signals --role` 的 RTL 匹配组合完成。波形查询是数据事实，不构成功能验证结论；复验通过以同一规则再次仿真的结果为准。

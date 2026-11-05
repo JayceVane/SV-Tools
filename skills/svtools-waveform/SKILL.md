@@ -13,7 +13,7 @@ description: VCD/FST 波形调试与取证：信号清单与方向匹配、时�
 - 枚举窗口跳变与沿：`wave changes/edges`（向量 rise/fall 需 `--bit`）；错误窗口分诊用 `wave stats`（谁最活跃/谁进入未知态），多信号同刻叙事用 `wave timeline`。
 - 同刻瞬态取证：`wave glitches`（原始记录级，见 references 的 ΔCycle 诊断节；模块验证报告的必需项）。
 - 修复复验：重跑仿真后 `wave diff --file broken.vcd --against fixed.vcd`——`firstDiff` 是首个行为分叉点，差异计数应与注入缺陷的传播窗口一致；修复有效时同一 `--where` 条件命中数应为 0。
-- 取证交付：`wave export --signals ... --from --to --at [--format png|svg|csv]`（document 黑白风格图像带 A/B 游标；CSV 为终值位串矩阵，`--out` 须在工作区内）。
+- 取证交付：`wave export --signals ... --from --to --at [--format png|svg|csv|layout]`（document 黑白风格图像带 A/B 游标；CSV 为终值位串矩阵；layout 为可复用 `.svwave.json` 布局，不是验证证据。`--out` 须在工作区内，layout 可省略以写波形同目录供查看器自动套用）。
 
 时间输出一律整数 tick 字符串；每次查询独立持有会话，没有落盘索引缓存，改文件后旧查询结果不得引用。失败日志自动解析取窗尚未实现，`--at` 时刻由调用者提供。
 

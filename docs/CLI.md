@@ -121,6 +121,7 @@ node src/cli/main.js task cancel <task-id> --workspace D:/project
 | `SNAPSHOT_UNSUPPORTED`、`VIVADO_CONTEXT_MISMATCH` | 工程存在尚不能隔离的依赖，或所选源文件集与run不符 | 按返回的文件/属性修正输入；不回退到未绑定的实时源码运行 |
 | `ARTIFACT_INVALID` | 检查点已变化、越界或不可信 | 重新构建，不使用原来的输入绑定 |
 | `SIGNAL_NOT_FOUND` | wave 信号名未命中或匹配多个信号 | 用 `data.candidates` 的完整层级路径重试；alias 共享 id 不算歧义 |
+| `FILE_EXISTS` | 目标产物已存在且未加 `--force`（如布局导出） | 确认是否要覆盖；不要删除已有产物后重跑 |
 | `VCD_PARSE`、`WAVE_FORMAT_UNSUPPORTED` | VCD 语法/编码损坏，或波形格式不受支持 | 修复重新仿真，或改用 VCD/FST；不得截断后继续 |
 | `SERVICE_FAILED` | 未分类失败 | 读 `diagnostics` 与对应日志产物 |
 
@@ -236,6 +237,7 @@ node src/cli/main.js wave edges --workspace D:/project --file sim/wave.vcd --sig
 node src/cli/main.js wave sample --workspace D:/project --file sim/wave.vcd --clock tb.clk --signals dut.q,model.q --where "dut.q != model.q"
 node src/cli/main.js wave diff --workspace D:/project --file broken.vcd --against fixed.vcd --signals q
 node src/cli/main.js wave export --workspace D:/project --file sim/wave.vcd --signals clk,q --out report --at 1250ns --format png
+node src/cli/main.js wave export --workspace D:/project --file sim/wave.vcd --signals clk,q --from 100ns --to 200ns --at 125ns --format layout
 ```
 
 所有命令都用 Rust（wellen）一次解析建立索引，不落盘缓存：实测 500 MiB/1463 万事件冷解析 353 ms，比原 JS 实现的缓存命中（211–290 ms 加载 + 5.7 s 首次解析）更快，因此 `.svtools/agent/wave/` 索引缓存已移除。解析期间文件变化返回 `SOURCE_CHANGED`；文件超过 2048 MiB 返回 `SOURCE_LIMIT`；格式不受支持或语法损坏返回 `WAVE_FORMAT_UNSUPPORTED`/`VCD_PARSE`。
@@ -252,6 +254,7 @@ node src/cli/main.js wave export --workspace D:/project --file sim/wave.vcd --si
 - `wave stats`：多信号窗口统计（形态参考 pywellen `signal_get_statistics`）——每信号 `events`（折叠后事件数，与 changes 同口径）、`transitions`（终值实际跳变数，同值冗余不计）、`firstChange/lastChange`、`hasX/hasZ`、`windowRecords`；预算与分页同 glitches。`from=0` 时窗口首组的初值不算跳变。用于错误窗口分诊"谁最活跃、谁进入未知态"。
 - `wave timeline`：多信号合并时间线（形态参考 pywellen `debug_build_timeline`）——只含终值跳变，按时间戳归组（同刻多信号变化同组返回，组内按路径排序），每条变化带 `before`（窗口首事件取窗口前一时刻终值，`from=0` 无前值为 null）；`--limit` 为返回组数上限（1..2000，默认 1000），`next` 是首个未返回组时刻、直接作下一页闭区间 `--from`，整查询预算统一截断保证不重不漏。
 - `wave export --format csv`：数据矩阵导出（形态参考 pywellen `export_to_csv`）——行=窗口内任一信号终值跳变时刻，列=各信号该时刻终值位串（含 X/Z，证据口径；`from=0` 时首行前基线为空单元格）；行预算 10 万，超出 `truncated=true`；忽略游标参数，`--out` 与图像导出同一目录安全模型，产物计入 `artifacts[]`（kind `data`，含 sha256 与行数）。
+- `wave export --format layout`：把 `--signals` 的声明身份（路径/范围/位宽）、`--from/--to` 时间窗与 A/B 游标写成 v1 `.svwave.json` 布局。省略 `--out` 时默认写波形同目录、以波形名命名（VCD/FST 去扩展名 + `.svwave.json`），波形本身须在工作区内，否则报 `INVALID_ARGUMENT`；查看器打开同名波形时自动套用，**至少一条声明可匹配才应用**，0 命中（同名巧合或声明已变化）静默保留默认视图，自动套用优先于上次会话的选择与游标。指定 `--out` 时仍受同一目录安全模型约束，但产物不会自动套用，需用查看器「加载布局」手动打开，`data.viewer` 会区分两种情形。`--title` 作文件名；同名文件已存在返回 `FILE_EXISTS`，加 `--force` 覆盖（覆盖前同样拒绝链接/别名目标）；产物计入 `artifacts[]`（kind `layout`，含 sha256 与 tracks 数）。声明重复导致无法唯一匹配的条目仍记为未匹配，不猜测。
 
 波形查询返回原始位值与解码值，不改变或推断波形内容；密集区在 `changes` 中不降采样（与查看器像素窗口的 `dense` 标记不同）。失败日志解析取窗尚未实现，`--at` 时刻由调用者从仿真日志/断言提供。
 

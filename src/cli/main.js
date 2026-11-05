@@ -43,7 +43,7 @@ const help=`SV Tools headless CLI (API 1)
               [--from <t>] [--to <t>] [--limit <n>]   (--where e.g. "dut.q != 8'hA5", "bus contains-x")
   wave diff --file <a.vcd> --against <b.vcd> [--signals <a,b>] [--from <t>] [--to <t>] [--limit <n>]
   wave export --file <vcd> --signals <a,b> --out <dir> [--from <t>] [--to <t>] [--at <t>] [--at-b <t>]
-              [--format svg|png|csv] [--title <t>] (image, or csv data matrix)
+              [--format svg|png|csv|layout] [--title <t>] [--force] (image/csv, or .svwave.json layout; layout 可省 --out)
   task start lint [lint options]
   task list|status|logs|cancel [task-id]
 
