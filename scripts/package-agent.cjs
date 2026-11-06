@@ -13,7 +13,7 @@ const { runProcess } = require('../src/toolchains/process');
 const root = path.resolve(__dirname, '..');
 const skills = ['agent', 'delivery', 'design', 'vivado', 'waveform'];
 const documents = ['docs/AGENT_QUICKSTART.md', 'docs/CLI.md', 'docs/DESIGN_WORKFLOW.md', 'docs/WAVEFORM.md', 'docs/V4_2_PLAN.md'];
-const runtime = name => /^(?:src\/|bin\/|templates\/|package\.json$|LICENSE$|THIRD_PARTY_NOTICES\.md$)/.test(name);
+const runtime = name => /^(?:src\/|bin\/|templates\/|package\.json$|LICENSE(?:\.txt)?$|NOTICE$|AUTHORS$|THIRD_PARTY_NOTICES\.md$)/.test(name);
 const launcher = '@echo off\r\nnode "%~dp0src\\cli\\main.js" %*\r\nexit /b %errorlevel%\r\n';
 
 async function smoke(stage, workspace) {
@@ -45,7 +45,7 @@ async function packageAgent(vsix, output) {
         const files = (await fsp.readdir(payload, { recursive: true, withFileTypes: true }))
             .filter(entry => entry.isFile()).map(entry => path.relative(payload, path.join(entry.parentPath, entry.name)).replace(/\\/g, '/'))
             .filter(runtime).sort();
-        for (const name of ['src/cli/main.js', 'bin/svtools.win32-x64-msvc.node', 'LICENSE', 'THIRD_PARTY_NOTICES.md', 'bin/vendor/ELK-LICENSE.md', 'bin/vendor/resvg-LICENSE.txt']) {
+        for (const name of ['src/cli/main.js', 'bin/svtools.win32-x64-msvc.node', 'LICENSE.txt', 'NOTICE', 'THIRD_PARTY_NOTICES.md', 'bin/vendor/ELK-LICENSE.md', 'bin/vendor/resvg-LICENSE.txt', 'bin/vendor/yosys/THIRD-PARTY-NOTICES.txt']) {
             assert.ok(files.includes(name), '缺少 Agent 运行文件或许可 ' + name);
         }
         for (const name of files) zip.addFile(path.join(payload, name), name);

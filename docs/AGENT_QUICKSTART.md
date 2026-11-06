@@ -17,4 +17,4 @@
 - [波形和布局](docs/WAVEFORM.md)
 - [项目与反馈](https://github.com/JayceVane/SV-Tools)
 
-`RELEASE.json` 记录版本、源码提交和对应 VSIX 的 SHA256。下载后可用同一 Release 的 `SHA256SUMS.txt` 核对 ZIP。许可见 `LICENSE`、`THIRD_PARTY_NOTICES.md` 和 `bin/vendor/`。
+`RELEASE.json` 记录版本、源码提交和对应 VSIX 的 SHA256。下载后可用同一 Release 的 `SHA256SUMS.txt` 核对 ZIP。许可见 `LICENSE.txt`、`NOTICE`、`THIRD_PARTY_NOTICES.md` 和 `bin/vendor/`。
