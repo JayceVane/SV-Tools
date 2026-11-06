@@ -41,7 +41,7 @@ test('格式化预览只读，check非零，显式写入保全字符且复验幂
     assert.equal((await command(workspace,['format','--file','top.sv','--write'])).json.data.written,true);
     assert(preservesCharacters(source,await fs.readFile(file,'utf8')));
     assert.equal((await command(workspace,['format','--file','top.sv','--check'])).code,0);
-    const binary=path.resolve(__dirname,'../bin',process.platform==='win32'?'svtools.exe':'svtools');
+    const binary=path.resolve(__dirname,'../bin',process.platform==='win32'?'svtools-format.exe':'svtools');
     const old=await runProcess(binary,['--check',file],{timeoutMs:15000});assert.equal(old.code,0,old.stderr);
 });
 test('跨进程租约限制同一资源，拥有者退出自动释放，排队可以取消',async t=>{

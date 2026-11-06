@@ -1,0 +1,510 @@
+'use strict';
+// M3 交付3验收：接口束聚合与纯 Node SVG 架构图渲染（证据绑定、确定性、PNG 拒绝）。
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const fsp = require('node:fs/promises');
+const os = require('node:os');
+const path = require('node:path');
+const { spawnSync } = require('node:child_process');
+const { createHash } = require('node:crypto');
+const { run } = require('../src/cli/main');
+const { buildArchitecture } = require('../src/design/arch');
+const { buildRenderProjection, DEFAULT_RENDER_BUDGET, layoutArchitecture, renderArchitectureSvg } = require('../src/design/svg');
+
+const ROOT = path.resolve(__dirname, '..');
+const FIXTURES = path.join(__dirname, 'fixtures', 'design');
+// 演示工程用例只在显式提供 SVTOOLS_ARCH_DEMO 时运行，不回退任何本机固定路径。
+const DEMO = process.env.SVTOOLS_ARCH_DEMO;
+
+/** @param {string} directory @returns {{path:string,text:string}[]} 递归读取源码文本。 */
+function readDirectory(directory) {
+    return fs.readdirSync(directory, { withFileTypes: true }).flatMap(entry => {
+        const file = path.join(directory, entry.name);
+        if (entry.isDirectory()) {
+            return entry.name === '.svtools' ? [] : readDirectory(file);
+        }
+        return entry.isFile() ? [{ path: file, text: fs.readFileSync(file, 'utf8') }] : [];
+    });
+}
+
+/** @param {object} t 测试上下文 @param {string} name fixture 名称 @returns {Promise<string>} 隔离工作区。 */
+async function workspace(t, name) {
+    const directory = await fsp.realpath(await fsp.mkdtemp(path.join(os.tmpdir(), 'svtools-render-')));
+    t.after(() => fsp.rm(directory, { recursive: true, force: true }));
+    await fsp.cp(path.join(FIXTURES, name), directory, { recursive: true });
+    return directory;
+}
+
+/** @param {string} svg SVG 文本。 @returns {object} 解析后的证据元数据。 */
+function evidenceOf(svg) {
+    const match = /<metadata id="svtools-evidence">([\s\S]*?)<\/metadata>/.exec(svg);
+    assert(match, '缺少 svtools-evidence 元数据');
+    return JSON.parse(match[1].replace(/&quot;/g, '"').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&apos;/g, "'"));
+}
+
+test('skeleton 接口束：clk 扇出合并、din/dout/ready 各成束', async t => {
+    const directory = await workspace(t, 'skeleton');
+    const response = await run(['design', 'arch', '--workspace', directory, '--top', 'fifo_top']);
+    assert.equal(response.exitCode, 0);
+    const interfaces = response.output.data.interfaces;
+    assert.equal(interfaces.length, 5);
+    const clk = interfaces.find(item => item.from.kind === 'boundary' && item.from.name === 'clk');
+    assert.deepEqual(clk.to, { kind: 'instance', name: 'u_buf+u_sink' });
+    assert.equal(clk.direction, 'forward');
+    assert.equal(clk.bits, 1);
+    assert.equal(clk.label, 'clk');
+    assert.deepEqual(clk.signals, [{ name: 'clk', width: 1, direction: 'input' }]);
+    const din = interfaces.find(item => item.label === 'din');
+    assert.deepEqual(din.from, { kind: 'boundary', name: 'din' });
+    assert.deepEqual(din.to, { kind: 'instance', name: 'u_buf' });
+    assert.equal(din.bits, 8);
+    const dout = interfaces.find(item => item.label === 'dout');
+    assert.deepEqual(dout.from, { kind: 'instance', name: 'u_buf' });
+    assert.deepEqual(dout.to, { kind: 'boundary', name: 'dout' });
+    const ready = interfaces.find(item => item.label === 'ready');
+    assert.deepEqual(ready.to, { kind: 'boundary', name: 'ready' });
+    const internal = interfaces.find(item => item.label.startsWith('buf_'));
+    assert.deepEqual(internal.from, { kind: 'instance', name: 'u_buf' });
+    assert.deepEqual(internal.to, { kind: 'instance', name: 'u_sink' });
+    assert.equal(internal.bits, 8);
+});
+
+test('render SVG：证据元数据、data-model-id 数量、边界、总线标签与字体/图例', async t => {
+    const directory = await workspace(t, 'skeleton');
+    const response = await run(['design', 'render', '--workspace', directory, '--top', 'fifo_top', '--out', 'out', '--title', 'FIFO 架构']);
+    assert.equal(response.exitCode, 0);
+    assert.equal(response.output.operation, 'design.render');
+    const data = response.output.data, artifact = response.output.artifacts[0];
+    assert.equal(data.style, 'document');
+    assert.equal(artifact.kind, 'image');
+    assert.equal(artifact.format, 'svg');
+    assert.equal(artifact.path, data.path);
+    assert.equal(artifact.sha256, data.sha256);
+    assert.equal(artifact.bytes, data.bytes);
+    assert.equal(artifact.width, data.width);
+    assert.equal(artifact.height, data.height);
+    const svg = await fsp.readFile(artifact.path, 'utf8');
+    assert.match(svg, /^<svg /);
+    assert.equal(svg.includes('width="' + artifact.width + '"'), true);
+    assert.equal(svg.includes('height="' + artifact.height + '"'), true);
+    const evidence = evidenceOf(svg);
+    assert.match(evidence.archSha256, /^[0-9a-f]{64}$/);
+    assert.match(evidence.contextRevision, /^[0-9a-f]{64}$/);
+    assert.equal(evidence.top.name, 'fifo_top');
+    assert.equal(evidence.layout.engine, 'elk');
+    assert.equal(evidence.export.format, 'svg');
+    assert.equal(evidence.export.style, 'document');
+    assert.equal(evidence.export.title, 'FIFO 架构');
+    assert.equal(evidence.export.width, artifact.width);
+    assert.match(evidence.designId, /^design:[0-9a-f]{16}$/);
+    assert.match(evidence.modelSha256, /^[0-9a-f]{64}$/);
+    assert.equal(evidence.modelSha256, evidence.archSha256);
+    const expectedSources = (await fsp.readdir(directory)).filter(name => name.endsWith('.sv')).sort().map(name => ({
+        path: name, sha256: createHash('sha256').update(fs.readFileSync(path.join(directory, name)), 'utf8').digest('hex')
+    }));
+    assert.deepEqual(evidence.sourceFiles, expectedSources);
+    assert.deepEqual(data.evidence, evidence);
+    assert.equal(svg.includes('fill="#ffffff"'), true, 'document 风格纯白背景');
+    assert.equal(svg.includes('arch-grid'), false, 'document 风格无网格/渐变');
+    assert.equal(svg.includes('stroke="#111111"'), true, 'document 风格黑色描边');
+    assert.equal(svg.includes('stroke-dasharray="6 4"'), true, 'blackbox 虚线 6 4');
+    assert.equal(svg.includes('font-family="-apple-system'), true, 'document 无衬线字体');
+    const arch = (await run(['design', 'arch', '--workspace', directory, '--top', 'fifo_top'])).output.data;
+    const projection = buildRenderProjection(arch);
+    const expectedIds = projection.nodes.length + projection.nodes.reduce((total, node) => total + node.ports.length, 0);
+    assert.equal((svg.match(/data-model-id="/g) || []).length, expectedIds);
+    for (const id of ['boundary:clk', 'boundary:din', 'boundary:dout', 'boundary:ready', 'instance:u_buf', 'instance:u_sink']) {
+        assert.equal(svg.includes('data-model-id="' + id + '"'), true, id);
+    }
+    assert.equal(svg.includes('class="badge"') || svg.includes('blackbox'), true);
+    assert.equal(svg.includes('collapsed'), true);
+    assert.equal(svg.includes('(8 bits)'), true, '总线位宽标签');
+    assert.equal(svg.includes('(1 bits)'), true);
+    assert.equal(svg.includes('signals:'), true, '边 title 保留完整成员名');
+    assert.equal(svg.includes('>bus<') || svg.includes('>bus'), true);
+    assert.equal(svg.includes('>boundary<') || svg.includes('>boundary'), true);
+    const files = await fsp.readdir(path.join(directory, 'out'));
+    assert.equal(files.filter(name => name.endsWith('.svg')).length, 1);
+});
+
+test('document/presentation 共用布局坐标，各自两次渲染确定', async t => {
+    const directory = await workspace(t, 'skeleton');
+    const arch = (await run(['design', 'arch', '--workspace', directory, '--top', 'fifo_top'])).output.data;
+    const layout = await layoutArchitecture(arch);
+    const documentA = renderArchitectureSvg(arch, layout, { style: 'document' });
+    const documentB = renderArchitectureSvg(arch, layout, { style: 'document' });
+    const presentationA = renderArchitectureSvg(arch, layout, { style: 'presentation' });
+    const presentationB = renderArchitectureSvg(arch, layout, { style: 'presentation' });
+    const alias = renderArchitectureSvg(arch, layout, { style: 'ui' });
+    assert.equal(documentA.sha256, documentB.sha256);
+    assert.equal(presentationA.sha256, presentationB.sha256);
+    assert.equal(alias.sha256, presentationA.sha256, 'ui 是 presentation 的别名');
+    assert.notEqual(documentA.sha256, presentationA.sha256);
+    assert.equal(documentA.width, presentationA.width);
+    assert.equal(documentA.height, presentationA.height);
+    assert.equal(documentA.evidence.export.style, 'document');
+    assert.equal(presentationA.evidence.export.style, 'presentation');
+    const rectOf = (svg, id) => {
+        const match = new RegExp('data-model-id="' + id + '"[\\s\\S]*?<rect x="([^"]+)" y="([^"]+)" width="([^"]+)" height="([^"]+)"').exec(svg);
+        assert(match, id);
+        return match.slice(1);
+    };
+    for (const id of ['instance:u_buf', 'instance:u_sink', 'boundary:clk']) {
+        assert.deepEqual(rectOf(documentA.svg, id), rectOf(presentationA.svg, id), id);
+    }
+    assert.equal(presentationA.svg.includes('fill="#111923"'), true);
+    assert.equal(presentationA.svg.includes('arch-grid'), true);
+    assert.equal(presentationA.svg.includes('stroke-dasharray="4 3"'), true);
+    assert.equal(presentationA.svg.includes('#eebc79'), true, 'presentation 输入边界角色色');
+    assert.equal(presentationA.svg.includes('#70d3c3'), true, 'presentation 输出边界角色色');
+    assert.equal(documentA.svg.includes('stroke-dasharray="6 4"'), true);
+    assert.equal(documentA.svg.includes('#eebc79'), false, 'document 无输入角色彩色');
+    assert.equal(documentA.svg.includes('#70d3c3'), false, 'document 无输出角色彩色');
+    assert.equal(/linearGradient|radialGradient/.test(documentA.svg), false, 'document 无渐变');
+    for (const match of documentA.svg.matchAll(/(?:fill|stroke)="([^"]+)"/g)) {
+        const value = match[1].toLowerCase();
+        if (value === 'none') {
+            continue;
+        }
+        assert.equal(value.startsWith('url('), false, 'document 不应引用渐变/图案：' + value);
+        const hex = /^#([0-9a-f]{3}|[0-9a-f]{6})$/.exec(value);
+        assert(hex, 'document 颜色必须为十六进制：' + value);
+        const digits = hex[1].length === 3 ? [...hex[1]].map(char => char + char).join('') : hex[1];
+        assert.equal(digits.slice(0, 2), digits.slice(2, 4), 'document 必须 R=G=B：' + value);
+        assert.equal(digits.slice(2, 4), digits.slice(4, 6), 'document 必须 R=G=B：' + value);
+    }
+    assert.throws(() => renderArchitectureSvg(arch, layout, { style: 'neon' }), { code: 'INVALID_ARGUMENT' });
+    const unresolvedDirectory = await workspace(t, 'unresolved');
+    const unresolvedArch = (await run(['design', 'arch', '--workspace', unresolvedDirectory, '--top', 'ghost_top'])).output.data;
+    const unresolvedImage = renderArchitectureSvg(unresolvedArch, await layoutArchitecture(unresolvedArch));
+    assert.equal(unresolvedImage.svg.includes('stroke-dasharray="2 3"'), true, 'unresolved 点线 2 3');
+    assert.equal(unresolvedImage.svg.includes('>unresolved<'), true);
+});
+
+test('布局门禁：横向可读、节点与连线标签不重叠且布局确定', async t => {
+    const directory = await workspace(t, 'layout');
+    const arch = (await run(['design', 'arch', '--workspace', directory, '--top', 'layout_top'])).output.data;
+    assert.equal(arch.instances.length, 9);
+    assert.equal(arch.interfaces.length >= 8, true);
+    const first = await layoutArchitecture(arch);
+    const second = await layoutArchitecture(arch);
+    const ratio = first.layout.width / first.layout.height;
+    assert.equal(ratio > 1 && ratio < 2.2, true, '夹具布局应保持可读的横向比例，实际 ' + ratio.toFixed(2));
+    assert.equal(first.projection.stats.junctions > 0, true);
+    const boxes = first.layout.nodes.map(node => ({ id: node.id, x: node.x, y: node.y, width: node.width, height: node.height }));
+    for (let left = 0; left < boxes.length; left++) {
+        for (let right = left + 1; right < boxes.length; right++) {
+            const a = boxes[left], b = boxes[right];
+            const overlap = a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
+            assert.equal(overlap, false, a.id + ' 与 ' + b.id + ' 重叠');
+        }
+    }
+    const geometry = layout => layout.nodes.map(node => [node.id, node.x, node.y, node.width, node.height]);
+    assert.deepEqual(geometry(second.layout), geometry(first.layout));
+    const labels = first.layout.edges.flatMap(edge => edge.labels || []);
+    assert.ok(labels.length, '连线标签必须参与布局');
+    const overlap = (a,b) => a.x < b.x+b.width && b.x < a.x+a.width && a.y < b.y+b.height && b.y < a.y+a.height;
+    for (const label of labels) {
+        assert.ok(label.x >= 0 && label.y >= 0 && label.x+label.width <= first.layout.width && label.y+label.height <= first.layout.height);
+        assert.ok(boxes.every(box => !overlap(label,box)), '连线标签覆盖模块');
+    }
+    for (let at=0; at<labels.length; at++) assert.ok(labels.slice(at+1).every(other => !overlap(labels[at],other)), '连线标签互相覆盖');
+});
+
+test('struct 空模块渲染为虚线盒，含 assign/always_ff 的模块保持实线', async t => {
+    const directory = await workspace(t, 'struct-empty');
+    const arch = (await run(['design', 'arch', '--workspace', directory, '--top', 'struct_empty_top'])).output.data;
+    const image = renderArchitectureSvg(arch, await layoutArchitecture(arch));
+    const blockOf = id => {
+        const start = image.svg.indexOf('data-model-id="' + id + '"');
+        assert.notEqual(start, -1, id);
+        const next = image.svg.indexOf('<g data-model-id="instance:', start + 1);
+        return image.svg.slice(start, next < 0 ? start + 8000 : next);
+    };
+    assert.equal(blockOf('instance:u_empty').includes('stroke-dasharray="6 4"'), true);
+    assert.equal(blockOf('instance:u_assign').includes('stroke-dasharray="6 4"'), false);
+    assert.equal(blockOf('instance:u_ff').includes('stroke-dasharray="6 4"'), false);
+});
+
+test('纯 alias/常量 assign 渲染为实线盒，真正空模块为虚线', async t => {
+    const directory = await workspace(t, 'alias-empty');
+    const arch = (await run(['design', 'arch', '--workspace', directory, '--top', 'alias_empty_top'])).output.data;
+    const image = renderArchitectureSvg(arch, await layoutArchitecture(arch));
+    const blockOf = id => {
+        const start = image.svg.indexOf('data-model-id="' + id + '"');
+        assert.notEqual(start, -1, id);
+        const next = image.svg.indexOf('<g data-model-id="instance:', start + 1);
+        return image.svg.slice(start, next < 0 ? start + 8000 : next);
+    };
+    assert.equal(blockOf('instance:u_alias').includes('stroke-dasharray="6 4"'), false);
+    assert.equal(blockOf('instance:u_const').includes('stroke-dasharray="6 4"'), false);
+    assert.equal(blockOf('instance:u_empty').includes('stroke-dasharray="6 4"'), true);
+});
+
+test('render --format png 走内置 resvg 栅格化，非法格式拒绝', async t => {
+    const directory = await workspace(t, 'skeleton');
+    const response = await run(['design', 'render', '--workspace', directory, '--top', 'fifo_top', '--format', 'png', '--out', 'png-out']);
+    assert.equal(response.exitCode, 0, JSON.stringify(response.output.diagnostics));
+    assert.equal(response.output.data.format, 'png');
+    assert.equal(response.output.data.scale, 2, '默认 2x 栅格化');
+    assert.equal(response.output.data.width, response.output.data.evidence.export.width * 2);
+    const artifact = response.output.artifacts[0];
+    const png = await fsp.readFile(artifact.path);
+    assert.equal(png.slice(1, 4).toString(), 'PNG');
+    assert.equal(png.readUInt32BE(16), response.output.data.width, 'PNG 头尺寸与返回一致');
+    const invalid = await run(['design', 'render', '--workspace', directory, '--top', 'fifo_top', '--format', 'gif', '--out', 'png-out']);
+    assert.equal(invalid.exitCode, 2);
+    assert.equal(invalid.output.diagnostics[0].code, 'INVALID_ARGUMENT');
+    assert.equal(invalid.output.diagnostics[0].message.includes('gif'), true);
+});
+
+test('渲染预算超限返回 DESIGN_LIMIT', async t => {
+    const directory = await workspace(t, 'skeleton');
+    const files = readDirectory(directory);
+    const arch = await buildArchitecture({ workspace: directory, files, top: 'fifo_top' });
+    assert.deepEqual({ ...DEFAULT_RENDER_BUDGET }, { nodes: 2000, edges: 6000, ports: 16384 });
+    assert.throws(() => buildRenderProjection(arch, { budget: { nodes: 1 } }), error => {
+        assert.equal(error.code, 'DESIGN_LIMIT');
+        assert.equal(error.details.kind, 'nodes');
+        return true;
+    });
+    assert.throws(() => buildRenderProjection(arch, { budget: { edges: 1 } }), error => {
+        assert.equal(error.code, 'DESIGN_LIMIT');
+        assert.equal(error.details.kind, 'edges');
+        return true;
+    });
+    const fanoutDirectory = await workspace(t, 'fanout');
+    const fanoutArch = (await run(['design', 'arch', '--workspace', fanoutDirectory, '--top', 'fanout_top'])).output.data;
+    const projection = buildRenderProjection(fanoutArch);
+    const graphNodes = fanoutArch.graph.nodes.length;
+    const graphPorts = fanoutArch.graph.nodes.reduce((total, node) => total + node.ports.length, 0);
+    assert.equal(projection.nodes.length > graphNodes, true);
+    assert.throws(() => buildRenderProjection(fanoutArch, { budget: { nodes: graphNodes } }), error => {
+        assert.equal(error.code, 'DESIGN_LIMIT');
+        assert.equal(error.details.kind, 'nodes');
+        return true;
+    });
+    assert.throws(() => buildRenderProjection(fanoutArch, { budget: { ports: graphPorts } }), error => {
+        assert.equal(error.code, 'DESIGN_LIMIT');
+        assert.equal(error.details.kind, 'ports');
+        return true;
+    });
+});
+
+test('capabilities 增加 design.render，CLI 子进程输出单份 JSON', async t => {
+    const directory = await workspace(t, 'skeleton');
+    const doctor = await run(['doctor', '--workspace', directory]);
+    assert.equal(doctor.exitCode, 0);
+    assert.equal(doctor.output.data.capabilities.includes('design.render'), true);
+    const cli = path.join(ROOT, 'src', 'cli', 'main.js');
+    const child = spawnSync(process.execPath, [cli, 'design', 'render', '--workspace', directory, '--top', 'fifo_top', '--out', 'out'], { encoding: 'utf8' });
+    assert.equal(child.status, 0);
+    const output = JSON.parse(child.stdout);
+    assert.equal(output.operation, 'design.render');
+    assert.equal(output.data.style, 'document');
+    assert.match(path.basename(output.artifacts[0].path), /-document\.svg$/);
+    assert.equal(output.artifacts[0].format, 'svg');
+    assert.equal(fs.existsSync(output.artifacts[0].path), true);
+});
+
+test('扇出接口合并与无公共前缀标签回退', async t => {
+    const directory = await workspace(t, 'fanout');
+    const arch = (await run(['design', 'arch', '--workspace', directory, '--top', 'fanout_top'])).output.data;
+    assert.equal(arch.interfaces.length, 4);
+    const fanout = arch.interfaces.find(item => item.from.name === 'u_clk' && item.to.kind === 'instance' && item.to.name.includes('+'));
+    assert.deepEqual(fanout.to, { kind: 'instance', name: 'u_a+u_b+u_c' });
+    assert.equal(fanout.direction, 'forward');
+    assert.equal(fanout.bits, 2);
+    assert.equal(fanout.label, 'clk/rst');
+    assert.deepEqual(fanout.signals.map(signal => signal.name), ['clk_sys', 'rst_sys_n']);
+    const fallback = arch.interfaces.find(item => item.from.name === 'u_a' && item.to.name === 'u_sink');
+    assert.equal(fallback.label, 'alpha, beta');
+    assert.equal(fallback.bits, 2);
+    const image = await run(['design', 'render', '--workspace', directory, '--top', 'fanout_top', '--out', 'out']);
+    assert.equal(image.exitCode, 0);
+    assert.equal(image.output.data.style, 'document');
+    assert.equal(image.output.data.stats.junctions, 2, 'clk/rst 是不同端口，分别扇出');
+    assert.equal(image.output.data.evidence.export.junctionCount, 2);
+    const svg = await fsp.readFile(image.output.data.path, 'utf8');
+    for (const label of ['clk_sys (1 bits)', 'rst_sys_n (1 bits)', 'alpha (1 bits)', 'beta (1 bits)']) assert.equal(svg.includes(label), true, label);
+});
+
+test('端口折叠 opt-in 门禁：信号级端口事实、m_axi/m_valid 守卫、s_*、预算与 title 位宽', async t => {
+    const directory = await workspace(t, 'bundles');
+    const arch = (await run(['design', 'arch', '--workspace', directory, '--top', 'bundle_top'])).output.data;
+    const instance = arch.instances.find(item => item.name === 'u_c');
+    assert.equal(instance.ports.length, 8);
+    assert.deepEqual(instance.bundles.map(bundle => [bundle.name, bundle.direction, bundle.bits, bundle.members.length]), [
+        ['clk', 'input', 1, 1],
+        ['m_axi', 'inout', 96, 2],
+        ['m_valid', 'input', 1, 1],
+        ['s0', 'inout', 64, 2],
+        ['s_awaddr', 'input', 32, 1],
+        ['s_wdata', 'output', 32, 1]
+    ]);
+    assert.deepEqual(instance.bundles.find(bundle => bundle.name === 'm_axi').members.map(member => member.name), ['m_axi_araddr', 'm_axi_rdata']);
+    assert.equal(instance.bundles.reduce((total, bundle) => total + bundle.members.length, 0), instance.ports.length, '折叠成员总和等于端口数');
+    assert.equal(arch.limitations.some(text => text.includes('虚拟接口端口为前缀折叠展示')), true);
+
+    const plain = buildRenderProjection(arch, {detail:'signals'});
+    const folded = buildRenderProjection(arch, { detail:'signals', bundle: true });
+    assert.equal(plain.stats.bundled, false);
+    assert.equal(plain.stats.bundles, 0);
+    assert.equal(plain.stats.ports, plain.stats.fullPorts);
+    assert.equal(folded.stats.bundled, true);
+    assert.equal(folded.stats.bundles, 2);
+    assert.equal(folded.stats.ports < plain.stats.ports, true);
+    assert.equal(folded.stats.fullPorts, plain.stats.fullPorts);
+    const endpointOf = (projection, port) => projection.edges.find(edge => edge.interface.toPorts.includes(port));
+    assert.equal(endpointOf(plain, 'm_axi_araddr').targets[0], 'instance:u_c/m_axi_araddr');
+    assert.equal(endpointOf(folded, 'm_axi_araddr').targets[0], 'instance:u_c/bundle:m_axi');
+    assert.equal(endpointOf(folded, 'm_valid').targets[0], 'instance:u_c/m_valid');
+    assert.equal(endpointOf(folded, 's0_awaddr').targets[0], 'instance:u_c/bundle:s0');
+    const sourceEdge = projection => projection.edges.find(edge => edge.interface.fromPorts.includes('m_axi_rdata'));
+    assert.equal(sourceEdge(plain).sources[0], 'instance:u_c/m_axi_rdata');
+    assert.equal(sourceEdge(folded).sources[0], 'instance:u_c/bundle:m_axi');
+
+    assert.doesNotThrow(() => buildRenderProjection(arch, { detail:'signals', bundle: true, budget: { ports: 15 } }));
+    assert.throws(() => buildRenderProjection(arch, { detail:'signals', budget: { ports: 15 } }), error => {
+        assert.equal(error.code, 'DESIGN_LIMIT');
+        assert.equal(error.details.kind, 'ports');
+        return true;
+    });
+    assert.throws(() => buildRenderProjection(arch, { detail:'signals', bundle: true, budget: { ports: folded.stats.ports - 1 } }), error => {
+        assert.equal(error.code, 'DESIGN_LIMIT');
+        assert.equal(error.details.kind, 'ports');
+        return true;
+    });
+
+    const baseline = await run(['design', 'render', '--detail', 'signals', '--workspace', directory, '--top', 'bundle_top', '--out', 'out-default']);
+    assert.equal(baseline.exitCode, 0);
+    assert.equal(baseline.output.data.evidence.export.bundled, false);
+    assert.equal(baseline.output.data.evidence.export.bundleCount, 0);
+    assert.equal(baseline.output.data.stats.ports, plain.stats.ports);
+    const baselineSvg = await fsp.readFile(baseline.output.data.path, 'utf8');
+    assert.equal(baselineSvg.includes('m_axi_araddr['), true);
+    assert.equal(baselineSvg.includes('m_axi*'), false);
+    const baselineTitles = [...baselineSvg.matchAll(/<title>([\s\S]*?)<\/title>/g)].map(match => match[1]);
+    assert.equal(baselineTitles.some(title => title.includes('m_axi_araddr[32]')), true);
+    assert.equal(baselineTitles.some(title => title.includes('(0 bits)')), false, '默认 title 位宽不得为0');
+
+    const foldedRender = await run(['design', 'render', '--detail', 'signals', '--workspace', directory, '--top', 'bundle_top', '--fold-ports', '--out', 'out-fold']);
+    assert.equal(foldedRender.exitCode, 0);
+    assert.equal(foldedRender.output.data.evidence.export.bundled, true);
+    assert.equal(foldedRender.output.data.evidence.export.bundleCount, 2);
+    assert.equal(foldedRender.output.data.stats.ports, folded.stats.ports);
+    const foldedSvg = await fsp.readFile(foldedRender.output.data.path, 'utf8');
+    assert.equal(foldedSvg.includes('m_axi*'), true);
+    assert.equal(foldedSvg.includes('(96 bits)'), true);
+    assert.equal(foldedSvg.includes('virtual bundle'), true);
+    assert.equal(foldedSvg.includes('前缀折叠展示'), true);
+    const foldedTitles = [...foldedSvg.matchAll(/<title>([\s\S]*?)<\/title>/g)].map(match => match[1]);
+    assert.equal(foldedTitles.some(title => title.includes('虚拟接口端口 m_axi* (96 bits)')), true);
+    assert.equal(foldedTitles.some(title => title.includes('虚拟接口端口 s0* (64 bits)')), true);
+    assert.equal(foldedTitles.some(title => title.includes('s0_awaddr[32]')), true);
+    assert.equal(foldedTitles.some(title => title.includes('(0 bits)')), false, '折叠 title 位宽不得为0');
+    const again = await run(['design', 'render', '--detail', 'signals', '--workspace', directory, '--top', 'bundle_top', '--fold-ports', '--out', 'out-fold']);
+    assert.equal(again.output.data.sha256, foldedRender.output.data.sha256);
+
+    const named = await run(['design', 'render', '--detail', 'signals', '--workspace', directory, '--top', 'bundle_top', '--fold-ports', '--out', 'out-named', '--bundle-name', 's0=s0_axi']);
+    assert.equal(named.exitCode, 0);
+    assert.equal(named.output.data.bundleNames.s0, 's0_axi');
+    const namedSvg = await fsp.readFile(named.output.data.path, 'utf8');
+    assert.equal(namedSvg.includes('s0_axi*'), true);
+    const invalidName = await run(['design', 'render', '--detail', 'signals', '--workspace', directory, '--top', 'bundle_top', '--out', 'out-invalid', '--bundle-name', 's0=s0_axi']);
+    assert.equal(invalidName.exitCode, 2);
+    assert.equal(invalidName.output.diagnostics[0].code, 'INVALID_ARGUMENT');
+});
+
+test('render --out 越界、绝对路径与普通文件目标返回 INVALID_ARGUMENT，不写工作区外', async t => {
+    const directory = await workspace(t, 'skeleton');
+    const escapeName = 'render-escape-' + process.pid;
+    await fsp.rm(path.join(path.dirname(directory), escapeName), { recursive: true, force: true });
+    const parentEscape = await run(['design', 'render', '--workspace', directory, '--top', 'fifo_top', '--out', '../' + escapeName]);
+    assert.equal(parentEscape.exitCode, 2);
+    assert.equal(parentEscape.output.diagnostics[0].code, 'INVALID_ARGUMENT');
+    assert.equal(fs.existsSync(path.join(path.dirname(directory), escapeName)), false, '不得在工作区外创建目录');
+    const outside = path.join(os.tmpdir(), 'svtools-render-outside-' + process.pid);
+    const absoluteOutside = await run(['design', 'render', '--workspace', directory, '--top', 'fifo_top', '--out', outside]);
+    assert.equal(absoluteOutside.exitCode, 2);
+    assert.equal(absoluteOutside.output.diagnostics[0].code, 'INVALID_ARGUMENT');
+    assert.equal(fs.existsSync(outside), false);
+    await fsp.writeFile(path.join(directory, 'blocked'), 'x');
+    const blocked = await run(['design', 'render', '--workspace', directory, '--top', 'fifo_top', '--out', 'blocked']);
+    assert.equal(blocked.exitCode, 2);
+    assert.equal(blocked.output.diagnostics[0].code, 'INVALID_ARGUMENT');
+    const okay = await run(['design', 'render', '--workspace', directory, '--top', 'fifo_top', '--out', 'out-safe']);
+    assert.equal(okay.exitCode, 0, JSON.stringify(okay.output.diagnostics));
+    assert.equal((await fsp.readdir(path.join(directory, 'out-safe'))).filter(name => name.endsWith('.svg')).length, 1);
+});
+
+/** @param {string} text @param {number} size @returns {number} 与实现一致的文本宽度估算。 */
+function estimatedTextWidth(text, size) {
+    return [...String(text)].reduce((total, char) => total + (/[^\x00-\x7f]/.test(char) ? size : size * 0.62), 0);
+}
+
+test('窄图图例按画布宽度换行，不超出 viewBox', async t => {
+    const directory = await workspace(t, 'unresolved');
+    const response = await run(['design', 'render', '--workspace', directory, '--top', 'ghost_top']);
+    assert.equal(response.exitCode, 0, JSON.stringify(response.output.diagnostics));
+    const data = response.output.data;
+    const svg = await fsp.readFile(data.path, 'utf8');
+    // 底部图例/说明文本（fill #333 的 muted 文本，含 11px 图例与 10px 说明）。
+    const legendTexts = [...svg.matchAll(/<text x="([\d.]+)" y="([\d.]+)" fill="#333333"[^>]*font-size="(10|11)"[^>]*>([^<]+)<\/text>/g)]
+        .map(match => ({ x: Number(match[1]), y: Number(match[2]), size: Number(match[3]), text: match[4] }))
+        .filter(item => item.y > data.height - 80);
+    assert.equal(legendTexts.length >= 4, true, '四项基础图例：' + JSON.stringify(legendTexts));
+    for (const item of legendTexts) {
+        const right = item.x + estimatedTextWidth(item.text, item.size);
+        assert.equal(right <= data.width, true, '图例超出画布：' + item.text + ' 右缘 ' + right.toFixed(1) + ' > ' + data.width);
+    }
+    const rows = new Set(legendTexts.filter(item => item.size === 11).map(item => item.y));
+    assert.equal(rows.size >= 2, true, '窄图应换行：' + JSON.stringify(legendTexts.map(item => [item.x, item.y])));
+
+    // --fold-ports 发生折叠时补一行说明文字；bundles 夹具较宽，验证说明单独成行且不超画布。
+    const foldedDirectory = await workspace(t, 'bundles');
+    const folded = await run(['design', 'render', '--workspace', foldedDirectory, '--top', 'bundle_top', '--fold-ports']);
+    assert.equal(folded.exitCode, 0, JSON.stringify(folded.output.diagnostics));
+    const foldedSvg = await fsp.readFile(folded.output.data.path, 'utf8');
+    const note = /<text x="([\d.]+)" y="([\d.]+)" fill="#333333"[^>]*font-size="10"[^>]*>(虚拟接口端口[^<]+)<\/text>/.exec(foldedSvg);
+    assert(note, '折叠说明文字保留');
+    assert.equal(Number(note[1]) + estimatedTextWidth(note[3], 10) <= folded.output.data.width, true, '说明文字超出画布');
+});
+
+test('演示项目：默认端口事实与 --fold-ports 规模检查', { skip: DEMO && fs.existsSync(DEMO) ? false : '未设置 SVTOOLS_ARCH_DEMO 指向演示工程' }, async t => {
+    const directory = await fsp.realpath(await fsp.mkdtemp(path.join(os.tmpdir(), 'svtools-demo-render-')));
+    t.after(() => fsp.rm(directory, { recursive: true, force: true }));
+    const files = [];
+    for (const source of readDirectory(path.join(DEMO, 'rtl'))) {
+        const file = path.join(directory, path.relative(DEMO, source.path));
+        await fsp.mkdir(path.dirname(file), { recursive: true }); await fsp.writeFile(file, source.text);
+        files.push({ path: file, text: source.text });
+    }
+    const arch = await buildArchitecture({ workspace: directory, files, top: 'soc_top' });
+    assert.equal(arch.graph.nodes.filter(node => node.kind === 'instance').length, 15);
+    assert.equal(arch.graph.edges.length, 191);
+    assert.equal(arch.interfaces.length, 30);
+    const plain = await layoutArchitecture(arch);
+    const folded = await layoutArchitecture(arch, { bundle: true });
+    assert.equal(plain.projection.stats.bundled, false);
+    assert.equal(folded.projection.stats.bundled, true);
+    assert.equal(folded.projection.stats.bundles > 0, true);
+    assert.equal(folded.projection.stats.ports < plain.projection.stats.ports, true);
+    assert.equal(folded.projection.stats.fullPorts, plain.projection.stats.fullPorts);
+    const instance = name => arch.instances.find(item => item.name === name);
+    assert.equal(instance('u_ic').bundles.length, 6);
+    assert.equal(instance('u_cpu').bundles.length, 4);
+    assert.equal(instance('u_ddr').bundles.some(bundle => bundle.name === 's'), false, '单字母桶 s_* 不折叠');
+    const heightOf = (layout, id) => layout.nodes.find(node => node.id === id).height;
+    assert.equal(heightOf(folded.layout, 'instance:u_ic') < heightOf(plain.layout, 'instance:u_ic') / 2, true);
+    const imageA = renderArchitectureSvg(arch, folded, { title: 'SoC 顶层架构', style: 'document' });
+    const imageB = renderArchitectureSvg(arch, folded, { title: 'SoC 顶层架构', style: 'document' });
+    const presentation = renderArchitectureSvg(arch, folded, { title: 'SoC 顶层架构', style: 'presentation' });
+    assert.equal(imageA.sha256, imageB.sha256);
+    assert.equal(imageA.width, presentation.width);
+    assert.equal(imageA.height, presentation.height);
+    assert.equal(imageA.evidence.export.bundled, true);
+    assert.equal(imageA.evidence.export.bundleCount > 0, true);
+    assert.equal(imageA.svg.includes('virtual bundle'), true);
+});

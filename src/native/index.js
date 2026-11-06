@@ -310,7 +310,7 @@ if (!nativeBinding) {
   throw new Error(`Failed to load native binding`)
 }
 
-const { SymbolKind, formatText, generateModuleInst, generateTestbench, repeatCode, alignCode, generateHeader, extractSymbols, findSymbolByName, writeClipboardPng } = nativeBinding
+const { SymbolKind, formatText, generateModuleInst, generateTestbench, repeatCode, alignCode, generateHeader, extractSymbols, findSymbolByName, waveOpen, waveSessionOpen, waveSessionOpenAsync, waveSessionClose, waveSessionCount, waveOpenAsync, waveValues, waveChanges, waveEdges, waveSample, waveDiff, waveWindow, waveEdge, waveValuesAsync, waveChangesAsync, waveEdgesAsync, waveSampleAsync, waveDiffAsync, waveWindowAsync, waveEdgeAsync, waveConvertVcdToFst, waveConvertVcdToFstAsync, waveGlitches, waveStats, waveTimeline, writeClipboardPng } = nativeBinding
 
 module.exports.SymbolKind = SymbolKind
 module.exports.formatText = formatText
@@ -321,4 +321,29 @@ module.exports.alignCode = alignCode
 module.exports.generateHeader = generateHeader
 module.exports.extractSymbols = extractSymbols
 module.exports.findSymbolByName = findSymbolByName
+module.exports.waveOpen = waveOpen
+module.exports.waveSessionOpen = waveSessionOpen
+module.exports.waveSessionOpenAsync = waveSessionOpenAsync
+module.exports.waveSessionClose = waveSessionClose
+module.exports.waveSessionCount = waveSessionCount
+module.exports.waveOpenAsync = waveOpenAsync
+module.exports.waveValues = waveValues
+module.exports.waveChanges = waveChanges
+module.exports.waveEdges = waveEdges
+module.exports.waveSample = waveSample
+module.exports.waveDiff = waveDiff
+module.exports.waveWindow = waveWindow
+module.exports.waveEdge = waveEdge
+module.exports.waveValuesAsync = waveValuesAsync
+module.exports.waveChangesAsync = waveChangesAsync
+module.exports.waveEdgesAsync = waveEdgesAsync
+module.exports.waveSampleAsync = waveSampleAsync
+module.exports.waveDiffAsync = waveDiffAsync
+module.exports.waveWindowAsync = waveWindowAsync
+module.exports.waveEdgeAsync = waveEdgeAsync
+module.exports.waveConvertVcdToFst = waveConvertVcdToFst
+module.exports.waveConvertVcdToFstAsync = waveConvertVcdToFstAsync
+module.exports.waveGlitches = waveGlitches
+module.exports.waveStats = waveStats
+module.exports.waveTimeline = waveTimeline
 module.exports.writeClipboardPng = writeClipboardPng

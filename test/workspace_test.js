@@ -2,7 +2,7 @@
 const assert = require('node:assert/strict');
 const path = require('node:path');
 const { test } = require('node:test');
-const { createWorkspaceSourceIndex } = require('../src/workspace/sources');
+const { createWorkspaceSourceIndex, extractDesignUnits } = require('../src/workspace/sources');
 
 test('工具快照和依赖目录被明确排除，防止重复设计单元污染索引', async () => {
     const calls = [];
@@ -283,4 +283,11 @@ test('并发强制刷新共享一次发现，可重新尝试上次读取失败�
     const [a, b] = await Promise.all([index.scan(true), index.scan(true)]);
     assert.equal(a, b); assert.equal(a.modules.get('recovered'), file);
     assert.equal(reads, 2); assert.equal(discovers, 2); assert.equal(invalidates, 1);
+});
+test('带 UTF-8 BOM 的源码仍能识别设计单元，且区间对应原文', () => {
+    const nl = String.fromCharCode(10), text = String.fromCharCode(0xFEFF) + 'module leaf; endmodule' + nl + 'module next; endmodule' + nl;
+    const units = extractDesignUnits(text);
+    assert.deepEqual(units.map(unit => unit.name), ['leaf', 'next']);
+    assert.equal(text.slice(units[0].start, units[0].end).trim(), 'module leaf; endmodule');
+    assert.deepEqual(extractDesignUnits(text.slice(1)).map(unit => unit.name), ['leaf', 'next']);
 });

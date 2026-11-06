@@ -24,7 +24,7 @@ async function host(t) {
                 assert.equal(id, 'svtools.vivado.projectTree');
                 provider = value;
                 return noop();
-            }, showErrorMessage: error => errors.push(error), showQuickPick: async () => undefined }, ConfigurationTarget: {Workspace:2,Global:1}, workspace: { getConfiguration: () => ({ get: () => traceMode, update:async (_,value)=>{traceMode=value;} }), createFileSystemWatcher: () => ({ onDidChange: noop, onDidCreate: noop, onDidDelete: noop, dispose() {
+            }, showErrorMessage: error => errors.push(error), showQuickPick: async () => undefined }, ConfigurationTarget: {Workspace:2,Global:1}, workspace: { getConfiguration: () => ({ get: key => key==='design.planFile'?'svtools.design.json':traceMode, update:async (_,value)=>{traceMode=value;} }), createFileSystemWatcher: () => ({ onDidChange: noop, onDidCreate: noop, onDidDelete: noop, dispose() {
                 } }) }, commands: { registerCommand(id, callback) {
                 commands.set(id, callback);
                 return noop();
@@ -139,4 +139,19 @@ test('文件视图聚合角色，实例视图区分同文件多实例，信号�
     assert.equal(instances.length, 2);
     assert.notEqual(instances[0].id, instances[1].id);
     assert.ok(instances.every(n => !n.label.includes('r_data')));
+});
+
+test('同一侧栏的只读进展读取计划，链接限定当前工程且不创建状态',async t=>{
+    const root=fs.mkdtempSync(path.join(require('node:os').tmpdir(),'svtools-progress-'));
+    t.after(()=>{assert.ok(path.basename(root).startsWith('svtools-progress-'));fs.rmSync(root,{recursive:true,force:true});});
+    fs.writeFileSync(path.join(root,'top.sv'),'module top; endmodule');
+    fs.writeFileSync(path.join(root,'svtools.design.json'),JSON.stringify({schemaVersion:1,id:'p',title:'Progress',top:'top',overview:'fixture',requirements:[{id:'R1',text:'requirement'}],modules:[{id:'top',name:'top',responsibility:'fixture',sources:['top.sv'],requirements:['R1'],deltaSignals:['tb.q']}]}));
+    const h=await host(t);h.setProject({id:'progress-project',name:'progress',kind:'svtools',root,sets:[]});await h.api.refresh();
+    await h.message({action:'projection',projection:'progress',revision:h.api.getSnapshot().revision});
+    for(let i=0;i<50&&!h.sent.at(-1)?.progress?.available;i++)await new Promise(resolve=>setTimeout(resolve,10));
+    let snapshot=h.sent.at(-1);assert.equal(snapshot.projection,'progress');assert.equal(snapshot.progress.readOnly,true);assert.equal(snapshot.progress.summary.total,1);assert.deepEqual(snapshot.nodes,[]);assert.equal(fs.existsSync(path.join(root,'.svtools')),false);
+    const link=snapshot.progress.modules[0].references[0];await h.message({action:'openProgress',linkId:link.id,revision:snapshot.revision});for(let i=0;i<50&&!h.calls.some(call=>call[0]==='vscode.open');i++)await new Promise(resolve=>setTimeout(resolve,10));assert.ok(h.calls.some(call=>call[0]==='vscode.open'&&call[1].fsPath===fs.realpathSync.native(path.join(root,'top.sv'))),JSON.stringify({calls:h.calls,expected:fs.realpathSync.native(path.join(root,'top.sv')),errors:h.errors}));
+    const count=h.calls.length;await h.message({action:'openProgress',linkId:'arbitrary-path',revision:snapshot.revision});assert.equal(h.calls.length,count);
+    await h.message({action:'openProgress',linkId:link.id,revision:snapshot.revision-1});assert.equal(h.calls.length,count);
+    h.setProject({id:'other',name:'other',kind:'svtools',root,sets:[]});await h.api.refresh();await h.message({action:'openProgress',linkId:link.id,revision:h.api.getSnapshot().revision});assert.equal(h.calls.length,count);
 });

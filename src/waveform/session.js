@@ -80,6 +80,10 @@ class VcdSession {
     window(params) { return this.query('window', params); }
     /** @param {{ids: string[], time: number}} params @returns {Promise<object>} */
     values(params) { return this.query('values', params); }
+    /** @param {{ids: string[], from?: number, to: number, limit?: number}} params @returns {Promise<object>} 窗口内全保真跳变枚举。 */
+    changes(params) { return this.query('changes', params); }
+    /** @param {{clock: string, edge?: 'rise'|'fall'|'both', ids: string[], from?: number, to: number, limit?: number}} params @returns {Promise<object>} 时钟沿采样。 */
+    sample(params) { return this.query('sample', params); }
     /** @param {{id: string, time: number, direction: 'next'|'previous'|1|-1, bitOffset?:number, bitWidth?:number, continuation?:number}} params @returns {Promise<object>} */
     edge(params) { return this.query('edge', params); }
     /** @param {object} sourceContext 有界RTL清单。 @returns {Promise<object>} 只重算方向，不重新读取VCD或创建事件存储。 */
@@ -90,9 +94,30 @@ class VcdSession {
         this.disposed = true;
         this.ready = false;
         this.rejectAll(sessionError('VCD 会话已关闭', 'VCD_DISPOSED'));
-        this.closing = this.worker ? this.worker.terminate() : Promise.resolve();
+        this.closing = this.worker ? this.closeWorker() : Promise.resolve();
         return this.closing;
     }
+    /**
+     * 优雅关闭 worker。
+     *
+     * 不能直接 `terminate()`：worker 里可能正在执行异步 napi 查询（compute 跑在
+     * libuv 线程池），V8 拆 isolate 时 Rust 侧收尾会踩到已销毁的上下文——实测
+     * 概率性段错误（exit 139 / 0xC0000005，5 次里约 1 次）。
+     *
+     * 协议：发 `close` → worker 等在途请求计数归零后回 `closed` 并自行 exit。
+     * 解析不可中断，等待其完成并自然退出，不强制拆除仍有原生任务的 isolate。
+     */
+    closeWorker() {
+        const worker = this.worker;
+        if (worker.threadId === -1) return Promise.resolve();
+        return new Promise(resolve => {
+            // closed 回执只表示请求排空，dispose 还需等原生任务收尾及 isolate 自然退出。
+            // Rust 解析不可中断，不能因超时强杀仍有 napi 任务的 worker。
+            worker.once('exit', resolve);
+            worker.postMessage({ requestId: -1, method: 'close', params: {} });
+        });
+    }
+
 }
 
 module.exports = { VcdSession };

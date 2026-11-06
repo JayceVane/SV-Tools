@@ -18,6 +18,7 @@ pub mod postprocess;
 pub mod preprocess;
 pub mod source_scan;
 pub mod tokenizer;
+pub mod wave;
 
 // host 绑定由 napi 注册，Rust 单测不会直接调用这些入口。
 #[cfg_attr(test, allow(dead_code))]

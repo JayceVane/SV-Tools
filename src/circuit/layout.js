@@ -55,7 +55,7 @@ async function layoutProjection(projection, { elk } = {}) {
     const edges = projection.edges.map(edge => {
         const routed = routedEdges.get(edge.id);
         if (!routed || !Array.isArray(routed.sections) || !routed.sections.length) throw new TypeError(`ELK omitted edge route ${edge.id}`);
-        return { ...edge, sections: routed.sections.map(section => ({
+        return { ...edge, ...(routed.labels ? { labels: routed.labels.map(label => ({ id: label.id, ...geometry(label, `edge label ${edge.id}`) })) } : {}), sections: routed.sections.map(section => ({
             startPoint: point(section.startPoint, 'edge startPoint'),
             ...(section.bendPoints ? { bendPoints: section.bendPoints.map(bend => point(bend, 'edge bendPoint')) } : {}),
             endPoint: point(section.endPoint, 'edge endPoint'),

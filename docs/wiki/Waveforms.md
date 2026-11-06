@@ -2,9 +2,9 @@
 
 ## 打开与基本操作
 
-默认点击 `.vcd` 即打开内置波形查看器；已有自定义编辑器关联时，使用“重新打开方式”选择 VCD 波形查看器。右上角“查看文本”可返回原文。仿真成功后默认自动打开新 VCD。
+默认点击 `.vcd` 或 `.fst` 即打开内置波形查看器；已有自定义编辑器关联时，使用“重新打开方式”选择 VCD / FST 波形查看器。VCD 可通过右上角“查看文本”返回原文。Icarus 仿真成功后默认自动打开新 VCD/FST；使用 `-fst`、`-fst-speed` 或 `-fst-space` 输出 FST，未指定文件名时为仿真工作目录中的 `dump.fst`。FST 输出保留仿真器指定位置。
 
-在左侧按名称/完整层级搜索，按 scope 筛选并添加信号。目录与名称/读值栏的边界可拖动调整宽度。图形颜色跟随 IDE 明暗主题。
+在左侧按名称/完整层级搜索，按设计层级筛选并添加信号。VCD/FST 均可选择模块实例及其子层级；空实例也保留在下拉列表中，选择后信号列表为空。目录与名称/读值栏的边界可拖动调整宽度。图形颜色跟随 IDE 明暗主题。
 
 ![4.1 波形工作区图解](https://raw.githubusercontent.com/wiki/JayceVane/SV-Tools/images/waveform-workspace-4.1-light.png)
 
@@ -83,7 +83,7 @@ FP8 E3M4 使用本项目约定的偏置 3，全 1 指数保留为 Inf/NaN；它�
 
 表格共用 A/B 游标，显示两个时刻的精确值与变化标记。点击单元添加/定位对应波形；“定位”输入地址或 `行,列`。`—` 表示缺初值，“未 dump”表示文件中没有该单元，X/Z 保持原值。
 
-必须在仿真时 dump 需要的元素。部分仿真器将二维数组展平成线性名称，VCD 没有行列元数据时只能显示字数组，无法恢复原二维声明。当前内置查看器仅支持 VCD，未提供 FSDB 查看。
+必须在仿真时 dump 需要的元素。部分仿真器将二维数组展平成线性名称，VCD 没有行列元数据时只能显示字数组，无法恢复原二维声明。当前内置查看器支持 VCD/FST，未提供 FSDB 查看。
 
 ## 保存布局与重新仿真
 
@@ -108,3 +108,26 @@ SVG 适合技术文档与后续编辑。PNG 按图幅预算调整分辨率；超
 缩小后出现密集区时应放大再判断窄脉冲。A/B 精确读值和真实边沿导航仍可用于核对。
 
 [详细行为、容量与测量条件](https://github.com/JayceVane/SV-Tools/blob/v4.1.0/docs/WAVEFORM.md)
+
+
+## 仿真后自动压缩为 FST（可选）
+
+在设置中搜索 `svtools.waveform.convertVcdToFst`，或在工作区设置中添加：
+
+```json
+{
+    "svtools.waveform.convertVcdToFst": true
+}
+```
+
+默认关闭。开启后，Icarus 仿真成功时将本轮生成并归档的 VCD 转为 FST，再打开转换后的波形；文件保持在原归档目录（通常为 `.svtools/vcd`）。转换器编入插件原生模块，无需安装 GTKWave 或 `vcd2fst`，也不修改 RTL 中的 `$dumpfile`。
+
+转换先写临时文件、验证 FST，再移除原 VCD。取消、转换失败或源文件在转换期间变化时保留 VCD；警告写入仿真输出通道。默认覆盖同名 FST（`svtools.waveform.convertVcdToFstOverwrite`，同目录原子替换）；关闭该选项后保留既有 FST，新文件改用 `name-2.fst` 等递增编号。已经由仿真器生成的 FST 按文件内容识别并跳过转换。
+
+支持数字信号、总线、别名、数组元素、实数和 X/Z。字符串波形扩展、EVCD、未声明时间单位、存在未初始化/延迟初始化信号等无法保证保真的输入会保留 VCD。转换是流式异步处理，但会增加仿真结束后的处理时间。FST 通常显著减少磁盘占用；查看速度取决于信号与事件分布，不保证每种文件都更快。
+
+## 4.2 的 FST 与 Agent 波形取证
+
+查看器可打开 VCD 和 FST，并使用层级筛选。`svtools.waveform.convertVcdToFst` 可在支持的仿真成功后把本轮 VCD 转为 FST，默认关闭。转换成功后才移除原 VCD，同名覆盖由 `svtools.waveform.convertVcdToFstOverwrite` 控制。
+
+用 Agent CLI 的 `wave stats` 与 `wave timeline` 缩小故障窗口，再用 `wave values` 或 `wave glitches` 查询指定信号。`wave export --format layout` 默认生成同名 `.svwave.json`，查看器下次打开波形时匹配信号并恢复窗口。另存文件可从「加载布局」打开。用 `--format csv` 导出终值变化矩阵，用 `--format svg` 或 `png` 导出文档图。详见 [Agent CLI](https://github.com/JayceVane/SV-Tools/wiki/Agent-CLI)。

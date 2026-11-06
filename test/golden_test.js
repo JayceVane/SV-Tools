@@ -5,7 +5,7 @@
  *  - 对 example/*.sv 逐个用扩展同款配置格式化，与 example/target/<同名> 全文比对；
  *  - 同时验证幂等：对 target 再格式化一次应与 target 完全一致；
  *  - 发现新的格式化问题时：把最小复现加入 example/，人工校对输出后固化到
- *    example/target/（bin/svtools.exe example/xx.sv > example/target/xx.sv）。
+ *    example/target/（bin/svtools-format.exe example/xx.sv > example/target/xx.sv）。
  */
 const fs = require('fs');
 const path = require('path');

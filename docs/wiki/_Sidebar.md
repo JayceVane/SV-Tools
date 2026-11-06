@@ -1,8 +1,10 @@
-# SV Tools 4.1
+# SV Tools 4.2
 
 - [首页](https://github.com/JayceVane/SV-Tools/wiki/Home)
 - [界面图解与操作入口](https://github.com/JayceVane/SV-Tools/wiki/Screenshots)
 - [安装与第一次运行](https://github.com/JayceVane/SV-Tools/wiki/Getting-Started)
+- [Agent CLI 与 Skills](https://github.com/JayceVane/SV-Tools/wiki/Agent-CLI)
+- [架构计划与验证交接](https://github.com/JayceVane/SV-Tools/wiki/Design-Delivery)
 - [升级指南](https://github.com/JayceVane/SV-Tools/wiki/Upgrade-Guide)
 - [格式化](https://github.com/JayceVane/SV-Tools/wiki/Formatting)
 - [代码生成与文件头](https://github.com/JayceVane/SV-Tools/wiki/Code-Generation)

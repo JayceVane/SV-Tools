@@ -163,7 +163,11 @@ impl Engine {
             return;
         }
         match self.block_state {
-            BlockState::Generate => {
+            // generate 体内任意 `)`（如 `if (A) ...`、`for (...)` 头）也会带来
+            // state_end；只有 endgenerate 才收尾整个 generate 块。提前 flush 会把
+            // generate 头单独立场、并让 skip_terminator 滞后吞掉下一条语句的换行
+            // （`if (A) $error(...);endgenerate` 被并成一行）。
+            BlockState::Generate if word == "endgenerate" => {
                 session.buffer.block = self.align_embedded_instances(&session.buffer.block);
                 session.buffer.should_flush = true;
             }

@@ -22,7 +22,10 @@ const { fromYosys } = require('../src/circuit/adapters/yosys');
 test('未打开的依赖在磁盘改写后使快照失效，保存相同内容及旧监听响应不误报',async t=>{
     const root=await fs.mkdtemp(path.resolve('bin/audit-source-watch-')),file=path.join(root,'dep.sv');
     // 保持测试临时目录在仓库 bin/ 下的既有约定，并在用例结束后清理，避免历史目录累积。
-    t.after(async()=>{assert.equal(path.dirname(path.resolve(root)),path.resolve('bin'));await fs.rm(root,{recursive:true,force:true,maxRetries:10,retryDelay:20});});
+    t.after(async()=>{assert.equal(path.dirname(path.resolve(root)),path.resolve('bin'));
+        // 某些宿主环境会把 fs.rm 转成回收站操作并拒绝删除；清理失败不影响本用例断言，目录仍在被忽略的 bin/ 下。
+        try { await fs.rm(root,{recursive:true,force:true,maxRetries:10,retryDelay:20}); }
+        catch (error) { console.warn('临时目录清理失败（宿主安全删除钩子）：' + error.message); }});
     const body='module dep; endmodule';await fs.writeFile(file,body);
     const callbacks=[],timers=new Map();let next=0,warnings=0,closed=0;
     const observer=createSourceWatch({vscode:{workspace:{textDocuments:[]}},onStale(){warnings++;},

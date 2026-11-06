@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "interfaces": [
+    { "type": "request", "members": [{ "name": "valid", "width": 1 }, { "name": "payload", "width": 32 }] },
+    { "type": "response", "members": [{ "name": "valid", "width": 1 }, { "name": "result", "width": 32 }] }
+  ],
+  "buses": [{ "name": "req", "type": "request" }, { "name": "rsp", "type": "response" }],
+  "modules": [
+    { "name": "controller", "ports": [
+      { "name": "m_req", "type": "request", "role": "master", "direction": "output" },
+      { "name": "m_rsp", "type": "response", "role": "master", "direction": "input" }
+    ] },
+    { "name": "engine", "ports": [
+      { "name": "s_req", "type": "request", "role": "slave", "direction": "input" },
+      { "name": "s_rsp", "type": "response", "role": "slave", "direction": "output" }
+    ] }
+  ],
+  "top": { "name": "architecture_top", "instances": [
+    { "name": "u_controller", "module": "controller", "connections": { "m_req": "req", "m_rsp": "rsp" } },
+    { "name": "u_engine", "module": "engine", "connections": { "s_req": "req", "s_rsp": "rsp" } }
+  ] }
+}

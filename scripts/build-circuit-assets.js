@@ -46,6 +46,12 @@ async function buildCircuitAssets() {
         sha256: createHash('sha256').update(fs.readFileSync(path.join(bundled, 'yosys.wasm'))).digest('hex'),
         resourcesSha256: createHash('sha256').update(fs.readFileSync(path.join(yosys, 'gen/yosys-resources.0.tar'))).digest('hex') }, null, 2));
     console.log('内置 Yosys WASM：' + version);
+    // SVG 光栅化用 resvg prebuilt napi：同样不依赖运行时 node_modules，二进制进 bin/，许可进 vendor。
+    const resvgBinary = require.resolve('@resvg/resvg-js-win32-x64-msvc/resvgjs.win32-x64-msvc.node');
+    fs.copyFileSync(resvgBinary, path.join(root, 'bin', 'resvg.win32-x64-msvc.node'));
+    fs.copyFileSync(path.join(path.dirname(require.resolve('@resvg/resvg-js/package.json')), 'LICENSE'),
+        path.join(destination, 'resvg-LICENSE.txt'));
+    console.log('内置 SVG 栅格化：resvg-js ' + require('@resvg/resvg-js/package.json').version);
 }
 
 if (require.main === module) buildCircuitAssets().catch(error => { console.error(error); process.exitCode = 1; });

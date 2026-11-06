@@ -53,6 +53,11 @@ test/helpers/*
 !test/helpers/waveform-client-harness.js
 !test/fixtures/
 test/fixtures/*
+!test/fixtures/waveform/
+test/fixtures/waveform/*
+!test/fixtures/waveform/*.sv
+!test/fixtures/waveform/*.vcd
+!test/fixtures/waveform/*.fst
 !test/fixtures/memory_dump.sv
 !test/fixtures/memory_dump.vcd
 !test/fixtures/circuit-demo.sv
@@ -64,6 +69,12 @@ test/fixtures/codegen/*
 !test/fixtures/circuit-enum/
 test/fixtures/circuit-enum/*
 !test/fixtures/circuit-enum/*.sv
+!test/fixtures/design/
+test/fixtures/design/*
+!test/fixtures/design/*/
+test/fixtures/design/*/*
+!test/fixtures/design/*/*.sv
+!test/fixtures/design/*/*.json
 
 # OS
 .DS_Store
@@ -74,6 +85,7 @@ Thumbs.db
 .opencode/
 .sisyphus/
 .zcode/
+.workbuddy/
 nul
 
 # Private test project (proprietary, not for open source)
@@ -94,3 +106,6 @@ src/private/
 
 # 工作文档与验收资料
 docs/private/
+
+# 本机工具路径配置，防止误提交（completion 宿主的 Icarus 路径由 verify-completion-host.ps1 -IcarusPath 传入）
+tools.json

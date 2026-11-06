@@ -22,7 +22,7 @@ function main() {
     if (process.platform !== 'win32' || process.arch !== 'x64') throw new Error('当前预览交付入口仅构建Windows x64');
     const stem = `svtools-${version}-${target}`, archive = path.join(root,'bin',stem+'.vsix'), manifest = path.join(root,'bin',stem+'.manifest.json');
     if (fs.existsSync(archive) || fs.existsSync(manifest)) throw new Error('该预览号已存在产物；请使用下一个版本号，禁止覆盖：'+stem);
-    const cli = path.join(root,'bin/svtools.exe');
+    const cli = path.join(root,'bin/svtools-format.exe');
     if (run(cli,['--version']) !== 'svtools '+version) throw new Error('CLI版本不匹配，请先构建当前原生版本');
     if (process.argv.includes('--check')) { console.log('预览版本与原生CLI一致：'+version); return; }
     if (run('git',['status','--porcelain','--untracked-files=normal'])) throw new Error('请先提交源码、验证脚本与发布说明，再生成可追溯安装包');

@@ -227,12 +227,23 @@ function buildLaunchRunScript(o) {
     return [
         'if {[catch {',
         '    open_project ' + tclQuote(o.xprPath),
+        ...(o.setup || []).map(line=>'    '+line),
         '    update_compile_order -fileset sources_1',
+        ...(o.prerequisiteRun ? [
+            '    reset_run '+tclQuote(o.prerequisiteRun),
+            '    launch_runs '+tclQuote(o.prerequisiteRun)+' -jobs '+(o.jobs || 4),
+            '    wait_on_run '+tclQuote(o.prerequisiteRun),
+            '    if {[get_property PROGRESS [get_runs '+tclQuote(o.prerequisiteRun)+']] ne "100%"} { error "Synthesis prerequisite failed" }'
+        ] : []),
         ...(o.reset ? ['    reset_run ' + o.run] : []),
         '    launch_runs ' + o.run + step + ' -jobs ' + (o.jobs || 4),
         '    wait_on_run ' + o.run,
         '    set r [get_runs ' + o.run + ']',
         '    puts "SVTOOLS_RUN_STATUS [get_property STATUS $r] [get_property PROGRESS $r]"',
+        ...(o.captureArtifacts ? [
+            '    puts "SVTOOLS_RUN_VERSION [version -short]"',
+            '    foreach f [glob -nocomplain -directory [get_property DIRECTORY $r] *.dcp] { puts "SVTOOLS_CHECKPOINT $f" }'
+        ] : []),
         '} errMsg]} {',
         '    puts "SVTOOLS_TCL_ERROR $errMsg"',
         '    catch { close_project }',
@@ -456,11 +467,16 @@ function buildVivadoDrcScript({ xprPath, run }) {
     return JSON_HELPERS + [
         'open_project ' + tclQuote(xprPath),
         'if {[catch {open_run ' + run + ' -quiet} error]} { puts "SVTOOLS_ERROR [svtStr $error]"; exit 1 }',
+        // get_drc_violations 只返回“上一次DRC”的对象；必须先完成本次DRC，否则会静默得到空列表。
+        'if {[catch {report_drc -quiet} error]} { puts "SVTOOLS_ERROR [svtStr $error]"; exit 1 }',
         'set items [list]',
         'foreach v [get_drc_violations -quiet] {',
-        '    lappend items [svtObj name [svtText $v NAME] rule [svtText $v RULE] severity [svtText $v SEVERITY]]',
+        '    set drcName ""; catch { set drcName [get_property NAME $v] }',
+        '    set drcRule ""; catch { set drcRule [get_property RULE $v] }',
+        '    if {![string length $drcRule]} { set drcRule [lindex [split $drcName #] 0] }',
+        '    lappend items [svtObj name [svtStr $drcName] rule [svtStr $drcRule] severity [svtText $v SEVERITY]]',
         '}',
-        'puts "SVTOOLS_JSON [svtObj run [svtStr ' + run + '] violations [svtArr $items]]"',
+        'puts "SVTOOLS_JSON [svtObj run [svtStr ' + run + '] checked 1 violations [svtArr $items]]"',
         'close_project',
         'puts "SVTOOLS_DONE"'
     ].join('\n') + '\n';

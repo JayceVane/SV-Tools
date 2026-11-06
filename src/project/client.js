@@ -35,11 +35,46 @@
             actions.append(button);
         }
     }
+    function renderProgress() {
+        const progress=snapshot.progress,local=currentState();
+        local.progressExpanded||=[];
+        const note=document.createElement('div');note.className='progress-note';
+        if(!progress?.available){note.textContent=progress?.message||'正在读取设计进展…';tree.append(note);return;}
+        const summary=progress.summary;
+        note.textContent=progress.title+' · top '+progress.top+' · 任务版本 '+progress.revision;
+        tree.append(note);
+        const totals=document.createElement('div');totals.className='progress-totals';
+        for(const [label,value] of [['模块',summary.total],['设计已提交',summary.designSubmitted],['核验通过',summary.accepted],['待复验',summary.stale]]){
+            const item=document.createElement('span');item.textContent=label+' '+value;totals.append(item);
+        }
+        tree.append(totals);
+        const stages={planned:'待开始',designing:'设计中','design-submitted':'设计已提交',verifying:'验证中','verification-submitted':'待核验','verification-failed':'验证失败',returned:'已退回',accepted:'已核验'};
+        const verification={not_run:'尚未验证',submitted:'证据待核验',failed:'验证失败',stale:'证据待复验',accepted:'证据核验通过'};
+        for(const module of progress.modules){
+            const card=document.createElement('details');card.className='progress-module';card.open=local.progressExpanded.includes(module.id);
+            card.addEventListener('toggle',()=>{local.progressExpanded=card.open?[...new Set([...local.progressExpanded,module.id])]:local.progressExpanded.filter(id=>id!==module.id);remember();});
+            const heading=document.createElement('summary');heading.textContent=module.name+' · '+(stages[module.stage]||module.stage);
+            if(module.verification==='stale'||module.candidateId&&!module.designCurrent)heading.textContent+=' · 待复验';
+            heading.className=module.verification==='failed'?'progress-failed':module.verification==='stale'?'progress-stale':module.verification==='accepted'?'progress-accepted':'';
+            card.append(heading);
+            const content=document.createElement('div');content.className='progress-detail';
+            const fields=[['职责',module.responsibility],['模块 ID',module.id],['设计',module.designCurrent?'候选输入当前':module.candidateId?'候选已过期':'尚未提交'],['验证',verification[module.verification]||module.verification],
+                ['负责人',module.owner?module.owner.actor+' / '+module.owner.role:'未领取'],['设计 / 验证',String(module.designActor||'—')+' / '+String(module.verificationActor||'—')],
+                ['需求',module.requirements.join(', ')],['依赖',module.blockedBy.length?'等待 '+module.blockedBy.join(', '):'开工条件满足'],['说明',module.reason||'—']];
+            for(const [label,value] of fields){const row=document.createElement('div');row.textContent=label+'：'+value;content.append(row);}
+            for(const reference of module.references||[]){const button=document.createElement('button');button.className='progress-link';button.textContent=reference.label;button.addEventListener('click',()=>send('openProgress',{linkId:reference.id}));content.append(button);}
+            card.append(content);tree.append(card);
+        }
+        const boundary=document.createElement('div');boundary.className='progress-note';boundary.textContent='只读 · 当前工作区候选 · 核验检查本地产物及输入身份；功能结论见独立验证报告。';tree.append(boundary);
+    }
+
     function render() {
         closeMenu();
         const focusedId = document.activeElement?.dataset?.nodeId;
         const project = snapshot.project, local = currentState();
         tree.replaceChildren();
+        tree.setAttribute('role',snapshot.projection==='progress'?'region':'tree');
+        tree.setAttribute('aria-label',snapshot.projection==='progress'?'设计进展':'工程文件和实例');
         if (snapshot.tracing && local.traceId !== snapshot.traceId) {
             function reveal(nodes) {
                 let related = false;
@@ -69,8 +104,14 @@
         text('issues', (snapshot.issues || []).join('\n'));
         document.getElementById('diagnostics').hidden = !local.diagnostics || !snapshot.issues?.length;
         renderTools(local);
-        for (const mode of ['files', 'instances'])
-            document.getElementById(mode).setAttribute('aria-pressed', String(snapshot.projection === mode));
+        for (const mode of ['files', 'instances', 'progress'])
+            document.getElementById(mode)?.setAttribute('aria-pressed', String(snapshot.projection === mode));
+        if(snapshot.projection==='progress') {
+            document.getElementById('trace').hidden=true;document.getElementById('tools').hidden=true;
+            document.getElementById('add').hidden=true;document.getElementById('vivadoTools').hidden=true;
+            renderProgress();return;
+        }
+        document.getElementById('add').hidden=snapshot.project?.kind==='vivado';
         let count = 0;
         function append(nodes, depth) {
             for (const node of nodes) {
@@ -224,8 +265,8 @@
         render();
     });
     document.getElementById('toolReports').addEventListener('click', () => toggleMenu((snapshot.toolActions || []).filter(action => action.group === 'reports'), document.getElementById('toolReports')));
-    for (const projection of ['files', 'instances'])
-        document.getElementById(projection).addEventListener('click', () => {
+    for (const projection of ['files', 'instances', 'progress'])
+        document.getElementById(projection)?.addEventListener('click', () => {
             currentState().projection = projection;
             remember();
             send('projection', { projection });

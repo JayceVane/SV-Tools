@@ -66,6 +66,9 @@ function createProjectManager({ vscode, state, vivadoSelection, rename = fs.rena
             if (version !== revision) {
                 return current();
             }
+            if (candidate?.kind === 'vivado' && error?.code === 'ENOENT') {
+                throw new Error('所选工程已不存在：' + candidate.path + '。请重新选择工程。', { cause: error });
+            }
             throw error;
         }
         return version !== revision ? current() : result;

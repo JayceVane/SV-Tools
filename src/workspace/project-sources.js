@@ -13,7 +13,7 @@ function createProjectSourceProvider({ vscode, projectSelection, projects }) {
             const filesets = active.sets.filter(set => ['DesignSrcs','SimulationSrcs'].includes(set.type));
             const member = file && filesets.some(set => set.files.some(member => samePath(member,file)));
             if (root && !inside(root,active.root) && !inside(active.root,root)) return null;
-            if (file && !member && (!/\.vcd$/i.test(file) || !inside(file,active.root))) return null;
+            if (file && !member && (!/\.(vcd|fst)$/i.test(file) || !inside(file,active.root))) return null;
             const matching = filesets.filter(set => set.type === 'SimulationSrcs' && set.files.some(member => samePath(member,file || '')));
             // 与XPR旧路径一致：只把HDL计入成员，且空清单必须回落工作区发现，
             // 否则空工程/零HDL工程会以空文件集屏蔽 iverilog -y、xvlog 与 OOC 依赖收集。
@@ -30,7 +30,7 @@ function createProjectSourceProvider({ vscode, projectSelection, projects }) {
         if (root && !inside(xpr, root) && !inside(root, folder)) return null;
         const hdl = project.sets.filter(set => ['DesignSrcs','SimulationSrcs'].includes(set.type));
         const member = file && hdl.some(set => set.files.some(member => samePath(member,file)));
-        if (file && !member && (!/\.vcd$/i.test(file) || !inside(file,folder))) return null;
+        if (file && !member && (!/\.(vcd|fst)$/i.test(file) || !inside(file,folder))) return null;
         const simulation = hdl.filter(set => set.type === 'SimulationSrcs');
         const matching = file ? simulation.filter(set => set.files.some(member => samePath(member,file))) : [];
         const chosen = matching.length === 1 ? matching : simulation;

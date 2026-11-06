@@ -282,8 +282,8 @@ test('关闭返回可等待且可重复取得的worker释放屏障', async () =>
     assert.equal(releases, 1); assert.equal(finished, true);
 });
 
-test('VCD默认文件关联直接进入波形编辑器', () => {
+test('VCD/FST默认文件关联直接进入波形编辑器', () => {
     const editor = require('../package.json').contributes.customEditors.find(editor => editor.viewType === 'svtoolsWaveViewer');
     assert.equal(editor.priority, 'default');
-    assert.ok(editor.selector.some(selector => selector.filenamePattern === '*.vcd'));
+    for (const format of ['vcd', 'fst']) assert.ok(editor.selector.some(selector => selector.filenamePattern === '*.' + format));
 });

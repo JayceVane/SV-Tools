@@ -2,7 +2,7 @@
 
 更新日期：2026-10-31。
 
-状态：M1 已提供开发态的无界面工程查询、格式化、Icarus 检查和后台任务接口，见 [CLI 使用说明](CLI.md)；后续能力仍为计划。CLI 的结果合同版本为 API 1，4.2 尚未发行。
+状态：M1 已合入 master；M2 及其后里程碑在 4.2 开发分支（PR #23，draft）累积，4.2 完成前不合并、不发行。CLI 的结果合同版本为 API 1，4.2 尚未发行。
 
 ## 目标与现有基础
 
@@ -122,6 +122,14 @@ JSON中的精确时间采用整数tick字符串及timescale/单位表达；原�
 
 VCD与源码/电路的实例和位映射须有可验证依据；歧义返回候选，源码/波形改变后失效。失败仿真不把旧VCD或不完整产物当作本轮成功数据。
 
+## 开发与合并策略（2026-11-01 决定）
+
+4.2 的全部里程碑在 `fix/m2-review-p1` 上以 PR #23（draft）累积；M5 端到端验收通过后一次性合并 `master` 并发行 4.2.0。在此之前 `master` 只承载 4.1.x 修复（含已回灌的 4.1.2）。
+
+M2 完成边界：以「隔离真实工程 + 失败/报告语义明确」为完成定义。IP/BD、外部 Tcl 运行钩子、宏 include、XDC 动态外部读取明确返回 `SNAPSHOT_UNSUPPORTED`，不支持不计为缺陷。
+
+IP/BD 与分层 XDC 支持推迟到 4.3 开发计划，不在 4.2 阻塞项内。
+
 ## 建议实施顺序与验收门槛
 
 | 里程碑 | 交付 | 验收 |
@@ -141,9 +149,58 @@ VCD与源码/电路的实例和位映射须有可验证依据；歧义返回候�
 
 这些条目是4.2计划，不表示4.1已经具备全部无界面接口；FSDB维持此前取消的决定。
 
+M3 评审记录（2026-11-02）：空模块、packed struct 骨架与 SVG 已有实现，本轮补充了精确端口映射、隔离源码快照、生成规格校验、接口边界表及标签布局；随后交付 `design check`（逐端口结构诊断：悬空/无驱动/多驱动/隐式位宽补常量/缺失模块，常量驱动不产生假诊断）、`design diff`（快照对比：实例/模块/顶层端口/接口增删改，空骨架补实现单列 `implemented[]`）、无宿主 PNG（内置 resvg 2x 栅格化，随 VSIX 发布 `bin/resvg.*.node`）与 `design report` 报告证据包（SVG+PNG+architecture.json/md+report.json，清单含逐产物哈希）。已知边界：前端仅支持 Yosys `read_verilog -sv` 的语言子集且只投影顶层实例，位宽截断（宽 wire 连窄端口）在展开后不可见，PNG 中文依赖系统字体。缺陷机制与回归见 [M3 架构端点与输入身份](bugs/m3-architecture-evidence.md)。
+
+4.2 中期审查记录（2026-11-02，M3 完成后全量审查）：结论 pass-with-conditions。已处置：Skill 能力边界文案过期（`design check/diff/report` 与无宿主 PNG 已交付）；`cacheMiB` 预算此前无消费者——内容寻址缓存现按每工程保留最近 5 份输入清单封顶（失败/损坏清单同样按时间淘汰，不再无限累积），被引用对象超过 `cacheMiB` 时从最旧清单开始整体解除引用，Vivado run 成功后触发；约束/源文件缺失时的裸 ENOENT 改为 `SOURCE_NOT_FOUND`；缓存临时文件名加随机后缀避免跨工程并发竞争；binary 输入不再绕过单文件与总量预算。已知待办：`task status` 每次查询都全量重算输入指纹（与 run 流程重复 `captureInputs`），大工程下查询会放大 IO，M5 验收前评估指纹缓存。
+
+历史基线说明：下段记录 2026-11-02 首轮 JS 实现；当前已迁移 Rust/wellen、移除落盘波形索引缓存，使用操作级会话，并支持 FST 和内嵌可选转换。
+
+M4 评审记录（2026-11-02）：交付 `wave` 命令族七操作——`signals`（query/scope/role/位宽过滤，RTL 方向匹配复用 readSignalRoles）、`values`（时间点左闭取值，原始位串+解码值）、`changes`（窗口全保真跳变枚举，`next` 游标分页）、`edges`（rise/fall/x/z，位级投影，X 后回 1 不构成 rise）、`sample`（时钟沿采样，`--where` 受限条件支持信号对信号比较定位首个不一致）、`diff`（两 VCD 同名信号双指针对齐，首差异+差异计数）、`export`（无宿主波形图，document 风格，Node 沙箱复用 webview renderer + svg-canvas，A/B 游标，SVG/PNG）。底层新增 VcdStore `changes`/`sample` 原语与二进制快照（typed 数组 8 字节对齐零拷贝加载）；索引缓存落盘 `.svtools/agent/wave/<路径哈希>/`，size+mtime 身份失效、原子写、损坏自动重建；时间输出一律整数 tick 字符串。验收：注入输出级位翻转缺陷的流水线，纯波形（不读 TB 日志）`sample --where "dout != model_dout"` 定位首个不一致于 t=25000 ticks（25ns 沿，dout=0xA4 vs 0xA5，比 TB 的 #1 延迟检查精确一拍），`wave diff` 复验首差异同刻、修复后条件命中 0；错误窗口 PNG 经视觉检查（四行信号/方波/总线段/标尺/游标正常）。资源边界（合成 VCD，100 信号）：100 MiB/293 万事件冷解析 1.8 s、命中加载 72–89 ms；500 MiB/1464 万事件冷解析 8.8 s、命中加载 211–290 ms、全沿 where 扫描（69 万沿）216 ms。已知边界：失败日志自动解析取窗未实现（时刻由调用者提供）、export 仅 document 风格、VCD↔电路映射联动未交付（用 design arch 连接事实组合）、diff 窗口事件超 200 万标记 truncated。
+
 ## 技术依据
 
 - [MCP工具与结构化结果](https://modelcontextprotocol.io/specification/latest/server/tools)、[标准传输](https://modelcontextprotocol.io/specification/latest/basic/transports)。协议实现版本以目标客户端实测兼容矩阵为准。
 - [Agent Skills格式](https://agentskills.io/specification)。
 - [Vivado时序汇总](https://docs.amd.com/r/en-US/ug835-vivado-tcl-commands/report_timing_summary)、[路径对象查询](https://docs.amd.com/r/en-US/ug835-vivado-tcl-commands/get_timing_paths)。
 - [Vivado DRC报告](https://docs.amd.com/r/en-US/ug835-vivado-tcl-commands/report_drc)、[CDC报告](https://docs.amd.com/r/en-US/ug835-vivado-tcl-commands/report_cdc)。
+
+
+## M5 前置：Agent 交付与 ΔCycle 排查（2026-11-04）
+
+先完成同刻瞬态诊断和设计/验证交付约定，再启动完整 M5 联合验收。当前以 CLI + 一个可移植 Skill 为主，不新增 MCP 或专用多 Agent 编排依赖。
+
+- **工具与证据**：`wave glitches` 检查原始同刻记录，稳定查询仍按终值；分页、预算、文件身份、未知录制完整性均显式返回。查询不是功能验收，不能输出伪造的全局 delta 编号或零毛刺证明。
+- **角色与产出**：设计侧交付需求/接口/假设、RTL 和设计说明；验证侧依据同一规格独立建立参考模型/断言/TB，交付计划、回归、ΔCycle 处置和证据索引；主 Agent 汇总需求追踪与裁决。复杂 CDC/协议/多模块任务优先独立验证子 Agent，小改动允许单 Agent 分阶段完成并披露独立性限制。
+- **模块报告必需项**：已检查信号与窗口、完整性/未 dump 项、每项同刻活动的预期/缺陷/待判结论、修复复验和文件身份。无波形/未执行/扫描不完整不能宣称完整验证通过；不把组合收敛一律判错。
+- **交接约定**：需求 ID→用例 ID→检查规则→输入/运行身份→日志/波形/图表，DUT 与 TB 文件归属分开；任何影响结果的输入变化重新验证，旧证据不自动继承。
+
+可执行的 Skill 流程和默认交付清单见 [delivery.md](../skills/svtools-delivery/references/delivery.md)。
+
+随后 M5 分三批验证，结果逐批记录，不能以流程文档代替完成证据：
+
+1. **同步模块试点**：规格、独立 TB、受控缺陷、稳定查询与 ΔCycle 诊断、修复复验、报告/JSON 身份一致；缺信号/截断/旧波形必须暴露。
+2. **FIFO / 多时钟试点**：参数边界、满空/同时读写、背压、单边和双边复位、时钟公共沿，解释允许组合瞬态并发现错误使能/复位行为；按同一条件复验，记录单/多 Agent 执行方式及独立性。
+3. **工程与客户端联合验收**：真实 Vivado 创建/运行/报告闭环，源变更后的证据失效，CLI 与插件打开同一图表/波形，目标 IDE/Node 兼容矩阵、发行文件与许可检查。既有四个端到端场景继续作为最终发行门禁。
+
+
+### M5 协作基础实现（2026-11-05）
+
+- 已实现架构计划/Markdown 报告、稳定需求与模块 ID、源码清单、依赖门槛、检查范围。
+- 已实现 CLI 领取/设计提交/验证提交/退回/复验，跨进程 revision 冲突保护与共享源码归属；输入、产物、接口或依赖候选变化使结论失效。
+- 已在同一工程侧栏增加只读“设计进展”，显示阶段、负责人、依赖、待复验和源码/证据跳转；不新增侧栏或自动工具运行入口。
+- Skill 接入工作流，证据只声明本地产物一致性，不能用状态字段代替独立功能验证。使用说明见 [DESIGN_WORKFLOW.md](DESIGN_WORKFLOW.md)。
+
+这一批不是 M5 全部验收完成；后续批次进展见下方记录，M5 通过前仍不合并、不发行 4.2。
+
+### M5 批 2 / 批 3 进展（2026-11-05）
+
+- 批 2 FIFO / 多时钟试点通过：受控异步 FIFO 的独立 oracle 捕获「B 域同步链不接复位」缺陷并修复复验，真机 `05_corelib/afifo` 复位窗口假非空消失；详见 [M5 批 2 验证记录](V4_2_M5_FIFO_VALIDATION.md)。
+- 批 3 真实 Vivado 闭环在本机通过：隔离临时工程完成创建/加源/设 top/综合/报告/改源失效/复跑，Node 22 与 24 的 CI 完整回归均通过，公开包清单与许可检查通过；详见 [M5 批 3 验证记录](V4_2_M5_VIVADO_VALIDATION.md)。
+- 后台取消用例已补跑通过（`accepted=true`、`state=cancelled`、`operation=vivado.run`）；目标 IDE 真机宿主验收、四个端到端场景与发行机械仍未完成，M5 未验收完成，不合并、不发行 4.2。
+
+### M5 批 3 收尾：IDE 宿主矩阵与四端到端场景（2026-11-06）
+
+- 目标 IDE 真机宿主验收完成：`scripts/verify-m5-host-matrix.cjs`（矩阵生成器随本次入库，`bin/m5-host-matrix.json` 可重建）聚合 5 个 `verify-*-host.ps1` × VS Code 1.144.0 与 Qoder CN IDE（内核 1.106.3），10 行全部 0 失败。
+- 四个端到端场景以 `scripts/verify-m5-scenarios.cjs` 串成可重跑证据链（现场 CLI 步骤 + 批 1–3 真机记录引用 + 逐产物 sha256）：现场步骤 0 失败；场景 2「从失败到修复」、场景 4「从工程到文档」verified，场景 1/3 partial（现场为 CLI 侧与解析回归，真实 Vivado 工程动作引用批 3 真机记录）。详见 [M5 四场景验证记录](V4_2_M5_SCENARIOS_VALIDATION.md)。
+- 同批收尾修复：UTF-8 BOM 源码的设计单元识别、所选 Vivado 工程被删除后的明确报错与恢复、宿主脚本 ExitCode 刷新（有界等待后无参等待）与 host-report 状态断言、补全宿主用例对异步文件事件的容错。
+- 剩余门禁收敛为：真实 Vivado「从报告到优化」的现场完整闭环、多 Agent 独立性、四场景单次连续真机串联、发行机械（版本统一 / CHANGELOG / VSIX 复核）。M5 未全部通过前仍不合并、不发行 4.2。

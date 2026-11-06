@@ -194,7 +194,7 @@ function editorHarness(f, getToolchain, options = {}) {
             showErrorMessage: text => { messages.push(text); return Promise.resolve(); }, setStatusBarMessage: text => messages.push(text) },
         workspace: { textDocuments: options.documents || [doc], workspaceFolders: [{ uri: uri(f.root) }], getWorkspaceFolder: () => ({ uri: uri(f.root) }),
             getConfiguration: (namespace, resource) => configuration(namespace, namespace === 'svtools.iverilog' ? { ...config, ...options.configForUri?.(resource) }
-                : namespace === 'svtools.lint' ? options.lintConfig || {} : {}), findFiles: async () => [] },
+                : namespace === 'svtools.lint' ? options.lintConfig || {} : namespace === 'svtools.waveform' ? options.waveformConfig || {} : {}), findFiles: async () => [] },
         commands: { registerCommand(name, handler) { commands.set(name, handler); return disposable(); }, executeCommand: async () => {} } };
     for (const name of ['onDidOpenTextDocument','onDidChangeTextDocument','onDidSaveTextDocument','onDidCloseTextDocument','onDidChangeConfiguration','onDidCreateFiles','onDidDeleteFiles','onDidRenameFiles']) {
         vscode.workspace[name] = handler => { handlers.set(name, handler); return disposable(); };
@@ -720,4 +720,79 @@ test('任务结束后自动封顶到配置数量；keep=0关闭清理', async t 
     await keepAll.dispose();
     assert.equal(path.dirname(path.resolve(root)), path.resolve(os.tmpdir()));
     assert.ok(path.basename(root).startsWith('svtools-retention-mgr-')); await fs.rm(root, { recursive: true, force: true });
+});
+
+
+for (const mode of ['-fst', '-fst-speed', '-fst-space', 'environment']) {
+    test('FST仿真默认输出被预先保护，完成后自动打开：' + mode, async t => {
+        const f = await fixture(t), original = path.join(f.root, 'dump.fst');
+        await fs.writeFile(f.file, 'module main; initial $dumpvars(0,main); endmodule');
+        await fs.writeFile(path.join(f.root, 'wave-plan.json'), JSON.stringify([{ file: original, text: 'FST protocol fixture' }]));
+        let prepared, released = false;
+        const opened = [];
+        const h = editorHarness(f, async () => ({ ...protocolToolchain(f, 'ok'),
+            vvpPrefix: [f.driver, 'vvp', 'archive'],
+            env: { ...process.env, IVERILOG_DUMPER: mode === 'environment' ? 'fst' : 'vcd' }
+        }), { config: { simArgs: mode === 'environment' ? [] : [mode] }, waveViewer: {
+            async prepareForSimulation(options) { prepared = options; return { dispose() { released = true; } }; },
+            async openWaveform(file) { assert.equal(released, true); opened.push(file); }
+        } });
+        try {
+            const result = await h.api.runSimulation(h.doc);
+            assert.equal(result.ok, true);
+            assert.ok(prepared.paths.includes(original), '启动工具前保护真实 dump.fst');
+            assert.deepEqual(result.waves, [original]);
+            assert.deepEqual(opened, [original]);
+            assert.equal(await fs.readFile(original, 'utf8'), 'FST protocol fixture');
+            await assert.rejects(fs.stat(path.join(f.root, '.svtools', 'vcd')), { code: 'ENOENT' });
+        } finally { await h.api.dispose(); }
+    });
+}
+
+test('FST无后缀的显式dumpfile同时保护原名及补后缀路径', async t => {
+    const f = await fixture(t), original = path.join(f.root, 'waves', 'capture.fst');
+    await fs.writeFile(f.file, 'module main; initial begin $dumpfile("waves/capture"); $dumpvars(0,main); end endmodule');
+    await fs.writeFile(path.join(f.root, 'wave-plan.json'), JSON.stringify([{ file: original, text: 'FST protocol fixture' }]));
+    let prepared;
+    const h = editorHarness(f, async () => ({ ...protocolToolchain(f, 'ok'), vvpPrefix: [f.driver, 'vvp', 'archive'] }), {
+        config: { simArgs: ['-fst'] }, waveViewer: {
+            async prepareForSimulation(options) { prepared = options; return { dispose() {} }; }, async openWaveform() {}
+        }
+    });
+    try {
+        const result = await h.api.runSimulation(h.doc);
+        assert.equal(result.ok, true);
+        assert.ok(prepared.paths.includes(original));
+        assert.deepEqual(result.waves, [original]);
+    } finally { await h.api.dispose(); }
+});
+
+
+test('仿真后按工作区设置自动转FST，再打开转换后的路径', async t => {
+    const f = await fixture(t), original = path.join(f.root, 'capture.vcd');
+    const text = '$timescale 1ns $end $scope module main $end $var wire 1 ! clk $end $upscope $end $enddefinitions $end #0 0! #10 1! #20 0!';
+    await fs.writeFile(f.file, 'module main; initial begin $dumpfile("capture.vcd"); $dumpvars; end endmodule');
+    await fs.writeFile(path.join(f.root,'wave-plan.json'), JSON.stringify([{file:original,text}]));
+    const h = editorHarness(f, async () => ({...protocolToolchain(f,'ok'),vvpPrefix:[f.driver,'vvp','archive']}), {
+        waveformConfig:{convertVcdToFst:true}
+    });
+    try {
+        const result = await h.api.runSimulation(h.doc); assert.equal(result.ok,true);
+        const vcd = defaultVcdPath({root:f.root,sourceFile:f.file,engine:'iverilog',dumpFile:original});
+        assert.deepEqual(result.waves,[vcd.replace(/\.vcd$/i,'.fst')]); assert.deepEqual(h.waves,result.waves);
+        await assert.rejects(fs.stat(original),{code:'ENOENT'}); await assert.rejects(fs.stat(vcd),{code:'ENOENT'});
+        assert.ok(h.messages.some(text => String(text).includes('FST 已保存')));
+    } finally { await h.api.dispose(); }
+});
+
+test('仿真成功但VCD转换失败仍保留仿真通过与原VCD路径', async t => {
+    const f = await fixture(t), original = path.join(f.root,'capture.vcd');
+    await fs.writeFile(f.file,'module main; initial $dumpfile("capture.vcd"); endmodule');
+    await fs.writeFile(path.join(f.root,'wave-plan.json'),JSON.stringify([{file:original,text:'incomplete trace'}]));
+    const h = editorHarness(f, async () => ({...protocolToolchain(f,'ok'),vvpPrefix:[f.driver,'vvp','archive']}), {waveformConfig:{convertVcdToFst:true}});
+    try {
+        const result = await h.api.runSimulation(h.doc); assert.equal(result.ok,true); assert.match(result.waves[0],/\.vcd$/);
+        assert.equal(await fs.readFile(result.waves[0],'utf8'),'incomplete trace');
+        assert.ok(h.messages.some(text=>String(text).includes('原波形已保留')));
+    } finally { await h.api.dispose(); }
 });

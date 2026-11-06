@@ -101,7 +101,7 @@ async function run() {
     assert.equal((await api.projects.current()).id, project.id);
     assert.equal(other.kind, 'svtools');
     checks.push('多工程切换与Vivado上下文隔离');
-    const report = { vscode: vscode.version, checks };
+    const report = { vscode: vscode.version, version: extension.packageJSON.version, extensionPath: extension.extensionPath, checks };
     await fs.writeFile(path.join(root, '..', 'host-report.json'), JSON.stringify(report, null, 2));
     console.log('SVTOOLS_PROJECT_VALIDATED ' + JSON.stringify(report));
 }

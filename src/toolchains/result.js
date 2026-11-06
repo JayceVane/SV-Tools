@@ -21,10 +21,16 @@ function summarizeToolResult({ result, findings = [], mainFile, status, diagnost
     let message = '';
     if (taskStatus === 'cancelled') message = '任务已取消';
     else if (taskStatus === 'skipped') message = '未执行工具检查';
-    else if (!ok) message = result?.errorMessage || result?.logError || (result?.timedOut ? '工具执行超时' : '')
-        || (diagnosticsIncomplete ? '诊断超过安全预算，不能确认检查通过' : '')
-        || (totalErrorCount ? `工程存在 ${totalErrorCount} 个错误` : '')
-        || (result ? '工具退出码：' + result.code : '工具检查未启动');
+    else if (!ok) {
+        // timedOut 与终止错误并存时超时是根因：并行满载下退出事件常晚于 2s 终止宽限，
+        // 「终止工具进程失败」是次级症状，摘要必须先报「工具执行超时」再附细节。
+        message = result?.timedOut
+            ? '工具执行超时' + (result?.errorMessage || result?.logError ? '（' + (result?.errorMessage || result?.logError) + '）' : '')
+            : (result?.errorMessage || result?.logError
+                || (diagnosticsIncomplete ? '诊断超过安全预算，不能确认检查通过' : '')
+                || (totalErrorCount ? `工程存在 ${totalErrorCount} 个错误` : '')
+                || (result ? '工具退出码：' + result.code : '工具检查未启动'));
+    }
     return { ok, status: taskStatus, errorCount, warningCount: main.length - errorCount, totalErrorCount,
         message, logPath: result?.logPath || null };
 }

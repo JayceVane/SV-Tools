@@ -1,0 +1,47 @@
+{
+    "schemaVersion": 1,
+    "interfaces": [
+        {
+            "type": "axi4_lite",
+            "members": [
+                { "name": "awaddr", "width": 32 },
+                { "name": "wdata", "width": 32 },
+                { "name": "rdata", "width": 32 }
+            ]
+        },
+        {
+            "type": "irq_bus",
+            "members": [
+                { "name": "valid", "width": 1 },
+                { "name": "code", "width": 8 }
+            ]
+        }
+    ],
+    "buses": [
+        { "name": "m0", "type": "axi4_lite" },
+        { "name": "irq", "type": "irq_bus" }
+    ],
+    "modules": [
+        {
+            "name": "cpu",
+            "ports": [
+                { "name": "m_axi", "type": "axi4_lite", "role": "master", "direction": "output" },
+                { "name": "m_irq", "type": "irq_bus", "role": "master", "direction": "output" }
+            ]
+        },
+        {
+            "name": "mem",
+            "ports": [
+                { "name": "s_axi", "type": "axi4_lite", "role": "slave", "direction": "input" },
+                { "name": "s_irq", "type": "irq_bus", "role": "slave", "direction": "input" }
+            ]
+        }
+    ],
+    "top": {
+        "name": "scaffold_top",
+        "instances": [
+            { "name": "u_cpu", "module": "cpu", "connections": { "m_axi": "m0", "m_irq": "irq" } },
+            { "name": "u_mem", "module": "mem", "connections": { "s_axi": "m0", "s_irq": "irq" } }
+        ]
+    }
+}
