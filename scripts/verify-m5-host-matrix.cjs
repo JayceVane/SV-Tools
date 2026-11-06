@@ -1,109 +1,107 @@
 'use strict';
-// M5 批 3 收尾：把 5 个 verify-*-host.ps1 宿主验收 × 目标 IDE 聚合成 bin/m5-host-matrix.json。
-// 可重跑：node scripts/verify-m5-host-matrix.cjs --ide "<名称>=<Code可执行路径>" [--ide ...]
-//         [--iverilog <bin目录|exe>] [--cygwin <bin目录>] [--out <file>]
-// 行字段取自各宿主的 host-report.json；app 用调用方标签（Qoder 内核自报 appName 为 Visual Studio Code，不可信）。
-// 任一宿主失败或报告缺失 → 退出码 1，矩阵仍写盘以便排查。
-const fs = require('node:fs');
-const fsp = require('node:fs/promises');
+
+const assert = require('node:assert/strict');
+const fs = require('node:fs/promises');
 const path = require('node:path');
-const { spawn } = require('node:child_process');
+const { randomUUID } = require('node:crypto');
 const { parseArgs } = require('node:util');
+const { runProcess } = require('../src/toolchains/process');
 const { findIverilogBinDir } = require('../src/toolchains/iverilog');
+const { openCandidate, sha256 } = require('./release-archive.cjs');
 
-const tool = path.resolve(__dirname, '..');
-// 宿主名 → (ps1 脚本, 报告所在 bin 子目录, 附加参数)。报告目录约定由各 ps1 固化为 bin/<name>-host/run-*。
-const HOSTS = [
-    ['circuit', 'verify-circuit-host.ps1', 'circuit-host'],
-    ['completion', 'verify-completion-host.ps1', 'completion-host'],
-    ['project', 'verify-project-host.ps1', 'project-host'],
-    ['vivado', 'verify-vivado-host.ps1', 'vivado-host'],
-    ['waveform', 'verify-waveform-host.ps1', 'waveform-host'],
-];
-const HOST_TIMEOUT_MS = 300000;
+const root = path.resolve(__dirname, '..');
+const hosts = new Map([['circuit', 6], ['completion', 22], ['project', 10], ['vivado', 8], ['waveform', 5]]);
+const ideKinds = ['Visual Studio Code', 'Qoder CN IDE'];
 
-// 宿主脚本是 UTF-8 无 BOM：Windows PowerShell 5.1 按 ANSI 代码页解析会把中文串读坏成 ParserError，
-// 必须用 pwsh（默认 UTF-8）；未装 pwsh 时回退 powershell.exe 并在失败时提示该已知问题。
-const SHELL = process.platform === 'win32' ? 'pwsh.exe' : 'powershell.exe';
-
-function runHost(script, args) {
-    return new Promise(resolve => {
-        const started = Date.now();
-        const child = spawn(SHELL, ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
-            '-File', path.join(tool, 'scripts', script), ...args], { cwd: tool, windowsHide: true });
-        let stdout = '', stderr = '';
-        child.stdout.on('data', chunk => { stdout += chunk; });
-        child.stderr.on('data', chunk => { stderr += chunk; });
-        const timer = setTimeout(() => { try { child.kill(); } catch { /* 已退出 */ } }, HOST_TIMEOUT_MS);
-        child.once('error', error => { clearTimeout(timer); resolve({ ok: false, error: error.message, stdout, stderr, durationMs: Date.now() - started }); });
-        child.once('close', code => { clearTimeout(timer); resolve({ ok: code === 0, exitCode: code, stdout, stderr, durationMs: Date.now() - started }); });
-    });
-}
-
-/** 各宿主报告字段不统一（circuit/waveform 有 count、completion 有 passed/failed、project 只有 checks 数组）；
- * 到达报告即 ps1 退出码为 0；结构化缺 failed 的宿主以 0 计。 */
-function rowFrom(host, app, run, report, at) {
-    return { host, app, vscode: report.vscode || null,
-        extension: report.extensionVersion || report.version || null,
-        checks: report.count ?? (Array.isArray(report.checks) ? report.checks.length : null) ?? null,
-        passed: Number.isFinite(report.passed) ? report.passed : null,
-        failed: Number.isFinite(report.failed) ? report.failed : 0,
-        run, at };
-}
-
-async function main() {
-    const { values } = parseArgs({ options: {
-        ide: { type: 'string', multiple: true }, out: { type: 'string' },
-        iverilog: { type: 'string' }, cygwin: { type: 'string' } },
-    });
-    const ides = (values.ide || []).map(entry => {
+async function resolveIdes(entries) {
+    const ides = [];
+    for (const entry of entries ?? []) {
         const separator = entry.indexOf('=');
-        if (separator <= 0) throw new Error('--ide 需要 "<名称>=<可执行路径>"：' + entry);
-        return { app: entry.slice(0, separator), codePath: entry.slice(separator + 1) };
-    });
-    if (!ides.length) throw new Error('至少需要一个 --ide "<名称>=<可执行路径>"');
-    for (const { codePath } of ides) {
-        try { if (!fs.statSync(codePath).isFile()) throw new Error('不是普通文件'); }
-        catch { throw new Error('IDE 可执行路径不可用：' + codePath); }
+        assert.ok(separator > 0, '使用 --ide "<名称>=<可执行路径>"');
+        const name = entry.slice(0, separator);
+        const executable = await fs.realpath(entry.slice(separator + 1));
+        assert.ok((await fs.stat(executable)).isFile());
+        ides.push({ name, executable, sha256: await sha256(executable) });
     }
-    // Icarus 可用时透传给补全宿主（ps1 写 run 内 tools.json，启用「真实接受参数补全后 Icarus 编译通过」子项）。
-    const iverilogBin = findIverilogBinDir(values.iverilog);
-    if (values.iverilog && !iverilogBin) throw new Error('--iverilog 指定的路径未找到 iverilog：' + values.iverilog);
-    if (!iverilogBin) console.error('提示：未找到 Icarus，补全宿主将跳过 Icarus 编译子项（nativeSkipped=true，21/22 项）');
-    const iverilogExe = iverilogBin && path.join(iverilogBin, process.platform === 'win32' ? 'iverilog.exe' : 'iverilog');
-    const cygwinBin = values.cygwin || null;
-    const rows = [], failures = [];
-    for (const { app, codePath } of ides) {
-        for (const [host, script, reportDir] of HOSTS) {
-            const extra = host === 'completion' && iverilogExe ? ['-IcarusPath', iverilogExe, ...(cygwinBin ? ['-CygwinPath', cygwinBin] : [])] : [];
-            const before = new Set(await fsp.readdir(path.join(tool, 'bin', reportDir), { withFileTypes: true })
-                .catch(() => []).then(entries => entries.filter(entry => entry.isDirectory()).map(entry => entry.name)));
-            const run = await runHost(script, ['-CodePath', codePath, ...extra]);
-            const fresh = (await fsp.readdir(path.join(tool, 'bin', reportDir), { withFileTypes: true }))
-                .filter(entry => entry.isDirectory() && !before.has(entry.name)).map(entry => entry.name).sort();
-            const runName = fresh.at(-1);
-            const reportPath = runName && path.join(tool, 'bin', reportDir, runName, 'host-report.json');
-            if (!run.ok || !reportPath || !fs.existsSync(reportPath)) {
-                failures.push({ host, app, exitCode: run.exitCode ?? null, error: run.error || null,
-                    stderrTail: (run.stderr || run.stdout || '').slice(-600) });
-                continue;
+    assert.deepEqual(ides.map(ide => ide.name).sort(), [...ideKinds].sort(), '需要分别指定 VS Code 与 Qoder CN IDE');
+    assert.equal(new Set(ides.map(ide => ide.sha256)).size, 2, '两个目标 IDE 必须使用不同的可执行文件');
+    return ides;
+}
+
+function validateMatrix(matrix, candidate) {
+    assert.equal(matrix.schemaVersion, 2);
+    assert.deepEqual(matrix.candidate, candidate);
+    assert.deepEqual(matrix.ides.map(ide => ide.name).sort(), [...ideKinds].sort());
+    assert.ok(matrix.ides.every(ide => /^[a-f0-9]{64}$/.test(ide.sha256)));
+    assert.equal(new Set(matrix.ides.map(ide => ide.sha256)).size, 2);
+    const combinations = new Set();
+    const reports = new Set();
+    for (const row of matrix.rows) {
+        assert.ok(ideKinds.includes(row.app) && hosts.has(row.host));
+        const key = row.app + '/' + row.host;
+        const ideIndex = matrix.ides.findIndex(ide => ide.name === row.app);
+        assert.equal(String(row.report).replace(/\\/g, '/'), ideIndex + '-' + row.host + '/host-report.json');
+        assert.ok(!combinations.has(key) && !reports.has(row.report), '重复的 IDE/宿主组合或报告');
+        assert.ok(typeof row.vscode === 'string' && /^\d+\.\d+\.\d+/.test(row.vscode));
+        assert.equal(row.extension, candidate.version);
+        assert.ok(Number.isSafeInteger(row.passed) && row.passed >= hosts.get(row.host));
+        assert.equal(row.failed, 0);
+        assert.match(row.sha256, /^[a-f0-9]{64}$/);
+        combinations.add(key);
+        reports.add(row.report);
+    }
+    assert.equal(combinations.size, hosts.size * ideKinds.length, '缺少 IDE/宿主组合');
+    return matrix;
+}
+
+async function verifyHosts({ directory, extensionPath, candidate, ideEntries, iverilogBin, cygwin }) {
+    const ides = await resolveIdes(ideEntries);
+    assert.ok(iverilogBin, '宿主验收需要真实 Icarus 编译');
+    const rows = [];
+    const matrix = { schemaVersion: 2, createdUtc: new Date().toISOString(), candidate, ides, rows };
+    for (const [index, ide] of ides.entries()) {
+        for (const [host, minimum] of hosts) {
+            const runDirectory = path.join(directory, `${index}-${host}`);
+            const script = path.join(root, 'scripts', `verify-${host}-host.ps1`);
+            const args = ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', script,
+                '-CodePath', ide.executable, '-ExtensionPath', extensionPath, '-RunDirectory', runDirectory];
+            if (host === 'completion') {
+                args.push('-IcarusPath', path.join(iverilogBin, 'iverilog.exe'));
+                if (cygwin) args.push('-CygwinPath', cygwin);
             }
-            const report = JSON.parse(await fsp.readFile(reportPath, 'utf8'));
-            const at = (await fsp.stat(reportPath)).mtime.toISOString();
-            const row = rowFrom(host, app, runName, report, at);
-            rows.push(row);
-            if (row.failed > 0) failures.push({ host, app, failed: row.failed, run: runName });
-            console.error(`[${row.failed ? 'FAIL' : 'ok'}] ${app} · ${host} · checks=${row.checks} failed=${row.failed} · ${run.durationMs}ms`);
+            console.error(`[host] ${ide.name} / ${host}`);
+            const execution = await runProcess('pwsh.exe', args, { cwd: root, timeoutMs: 300000 });
+            assert.equal(execution.code, 0, `${ide.name}/${host}: ${execution.stderr || execution.stdout || execution.errorMessage}`);
+            const report = path.join(runDirectory, 'host-report.json');
+            const data = JSON.parse(await fs.readFile(report, 'utf8'));
+            assert.equal((await fs.realpath(data.extensionPath)).toLowerCase(), (await fs.realpath(extensionPath)).toLowerCase(), '宿主实际加载的扩展路径有误');
+            assert.equal(data.version ?? data.extensionVersion, candidate.version);
+            assert.ok(Array.isArray(data.checks) && data.checks.length >= minimum);
+            assert.ok(data.checks.every(check => typeof check === 'string' ? check.length > 0 : check?.passed === true));
+            if (host === 'completion') assert.equal(data.nativeSkipped, false);
+            if (host === 'waveform') assert.ok(data.status?.ready && data.status.loaded && !data.status.error);
+            rows.push({ host, app: ide.name, vscode: data.vscode, extension: candidate.version,
+                passed: data.checks.length, failed: 0, report: path.relative(directory, report), sha256: await sha256(report) });
         }
     }
-    const matrix = { createdUtc: new Date().toISOString(), rows };
-    const out = values.out ? path.resolve(tool, values.out) : path.join(tool, 'bin', 'm5-host-matrix.json');
-    await fsp.mkdir(path.dirname(out), { recursive: true });
-    await fsp.writeFile(out, JSON.stringify(matrix, null, 2) + '\n', 'utf8');
-    console.error(`矩阵 ${rows.length} 行 → ${path.relative(tool, out)}；失败 ${failures.length}`);
-    if (failures.length) {
-        console.error(JSON.stringify(failures, null, 2));
-        process.exitCode = 1;
-    }
+    validateMatrix(matrix, candidate);
+    await fs.writeFile(path.join(directory, 'host-matrix.json'), JSON.stringify(matrix, null, 2) + '\n');
+    return matrix;
 }
-main().catch(error => { console.error(error.stack || error); process.exitCode = 1; });
+
+if (require.main === module) {
+    async function main() {
+        const { values } = parseArgs({ options: { vsix: { type: 'string' }, ide: { type: 'string', multiple: true },
+            iverilog: { type: 'string' }, cygwin: { type: 'string' } } });
+        assert.ok(values.vsix, '使用 --vsix 指定要验收的实际归档');
+        const directory = path.join(root, 'bin', 'm5-host-matrix', randomUUID());
+        const extensionPath = path.join(directory, 'extension');
+        const candidate = await openCandidate(path.resolve(values.vsix), extensionPath);
+        const matrix = await verifyHosts({ directory, extensionPath, candidate, ideEntries: values.ide,
+            iverilogBin: findIverilogBinDir(values.iverilog), cygwin: values.cygwin });
+        console.log(JSON.stringify({ directory, candidate, rows: matrix.rows.length }));
+    }
+    main().catch(error => { console.error(error.stack || error); process.exitCode = 1; });
+}
+
+module.exports = { verifyHosts, validateMatrix };

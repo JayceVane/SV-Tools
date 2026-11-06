@@ -4,7 +4,8 @@
 // 可重跑：node scripts/verify-fifo-workflow.cjs --iverilog <icarus-bin>；产物在 bin/fifo-e2e-<ts>/。
 const fs=require('node:fs/promises'),path=require('node:path'),assert=require('node:assert/strict'),crypto=require('node:crypto');
 const {spawn}=require('node:child_process');
-const tool=path.resolve(__dirname,'..'),{run}=require(path.join(tool,'src/cli/main'));
+const tool=path.resolve(__dirname,'..'),candidateRuntime=process.env.SVTOOLS_CANDIDATE_ROOT||tool;
+const {run}=require(path.join(candidateRuntime,'src/cli/main'));
 const {parseArgs}=require('node:util');
 const {values}=parseArgs({options:{iverilog:{type:'string'},cygwin:{type:'string'}}});
 const {findIverilogBinDir,findCygwinBinDir,buildChildEnv}=require(path.join(tool,'src/toolchains/iverilog'));
@@ -164,7 +165,7 @@ async function cycle(label,extraCompileArgs,expectedPass){
     await file(evidenceFile,{schemaVersion:1,planId:'m5-fifo-e2e',moduleId:'afifo',candidateId,inputs,verificationInputs,checks:[
         {id:'compile',status:'passed',command:[compiler,...compileArgs],toolVersion:(await execute(compiler,['-V'])).stdout.split('\n')[0],report:compile,log:compileLog},
         {id:'simulation',status:passed?'passed':'failed',command:[runtime,label+'.vvp'],toolVersion:'icarus-vvp',report:sim,log:simLog},
-        {id:'delta-cycle',status:'passed',command:['node',path.join(tool,'src/cli/main.js'),...query],toolVersion:require(path.join(tool,'package.json')).version,report:delta,waveform,dispositions:[]}]});
+        {id:'delta-cycle',status:'passed',command:['node',path.join(candidateRuntime,'src/cli/main.js'),...query],toolVersion:require(path.join(tool,'package.json')).version,report:delta,waveform,dispositions:[]}]});
     state=await command('submit',['--module','afifo','--actor','verification-phase','--token',verify.token,'--revision',String(verify.revision),'--evidence',evidenceFile]);
     if(passed){state=await command('review',['--module','afifo','--actor','review-phase','--revision',String(state.revision),'--reason','Reviewed simulator log, independent queue oracle, reset-hazard and coincident-edge scenarios; single Agent phased execution.']);assert.equal(state.summary.accepted,1);}
     else{assert.equal(state.modules[0].verification,'failed');

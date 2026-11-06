@@ -34,7 +34,7 @@ async function run() {
         const nodes = flatten(panel.getChildren()); assert.ok(nodes.some(node => node.contextValue === 'orphan' && node.label === 'orphan.sv'));
         assert.ok(nodes.some(node => node.nodeData?.module === 'leaf')); checks.push('成员层级与未加入文件');
     } finally { listener.dispose(); }
-    const report = { vscode: vscode.version, version: extension.packageJSON.version, checks };
+    const report = { vscode: vscode.version, version: extension.packageJSON.version, extensionPath: extension.extensionPath, checks };
     await fs.writeFile(path.join(root, '..', 'host-report.json'), JSON.stringify(report, null, 2));
     console.log('SVTOOLS_HOST_VALIDATED ' + JSON.stringify(report));
 }

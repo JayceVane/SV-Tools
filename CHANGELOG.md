@@ -2,6 +2,14 @@
 
 All notable changes to the SystemVerilog VSCode Extension will be documented in this file.
 
+## [4.2.0]
+
+- 新增本地 Agent CLI 与五份 Skills，提供 Windows x64 便携 ZIP。
+- 支持架构检查与图文报告、模块领取和验证交接。IDE 工程侧栏新增只读设计进展。
+- Vivado 隔离运行绑定输入与报告，源码变化后标记旧证据过期。
+- VCD/FST 支持查询、统计、同刻变化分析、CSV 和布局导出。支持按需将仿真产出的 VCD 转为 FST。
+- Windows 独立格式化器发布名改为 `svtools-format.exe`。
+
 ## [4.1.2] - 2026-11-01
 
 ### 波形查看器

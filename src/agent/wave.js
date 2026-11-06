@@ -510,6 +510,9 @@ async function exportLayout(trace, input, { ids, names, from, to }) {
     const base = (input.title ? input.title.replace(/[\\/:*?"<>|]/g, '_') : path.basename(trace.file).replace(/\.(?:vcd|fst)$/i, '')) || 'waveform';
     const outputDirectory = path.resolve(trace.options.workspace, input.out ?? path.dirname(trace.file));
     // 与 createContainedDirectories 的 inside() 同口径：跨盘符时 path.relative 返回绝对路径，也要拒绝。
+    const layoutFile = path.join(outputDirectory, base + '.svwave.json');
+    const automaticFile = trace.file.replace(/\.(?:vcd|fst)$/i, '') + '.svwave.json';
+    const autoLoads = path.relative(automaticFile, layoutFile) === '';
     const relative = path.relative(trace.options.workspace, outputDirectory);
     if (input.out === undefined && (relative === '..' || relative.startsWith('..' + path.sep) || path.isAbsolute(relative)))
         fail('INVALID_ARGUMENT', '波形文件不在工作区内：布局导出默认写波形同目录，请用 --out 指定工作区内目录');
@@ -517,7 +520,7 @@ async function exportLayout(trace, input, { ids, names, from, to }) {
     try {
         const created = (await createContainedDirectories(outputDirectory, trace.options.workspace)).created;
         try {
-            const file = path.join(outputDirectory, base + '.svwave.json');
+            const file = layoutFile;
             const text = JSON.stringify(layout, null, 2) + '\n';
             // --force 覆盖时不能跟随已存在的链接/别名写出工作区外。
             try { await assertExportTarget(file, trace.file); }
@@ -540,7 +543,7 @@ async function exportLayout(trace, input, { ids, names, from, to }) {
         out: outputDirectory, format: 'layout', tracks: layout.tracks.length,
         signals: layout.tracks.map(track => track.signal.path),
         cursor: { a: tickString(cursorA), ...(cursorB !== null ? { b: tickString(cursorB) } : {}) },
-        viewer: input.out === undefined ? '打开同名波形时自动套用该布局' : '需用查看器“加载布局”手动打开该文件',
+        viewer: autoLoads ? '打开同名波形时自动套用该布局' : '需用查看器“加载布局”手动打开该文件',
         stats: trace.stats
     }, null, [], artifacts);
 }

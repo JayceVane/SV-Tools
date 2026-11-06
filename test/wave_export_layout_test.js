@@ -138,3 +138,16 @@ test('波形在工作区外时默认同名输出被拒绝，并要求显式 --ou
     assert.equal(explicit.exitCode, 0, JSON.stringify(explicit.output));
     assert.equal(explicit.output.artifacts[0].path, path.join(workspace, 'layouts', 'trace.svwave.json'));
 });
+
+test('布局提示取决于查看器实际查找的路径', async t => {
+    const directory = await fixture(t);
+    const viewer = createLayoutFiles({ vscode: vscodeStub(), filePath: path.join(directory, 'trace.vcd') });
+    const renamed = await run(args(directory, ['--format', 'layout', '--title', 'review']));
+    assert.equal(renamed.exitCode, 0);
+    assert.match(renamed.output.data.viewer, /手动打开/);
+    assert.equal(await viewer.auto(), null);
+    const samePath = await run(args(directory, ['--format', 'layout', '--out', '.']));
+    assert.equal(samePath.exitCode, 0);
+    assert.match(samePath.output.data.viewer, /自动套用/);
+    assert.ok(await viewer.auto());
+});

@@ -125,3 +125,9 @@ SVG 适合技术文档与后续编辑。PNG 按图幅预算调整分辨率；超
 转换先写临时文件、验证 FST，再移除原 VCD。取消、转换失败或源文件在转换期间变化时保留 VCD；警告写入仿真输出通道。默认覆盖同名 FST（`svtools.waveform.convertVcdToFstOverwrite`，同目录原子替换）；关闭该选项后保留既有 FST，新文件改用 `name-2.fst` 等递增编号。已经由仿真器生成的 FST 按文件内容识别并跳过转换。
 
 支持数字信号、总线、别名、数组元素、实数和 X/Z。字符串波形扩展、EVCD、未声明时间单位、存在未初始化/延迟初始化信号等无法保证保真的输入会保留 VCD。转换是流式异步处理，但会增加仿真结束后的处理时间。FST 通常显著减少磁盘占用；查看速度取决于信号与事件分布，不保证每种文件都更快。
+
+## 4.2 的 FST 与 Agent 波形取证
+
+查看器可打开 VCD 和 FST，并使用层级筛选。`svtools.waveform.convertVcdToFst` 可在支持的仿真成功后把本轮 VCD 转为 FST，默认关闭。转换成功后才移除原 VCD，同名覆盖由 `svtools.waveform.convertVcdToFstOverwrite` 控制。
+
+用 Agent CLI 的 `wave stats` 与 `wave timeline` 缩小故障窗口，再用 `wave values` 或 `wave glitches` 查询指定信号。`wave export --format layout` 默认生成同名 `.svwave.json`，查看器下次打开波形时匹配信号并恢复窗口。另存文件可从「加载布局」打开。用 `--format csv` 导出终值变化矩阵，用 `--format svg` 或 `png` 导出文档图。详见 [Agent CLI](https://github.com/JayceVane/SV-Tools/wiki/Agent-CLI)。

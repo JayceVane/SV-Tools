@@ -1,6 +1,7 @@
 param(
     [Parameter(Mandatory = $true)][string]$CodePath,
     [string]$ExtensionPath,
+    [string]$RunDirectory,
     [string]$TestPath = 'test/vscode_waveform_host.js',
     [string]$IcarusPath,
     [string]$CygwinPath,
@@ -10,7 +11,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $repoRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 if (-not $ExtensionPath) { $ExtensionPath = $repoRoot }
-$testRoot = Join-Path $repoRoot ('bin/waveform-host/run-' + [guid]::NewGuid().ToString('N'))
+$testRoot = if ($RunDirectory) { [IO.Path]::GetFullPath($RunDirectory) } else { Join-Path $repoRoot ('bin/waveform-host/run-' + [guid]::NewGuid().ToString('N')) }
 $testWorkspace = Join-Path $testRoot 'workspace'
 $profilePath = Join-Path $testRoot 'profile'
 $extensionsPath = Join-Path $testRoot 'extensions'

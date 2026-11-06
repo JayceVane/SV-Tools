@@ -1,0 +1,8 @@
+{
+  "context": "separate-agents-shared-interface-only",
+  "design": "m5_independent_rtl",
+  "verification": "m5_independent_tb",
+  "rtlSha256": "6702b7d5b1fdfcdc43967a4d0503dcd64fd50d43932bb6ed7814d4f9555edc4d",
+  "testbenchSha256": "f19bc8e91b589400621716d998e4d62c711bbf2ee4a31c5ab8e7dc849601cb53",
+  "coordinator": "runs and reviews original inputs, single-bit mutation and restored RTL against the same testbench"
+}

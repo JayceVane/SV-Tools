@@ -1,8 +1,8 @@
-param([Parameter(Mandatory = $true)][string]$CodePath, [string]$ExtensionPath)
+param([Parameter(Mandatory = $true)][string]$CodePath, [string]$ExtensionPath, [string]$RunDirectory)
 $ErrorActionPreference = 'Stop'
 $repoRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 if (-not $ExtensionPath) { $ExtensionPath = $repoRoot }
-$testRoot = Join-Path $repoRoot ('bin/project-host/run-' + [guid]::NewGuid().ToString('N'))
+$testRoot = if ($RunDirectory) { [IO.Path]::GetFullPath($RunDirectory) } else { Join-Path $repoRoot ('bin/project-host/run-' + [guid]::NewGuid().ToString('N')) }
 $testWorkspace = Join-Path $testRoot 'workspace'
 $profilePath = Join-Path $testRoot 'profile'
 $extensionsPath = Join-Path $testRoot 'extensions'

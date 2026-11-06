@@ -1,1 +1,1 @@
-适用版本：**4.1.0 · Windows x64** · [指南源码](https://github.com/JayceVane/SV-Tools/tree/master/docs/wiki) · [安装渠道](https://github.com/JayceVane/SV-Tools/wiki/Getting-Started) · [问题反馈](https://github.com/JayceVane/SV-Tools/issues)
+适用版本：**4.2.0 · Windows x64** · [指南源码](https://github.com/JayceVane/SV-Tools/tree/master/docs/wiki) · [安装渠道](https://github.com/JayceVane/SV-Tools/wiki/Getting-Started) · [问题反馈](https://github.com/JayceVane/SV-Tools/issues)

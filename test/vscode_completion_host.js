@@ -252,7 +252,7 @@ endpackage
         } finally { await config.update('maxItems', undefined, vscode.ConfigurationTarget.Workspace); }
     });
 
-    const report = { vscode: vscode.version, version: extension.packageJSON.version, checks, native, nativeSkipped: !hasTools, passed: checks.filter(check => check.passed).length, failed: checks.filter(check => !check.passed).length };
+    const report = { vscode: vscode.version, version: extension.packageJSON.version, extensionPath: extension.extensionPath, checks, native, nativeSkipped: !hasTools, passed: checks.filter(check => check.passed).length, failed: checks.filter(check => !check.passed).length };
     await fs.writeFile(path.join(root, '..', 'host-report.json'), JSON.stringify(report, null, 2));
     console.log('SVTOOLS_COMPLETION_HOST_VALIDATED ' + JSON.stringify(report));
     assert.equal(report.failed, 0, report.failed + ' 项真实补全宿主验收失败，完整原因见 host-report.json');

@@ -68,12 +68,17 @@ jobs:
         run: Get-ChildItem bin/*.vsix | ForEach-Object { node scripts/check-public-package.js $_.FullName; if ($LASTEXITCODE -ne 0) { throw '公开安装包检查失败' } }
         shell: pwsh
 
+      - name: 构建和试跑 Agent 便携包
+        env:
+          TAG: ${{ github.ref_name }}
+        run: node scripts/package-agent.cjs "bin/svtools-${env:TAG}-win32-x64.vsix" "bin/svtools-agent-${env:TAG}-win32-x64.zip"
+
       - name: 运行 Rust 回归
         run: cargo test --manifest-path src/native/Cargo.toml
 
       - name: 生成 SHA256 校验清单
         run: |
-          $files = Get-Item bin/*.vsix, bin/svtools.win32-x64-msvc.node, bin/svtools-format.exe
+          $files = Get-Item bin/*.vsix, bin/svtools-agent-*-win32-x64.zip, bin/svtools.win32-x64-msvc.node, bin/svtools-format.exe
           $lines = $files | ForEach-Object { "{0}  {1}" -f (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant(), $_.Name }
           $lines | Set-Content bin/SHA256SUMS.txt -Encoding ascii
         shell: pwsh
@@ -95,7 +100,7 @@ jobs:
             fi
             gh release create "$TAG" "${options[@]}"
           fi
-          gh release upload "$TAG" bin/svtools.win32-x64-msvc.node bin/svtools-format.exe bin/*.vsix bin/SHA256SUMS.txt
+          gh release upload "$TAG" bin/svtools.win32-x64-msvc.node bin/svtools-format.exe bin/*.vsix "bin/svtools-agent-$TAG-win32-x64.zip" bin/SHA256SUMS.txt
         shell: bash
 
   marketplace:

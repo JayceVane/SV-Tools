@@ -1,10 +1,10 @@
-# SV Tools CLI：4.2 M1 开发入口
+# SV Tools CLI 4.2
 
-M1 提供无 IDE 的基础服务，正式支持环境为 Windows x64、Node.js 22 及以上。当前正式扩展版本仍为 4.1.1；本页说明 4.2 开发分支的接口。工程文件集规则与插件共用，格式化复用 Rust 原生模块，Icarus 检查复用已有的进程、诊断和取消逻辑。MCP 适配留待后续按需接入。
+SV Tools 4.2 提供无 IDE 的 CLI，发行目标为 Windows x64，验收覆盖 Node.js 22 和 24。工程文件集规则与插件共用，格式化复用 Rust 原生模块，Icarus 检查复用已有的进程、诊断和取消逻辑。MCP 适配留待后续按需接入。
 
 ## 准备与调用
 
-在构建过的 SV Tools 仓库中运行：
+发布包可直接用 `svtools-agent.cmd` 运行。安装和 Skills 入口见 [Agent 快速入门](AGENT_QUICKSTART.md)。也可在构建过的源码目录运行：
 
 ```powershell
 node src/cli/main.js doctor
@@ -65,7 +65,7 @@ node src/cli/main.js task logs <task-id> --workspace D:/project --offset 0 --lim
 node src/cli/main.js task cancel <task-id> --workspace D:/project
 ```
 
-`task start` 返回 UUID，调用进程退出后后台工作进程仍可运行。目前只注册 `lint` 后台操作。取消通过所属任务的请求传递给已有进程树终止逻辑，不根据历史 PID 杀进程。工作进程非正常退出且没有可信结果时标记 `lost`，不会推测为通过。状态依次为 `queued`、`starting`（进程已接管任务并取得租约）、`running`（工程/源码上下文已固定、工具执行中）与终态 `succeeded`/`failed`/`cancelled`/`lost`；进入 `running` 之前的失败不会伪装成已执行的检查。
+`task start` 返回 UUID，调用进程退出后后台工作进程仍可运行。`task start lint` 和 `vivado run` 可启动后台操作。取消通过所属任务的请求传递给已有进程树终止逻辑，不根据历史 PID 杀进程。工作进程非正常退出且没有可信结果时标记 `lost`，不会推测为通过。状态依次为 `queued`、`starting`（进程已接管任务并取得租约）、`running`（工程/源码上下文已固定、工具执行中）与终态 `succeeded`/`failed`/`cancelled`/`lost`；进入 `running` 之前的失败不会伪装成已执行的检查。
 
 同一工作区的 CLI 和使用任务目录的插件工具任务共享两个外部进程槽，排队也可取消；同一文件的 CLI 格式化写入互斥。当前最多 16 个活动后台任务、128 份任务记录。任务记录在 `.svtools/agent/tasks/`，完成运行目录默认保留最近 5 次；已清理的日志返回 `ARTIFACT_EXPIRED`。任务记录需另行归档清理，未知或未完成记录不自动删除。
 
@@ -254,7 +254,7 @@ node src/cli/main.js wave export --workspace D:/project --file sim/wave.vcd --si
 - `wave stats`：多信号窗口统计（形态参考 pywellen `signal_get_statistics`）——每信号 `events`（折叠后事件数，与 changes 同口径）、`transitions`（终值实际跳变数，同值冗余不计）、`firstChange/lastChange`、`hasX/hasZ`、`windowRecords`；预算与分页同 glitches。`from=0` 时窗口首组的初值不算跳变。用于错误窗口分诊"谁最活跃、谁进入未知态"。
 - `wave timeline`：多信号合并时间线（形态参考 pywellen `debug_build_timeline`）——只含终值跳变，按时间戳归组（同刻多信号变化同组返回，组内按路径排序），每条变化带 `before`（窗口首事件取窗口前一时刻终值，`from=0` 无前值为 null）；`--limit` 为返回组数上限（1..2000，默认 1000），`next` 是首个未返回组时刻、直接作下一页闭区间 `--from`，整查询预算统一截断保证不重不漏。
 - `wave export --format csv`：数据矩阵导出（形态参考 pywellen `export_to_csv`）——行=窗口内任一信号终值跳变时刻，列=各信号该时刻终值位串（含 X/Z，证据口径；`from=0` 时首行前基线为空单元格）；行预算 10 万，超出 `truncated=true`；忽略游标参数，`--out` 与图像导出同一目录安全模型，产物计入 `artifacts[]`（kind `data`，含 sha256 与行数）。
-- `wave export --format layout`：把 `--signals` 的声明身份（路径/范围/位宽）、`--from/--to` 时间窗与 A/B 游标写成 v1 `.svwave.json` 布局。省略 `--out` 时默认写波形同目录、以波形名命名（VCD/FST 去扩展名 + `.svwave.json`），波形本身须在工作区内，否则报 `INVALID_ARGUMENT`；查看器打开同名波形时自动套用，**至少一条声明可匹配才应用**，0 命中（同名巧合或声明已变化）静默保留默认视图，自动套用优先于上次会话的选择与游标。指定 `--out` 时仍受同一目录安全模型约束，但产物不会自动套用，需用查看器「加载布局」手动打开，`data.viewer` 会区分两种情形。`--title` 作文件名；同名文件已存在返回 `FILE_EXISTS`，加 `--force` 覆盖（覆盖前同样拒绝链接/别名目标）；产物计入 `artifacts[]`（kind `layout`，含 sha256 与 tracks 数）。声明重复导致无法唯一匹配的条目仍记为未匹配，不猜测。
+- `wave export --format layout`：把 `--signals` 的声明身份（路径/范围/位宽）、`--from/--to` 时间窗与 A/B 游标写成 v1 `.svwave.json` 布局。省略 `--out` 时默认写波形同目录、以波形名命名（VCD/FST 去扩展名 + `.svwave.json`），波形本身须在工作区内，否则报 `INVALID_ARGUMENT`；查看器打开同名波形时自动套用，**至少一条声明可匹配才应用**，0 命中（同名巧合或声明已变化）静默保留默认视图，自动套用优先于上次会话的选择与游标。实际文件位于波形同目录且同名时，`data.viewer` 提示自动套用。用 `--out` 改目录或用 `--title` 改名时，可在查看器用「加载布局」手动打开。`--title` 作文件名；同名文件已存在返回 `FILE_EXISTS`，加 `--force` 覆盖（覆盖前同样拒绝链接/别名目标）；产物计入 `artifacts[]`（kind `layout`，含 sha256 与 tracks 数）。声明重复导致无法唯一匹配的条目仍记为未匹配，不猜测。
 
 波形查询返回原始位值与解码值，不改变或推断波形内容；密集区在 `changes` 中不降采样（与查看器像素窗口的 `dense` 标记不同）。失败日志解析取窗尚未实现，`--at` 时刻由调用者从仿真日志/断言提供。
 
