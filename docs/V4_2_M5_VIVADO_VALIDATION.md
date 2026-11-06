@@ -69,8 +69,8 @@ ok 4 - 真实Vivado端到端                                  # SKIP
 
 批 3 的「真实 Vivado 创建/运行/报告闭环 + 源变更证据失效 + 后台取消 + Node 矩阵 + 发行/许可检查」在本机通过。以下仍是未完成的发行门禁，不得据此宣称 4.2 可发行：
 
-1. 目标 IDE 真机宿主验收：本机确认安装了 VS Code 与 Qoder CN IDE，但 `scripts/verify-*-host.ps1` 类宿主脚本未执行，客户端兼容矩阵未形成结论；
-2. 四个端到端场景（架构→工程、失败→修复、报告→优化、工程→文档）尚未完整串联，仍是最终发行门禁；
+1. ~~目标 IDE 真机宿主验收~~ 已于 2026-11-06 完成：`scripts/verify-m5-host-matrix.cjs` 聚合 5 个宿主脚本 × VS Code 1.144.0 / Qoder CN IDE（内核 1.106.3），10 行全部 0 失败，见 [M5 四场景验证记录](V4_2_M5_SCENARIOS_VALIDATION.md)；
+2. 四个端到端场景已以可重跑证据链串联（`scripts/verify-m5-scenarios.cjs`，现场步骤 + 真机记录引用），「单次连续真机串联」保留为最终发行门禁，见 [M5 四场景验证记录](V4_2_M5_SCENARIOS_VALIDATION.md)；
 3. M5 全流程仍为单 Agent 分阶段执行，多 Agent 独立性未验证；
 4. 发行机械（版本统一、`package.json` 仍为 4.1.1、CHANGELOG、VSIX/CLI 产物与许可复核）未启动。
 

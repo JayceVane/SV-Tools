@@ -21,9 +21,11 @@ function maskSourceText(text) {
 
 /** @param {string} text @returns {{name:string,start:number,end:number}[]} 按原文区间识别设计单元声明。 */
 function extractDesignUnits(text) {
-    const code = maskSourceText(text);
+    // Windows 编辑器常写入 UTF-8 BOM；去掉后仍按原文区间返回，供调用方切片。
+    const source = String(text), bom = source.startsWith('﻿') ? 1 : 0;
+    const code = maskSourceText(source.slice(bom));
     const matches = [...code.matchAll(MODULE_DECL_RE)];
-    return matches.map((match, index) => ({ name: match[1], start: match.index, end: matches[index + 1]?.index ?? code.length }));
+    return matches.map((match, index) => ({ name: match[1], start: match.index + bom, end: (matches[index + 1]?.index ?? code.length) + bom }));
 }
 
 /** @param {string} text @returns {string[]} 按源码顺序提取设计单元名，忽略注释和字符串。 */

@@ -136,7 +136,8 @@ endpackage
     await check('超过 30 行的实例端口与参数，已连接项去重', async () => {
         const fixture = await sample('ports.sv', 'module ports; long_leaf #(.WIDTH(8)) dut (\n.clk(0),\n' +
             Array.from({ length: 70 }, (_, index) => '.port_' + index + '(0),').join('\n') + '\n.po/*?*/\n); endmodule');
-        const ports = await complete(fixture); find(ports, 'port_89'); assert.ok(!ports.items.some(item => labelOf(item) === 'port_0'));
+        const ports = await eventually(fixture, list => list.items.some(item => labelOf(item) === 'port_89'));
+        assert.ok(!ports.items.some(item => labelOf(item) === 'port_0'));
         const params = await sample('params.sv', 'module params; long_leaf #(.WIDTH(8), .DE/*?*/) dut (); endmodule'); find(await complete(params), 'DEPTH');
     });
     const toolsFile = path.join(root, '..', 'tools.json');

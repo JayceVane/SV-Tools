@@ -58,3 +58,6 @@ CONTRIBUTING.md
 SECURITY.md
 nul
 *.vsix
+
+# 本机工具路径配置，不进入 VSIX
+tools.json

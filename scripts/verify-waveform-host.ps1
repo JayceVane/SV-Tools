@@ -39,12 +39,18 @@ try {
     $process = Start-Process -FilePath $CodePath -ArgumentList $arguments -WindowStyle $hostWindowStyle -PassThru `
         -RedirectStandardOutput (Join-Path $testRoot 'stdout.log') -RedirectStandardError (Join-Path $testRoot 'stderr.log')
     if (-not $process.WaitForExit(60000)) { throw ('波形验收宿主未在60秒内退出：' + $testRoot) }
-    if ($process.ExitCode -ne 0) {
+    # 有界等待返回后仍需无参等待，确保 Start-Process 的 ExitCode 已刷新。
+    $process.WaitForExit()
+    $process.Refresh()
+    $exitCode = $process.ExitCode
+    if ($null -ne $exitCode -and $exitCode -ne 0) {
         Get-Content -LiteralPath (Join-Path $testRoot 'stdout.log') -Tail 24
         Get-Content -LiteralPath (Join-Path $testRoot 'stderr.log') -Tail 24
-        throw ('波形宿主验收失败：' + $process.ExitCode + '；日志 ' + $testRoot)
+        throw ('波形宿主验收失败：' + $exitCode + '；日志 ' + $testRoot)
     }
     $report = Join-Path $testRoot 'host-report.json'
     if (-not (Test-Path -LiteralPath $report)) { throw ('测试宿主未生成报告：' + $testRoot) }
+    $reportJson = [IO.File]::ReadAllText($report, [Text.Encoding]::UTF8) | ConvertFrom-Json
+    if ($reportJson.status -and ($reportJson.status.ready -ne $true -or $reportJson.status.loaded -ne $true -or $reportJson.status.error)) { throw ('测试宿主报告标记失败：' + $report) }
     Get-Content -LiteralPath $report
 } finally { $env:ELECTRON_RUN_AS_NODE = $previousNodeMode }

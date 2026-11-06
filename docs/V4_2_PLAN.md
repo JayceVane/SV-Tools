@@ -197,3 +197,10 @@ M4 评审记录（2026-11-02）：交付 `wave` 命令族七操作——`signals
 - 批 2 FIFO / 多时钟试点通过：受控异步 FIFO 的独立 oracle 捕获「B 域同步链不接复位」缺陷并修复复验，真机 `05_corelib/afifo` 复位窗口假非空消失；详见 [M5 批 2 验证记录](V4_2_M5_FIFO_VALIDATION.md)。
 - 批 3 真实 Vivado 闭环在本机通过：隔离临时工程完成创建/加源/设 top/综合/报告/改源失效/复跑，Node 22 与 24 的 CI 完整回归均通过，公开包清单与许可检查通过；详见 [M5 批 3 验证记录](V4_2_M5_VIVADO_VALIDATION.md)。
 - 后台取消用例已补跑通过（`accepted=true`、`state=cancelled`、`operation=vivado.run`）；目标 IDE 真机宿主验收、四个端到端场景与发行机械仍未完成，M5 未验收完成，不合并、不发行 4.2。
+
+### M5 批 3 收尾：IDE 宿主矩阵与四端到端场景（2026-11-06）
+
+- 目标 IDE 真机宿主验收完成：`scripts/verify-m5-host-matrix.cjs`（矩阵生成器随本次入库，`bin/m5-host-matrix.json` 可重建）聚合 5 个 `verify-*-host.ps1` × VS Code 1.144.0 与 Qoder CN IDE（内核 1.106.3），10 行全部 0 失败。
+- 四个端到端场景以 `scripts/verify-m5-scenarios.cjs` 串成可重跑证据链（现场 CLI 步骤 + 批 1–3 真机记录引用 + 逐产物 sha256）：现场步骤 0 失败；场景 2「从失败到修复」、场景 4「从工程到文档」verified，场景 1/3 partial（现场为 CLI 侧与解析回归，真实 Vivado 工程动作引用批 3 真机记录）。详见 [M5 四场景验证记录](V4_2_M5_SCENARIOS_VALIDATION.md)。
+- 同批收尾修复：UTF-8 BOM 源码的设计单元识别、所选 Vivado 工程被删除后的明确报错与恢复、宿主脚本 ExitCode 刷新（有界等待后无参等待）与 host-report 状态断言、补全宿主用例对异步文件事件的容错。
+- 剩余门禁收敛为：真实 Vivado「从报告到优化」的现场完整闭环、多 Agent 独立性、四场景单次连续真机串联、发行机械（版本统一 / CHANGELOG / VSIX 复核）。M5 未全部通过前仍不合并、不发行 4.2。

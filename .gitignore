@@ -106,3 +106,6 @@ src/private/
 
 # 工作文档与验收资料
 docs/private/
+
+# 本机工具路径配置，防止误提交（completion 宿主的 Icarus 路径由 verify-completion-host.ps1 -IcarusPath 传入）
+tools.json
