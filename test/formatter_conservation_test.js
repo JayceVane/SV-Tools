@@ -10,7 +10,7 @@ const { createNativeLoader } = require('../src/native-loader');
 
 const rootDir = path.join(__dirname, '..');
 const native = createNativeLoader({ rootDir }).load();
-const cliPath = path.join(rootDir, 'bin', process.platform === 'win32' ? 'svtools.exe' : 'svtools');
+const cliPath = path.join(rootDir, 'bin', process.platform === 'win32' ? 'svtools-format.exe' : 'svtools');
 const cliAvailable = process.platform === 'win32' || fs.existsSync(cliPath);
 const cliTimeoutMs = 5000;
 

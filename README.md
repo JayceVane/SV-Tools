@@ -89,7 +89,7 @@
 
 命令面板搜索“电路”，或在 RTL 编辑器右键用内置 Yosys 生成；`svtools.circuit.yosysPath` 默认为 `bundled`，也可指定外部工具。前端默认`auto`：内置工具使用Slang解析SystemVerilog，外部工具兼容旧前端。Vivado 右键入口要求当前文件已保存且属于所选工程综合源，在任务副本中重建 top 与编译顺序。配置、数据语义、容量边界及验证命令见 [电路查看器](docs/CIRCUIT.md)。
 
-**CLI 格式化器**：独立 `svtools.exe`，无需 VSCode。
+**CLI 格式化器**使用独立程序 `svtools-format.exe`，可直接在终端运行。
 
 ## 系统要求
 
@@ -169,16 +169,16 @@ npm run package -- --target win32-x64 # 生成 Windows x64 VSIX
 ### CLI
 
 ```bash
-svtools.exe file.sv                # 格式化到 stdout
-svtools.exe -i file1.sv file2.sv   # 原地格式化
-svtools.exe -c *.sv                # 检查是否需要格式化（CI 可用）
-svtools.exe --port-name-gap 1 f.sv # 常用格式化选项均有对应旗标
-cat file.sv | svtools.exe -        # stdin
+svtools-format.exe file.sv                # 格式化到 stdout
+svtools-format.exe -i file1.sv file2.sv   # 原地格式化
+svtools-format.exe -c *.sv                # 检查是否需要格式化（CI 可用）
+svtools-format.exe --port-name-gap 1 f.sv # 常用格式化选项均有对应旗标
+cat file.sv | svtools-format.exe -        # stdin
 ```
 
 CLI 旗标覆盖常用格式化选项；`svtools.oneBindPerLine`、`svtools.paramOneLine`、`svtools.stripEmptyLine`、`svtools.ignoreTick`、`svtools.importSameLine` 等选项仅在 VS Code 扩展配置中生效。
 
-可执行文件从 [GitHub Releases](https://github.com/JayceVane/SV-Tools/releases) 下载（随版本附 `.node` 与 `svtools.exe`）。
+可执行文件从 [GitHub Releases](https://github.com/JayceVane/SV-Tools/releases) 下载（随版本附 `.node` 与 `svtools-format.exe`）。Windows 附件从 4.2 起使用新名称，升级脚本时请更新可执行文件路径。
 
 ### 效果示例
 

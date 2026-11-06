@@ -103,7 +103,7 @@ npm run build:native # 构建当前平台 .node 与 CLI 到 bin/
 npm run package      # vsce package，打包前自动跑 npm test
 ```
 
-VSIX 运行时包含 `src/` JavaScript 与 `bin/*.node`，`.vscodeignore` 排除 Rust 源码和中间产物；Release 单独附加 `bin/svtools.exe`。
+VSIX 运行时包含 `src/` JavaScript 与 `bin/*.node`，`.vscodeignore` 排除 Rust 源码和中间产物。Release 单独附加 `bin/svtools-format.exe`。
 
 成功后生成 `svtools-<version>.vsix`（完整测试未通过时打包会中止）。
 

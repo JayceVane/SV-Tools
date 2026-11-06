@@ -73,7 +73,7 @@ jobs:
 
       - name: 生成 SHA256 校验清单
         run: |
-          $files = Get-Item bin/*.vsix, bin/svtools.win32-x64-msvc.node, bin/svtools.exe
+          $files = Get-Item bin/*.vsix, bin/svtools.win32-x64-msvc.node, bin/svtools-format.exe
           $lines = $files | ForEach-Object { "{0}  {1}" -f (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant(), $_.Name }
           $lines | Set-Content bin/SHA256SUMS.txt -Encoding ascii
         shell: pwsh
@@ -95,7 +95,7 @@ jobs:
             fi
             gh release create "$TAG" "${options[@]}"
           fi
-          gh release upload "$TAG" bin/svtools.win32-x64-msvc.node bin/svtools.exe bin/*.vsix bin/SHA256SUMS.txt
+          gh release upload "$TAG" bin/svtools.win32-x64-msvc.node bin/svtools-format.exe bin/*.vsix bin/SHA256SUMS.txt
         shell: bash
 
   marketplace:

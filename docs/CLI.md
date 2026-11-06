@@ -16,7 +16,7 @@ node src/cli/main.js lint --workspace D:/project --file src/top.sv --top top
 
 `doctor` 返回实际可用的格式化模块和 Icarus 路径/版本。缺少原生模块时，先按仓库构建方式运行 `npm ci`、`npm ci --prefix src/native`、`npm run build:native`；Icarus 需另行安装，可用 `--iverilog D:/tools/iverilog/bin` 指定。显式路径无效会报错，不会悄悄改用其他安装。
 
-`npm run cli -- <参数>` 也能调用。作为 Node 包链接后，入口名为 `svtools-agent`。原有 `bin/svtools.exe` 的参数和行为保持兼容，直接用于批量格式化的脚本无需迁移。
+`npm run cli -- <参数>` 也能调用。作为 Node 包链接后，入口名为 `svtools-agent`。从 4.2 起，Windows 独立格式化器的发布附件为 `svtools-format.exe`，批处理脚本升级时请更新可执行文件路径。
 
 ## 工程上下文
 

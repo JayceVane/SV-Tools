@@ -12,7 +12,7 @@
 
 市场版本以各详情页为准。本指南按 4.1.0 的界面说明；安装后执行 **Developer: Reload Window / 开发人员：重新加载窗口**，在扩展详情中核对版本和扩展 ID **`JayceVane.svtools`**。
 
-只安装扩展不需要 Node.js、Rust、Python 或系统 PATH 中的 Yosys。发布附件中的 `svtools.exe` 是独立 CLI，使用编辑器扩展时不必单独安装。
+只安装扩展不需要 Node.js、Rust、Python 或系统 PATH 中的 Yosys。从 4.2 起，发布附件中的 `svtools-format.exe` 是独立 CLI，使用编辑器扩展时不必单独安装。
 
 需要核对下载完整性时，用 PowerShell 对附件求哈希，与同一 Release 的 `SHA256SUMS.txt` 比较：
 
