@@ -8,6 +8,7 @@ bin/**
 !bin/*.node
 !bin/vendor/elk.bundled.js
 !bin/vendor/ELK-LICENSE.md
+!bin/vendor/resvg-LICENSE.txt
 !bin/vendor/yosys/**
 
 # 开发与测试资源
