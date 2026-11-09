@@ -157,9 +157,14 @@ function createIcarusRunner(deps) {
         // 宏内的dumpvars可能无法静态识别，明确的运行参数目标仍必须关闭、保护并查询。
         if (overridden.length) waveforms.paths = [...new Set([...waveforms.paths, ...defaultDumpfiles.map(file => path.resolve(prep.fileDir, file))])];
         if (waveforms.uncertain) channel.appendLine('波形路径含动态表达式或未完整解析：本次仿真目录内已打开的波形将先关闭。');
-        const destination = file => !invocation.vcd || !/\.vcd$/i.test(file)
-            || path.relative(path.dirname(prep.defaultVcd), path.dirname(path.resolve(file))) === ''
-            ? file : defaultVcdPath({ ...prep.waveformOptions, dumpFile: file });
+        // 归档白名单按扩展名：.vcd 与 .fst（快照同样只跟踪这两类）都集中进 .svtools/vcd 并保留真实后缀；
+        // 其他扩展名与已在归档目录内的文件原样保留。此前仅 .vcd 归档，FST 直接倾倒会留在仿真目录。
+        const destination = file => {
+            const extension = path.extname(file).toLowerCase();
+            if ((extension !== '.vcd' && extension !== '.fst')
+                || path.relative(path.dirname(prep.defaultVcd), path.dirname(path.resolve(file))) === '') return file;
+            return defaultVcdPath({ ...prep.waveformOptions, dumpFile: file, extension });
+        };
         const protectedPaths = new Set([...waveforms.paths, ...waveforms.paths.map(destination)]);
         task.throwIfCancelled();
         const lease = await deps.prepareWaveforms?.({ ...waveforms, paths: [...protectedPaths], directory: prep.fileDir, sourceFile: prep.filePath });

@@ -40,6 +40,8 @@ test('显式输出归档名保留可读名称，同名文件按目录和测试�
     assert.notEqual(target, defaultVcdPath({ ...options, dumpFile, sourceFile: path.join(root, 'sim/b/tb.sv') }));
     assert.notEqual(target, defaultVcdPath({ ...options, dumpFile, top: 'other_top' }));
     assert.equal(defaultVcdPath({ ...options, dumpFile: undefined }), defaultPath);
+    assert.equal(path.extname(defaultVcdPath({ ...options, dumpFile, extension: '.fst' })), '.fst', '显式输出按实际后缀归档');
+    assert.equal(path.extname(defaultVcdPath({ ...options, dumpFile, extension: 'bogus!ext' })), '.vcd', '非法后缀回退 .vcd');
 });
 
 test('仿真释放精确波形并等待worker，保护写入直到租约结束，其它波形保持打开', async () => {

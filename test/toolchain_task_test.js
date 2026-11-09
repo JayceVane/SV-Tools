@@ -599,6 +599,27 @@ test('Icarus显式VCD归档到工作区，重跑路径稳定，关闭原文件�
     } finally { await h.api.dispose(); }
 });
 
+test('Icarus FST直接倾倒同样归档进.svtools/vcd并保留后缀，与VCD归档名互不冲突', async t => {
+    const f = await fixture(t), sourceDir = path.join(f.root, 'sim');
+    await fs.mkdir(sourceDir); f.file = path.join(sourceDir, 'tb.sv');
+    // vvp 按 $dumpfile 扩展名原生写 FST：实际输出不是 VCD，也不经转换链。
+    await fs.writeFile(f.file, 'module tb; initial begin $dumpfile("tb.fst"); $dumpvars(0,tb); end endmodule\n');
+    const original = path.join(sourceDir, 'tb.fst');
+    const target = defaultVcdPath({ root: f.root, sourceFile: f.file, engine: 'iverilog', dumpFile: original, extension: '.fst' });
+    assert.match(path.basename(target), /^tb-[a-f0-9]{12}-iverilog\.fst$/);
+    await fs.writeFile(path.join(f.root, 'wave-plan.json'), JSON.stringify([{ file: original, text: 'fst payload' }]));
+    const opened = [];
+    const h = editorHarness(f, async () => ({ ...protocolToolchain(f, 'ok'), vvpPrefix: [f.driver, 'vvp', 'archive'] }), {
+        waveViewer: { async prepareForSimulation() { return { dispose() {} }; }, async openWaveform(file) { opened.push(file); } }
+    });
+    try {
+        const result = await h.api.runSimulation(h.doc); assert.equal(result.ok, true);
+        assert.deepEqual(result.waves, [target]); assert.deepEqual(opened, [target]);
+        assert.equal(await fs.readFile(target, 'utf8'), 'fst payload');
+        await assert.rejects(fs.stat(original), { code: 'ENOENT' }, '源目录的 FST 已被归档移走');
+    } finally { await h.api.dispose(); }
+});
+
 test('动态VCD归档前保护新目标，同名子目录输出互不覆盖，旧波形不迁移', async t => {
     const f = await fixture(t), files = ['a/capture.vcd', 'b/capture.vcd'].map(name => path.join(f.root, name));
     // 两个字面路径可在启动前保护；运行中才发现的动态产物另行取得归档写入租约。
@@ -663,14 +684,16 @@ test('跨卷VCD先完整复制再替换目标，原文件仅在归档成功后�
     } finally { await h.api.dispose(); }
 });
 
-test('显式FST模式保留原输出位置，即使文件名后缀为vcd也不按VCD归档', async t => {
+test('显式FST模式下 .vcd 后缀输出也按扩展名归档，内容格式由转换层判断', async t => {
     const f = await fixture(t), original = path.join(f.root, 'capture.vcd');
     await fs.writeFile(path.join(f.root, 'wave-plan.json'), JSON.stringify([{ file: original, text: 'FST data' }]));
     const h = editorHarness(f, async () => ({ ...protocolToolchain(f, 'ok'), vvpPrefix: [f.driver, 'vvp', 'archive'] }), { config: { simArgs: ['-fst'] } });
     try {
         const result = await h.api.runSimulation(h.doc); assert.equal(result.ok, true);
-        assert.deepEqual(result.waves, [original]); assert.equal(await fs.readFile(original, 'utf8'), 'FST data');
-        await assert.rejects(fs.stat(path.join(f.root, '.svtools', 'vcd')), { code: 'ENOENT' });
+        assert.equal(result.waves.length, 1); assert.equal(path.extname(result.waves[0]), '.vcd');
+        assert.equal(path.dirname(result.waves[0]), path.join(f.root, '.svtools', 'vcd'));
+        assert.equal(await fs.readFile(result.waves[0], 'utf8'), 'FST data');
+        await assert.rejects(fs.stat(original), { code: 'ENOENT' });
     } finally { await h.api.dispose(); }
 });
 
@@ -724,7 +747,7 @@ test('任务结束后自动封顶到配置数量；keep=0关闭清理', async t 
 
 
 for (const mode of ['-fst', '-fst-speed', '-fst-space', 'environment']) {
-    test('FST仿真默认输出被预先保护，完成后自动打开：' + mode, async t => {
+    test('FST仿真默认输出被预先保护并归档保留后缀，完成后自动打开：' + mode, async t => {
         const f = await fixture(t), original = path.join(f.root, 'dump.fst');
         await fs.writeFile(f.file, 'module main; initial $dumpvars(0,main); endmodule');
         await fs.writeFile(path.join(f.root, 'wave-plan.json'), JSON.stringify([{ file: original, text: 'FST protocol fixture' }]));
@@ -741,15 +764,15 @@ for (const mode of ['-fst', '-fst-speed', '-fst-space', 'environment']) {
             const result = await h.api.runSimulation(h.doc);
             assert.equal(result.ok, true);
             assert.ok(prepared.paths.includes(original), '启动工具前保护真实 dump.fst');
-            assert.deepEqual(result.waves, [original]);
-            assert.deepEqual(opened, [original]);
-            assert.equal(await fs.readFile(original, 'utf8'), 'FST protocol fixture');
-            await assert.rejects(fs.stat(path.join(f.root, '.svtools', 'vcd')), { code: 'ENOENT' });
+            assert.equal(result.waves.length, 1); assert.match(path.basename(result.waves[0]), /^dump-[a-f0-9]{12}-iverilog\.fst$/);
+            assert.deepEqual(opened, result.waves);
+            assert.equal(await fs.readFile(result.waves[0], 'utf8'), 'FST protocol fixture');
+            await assert.rejects(fs.stat(original), { code: 'ENOENT' });
         } finally { await h.api.dispose(); }
     });
 }
 
-test('FST无后缀的显式dumpfile同时保护原名及补后缀路径', async t => {
+test('FST无后缀的显式dumpfile同时保护原名及补后缀路径，产物归档保留后缀', async t => {
     const f = await fixture(t), original = path.join(f.root, 'waves', 'capture.fst');
     await fs.writeFile(f.file, 'module main; initial begin $dumpfile("waves/capture"); $dumpvars(0,main); end endmodule');
     await fs.writeFile(path.join(f.root, 'wave-plan.json'), JSON.stringify([{ file: original, text: 'FST protocol fixture' }]));
@@ -763,7 +786,8 @@ test('FST无后缀的显式dumpfile同时保护原名及补后缀路径', async 
         const result = await h.api.runSimulation(h.doc);
         assert.equal(result.ok, true);
         assert.ok(prepared.paths.includes(original));
-        assert.deepEqual(result.waves, [original]);
+        assert.equal(result.waves.length, 1); assert.match(path.basename(result.waves[0]), /^capture-[a-f0-9]{12}-iverilog\.fst$/);
+        assert.equal(await fs.readFile(result.waves[0], 'utf8'), 'FST protocol fixture');
     } finally { await h.api.dispose(); }
 });
 
