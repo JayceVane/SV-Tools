@@ -1,6 +1,6 @@
 # 安装与第一次运行
 
-## 安装 4.1.0
+## 安装 4.2.0
 
 先确认系统为 **Windows x64**，使用 VS Code 1.106.0 或更新版本；兼容 IDE 也需满足相同扩展宿主要求。当前正式维护这一平台。
 
@@ -8,16 +8,16 @@
 |---|---|
 | [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=JayceVane.svtools) | 在 VS Code 扩展市场搜索 **SystemVerilog Tools**，确认发布者 **JayceVane** 后安装 |
 | [Open VSX](https://open-vsx.org/extension/JayceVane/svtools) | 在使用 Open VSX 的兼容 IDE 中搜索同一扩展 ID 并安装 |
-| [GitHub Releases](https://github.com/JayceVane/SV-Tools/releases/tag/v4.1.0) | 下载 `svtools-v4.1.0-win32-x64.vsix`，执行 **Extensions: Install from VSIX… / 扩展：从 VSIX 安装** |
+| [GitHub Releases](https://github.com/JayceVane/SV-Tools/releases/tag/v4.2.0) | 下载 `svtools-v4.2.0-win32-x64.vsix`，执行 **Extensions: Install from VSIX… / 扩展：从 VSIX 安装** |
 
-市场版本以各详情页为准。本指南按 4.1.0 的界面说明；安装后执行 **Developer: Reload Window / 开发人员：重新加载窗口**，在扩展详情中核对版本和扩展 ID **`JayceVane.svtools`**。
+市场版本以各详情页为准。本指南按 4.2.0 的界面说明；安装后执行 **Developer: Reload Window / 开发人员：重新加载窗口**，在扩展详情中核对版本和扩展 ID **`JayceVane.svtools`**。
 
 只安装扩展不需要 Node.js、Rust、Python 或系统 PATH 中的 Yosys。从 4.2 起，发布附件中的 `svtools-format.exe` 是独立 CLI，使用编辑器扩展时不必单独安装。
 
 需要核对下载完整性时，用 PowerShell 对附件求哈希，与同一 Release 的 `SHA256SUMS.txt` 比较：
 
 ```powershell
-Get-FileHash .\svtools-v4.1.0-win32-x64.vsix -Algorithm SHA256
+Get-FileHash .\svtools-v4.2.0-win32-x64.vsix -Algorithm SHA256
 ```
 
 ## 先完成一次格式化

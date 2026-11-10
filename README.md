@@ -7,9 +7,9 @@
 
 在 VS Code 中完成 RTL 格式化、代码生成、补全、工程管理、仿真、波形分析和电路信号追踪。核心引擎使用 **Rust 原生模块（napi-rs）**，安装包自带离线 Yosys，无需另外安装 Rust、Python 或 Yosys；设置与命令支持中英文自动切换。
 
-**当前正式版本：4.1.1 · 正式支持平台：Windows x64。** 各市场版本以其详情页为准，4.1.1 的完整发布附件见 [GitHub Releases](https://github.com/JayceVane/SV-Tools/releases/tag/v4.1.1)。
+**当前正式版本：4.2.0 · 正式支持平台：Windows x64。** 各市场版本以其详情页为准，发布附件见 [GitHub Releases](https://github.com/JayceVane/SV-Tools/releases/tag/v4.2.0)。
 
-[安装与第一次运行](https://github.com/JayceVane/SV-Tools/wiki/Getting-Started) · [图解使用指南](https://github.com/JayceVane/SV-Tools/wiki/Screenshots) · [4.1 信号追踪](https://github.com/JayceVane/SV-Tools/wiki/Signal-Tracing) · [版本说明](docs/releases/v4.1.1.md) · [反馈问题](https://github.com/JayceVane/SV-Tools/issues)
+[安装与第一次运行](https://github.com/JayceVane/SV-Tools/wiki/Getting-Started) · [图解使用指南](https://github.com/JayceVane/SV-Tools/wiki/Screenshots) · [4.1 信号追踪](https://github.com/JayceVane/SV-Tools/wiki/Signal-Tracing) · [版本说明](docs/releases/v4.2.0.md) · [反馈问题](https://github.com/JayceVane/SV-Tools/issues)
 
 ## 4.1：从信号出发查看设计
 

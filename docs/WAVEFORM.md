@@ -12,7 +12,7 @@ Icarus编译成功后、启动vvp前，自动关闭对应旧波形页及VCD文�
 写入期间波形入口暂不可用，仿真结束后按原有自动打开设置加载新数据。编译失败保留旧视图；
 取消、运行失败或超时都释放写入保护，失败时不自动打开残缺波形。无法关闭标签时不会启动仿真。
 
-字面 `$dumpfile` 路径按仿真工作目录解析，支持子目录及字面include；上次仿真关联用于动态路径。Icarus成功仿真后的本轮VCD集中归档到工作区`.svtools/vcd/`再打开，原文件及归档目标均纳入读取释放屏障。
+字面 `$dumpfile` 路径按仿真工作目录解析，支持子目录及字面include；上次仿真关联用于动态路径。Icarus成功仿真后的本轮VCD集中归档到工作区`.svtools/vcd/`再打开，原文件及归档目标均纳入读取释放屏障。仿真直接产出的原生 FST 同样归档到工作区 `.svtools/vcd/`，归档时读取文件头识别真实格式并保留对应后缀。
 宏、动态表达式或扫描未完整时，输出通道会说明，并保守关闭本次仿真目录及其子目录内已打开的波形，
 其他工程目录保留。默认 `$dumpvars` 使用dump.vcd。此流程管理IDE内的视图，不结束外部查看器进程。
 
@@ -92,7 +92,7 @@ VCD 缺少原行列范围，查看器因此显示字数组。样例中的 escape
 其它 simulator 若保留两层索引，可直接使用矩阵视图。识别依据是 VCD 名称，不能恢复文件
 没有记录的源码声明，也不能区分未带 packed range 的一位索引究竟来自数组还是 bus bit。
 
-本版本仅支持 VCD；FSDB 查看开发按用户决定取消。
+内置波形查看器整体支持 VCD 与 FST，FSDB 不在支持范围。
 
 ## 浮点显示
 
@@ -236,7 +236,7 @@ SVG适合技术文档和后续编辑。PNG默认2倍分辨率，在16384像素�
 
 ## 可选 VCD → FST 仿真后转换
 
-`svtools.waveform.convertVcdToFst` 默认 `false`，可按工作区/资源设置。开启后，Icarus 成功仿真的本轮 VCD 在归档后使用内嵌 Rust `wavefst 0.4.0` 转为 FST。无需 GTKWave、`vcd2fst` 或脚本进程；仍使用 `.svtools/vcd` 归档目录。转换完成并验证层级后才移除 VCD；默认以同目录 rename 原子覆盖同名 FST（`svtools.waveform.convertVcdToFstOverwrite`，默认 `true`），关闭后保留既有 FST、新文件以递增编号保存。失败/取消保留 VCD，详细信息写入仿真输出通道。
+`svtools.waveform.convertVcdToFst` 默认 `false`，可按工作区/资源设置。开启后，Icarus 成功仿真的本轮 VCD 在归档后使用内嵌 Rust `wavefst 0.4.0` 转为 FST。无需 GTKWave、`vcd2fst` 或脚本进程；仍使用 `.svtools/vcd` 归档目录。转换完成并验证层级后才移除 VCD；默认以同目录 rename 原子覆盖同名 FST（`svtools.waveform.convertVcdToFstOverwrite`，默认 `true`），关闭后保留既有 FST、新文件以递增编号保存。失败/取消保留 VCD，详细信息写入仿真输出通道。此处是「按需转换 VCD」；仿真器原生输出的 FST 不经过转换，直接按真实格式归档到 `.svtools/vcd/`，两种路径相互独立。
 
 VCD 按 token 流式解析，FST 事件块限制约 16 MiB/50 万事件。输入上限 2 GiB、头部 64 MiB、单 token 16 MiB、累计固定宽状态 256 MiB；这些是转换预算，并非查看器的容量承诺。数字信号、范围、别名、数组元素、实数与 X/Z 保真。字符串扩展、EVCD、缺少 timescale、部分信号未初始化/延迟初始化等无法可靠保真的文件保留原 VCD。
 

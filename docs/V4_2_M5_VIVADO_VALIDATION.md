@@ -1,4 +1,5 @@
 # M5 批 3 验证记录：真实 Vivado 闭环与发行门禁
+> 历史记录（截至 2026-11-05）：本批验收当时的状态；4.2.0 最终状态见 `docs/releases/v4.2.0.md`。
 
 2026-11-05，Windows x64，Node.js 22.22.2，AMD Vivado 2022.1（`D:\DevKit\Xilinx\Vivado\2022.1\bin`），器件默认 `xc7z100ffg900-2`（可用 `SVTOOLS_TEST_VIVADO_PART` 覆盖）。基线 `c05457f`。记录只覆盖批 3 实际执行的门禁，**不宣称 M5 或 4.2 发行验收完成**。
 
@@ -60,18 +61,18 @@ ok 4 - 真实Vivado端到端                                  # SKIP
 
 ## 兼容矩阵与发行检查
 
-- **Node 22 / 24**：推送 `c05457f` 后草稿 PR #23 的「完整回归（Node 22）」5m44s、「完整回归（Node 24）」5m35s 均为 `pass`；推送 `6345cf0` 后两项重新触发，截至本记录仍为 pending，以 `gh pr checks 23` 实时结果为准。本机只有 Node 22.22.2，Node 24 由 CI 覆盖。
+- **Node 22 / 24**：推送 `c05457f` 后 PR #23 的「完整回归（Node 22）」5m44s、「完整回归（Node 24）」5m35s 均为 `pass`；推送 `6345cf0` 后两项重新触发，结果以 `gh pr checks 23` 实时记录为准。本机只有 Node 22.22.2，Node 24 由 CI 覆盖。
 - **发行文件与许可**：`scripts/check-public-package.js` 通过，539 文件 / 113,947,293 bytes；`test/public_package_test.js` 5 项通过。
 - **本轮发现并修复的发行回归**：新建工作区日志 `.workbuddy/memory/2026-11-05.md` 后，公开包守卫报「公开包文件不在发行范围内」。项目对 `.arts/`、`.opencode/`、`.sisyphus/`、`.zcode/` 等工具目录同时在 `.gitignore` 与 `.vscodeignore` 做了排除，`.workbuddy/` 缺规则；按同一惯例补齐两处后守卫恢复通过。该目录是项目数据，不删除、不进入 VSIX。
 - **CLI 与插件打开同一产物**：批 2 提交的 `wave export --format layout` 闭环测试（CLI 生成 v1 `.svwave.json` → 查看器 `S.restore` 按声明身份命中、宿主同名自动读取、0 命中静默跳过）9 项通过，已接入 `npm test` 显式列表。本轮未再启动真实 IDE 宿主验证。
 
 ## 结论与剩余
 
-批 3 的「真实 Vivado 创建/运行/报告闭环 + 源变更证据失效 + 后台取消 + Node 矩阵 + 发行/许可检查」在本机通过。以下仍是未完成的发行门禁，不得据此宣称 4.2 可发行：
+批 3 的「真实 Vivado 创建/运行/报告闭环 + 源变更证据失效 + 后台取消 + Node 矩阵 + 发行/许可检查」在本机通过。当时列出的剩余发行门禁如下（各批次验收此后已完成并留档，详见对应验证记录）：
 
 1. ~~目标 IDE 真机宿主验收~~ 已于 2026-11-06 完成：`scripts/verify-m5-host-matrix.cjs` 聚合 5 个宿主脚本 × VS Code 1.144.0 / Qoder CN IDE（内核 1.106.3），10 行全部 0 失败，见 [M5 四场景验证记录](V4_2_M5_SCENARIOS_VALIDATION.md)；
 2. 四个端到端场景已以可重跑证据链串联（`scripts/verify-m5-scenarios.cjs`，现场步骤 + 真机记录引用），「单次连续真机串联」保留为最终发行门禁，见 [M5 四场景验证记录](V4_2_M5_SCENARIOS_VALIDATION.md)；
 3. M5 全流程仍为单 Agent 分阶段执行，多 Agent 独立性未验证；
-4. 发行机械（版本统一、`package.json` 仍为 4.1.1、CHANGELOG、VSIX/CLI 产物与许可复核）未启动。
+4. 当时发行机械（六个版本文件尚未统一、CHANGELOG、VSIX/CLI 产物与许可复核）尚未启动；此后版本已统一为 4.2.0，各批次验收已完成并留档，详见对应验证记录。版本已合并并打 tag；发布状态以 GitHub Releases 与各市场详情页为准。
 
 真机执行说明：第一轮的 `LIFECYCLE+E2E` 命令末尾附带沙箱安全提示，结论取自完整返回的 TAP 输出；取消用例以不同门控、不写临时日志的形式单独补跑，未再出现该提示。两轮都没有重复执行同一真机命令。

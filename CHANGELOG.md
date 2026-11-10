@@ -2,13 +2,17 @@
 
 All notable changes to the SystemVerilog VSCode Extension will be documented in this file.
 
-## [4.2.0]
+## [4.2.0] - 2026-11-10
 
 - 新增本地 Agent CLI 与五份 Skills，提供 Windows x64 便携 ZIP。
 - 支持架构检查与图文报告、模块领取和验证交接。IDE 工程侧栏新增只读设计进展。
 - Vivado 隔离运行绑定输入与报告，源码变化后标记旧证据过期。
 - VCD/FST 支持查询、统计、同刻变化分析、CSV 和布局导出。支持按需将仿真产出的 VCD 转为 FST。
 - Windows 独立格式化器发布名改为 `svtools-format.exe`。
+- 仿真归档按文件头识别波形的真实格式：原生 FST 与 VCD 同样归档到 `.svtools/vcd/`，并保留与格式一致的后缀。
+- XSim 运行错误与断言失败会反映在任务状态（`ERROR` 关键字大小写无关），判定依据任务状态而非进程退出码。
+- 架构图与电路视图支持两端接口布局（`--boundary-layout auto|ends`，默认 `auto`）。
+- 发布流程对 VS Code Marketplace 与 Open VSX 均使用 OIDC Trusted Publishing，并按渠道复核公开安装包。
 
 ## [4.1.2] - 2026-11-01
 
