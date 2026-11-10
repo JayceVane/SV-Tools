@@ -101,3 +101,24 @@ test('Open VSX 等待指定 Windows 版本公开并校验下载的字节', async
     release.targetPlatform = 'universal';
     await assert.rejects(verifyMarketplace(report, options), /非预期扩展、版本或目标平台/);
 });
+
+test('发行候选只容忍构建期重写的原生绑定桩，其余改动一律拒绝', () => {
+    const { unexpectedChanges } = require('../scripts/release-archive.cjs');
+    assert.deepEqual(unexpectedChanges(''), []);
+    // CI 现场：napi build 重写两个绑定桩，porcelain 原始输出保持 XY 列。
+    assert.deepEqual(unexpectedChanges(' M src/native/index.d.ts\n M src/native/index.js\n'), []);
+    assert.deepEqual(unexpectedChanges('M  src/native/index.js\n'), []);
+    // 关键回归：若重新引入 trim，首行前导空格被吃掉，规则失配会再现 CI 失败。
+    assert.deepEqual(unexpectedChanges(' M src/native/index.d.ts\n M src/native/index.js\n'.trim()),
+        ['M src/native/index.d.ts']);
+    // 未跟踪产物与源码改动一律拒绝。
+    assert.deepEqual(unexpectedChanges('?? bin/svtools-v4.2.0-win32-x64.vsix\n'), ['?? bin/svtools-v4.2.0-win32-x64.vsix']);
+    // docs/ 与 skills/ 直接取自工作区，任何改动仍必须拒绝。
+    assert.deepEqual(unexpectedChanges(' M docs/CLI.md\n M skills/svtools-agent/SKILL.md\n M src/native/index.js\n'),
+        [' M docs/CLI.md', ' M skills/svtools-agent/SKILL.md']);
+    // 同目录下的其它文件不享受豁免；绑定桩的删除/新增/未跟踪也不算构建期重写。
+    assert.deepEqual(unexpectedChanges(' M src/native/index.mjs\n'), [' M src/native/index.mjs']);
+    assert.deepEqual(unexpectedChanges(' D src/native/index.js\n'), [' D src/native/index.js']);
+    assert.deepEqual(unexpectedChanges('A  src/native/index.js\n'), ['A  src/native/index.js']);
+    assert.deepEqual(unexpectedChanges('?? src/native/index.js\n'), ['?? src/native/index.js']);
+});
