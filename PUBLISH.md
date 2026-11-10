@@ -1,10 +1,10 @@
 # SV Tools 发行流程
 
-正式版本通过 `.github/workflows/release.yml` 发布。版本号、原生模块和CLI同步后，经PR合入master，将正式tag指向合并提交。工作流构建并验证Windows x64 VSIX，上传GitHub Release，随后通过OIDC发布同版本到VS Code Marketplace；预览tag只发布GitHub附件。
+正式版本通过 `.github/workflows/release.yml` 发布。版本号、原生模块和CLI同步后，经PR合入master，将正式tag指向合并提交。`assets` job（「构建并上传 .node 与 vsix」）构建并验证 Windows x64 VSIX 与 Agent 便携包，上传 GitHub Release（含 `SHA256SUMS.txt`）；`marketplace` job 通过 OIDC Trusted Publishing 双通道发布同版本到 VS Code Marketplace 与 Open VSX；预览tag只发布GitHub附件。
 
-Marketplace的Trusted Publishing策略绑定 `JayceVane/SV-Tools`、`release.yml`，当前不设置Environment。仅发布job具有`id-token: write`；无需PAT。补发使用GitHub Actions的Run workflow入口，选择master并填写与当前版本一致的正式tag。补发读取既有Release及SHA256清单，对照tag源码检查安装包，并同步同版本Changelog；文档一致时安装包字节保持不变。
+Marketplace 与 Open VSX 的 Trusted Publishing 策略均绑定 `JayceVane/SV-Tools`、`release.yml`，当前不设置Environment。仅发布job具有`id-token: write`；无需PAT。补发使用GitHub Actions的Run workflow入口，选择master并填写与当前版本一致的正式tag。补发读取既有Release及SHA256清单，对照tag源码检查安装包，并同步同版本Changelog；文档一致时安装包字节保持不变。
 
-发布后最多等待10分钟让Marketplace公开入口更新，再取回VSIX核对SHA256；等待期间每分钟报告进度。重复版本仅在公开载荷与本次校验值一致时视为成功；运行记录保存安装包及publication.json。GitHub既有附件不被覆盖。Open VSX仍使用现有发布流程。
+发布后按渠道分别等待公开入口更新（最多10分钟），再取回VSIX核对SHA256；等待期间每分钟报告进度。重复版本仅在公开载荷与本次校验值一致时视为成功；`scripts/verify-marketplace.js` 同时支持 `marketplace` 与 `open-vsx` 两种 store，运行记录按渠道分别保存安装包及publication.json。GitHub既有附件不被覆盖。
 
 Wiki源稿和界面图解位于`docs/wiki/`，维护方式见`docs/WIKI.md`。发布文案描述实际交付功能、使用步骤和支持范围。
 
@@ -166,7 +166,9 @@ vsce publish major   # 3.4.6 -> 4.0.0
 
 ---
 
-## 发布到 Open VSX（可选）
+## 发布到 Open VSX（历史手动参考）
+
+> 以下是 4.2.0 之前的本地手动发布方式，仅作故障排查参考。正式发布由 `release.yml` 的 `marketplace` job 使用 `ovsx publish --trusted-publishing --skip-duplicate --packagePath <VSIX>` 完成，不需要本地 PAT。
 
 Open VSX 是 Eclipse Foundation 维护的开源替代市场，兼容 VSCode。
 

@@ -1,6 +1,6 @@
 # 信号追踪与波形联动
 
-适用于4.1.0。工程侧边栏的静态走向分析与电路局部逻辑锥分别服务于工程定位和详细电路调试；两者可独立使用。
+适用于 4.2.0，界面截图取自 4.1。工程侧边栏的静态走向分析与电路局部逻辑锥分别服务于工程定位和详细电路调试；两者可独立使用。
 
 ## 在工程中看信号走向
 
@@ -52,4 +52,4 @@
 
 最多观察32个信号、合计4096位。源码变化、关闭、刷新及重新仿真会撤销旧映射，重新打开后再次确认根实例。临时读值标注不包含在结构图导出中。
 
-[电路操作](https://github.com/JayceVane/SV-Tools/wiki/Circuits) · [波形操作](https://github.com/JayceVane/SV-Tools/wiki/Waveforms) · [详细关联范围](https://github.com/JayceVane/SV-Tools/blob/v4.1.0/docs/WAVE_LINKS.md)
+[电路操作](https://github.com/JayceVane/SV-Tools/wiki/Circuits) · [波形操作](https://github.com/JayceVane/SV-Tools/wiki/Waveforms) · [详细关联范围](https://github.com/JayceVane/SV-Tools/blob/v4.2.0/docs/WAVE_LINKS.md)

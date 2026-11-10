@@ -80,4 +80,4 @@ Yosys 保留可用模块层级；Vivado 当前提供平坦 RTL 详细化结果�
 
 日志在 `<工作区>/.svtools/circuit/<任务>/`；错误摘要尽量映射回原文件行列。先看具体缺模块/类型/语法错误，通用的 `Design elaboration failed` 只是总结。必要时提供完整 `01-yosys.log` 或 `01-vivado.log`。
 
-[Top 策略](https://github.com/JayceVane/SV-Tools/wiki/Vivado) · [详细配置与容量边界](https://github.com/JayceVane/SV-Tools/blob/v4.1.0/docs/CIRCUIT.md)
+[Top 策略](https://github.com/JayceVane/SV-Tools/wiki/Vivado) · [详细配置与容量边界](https://github.com/JayceVane/SV-Tools/blob/v4.2.0/docs/CIRCUIT.md)

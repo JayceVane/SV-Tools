@@ -5,7 +5,7 @@ description: VCD/FST 波形调试与取证：信号清单与方向匹配、时�
 
 # 波形调试与取证（M4）
 
-入口技能 `svtools-agent` 提供 CLI 调用约定；执行波形调试前，先读取 [references/waveform.md](references/waveform.md)（查询约束、最小流程、毛刺定位剧本、ΔCycle 诊断与能力边界）。
+入口技能 `svtools-agent` 提供 CLI 调用约定；执行波形调试前，先读取 [references/waveform.md](references/waveform.md)（查询约束、最小流程、毛刺定位剧本、ΔCycle 诊断与能力边界）。仿真产出的 VCD/FST 归档到工作区 `.svtools/vcd/`，按文件头识别真实格式并保留对应后缀。
 
 仿真失败后先用 `wave signals --file <vcd> [--query|--role]` 找到 DUT 与参考模型信号（方向标注要求唯一 RTL 匹配），再从失败日志/断言时刻用 `wave values --at <ticks|时间>` 取现场值（整数类另有 `signed` 补码解码）。
 

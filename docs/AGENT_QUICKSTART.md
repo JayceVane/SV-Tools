@@ -12,9 +12,9 @@
 
 将 `skills/` 中所需的完整目录导入支持 Agent Skills 的客户端，包括各自的 `references/` 和 `assets/`。从 `svtools-agent` 开始，再按任务使用 `svtools-design`、`svtools-delivery`、`svtools-vivado` 或 `svtools-waveform`。把解压位置和目标 RTL 工作区告诉客户端。
 
-- [命令与 JSON 合同](docs/CLI.md)
-- [架构计划、模块交接与设计进展](docs/DESIGN_WORKFLOW.md)
-- [波形和布局](docs/WAVEFORM.md)
+- [命令与 JSON 合同](https://github.com/JayceVane/SV-Tools/blob/v4.2.0/docs/CLI.md)
+- [架构计划、模块交接与设计进展](https://github.com/JayceVane/SV-Tools/blob/v4.2.0/docs/DESIGN_WORKFLOW.md)
+- [波形和布局](https://github.com/JayceVane/SV-Tools/blob/v4.2.0/docs/WAVEFORM.md)
 - [项目与反馈](https://github.com/JayceVane/SV-Tools)
 
 `RELEASE.json` 记录版本、源码提交和对应 VSIX 的 SHA256。下载后可用同一 Release 的 `SHA256SUMS.txt` 核对 ZIP。许可见 `LICENSE.txt`、`NOTICE`、`THIRD_PARTY_NOTICES.md` 和 `bin/vendor/`。

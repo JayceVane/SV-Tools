@@ -3,14 +3,14 @@
 ## 升级步骤
 
 1. 记录工作区与用户级的 `svtools.*` 自定义设置。
-2. 按[安装指南](https://github.com/JayceVane/SV-Tools/wiki/Getting-Started)选择市场渠道，或从 GitHub Releases 安装 4.1.0 的 Windows x64 VSIX，并重载窗口。
+2. 按[安装指南](https://github.com/JayceVane/SV-Tools/wiki/Getting-Started)选择市场渠道，或从 GitHub Releases 安装 4.2.0 的 Windows x64 VSIX，并重载窗口。
 3. 在扩展详情确认版本，检查Verilog/SystemVerilog默认格式化器。
 4. 重新打开VCD、重新生成电路。需要跨仿真复用显示状态时保存`.svwave.json`。
 5. 检查工具路径，完成一次小文件格式化/仿真/电路生成后，再使用大工程。
 
 3.x的常用快捷键和设置继续使用。4.0加入更严格的字符及词法保全：不能安全格式化时保留原文；部分不能忠实生成的复杂接口会明确报错，而不是输出缺端口的成功模板。
 
-4.1.0高于4.0及4.1的alpha/beta/open预览版本。升级会替换原生模块，必须重载窗口；原有常用设置继续使用。工程侧边栏现在统一切换Vivado和SV Tools自管理工程，详见[信号追踪](https://github.com/JayceVane/SV-Tools/wiki/Signal-Tracing)。
+4.2.0高于4.0及4.1的alpha/beta/open预览版本。升级会替换原生模块，必须重载窗口；原有常用设置继续使用。工程侧边栏现在统一切换Vivado和SV Tools自管理工程，详见[信号追踪](https://github.com/JayceVane/SV-Tools/wiki/Signal-Tracing)。
 
 ## 需要注意的变化
 
@@ -26,9 +26,9 @@
 
 当前只正式构建、测试和维护 Windows x64。市场安装入口为 [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=JayceVane.svtools) 和 [Open VSX](https://open-vsx.org/extension/JayceVane/svtools)，具体版本以各页面为准；GitHub Release 另提供 VSIX、CLI 和校验清单。其他平台暂不纳入正式维护计划。
 
-内置波形只支持VCD；二维mem要求文件保留索引。补全不是完整编译器语义实现。Vivado电路当前是平坦RTL，专门的IP新增/定制面板仍在计划中。超大电路建议按模块查看。
+内置波形支持 VCD 和 FST；二维mem要求文件保留索引。补全不是完整编译器语义实现。Vivado电路当前是平坦RTL，专门的IP新增/定制面板仍在计划中。超大电路建议按模块查看。
 
-[4.1发布说明](https://github.com/JayceVane/SV-Tools/releases/tag/v4.1.0) · [变更日志](https://github.com/JayceVane/SV-Tools/blob/v4.1.0/CHANGELOG.md)
+[4.2.0 发布说明](https://github.com/JayceVane/SV-Tools/releases/tag/v4.2.0) · [变更日志](https://github.com/JayceVane/SV-Tools/blob/v4.2.0/CHANGELOG.md)
 
 ## 升级到 4.2.0
 

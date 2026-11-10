@@ -18,6 +18,6 @@ description: 使用 SV Tools CLI 管理 Vivado 工程与实现运行：工程创
 - `stale=true`：源码/约束在该 run 之后变化，必须先重跑再引用。
 - `stale=null`：没有该 run 的记录，不能当作新鲜。
 - `drc` 只有 `checked=1` 的结果才代表本次检查。
-- `vivado run` 状态含 ERROR 时返回 `VIVADO_RUN_FAILED`。
+- `vivado run` 状态含 ERROR 时返回 `VIVADO_RUN_FAILED`；XSim 的运行错误与断言失败同样使任务失败，`ERROR` 关键字匹配大小写无关（`Error:` 也算），判定依据任务状态而非进程退出码。
 
 交付报告引用 Vivado 结论时逐轴说明；与 `svtools-delivery` 的证据身份约定（源码/TB/约束哈希、命令与运行产物）配合使用。

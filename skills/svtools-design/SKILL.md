@@ -11,7 +11,7 @@ description: RTL 架构建模与图表交付：packed struct 虚拟端口骨架�
 
 新建骨架默认声明 **packed struct 虚拟端口**，一个逻辑接口一个端口、一条连接；整体 inout 可用于架构中的双向接口，成员内容和收发约定写入架构文档。不要为出图强制拆开请求/响应或展开完整协议引脚，不要把主/从角色等同于电气方向。分析已有 RTL 则保留其真实端口。
 
-实际命令为 `design scaffold --spec <json|file>`、`design arch --top <module>` 和 `design render --top <module>`。SVG 默认采用接口级连线（--detail interfaces）：接口表外一条汇总线，方向缩写（`i`/`o`/`io`）在表内逐行标注；--detail signals 用于信号级排查。`--format png` 用内置 resvg 2x 栅格化（`sourceSha256` 关联源 SVG；中文依赖系统字体，文档首选 SVG）。默认黑白 document 风格；`--style presentation` 用于演示。`--fold-ports` 仅作可选的显示折叠，不能替代虚拟端口声明；`--bundle-name` 仅与折叠选项同时生效。输入快照及哈希绑定生成模型，源码变化后应重新运行。
+实际命令为 `design scaffold --spec <json|file>`、`design arch --top <module>` 和 `design render --top <module>`。SVG 默认采用接口级连线（--detail interfaces）：接口表外一条汇总线，方向缩写（`i`/`o`/`io`）在表内逐行标注；--detail signals 用于信号级排查。`--format png` 用内置 resvg 2x 栅格化（`sourceSha256` 关联源 SVG；中文依赖系统字体，文档首选 SVG）。默认黑白 document 风格；`--style presentation` 用于演示。`--boundary-layout auto|ends` 控制边界接口表布局（`design render` 与 `design report` 均支持，默认 `auto`），`ends` 把表格接口放在普通端口两端；`--fold-ports` 仅作可选的显示折叠，不能替代虚拟端口声明；`--bundle-name` 仅与折叠选项同时生效。输入快照及哈希绑定生成模型，源码变化后应重新运行。
 
 结构检查用 `design check --top <module>`：诊断逐条指认悬空 input（error）、无驱动网络（error）、多驱动（error）、缺失模块（error）与悬空 output、顶层无驱动输出、隐式位宽补常量（warning）；有 error 时退出码 1、`status=failed`，检查完成不等于结构干净，warning 也不得当作已验证。常量驱动不产生假诊断。
 

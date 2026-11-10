@@ -55,4 +55,4 @@ VCD输出集中在 `<工作区>/.svtools/vcd/`，没有工作区时以源码目�
 
 任务日志通常位于 `<工作区>/.svtools/tasks/`，每个阶段独立保存。优先看第一条具体语法、缺少 module/package、include 或参数错误，保留完整日志供排查。工具任务默认保留最近5轮已交还记录，可通过`svtools.tasks.retainedRuns`调整；活动任务及仍在使用的快照保留。
 
-[详细任务边界与资源预算](https://github.com/JayceVane/SV-Tools/blob/v4.1.0/docs/TOOLCHAINS.md)
+[详细任务边界与资源预算](https://github.com/JayceVane/SV-Tools/blob/v4.2.0/docs/TOOLCHAINS.md)
