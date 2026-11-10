@@ -67,6 +67,8 @@ test('不同渲染选项拥有不同产物名，避免完整端口图和折叠�
     const arch={top:{name:'top'},archSha256:'12345678'};
     assert.notEqual(defaultFileName(arch),defaultFileName(arch,'document',{bundle:true}));
     assert.notEqual(defaultFileName(arch),defaultFileName(arch,'document',{title:'标题'}));
+    assert.notEqual(defaultFileName(arch), defaultFileName(arch, 'document', { boundaryLayout: 'ends' }));
+    assert.equal(defaultFileName(arch), defaultFileName(arch, 'document', { boundaryLayout: 'auto' }));
 });
 
 test('骨架显式悬空与反向响应均保留真实方向，不以master等同output', () => {
@@ -97,6 +99,36 @@ test('同接口边界端口合成表格，逐行保留方向、宽度和真实�
     assert.ok(projection.edges.some(edge=>edge.targets[0]==='boundary:ddr_addr/ddr_addr'));
     assert.ok(projection.edges.some(edge=>edge.sources[0]==='boundary:ddr_dq/ddr_dq'));
     assert.equal(JSON.stringify(arch),before,'展示分组不改领域模型');
+});
+
+test('两端架构布局把接口表排在普通端口外侧并保留连接', async () => {
+    const ports = [['vin_data', 8, 'input'], ['vin_valid', 1, 'input'], ['clk', 1, 'input'],
+        ['ddr_dq', 16, 'inout'], ['ddr_addr', 14, 'output'], ['irq', 1, 'output'], ['gpio', 8, 'inout']];
+    const boundaries = ports.map(([name, width, direction]) => ({ id: 'boundary:' + name, kind: 'boundary', name, direction,
+        ports: [{ name, width, direction: { input: 'output', output: 'input', inout: 'inout' }[direction] }] }));
+    const instance = { id: 'instance:u', kind: 'instance', name: 'u', module: 'soc', implementation: 'blackbox',
+        ports: ports.filter(([name]) => name !== 'gpio').map(([name, width, direction]) => ({ name, width, direction })) };
+    const edges = ports.filter(([name]) => name !== 'gpio').map(([name, width, direction]) => {
+        const boundary = 'boundary:' + name;
+        return { sourceNode: direction === 'output' ? instance.id : boundary, targetNode: direction === 'output' ? boundary : instance.id,
+            sourcePort: name, targetPort: name, width, netNames: [name] };
+    });
+    const arch = { graph: { nodes: [...boundaries, instance], edges }, interfaces: [] };
+    for (const detail of ['interfaces', 'signals']) {
+        const options = { detail, boundaryLayout: 'ends' };
+        const result = await layoutArchitecture(arch, options);
+        const nodes = new Map(result.layout.nodes.map(node => [node.id, node]));
+        const columns = [['boundary-table:vin'], ['boundary:clk'], [instance.id],
+            ['boundary:irq', 'boundary:gpio'], ['boundary-table:ddr']].map(ids => ids.map(id => nodes.get(id)));
+        for (let index = 1; index < columns.length; index++) {
+            assert.ok(Math.max(...columns[index - 1].map(node => node.x + node.width)) < Math.min(...columns[index].map(node => node.x)));
+        }
+        assert.deepEqual(result.layout.edges.map(edge => [edge.id, edge.sources, edge.targets]),
+            buildRenderProjection(arch, { detail }).edges.map(edge => [edge.id, edge.sources, edge.targets]));
+        const image = renderArchitectureSvg(arch, result);
+        assert.equal(image.evidence.layout.boundaryLayout, 'ends');
+        assert.equal(nodes.get('boundary-table:ddr').rows.find(row => row.label === 'ddr_dq').boundaryDirection, 'inout');
+    }
 });
 
 test('DDR 接口表端到端保留双向DQ行和其余独立引脚', async t => {

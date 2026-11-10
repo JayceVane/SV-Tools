@@ -5,7 +5,7 @@
 const { createHash } = require('node:crypto');
 const { prepareNode } = require('../circuit/symbol-library');
 const { layoutProjection } = require('../circuit/layout');
-const { elkNode } = require('../circuit/projection');
+const { elkNode, placeBoundaryColumns } = require('../circuit/projection');
 const { svgDocument } = require('../graphics/image-export');
 const { escape } = require('../graphics/svg-canvas');
 const { fail } = require('../agent/protocol');
@@ -181,11 +181,11 @@ function prepareInstanceNode(node, options) {
 }
 
 /** @param {object} node 架构图边界节点。 @returns {object} 边界条节点。 */
-function prepareBoundaryNode(node) {
+function prepareBoundaryNode(node, boundaryLayout) {
     const label = node.name + (node.ports[0] && node.ports[0].width > 1 ? ' [' + node.ports[0].width + ']' : '');
     const width = Math.ceil(Math.max(92, textWidth(label, 12) + 44) / GRID) * GRID;
     const height = 36;
-    const side = node.direction === 'output' ? 'WEST' : 'EAST';
+    const side = node.direction === 'output' || (boundaryLayout === 'ends' && node.direction === 'inout') ? 'WEST' : 'EAST';
     const port = { id: node.id + '/' + node.ports[0].name, label: node.name, direction: node.ports[0].direction,
         width: node.ports[0].width, bitWidth: node.ports[0].width, bits: [], side, x: side === 'WEST' ? 0 : width, y: height / 2, width: 0, height: 0 };
     return { id: node.id, kind: 'boundary', label, name: node.name, direction: node.direction, boundary: true,
@@ -193,10 +193,10 @@ function prepareBoundaryNode(node) {
 }
 
 /** 同前缀边界排成接口表；默认共用一个逻辑锚点，信号级视图保留逐行锚点。 */
-function prepareBoundaryTables(boundaries, detail) {
+function prepareBoundaryTables(boundaries, detail, boundaryLayout) {
     const byName = new Map(boundaries.map(node => [node.name, node]));
     return bundlePorts(boundaries.map(node => ({ name: node.name, direction: node.direction, width: node.ports[0].width }))).map(group => {
-        if (!group.prefix || group.members.length < 2) return prepareBoundaryNode(byName.get(group.members[0].name));
+        if (!group.prefix || group.members.length < 2) return prepareBoundaryNode(byName.get(group.members[0].name), boundaryLayout);
         const rowHeight = 22, headerHeight = 50;
         const nameWidth = Math.max(100, ...group.members.map(port => textWidth(port.name, 11) + 24));
         const width = Math.ceil(Math.max(nameWidth + 104, textWidth(group.name, 12) + textWidth(group.members.length + ' ports · ' + group.bits + ' bits', 10) + 40) / GRID) * GRID;
@@ -222,8 +222,13 @@ function prepareBoundaryTables(boundaries, detail) {
 }
 
 /** 由真实连接给表格对端端口确定朝向；方向冲突时保留常规布局，不改变RTL方向。 */
-function boundarySideHints(arch, boundaries) {
-    const sides = new Map(boundaries.filter(node => node.boundaryTable).flatMap(node => (node.rows || node.ports).map(port => [port.sourceNodeId, port.side])));
+function boundarySideHints(arch, boundaries, boundaryLayout) {
+    const sides = new Map();
+    for (const node of boundaries) {
+        if (node.boundaryTable) {
+            for (const port of node.rows) sides.set(port.sourceNodeId, port.side);
+        } else if (boundaryLayout === 'ends') sides.set(node.id, node.ports[0].side);
+    }
     const candidates = new Map();
     for (const edge of [...(arch.graph.edges || []), ...(arch.interfaces || []).flatMap(item => item.bindings || [])]) {
         for (const [boundary, peer, peerPort] of [[edge.sourceNode,edge.targetNode,edge.targetPort],[edge.targetNode,edge.sourceNode,edge.sourcePort]]) {
@@ -279,11 +284,12 @@ function endpointNodes(name, kind) {
 
 /**
  * 构造 ELK 投影：节点为实例/边界，接口束为边；多端接口引入总线汇合节点。
- * @param {object} arch design arch 数据。 @param {{budget?:object, bundle?:boolean, bundleNames?:object, detail?:'interfaces'|'signals'}} [options]
+ * @param {object} arch design arch 数据。 @param {{budget?:object, bundle?:boolean, bundleNames?:object, detail?:'interfaces'|'signals', boundaryLayout?:'auto'|'ends'}} [options]
  *   bundle 默认 false；启用后只合并落在同一显示端口上的成员连接。
  * @returns {object} 可交给 layoutProjection 的投影。
  */
-function buildRenderProjection(arch, { budget = {}, bundle = false, bundleNames = {}, detail = 'interfaces' } = {}) {
+function buildRenderProjection(arch, { budget = {}, bundle = false, bundleNames = {}, detail = 'interfaces', boundaryLayout = 'auto' } = {}) {
+    if (!['auto', 'ends'].includes(boundaryLayout)) fail('INVALID_ARGUMENT', '--boundary-layout 需要 auto|ends');
     if (!['interfaces','signals'].includes(detail)) fail('INVALID_ARGUMENT','--detail需要 interfaces|signals');
     const limits = { ...DEFAULT_RENDER_BUDGET, ...budget };
     for (const [name, limit] of Object.entries(limits)) {
@@ -302,8 +308,9 @@ function buildRenderProjection(arch, { budget = {}, bundle = false, bundleNames 
     const legacyInout = arch.interfaces?.some(item => !item.bindings?.length && item.signals?.some(signal => signal.direction === 'inout'));
     const hasBindingFacts = !legacyInout && (!arch.interfaces?.length || arch.graph.edges?.length || arch.interfaces.some(item => item.bindings?.length));
     const boundaries = graphNodes.filter(node => node.kind === 'boundary');
-    const boundaryNodes = hasBindingFacts ? prepareBoundaryTables(boundaries, detail) : boundaries.map(prepareBoundaryNode);
-    const sideHints = boundarySideHints(arch, boundaryNodes);
+    const boundaryNodes = hasBindingFacts ? prepareBoundaryTables(boundaries, detail, boundaryLayout)
+        : boundaries.map(node => prepareBoundaryNode(node, boundaryLayout));
+    const sideHints = boundarySideHints(arch, boundaryNodes, boundaryLayout);
     const peerGroups = detail==='interfaces' ? boundaryPeerGroups(arch,boundaryNodes) : new Map();
     const nodes = [...boundaryNodes,
         ...graphNodes.filter(node => node.kind !== 'boundary').map(node => prepareInstanceNode(node, { bundle, bundleNames, sideHints,interfaceGroups:peerGroups.get(node.id) }))];
@@ -395,12 +402,14 @@ function buildRenderProjection(arch, { budget = {}, bundle = false, bundleNames 
                 width: textWidth(edge.interface.label + ' (' + edge.interface.bits + ' bits)', 10) + 12, height: 18,
                 layoutOptions: { 'elk.edgeLabels.placement': 'CENTER', 'elk.edgeLabels.inline': 'false' } }] } : {}) }))
     };
+    if (boundaryLayout === 'ends') placeBoundaryColumns(input, nodes);
     return { id: 'graph:arch', moduleId: arch.top ? arch.top.moduleId : null, name: arch.top ? arch.top.name : 'architecture',
         input, nodes, edges, signals: [], parameters: null,
         stats: { nodes: nodes.length, edges: edges.length, ports: renderPorts, fullPorts,
             bundles: nodes.reduce((total, node) => total + node.ports.filter(port => port.collapsed).length, 0),
             interfaces: interfaces.length, junctions: nodes.filter(node => node.kind === 'junction').length, bundled: bundle,
-            boundaryTables: nodes.filter(node => node.boundaryTable).length, detail } };
+            boundaryTables: nodes.filter(node => node.boundaryTable).length, detail,
+            ...(boundaryLayout === 'ends' ? { boundaryLayout } : {}) } };
 }
 
 /**
@@ -636,7 +645,8 @@ function renderArchitectureSvg(arch, layoutResult, { title, style } = {}) {
         archSha256: arch.archSha256 || null, contextRevision: arch.contextRevision || null,
         top: arch.top ? { name: arch.top.name, moduleId: arch.top.moduleId } : null,
         sourceFiles: Array.isArray(arch.sourceFiles) ? arch.sourceFiles.map(file => ({ path: file.path, sha256: file.sha256 })) : [],
-        layout: { engine: 'elk', engineVersion: 'bundled' },
+        layout: { engine: 'elk', engineVersion: 'bundled',
+            ...(projection.stats.boundaryLayout ? { boundaryLayout: projection.stats.boundaryLayout } : {}) },
         export: { format: 'svg', style: styleName, width, height, title: heading,
             nodeCount: projection.stats.nodes, portCount: projection.stats.ports, edgeCount: projection.stats.edges,
             interfaceCount: projection.stats.interfaces, junctionCount: projection.stats.junctions,
@@ -730,7 +740,9 @@ function renderArchitectureSvg(arch, layoutResult, { title, style } = {}) {
 /** @param {object} arch @param {string} [style] @returns {string} 默认输出文件名（含风格后缀）。 */
 function defaultFileName(arch, style = 'document', options = {}) {
     const suffix = normalizeStyle(style);
-    const identity = sha256(JSON.stringify([options.bundle === true, Object.entries(options.bundleNames || {}).sort(), options.title || null,options.detail || 'interfaces'])).slice(0, 8);
+    const parameters = [options.bundle === true, Object.entries(options.bundleNames || {}).sort(), options.title || null, options.detail || 'interfaces'];
+    if (options.boundaryLayout === 'ends') parameters.push(options.boundaryLayout);
+    const identity = sha256(JSON.stringify(parameters)).slice(0, 8);
     return safeName((arch.top && arch.top.name) || 'architecture') + '-' + String(arch.archSha256 || '0').slice(0, 8) + '-' + identity + '-' + suffix + '.svg';
 }
 

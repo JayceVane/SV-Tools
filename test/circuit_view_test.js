@@ -74,6 +74,23 @@ function tracedMessage() {
     return message;
 }
 
+test('模块视图发送两端布局请求，追踪视图禁用布局切换', () => {
+    const page = fakePage();
+    const select = page.ui('boundaryLayout');
+    const graph = graphMessage();
+    page.client.receive(graph);
+    assert.equal(select.value, 'auto');
+    select.value = 'ends'; select.dispatch('change');
+    assert.deepEqual(page.sent.at(-1), { type: 'boundary-layout', layout: 'ends' });
+    const next = graphMessage(); next.graph.stats = { boundaryLayout: 'ends' };
+    page.client.receive(next);
+    assert.equal(select.value, 'ends');
+    assert.notEqual(C.graphStateKey(graph.design, graph.graph), C.graphStateKey(next.design, next.graph));
+    page.client.receive(tracedMessage());
+    assert.equal(select.disabled, true);
+    page.client.destroy();
+});
+
 test('电路读值更新保留图和相机，标注校验实例，移除、切换图和失效均不保留旧值', () => {
     const page=fakePage(),message=tracedMessage();message.waveContext=[];message.viewGeneration=3;
     page.client.receive(message);page.window.paint();

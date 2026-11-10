@@ -27,10 +27,10 @@ const help=`SV Tools headless CLI (API 1)
   design evidence --module <id> --evidence <file>
   design scaffold --spec <json|file> [--out <dir>] [--force]
   design render --top <module> [--format svg] [--style document|presentation] [--out <dir>] [--title <t>]
-                [--detail interfaces|signals] [--fold-ports] [--bundle-name <prefix=display>] (repeatable)
+                [--detail interfaces|signals] [--boundary-layout auto|ends] [--fold-ports] [--bundle-name <prefix=display>] (repeatable)
   design check --top <module>
   design diff --top <module> --baseline <save-name|snapshot-file>
-  design report --top <module> [--out <dir>] [--style document|presentation] [--title <t>] (SVG+PNG+json+md bundle)
+  design report --top <module> [--out <dir>] [--style document|presentation] [--title <t>] [--boundary-layout auto|ends] (SVG+PNG+json+md bundle)
   wave signals --file <vcd> [--query <q>] [--scope <s>] [--role input|output|inout|internal]
               [--min-width <n>] [--max-width <n>] [--limit <n>]
   wave values --file <vcd> --signals <a,b> --at <ticks|10ns>
@@ -58,7 +58,7 @@ Output:  JSON on stdout; --help and --version return text.
 Node.js >=22. The existing Rust formatter CLI remains available in bin/.
 `;
 function argumentsFor(argv) {
-    const strings=['workspace','config','project','fileset','file','top','iverilog','cygwin','vivado','standard','run','timeout','offset','limit','log-index','max-paths','jobs','name','dir','part','sim-top','target-fileset','depth','save','spec','format','out','title','style','detail','baseline','against','clock','query','scope','role','bit','at','at-b','from','to','signal','signals','min-width','max-width','clock-edge','kind','max-values','plan','module','actor','revision','token','evidence','reason'];
+    const strings=['workspace','config','project','fileset','file','top','iverilog','cygwin','vivado','standard','run','timeout','offset','limit','log-index','max-paths','jobs','name','dir','part','sim-top','target-fileset','depth','save','spec','format','out','title','style','detail','boundary-layout','baseline','against','clock','query','scope','role','bit','at','at-b','from','to','signal','signals','min-width','max-width','clock-edge','kind','max-values','plan','module','actor','revision','token','evidence','reason'];
     const options=Object.fromEntries(strings.map(name=>[name,{type:'string'}]));
     for(const name of ['help','version','json','write','check','fold-ports','force']) options[name]={type:'boolean'};
     options.include={type:'string',multiple:true}; options.define={type:'string',multiple:true}; options.source={type:'string',multiple:true};
@@ -67,7 +67,7 @@ function argumentsFor(argv) {
     try { parsed=parseArgs({args:argv,options,allowPositionals:true,strict:true}); }
     catch(error) { fail('INVALID_ARGUMENT',error.message); }
     const input={...parsed.values};
-    for(const [from,to] of [['timeout','timeoutMs'],['log-index','logIndex'],['max-paths','maxPaths'],['sim-top','simTop'],['source','sources'],['target-fileset','filesetTarget'],['clock-edge','clockEdge'],['min-width','minWidth'],['max-width','maxWidth'],['at-b','atB'],['max-values','maxValues']]) if(input[from]!==undefined) {input[to]=input[from]; delete input[from];}
+    for(const [from,to] of [['timeout','timeoutMs'],['log-index','logIndex'],['max-paths','maxPaths'],['sim-top','simTop'],['source','sources'],['target-fileset','filesetTarget'],['clock-edge','clockEdge'],['min-width','minWidth'],['max-width','maxWidth'],['at-b','atB'],['max-values','maxValues'],['boundary-layout','boundaryLayout']]) if(input[from]!==undefined) {input[to]=input[from]; delete input[from];}
     for(const field of ['timeoutMs','offset','limit','logIndex','maxPaths','jobs','depth','maxValues','revision']) if(input[field]!==undefined) {
         if(!/^\d+$/.test(input[field]) || !Number.isSafeInteger(Number(input[field]))) fail('INVALID_ARGUMENT',field+'必须为非负整数');
         input[field]=Number(input[field]);

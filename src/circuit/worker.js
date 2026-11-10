@@ -111,9 +111,9 @@ const commands = {
         }
         return require('./source-request').topCandidates(text);
     },
-    layout: ({ moduleId }) => {
+    layout: ({ moduleId, boundaryLayout }) => {
         if (!design) throw new Error('电路尚未加载');
-        return layoutModule(design, moduleId);
+        return layoutModule(design, moduleId, { boundaryLayout });
     },
     source: ({ moduleId, cellId, objectId }) => {
         const module = design && findModule(design, moduleId);

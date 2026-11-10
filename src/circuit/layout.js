@@ -22,12 +22,12 @@ function geometry(value, where) {
 /**
  * @param {object} design 已验证的领域设计；不会写入坐标。
  * @param {string} moduleId 当前模块标识。
- * @param {{elk?:{layout:function}}} options 可注入 ELK 实例，默认按需加载打包依赖。
+ * @param {{elk?:{layout:function},boundaryLayout?:'auto'|'ends'}} options 可注入 ELK 实例，默认按需加载打包依赖。
  * @returns {Promise<object>} 带有节点、端口和正交连线坐标的独立展示图。
  * @throws {Error} 模块/预算错误、依赖缺失或布局失败，不返回伪造布局。
  */
-async function layoutModule(design, moduleId, { elk } = {}) {
-    const projection = projectModule(design, moduleId);
+async function layoutModule(design, moduleId, { elk, boundaryLayout } = {}) {
+    const projection = projectModule(design, moduleId, { boundaryLayout });
     return layoutProjection(projection, { elk });
 }
 

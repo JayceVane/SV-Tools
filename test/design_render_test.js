@@ -472,7 +472,7 @@ test('窄图图例按画布宽度换行，不超出 viewBox', async t => {
     assert.equal(Number(note[1]) + estimatedTextWidth(note[3], 10) <= folded.output.data.width, true, '说明文字超出画布');
 });
 
-test('演示项目：默认端口事实与 --fold-ports 规模检查', { skip: DEMO && fs.existsSync(DEMO) ? false : '未设置 SVTOOLS_ARCH_DEMO 指向演示工程' }, async t => {
+test('演示项目：接口表两端布局、端口事实与折叠检查', { skip: DEMO && fs.existsSync(DEMO) ? false : '未设置 SVTOOLS_ARCH_DEMO 指向演示工程' }, async t => {
     const directory = await fsp.realpath(await fsp.mkdtemp(path.join(os.tmpdir(), 'svtools-demo-render-')));
     t.after(() => fsp.rm(directory, { recursive: true, force: true }));
     const files = [];
@@ -483,21 +483,30 @@ test('演示项目：默认端口事实与 --fold-ports 规模检查', { skip: D
     }
     const arch = await buildArchitecture({ workspace: directory, files, top: 'soc_top' });
     assert.equal(arch.graph.nodes.filter(node => node.kind === 'instance').length, 15);
-    assert.equal(arch.graph.edges.length, 191);
-    assert.equal(arch.interfaces.length, 30);
+    assert.equal(arch.graph.edges.length, 67);
+    assert.equal(arch.interfaces.length, 27);
     const plain = await layoutArchitecture(arch);
-    const folded = await layoutArchitecture(arch, { bundle: true });
+    const ends = await layoutArchitecture(arch, { boundaryLayout: 'ends' });
+    const nodes = new Map(ends.layout.nodes.map(node => [node.id, node]));
+    const node = id => nodes.get(id);
+    assert.ok(node('boundary-table:vin').x + node('boundary-table:vin').width < node('boundary:clk_in').x);
+    for (const name of ['ddr', 'vout', 'spi', 'uart']) {
+        assert.ok(node('boundary-table:' + name).x > node('boundary:gpio').x + node('boundary:gpio').width);
+    }
+    assert.deepEqual(ends.layout.edges.map(edge => edge.id), plain.layout.edges.map(edge => edge.id));
+    const signalPorts = buildRenderProjection(arch, { detail: 'signals' }).stats.ports;
+    const folded = await layoutArchitecture(arch, { bundle: true, detail: 'signals' });
     assert.equal(plain.projection.stats.bundled, false);
     assert.equal(folded.projection.stats.bundled, true);
     assert.equal(folded.projection.stats.bundles > 0, true);
-    assert.equal(folded.projection.stats.ports < plain.projection.stats.ports, true);
+    assert.equal(folded.projection.stats.ports < signalPorts, true);
     assert.equal(folded.projection.stats.fullPorts, plain.projection.stats.fullPorts);
     const instance = name => arch.instances.find(item => item.name === name);
     assert.equal(instance('u_ic').bundles.length, 6);
     assert.equal(instance('u_cpu').bundles.length, 4);
     assert.equal(instance('u_ddr').bundles.some(bundle => bundle.name === 's'), false, '单字母桶 s_* 不折叠');
     const heightOf = (layout, id) => layout.nodes.find(node => node.id === id).height;
-    assert.equal(heightOf(folded.layout, 'instance:u_ic') < heightOf(plain.layout, 'instance:u_ic') / 2, true);
+    assert.equal(heightOf(folded.layout, 'instance:u_ic'), heightOf(plain.layout, 'instance:u_ic'), 'packed struct 端口已是单个端口');
     const imageA = renderArchitectureSvg(arch, folded, { title: 'SoC 顶层架构', style: 'document' });
     const imageB = renderArchitectureSvg(arch, folded, { title: 'SoC 顶层架构', style: 'document' });
     const presentation = renderArchitectureSvg(arch, folded, { title: 'SoC 顶层架构', style: 'presentation' });

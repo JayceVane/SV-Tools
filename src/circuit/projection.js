@@ -50,13 +50,30 @@ function elkNode(node) {
         layoutOptions: { 'elk.portConstraints': 'FIXED_POS' }, ports: node.ports.map(elkPort) };
 }
 
+/** 按外表、普通接口、内部电路、普通接口、外表分区。ELK 保留全部连线，包括同侧回连。 */
+function placeBoundaryColumns(input, nodes) {
+    input.layoutOptions = { ...input.layoutOptions,
+        'elk.partitioning.activate': 'true', 'elk.separateConnectedComponents': 'false' };
+    input.children.forEach((child, index) => {
+        const node = nodes[index];
+        let column = 2;
+        if (node.boundary) {
+            const west = node.ports[0].side === 'EAST';
+            column = west ? 1 : 3;
+            if (node.boundaryTable) column = west ? 0 : 4;
+        }
+        child.layoutOptions['elk.partitioning.partition'] = String(column);
+    });
+}
+
 /**
  * @param {object} design 已验证的领域设计。
  * @param {string} moduleId 模块标识。
+ * @param {{boundaryLayout?:'auto'|'ends'}} options 边界端口布局。
  * @returns {{input:object,nodes:object[],edges:object[],signals:object[],stats:object,id:string,name:string}} 纯 ELK 输入及独立展示元数据。
  * @throws {RangeError|TypeError} 模块不存在或超过节点/边预算；不截断原模型。
  */
-function projectModule(design, moduleId) {
+function projectModule(design, moduleId, { boundaryLayout = 'auto' } = {}) {
     const module = findModule(design, moduleId);
     if (!module) throw new TypeError(`Circuit module not found: ${moduleId}`);
     const ports = module.ports.length + module.cells.reduce((sum, cell) => sum + cell.ports.length, 0);
@@ -86,6 +103,7 @@ function projectModule(design, moduleId) {
         const terminal = graphPort(port, inverse(port.direction));
         addNode({ id: `node:${port.id}`, label: port.name, kind: port.direction === 'unknown' ? 'unknown' : port.direction,
             detail: `${port.direction} · ${port.bits.length} bit${port.bits.length === 1 ? '' : 's'}`, source: port.source,
+            ...(boundaryLayout === 'ends' ? { boundary: true } : {}),
             x: 0, y: 0, ...nodeSize(port.name, [terminal], true), ports: [terminal] });
         connect(terminal);
     }
@@ -149,7 +167,14 @@ function projectModule(design, moduleId) {
         outputs.forEach(item => addEdge(item.port.id, item.endpoint, group));
     }
     const busNodeCount = addBusConnections(nodes, edges, { maxNodes: MAX_NODES, maxEdges: MAX_EDGES, maxPorts: MAX_PORTS });
-    for (let i = 0; i < nodes.length; i++) nodes[i] = prepareNode(nodes[i]);
+    for (let i = 0; i < nodes.length; i++) {
+        const node = nodes[i] = prepareNode(nodes[i]);
+        if (node.boundary) {
+            const port = node.ports[0];
+            port.side = node.kind === 'input' || node.kind === 'unknown' ? 'EAST' : 'WEST';
+            port.x = port.side === 'EAST' ? node.width : 0;
+        }
+    }
     const graphId = `graph:${module.id}`;
     const input = { id: graphId, layoutOptions: {
         'elk.algorithm': 'layered', 'elk.direction': 'RIGHT', 'elk.edgeRouting': 'ORTHOGONAL',
@@ -159,9 +184,10 @@ function projectModule(design, moduleId) {
         'elk.padding': '[top=32,left=32,bottom=32,right=32]',
     }, children: nodes.map(elkNode),
     edges: edges.map(edge => ({ id: edge.id, sources: [edge.source], targets: [edge.target] })) };
+    if (boundaryLayout === 'ends') placeBoundaryColumns(input, nodes);
     return { id: graphId, moduleId: module.id, name: module.name, input, nodes, edges, signals: module.signals, parameters: module.parameters,
-        stats: { bitCount: nets.size, portCount: module.ports.length, cellCount: module.cells.length, nodeCount: nodes.length, edgeCount: edges.length,
+        stats: { ...(boundaryLayout === 'ends' ? { boundaryLayout } : {}), bitCount: nets.size, portCount: module.ports.length, cellCount: module.cells.length, nodeCount: nodes.length, edgeCount: edges.length,
             undrivenBitCount, multiDriverBitCount, ambiguousBitCount, busNodeCount } };
 }
 
-module.exports = { MAX_NODES, MAX_EDGES, MAX_LAYOUT_BIT_REFERENCES, projectModule, elkNode };
+module.exports = { MAX_NODES, MAX_EDGES, MAX_LAYOUT_BIT_REFERENCES, projectModule, elkNode, placeBoundaryColumns };

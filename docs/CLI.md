@@ -196,11 +196,14 @@ node src/cli/main.js design arch --workspace D:/project --top top --depth 1 --sa
 ```powershell
 node src/cli/main.js design render --workspace D:/project --top top
 node src/cli/main.js design render --workspace D:/project --top top --style presentation --out docs/arch --title "SoC 架构"
+node src/cli/main.js design render --workspace D:/project --top top --boundary-layout ends
 node src/cli/main.js design render --workspace D:/project --top top --fold-ports
 node src/cli/main.js design render --workspace D:/project --top top --fold-ports --bundle-name s0=s0_axi --bundle-name m0=m0_axi
 ```
 
 默认 `--style document`（黑白线稿，面向报告）：纯白背景、黑色描边、无彩色（黑白灰阶：#000/#111/#333/#fff/#f5f5f5 等 R=G=B）、无渐变/阴影；collapsed 实线 1.2px、blackbox 虚线（6,4）、unresolved 点线（2,3）并带文字角标；节点标题行浅灰底，端口/接口标签为黑色无衬线文本。`--style presentation`（别名 `ui`）保持电路视图深色展示主题，边界输入/输出/双向分别使用 theme input/output/inout 语义色。两种风格共用同一 ELK 布局坐标，仅替换配色与线型，并各自可确定性重渲染。
+
+`design render` 和 `design report` 都支持 `--boundary-layout auto|ends`，默认 `auto`。两端布局把输入放左侧、输出和独立双向端口放右侧；混合方向的接口表在输入成员过半时靠左，其余靠右。接口表位于同侧普通端口外面，表内逐行保留真实方向。
 
 以 `graph.edges` 的真实端点绘制连线；只在成员落在同一显示端口时聚合，旧数据缺少信号边时回退到 `interfaces[]`。默认按接口粒度绘制：每个模块与边界接口表之间合成一个虚拟锚点和一条汇总线，原始 `ports[]` 和连接仍保存在 JSON。`--detail signals` 才使用逐行物理锚点；只有显式 `--fold-ports` 才把 blackbox 与 collapsed 实例按 `bundles[]` 折叠为虚拟接口端口：多成员束标签为 `<name>* (N bits)`、混合方向为菱形 inout，端口 `<title>` 列出全部成员名与位宽；`--bundle-name <prefix>=<display>` 仅与 `--fold-ports` 同时有效，用于覆盖显示名。虚拟端口仅改变展示，不改变 `ports[]`/`bundles[]` 或 RTL 事实，图例与 limitations 明确标注「前缀折叠展示，inout 仅为架构示意」。实例与边界盒带端口标签，同一个完整源端口的多目标连接经主干扇出（不同切片不合并）（`stats.junctions` 与 evidence `export.junctionCount`），接口标签为 `label (N bits)` 并保留完整成员名在 `<title>` 中。ELK layered 使用交叉最小化与直边优先布局，连线标签作为有尺寸的布局对象预留空间，层间距按标签与线路需要扩展；宽高比作为偏好，验收以节点/标签不重叠和真实端点为准。默认输出 `.svtools/agent/design/render/<top>-<archSha前8位>-<导出参数摘要>-<style>.svg`，`--out` 指定目录（与 scaffold 同一安全模型：必须是工作区内的目录，按 realpath 复核、拒绝 symlink/junction 逃逸，越界或非目录返回 `INVALID_ARGUMENT`，写入失败清理本轮创建的目录）；图例按画布宽度自动换行，画布高度随图例行数扩展。`data`/`artifacts[]` 返回 `{kind:"image",format:"svg",path,sha256,bytes,width,height}`。SVG 根内 `<metadata id="svtools-evidence">` 含 `designId`、`modelSha256`（`archSha256` 的明确映射）、`archSha256`、`contextRevision`、`top`、`sourceFiles[]{path,sha256}`、`layout.engine`、`export`（含 `style`、`junctionCount`、`bundled`、`bundleCount`），`design.render` 的 `data.evidence` 与之一致；节点与端口带 `data-model-id`；同一输入、同一 detail 和风格的两次渲染节点坐标与 SVG SHA-256 完全一致。文本均为可选中 `<text>`。
 

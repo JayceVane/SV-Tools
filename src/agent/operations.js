@@ -314,6 +314,8 @@ async function render(input) {
     const style = normalizeStyle(input.style);
     const detail = input.detail || 'interfaces';
     if (!['interfaces','signals'].includes(detail)) fail('INVALID_ARGUMENT','--detail需要 interfaces|signals');
+    const boundaryLayout = input.boundaryLayout ?? 'auto';
+    if (!['auto','ends'].includes(boundaryLayout)) fail('INVALID_ARGUMENT','--boundary-layout 需要 auto|ends');
     const bundle = input.foldPorts === true;
     const bundleNames = parseBundleNames(Array.isArray(input.bundleNames) ? input.bundleNames : []);
     if (!bundle && Object.keys(bundleNames).length) {
@@ -324,7 +326,7 @@ async function render(input) {
     const files = [...contents].map(([file, value]) => ({ path: file, text: value.text }));
     const arch = await buildArchitecture({ workspace: options.workspace, files, top: input.top, includeDirs: context.includeDirs,
         defines: context.defines, depth: input.depth ?? 1, timeoutMs: options.timeoutMs, contextRevision: context.revision });
-    const layoutResult = await layoutArchitecture(arch, { bundle, bundleNames,detail });
+    const layoutResult = await layoutArchitecture(arch, { bundle, bundleNames, detail, boundaryLayout });
     const image = renderArchitectureSvg(arch, layoutResult, { title: typeof input.title === 'string' ? input.title : undefined, style });
     await assertCurrent(resolved);
     const outputDirectory = input.out ? path.resolve(options.workspace, input.out) : await directory(options.workspace,'design','render');
@@ -345,7 +347,7 @@ async function render(input) {
         }
         fail('DESIGN_FAILED', 'design render 创建输出目录失败：' + error.message, { out: input.out || null });
     }
-    const file = path.join(outputDirectory,defaultFileName(arch, style, { bundle, bundleNames, title: input.title,detail })
+    const file = path.join(outputDirectory,defaultFileName(arch, style, { bundle, bundleNames, title: input.title, detail, boundaryLayout })
         .replace(/\.svg$/, format === 'png' ? '.png' : '.svg')), temporary = file + '.' + randomUUID() + '.tmp';
     // PNG 用内置 resvg 栅格化同一份 SVG（无编辑器宿主），像素倍率 2 保证报告清晰度。
     const rasterized = format === 'png' ? rasterizeSvg(image.svg, { scale: DEFAULT_SCALE }) : null;
@@ -361,7 +363,7 @@ async function render(input) {
         ? { kind:'image', format:'png', path:file, sha256:hash(rasterized.png), bytes:rasterized.png.length,
             width:rasterized.width, height:rasterized.height, sourceSha256:image.sha256, scale:rasterized.scale }
         : { kind:'image', format:'svg', path:file, sha256:image.sha256, bytes:image.bytes, width:image.width, height:image.height };
-    return result('design.render',{ format, style, detail, bundled:bundle, bundleNames, path:file, sha256:artifact.sha256, bytes:artifact.bytes,
+    return result('design.render',{ format, style, detail, boundaryLayout, bundled:bundle, bundleNames, path:file, sha256:artifact.sha256, bytes:artifact.bytes,
         width:artifact.width, height:artifact.height, ...(rasterized ? { scale:rasterized.scale, sourceSha256:image.sha256 } : {}),
         title: image.evidence.export.title, stats:image.stats, evidence:image.evidence },context,[],[artifact]);
 }
@@ -371,6 +373,8 @@ async function report(input) {
     const style = normalizeStyle(input.style);
     const detail = input.detail || 'interfaces';
     if (!['interfaces','signals'].includes(detail)) fail('INVALID_ARGUMENT','--detail需要 interfaces|signals');
+    const boundaryLayout = input.boundaryLayout ?? 'auto';
+    if (!['auto','ends'].includes(boundaryLayout)) fail('INVALID_ARGUMENT','--boundary-layout 需要 auto|ends');
     const bundle = input.foldPorts === true;
     const bundleNames = parseBundleNames(Array.isArray(input.bundleNames) ? input.bundleNames : []);
     if (!bundle && Object.keys(bundleNames).length) {
@@ -381,7 +385,7 @@ async function report(input) {
     const files = [...contents].map(([file, value]) => ({ path: file, text: value.text }));
     const arch = await buildArchitecture({ workspace: options.workspace, files, top: input.top, includeDirs: context.includeDirs,
         defines: context.defines, depth: input.depth ?? 1, timeoutMs: options.timeoutMs, contextRevision: context.revision });
-    const layoutResult = await layoutArchitecture(arch, { bundle, bundleNames, detail });
+    const layoutResult = await layoutArchitecture(arch, { bundle, bundleNames, detail, boundaryLayout });
     const title = typeof input.title === 'string' ? input.title : (input.top + ' 架构报告');
     const image = renderArchitectureSvg(arch, layoutResult, { title, style });
     await assertCurrent(resolved);
@@ -400,7 +404,7 @@ async function report(input) {
         }
         fail('DESIGN_FAILED', 'design report 创建输出目录失败：' + error.message, { out: input.out || null });
     }
-    const base = defaultFileName(arch, style, { bundle, bundleNames, title: input.title, detail }).replace(/\.svg$/, '');
+    const base = defaultFileName(arch, style, { bundle, bundleNames, title: input.title, detail, boundaryLayout }).replace(/\.svg$/, '');
     const entries = [
         { kind: 'image', name: base + '.svg', bytes: Buffer.from(image.svg, 'utf8') },
         { kind: 'image', name: base + '.png', bytes: rasterized.png },
@@ -413,7 +417,7 @@ async function report(input) {
         pngSha256: pngEntry.sha256, scale: rasterized.scale, svgSha256: image.sha256 });
     const outputs = [...imageEntries,
         { kind: 'document', name: 'architecture.md', bytes: Buffer.from(markdown, 'utf8') }].map(shaOf);
-    const manifest = { generatedBy: 'svtools design report', top: input.top, style, detail, bundled: bundle, bundleNames,
+    const manifest = { generatedBy: 'svtools design report', top: input.top, style, detail, boundaryLayout, bundled: bundle, bundleNames,
         scale: rasterized.scale, files: outputs.map(item => ({ kind: item.kind, path: item.name, sha256: item.sha256, bytes: item.bytes.length })),
         evidence: image.evidence, checksSummary: { total: (arch.checks || []).length,
             errors: (arch.checks || []).filter(item => item.severity === 'error').length,
@@ -434,7 +438,7 @@ async function report(input) {
         fail('DESIGN_FAILED', 'design report 写入产物失败：' + error.message, { out: input.out || null });
     }
     const errors = (arch.checks || []).filter(item => item.severity === 'error').length;
-    const response = result('design.report', { style, detail, bundled: bundle, bundleNames, out: outputDirectory, top: arch.top,
+    const response = result('design.report', { style, detail, boundaryLayout, bundled: bundle, bundleNames, out: outputDirectory, top: arch.top,
         designId: arch.designId, archSha256: arch.archSha256, checksSummary: manifest.checksSummary,
         files: written.map(item => ({ ...item, path: path.relative(options.workspace, item.path).split(path.sep).join('/') })),
         evidence: { ...image.evidence, png: { sha256: pngEntry.sha256, scale: rasterized.scale,
