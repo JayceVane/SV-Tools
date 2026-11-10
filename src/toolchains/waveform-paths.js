@@ -8,13 +8,16 @@ const { createHash } = require('node:crypto');
  */
 function defaultVcdPath({ root, sourceFile, engine, top = '', dumpFile, extension = '.vcd' }) {
     if (!root || !sourceFile || !/^[a-z][a-z0-9-]*$/i.test(engine)) throw new TypeError('默认波形路径需要根目录、源文件与有效引擎标识');
-    const suffix = '.' + (/^[A-Za-z0-9]{1,8}$/.test(String(extension).replace(/^\./, '')) ? String(extension).replace(/^\./, '') : 'vcd');
+    const format = String(extension).replace(/^\./, '').toLowerCase();
+    const suffix = format === 'fst' ? '.fst' : '.vcd';
     const identity = file => {
         const relative = path.relative(path.resolve(root), path.resolve(file)).replace(/\\/g, '/');
         return process.platform === 'win32' ? relative.toLowerCase() : relative;
     };
     const parts = [identity(sourceFile), top];
     if (dumpFile) parts.push(identity(dumpFile));
+    // 原生 FST 与同名 VCD 转换后的 FST 分开，保留既有 VCD 的归档身份。
+    if (suffix === '.fst') parts.push(suffix);
     const digest = createHash('sha256').update(JSON.stringify(parts)).digest('hex').slice(0, 12);
     const label = dumpFile ? path.basename(dumpFile, path.extname(dumpFile)) : top || path.basename(sourceFile, path.extname(sourceFile));
     const name = label.replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 80) || 'wave';

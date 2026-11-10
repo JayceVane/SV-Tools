@@ -7,6 +7,7 @@ const { summarizeToolResult, resultFindings } = require('./result');
 const { COMPILE_TIMEOUT_MS } = require('./compile-policy');
 const { simulationWaveforms } = require('./simulation-waveforms');
 const { defaultVcdPath } = require('./waveform-paths');
+const { waveformFormat } = require('../waveform/format');
 
 /** 同目录只记录波形元数据，仿真后按实际变化识别产物，不用时间容差猜测。 */
 function waveformSnapshot(directory, targets = []) {
@@ -26,7 +27,7 @@ function waveformSnapshot(directory, targets = []) {
 function changedWaveforms(before, after) { return [...after.keys()].filter(file => after.get(file) !== before.get(file)); }
 
 /** 同卷rename不复制大型波形；跨卷先复制到目标目录临时文件，成功替换后才删除原文件。 */
-async function archiveVcd(source, target) {
+async function archiveWaveform(source, target) {
     let temporary;
     try {
         if (!(await fs.promises.lstat(source)).isFile()) throw new Error('输出不是普通文件');
@@ -39,7 +40,7 @@ async function archiveVcd(source, target) {
             await fs.promises.rename(temporary, target); temporary = null;
             await fs.promises.unlink(source);
         }
-    } catch (error) { throw new Error('VCD归档失败：' + source + ' → ' + target + '：' + error.message, { cause: error }); }
+    } catch (error) { throw new Error('波形归档失败：' + source + ' → ' + target + '：' + error.message, { cause: error }); }
     finally { if (temporary) await fs.promises.rm(temporary, { force: true }); }
 }
 
@@ -157,18 +158,20 @@ function createIcarusRunner(deps) {
         // 宏内的dumpvars可能无法静态识别，明确的运行参数目标仍必须关闭、保护并查询。
         if (overridden.length) waveforms.paths = [...new Set([...waveforms.paths, ...defaultDumpfiles.map(file => path.resolve(prep.fileDir, file))])];
         if (waveforms.uncertain) channel.appendLine('波形路径含动态表达式或未完整解析：本次仿真目录内已打开的波形将先关闭。');
-        // 归档白名单按扩展名：.vcd 与 .fst（快照同样只跟踪这两类）都集中进 .svtools/vcd 并保留真实后缀；
-        // 其他扩展名与已在归档目录内的文件原样保留。此前仅 .vcd 归档，FST 直接倾倒会留在仿真目录。
-        const destination = file => {
-            const extension = path.extname(file).toLowerCase();
-            if ((extension !== '.vcd' && extension !== '.fst')
-                || path.relative(path.dirname(prep.defaultVcd), path.dirname(path.resolve(file))) === '') return file;
-            return defaultVcdPath({ ...prep.waveformOptions, dumpFile: file, extension });
+        const destination = (file, suffix) => {
+            const inArchive = path.relative(path.dirname(prep.defaultVcd), path.dirname(path.resolve(file))) === '';
+            if (inArchive && path.extname(file).toLowerCase() === suffix) return file;
+            return defaultVcdPath({ ...prep.waveformOptions, dumpFile: file, extension: suffix });
         };
-        const protectedPaths = new Set([...waveforms.paths, ...waveforms.paths.map(destination)]);
+        const protectedPaths = new Set(waveforms.paths);
+        // 静态路径先保护预计的归档名；内容与 dumper 配置不一致时再保护实际目标。
+        if (invocation.vcd || invocation.dumper.startsWith('fst')) {
+            for (const file of waveforms.paths) protectedPaths.add(destination(file, extension));
+        }
         task.throwIfCancelled();
         const lease = await deps.prepareWaveforms?.({ ...waveforms, paths: [...protectedPaths], directory: prep.fileDir, sourceFile: prep.filePath });
         let archiveLease, summary, waves;
+        const unsupported = [];
         try {
             task.throwIfCancelled();
             const before = waveformSnapshot(prep.fileDir, waveforms.paths);
@@ -179,24 +182,31 @@ function createIcarusRunner(deps) {
             summary = complete(task, document, result);
             if (!summary.ok) return summary;
             const changed = changedWaveforms(before, waveformSnapshot(prep.fileDir, waveforms.paths));
-            const extraTargets = changed.map(destination).filter(file => !protectedPaths.has(file));
-            // 动态名称可能直到运行后才可知；归档替换前仍须关闭目标的读取者。
+            const outputs = [];
+            for (const file of changed) {
+                task.throwIfCancelled();
+                const format = await waveformFormat(file);
+                if (format) outputs.push({ file, target: destination(file, '.' + format) });
+                else unsupported.push(file);
+            }
+            const extraTargets = outputs.map(({ target }) => target).filter(file => !protectedPaths.has(file));
+            // 动态名称或实际格式可能直到运行后才可知，归档替换前关闭目标的读取者。
             if (extraTargets.length) archiveLease = await deps.prepareWaveforms?.({ paths: extraTargets,
                 directory: path.dirname(prep.defaultVcd), sourceFile: prep.filePath });
             waves = [];
-            for (const file of changed) {
+            for (const { file, target } of outputs) {
                 task.throwIfCancelled();
-                const target = destination(file);
-                if (target !== file) { await archiveVcd(file, target); channel.appendLine('波形已归档：' + target); }
+                if (target !== file) { await archiveWaveform(file, target); channel.appendLine('波形已归档：' + target); }
                 waves.push(target);
             }
-            if (deps.postprocessWaveforms) waves = await deps.postprocessWaveforms(waves, task, document);
+            if (waves.length && deps.postprocessWaveforms) waves = await deps.postprocessWaveforms(waves, task, document);
             task.throwIfCancelled();
         } finally {
             try { await archiveLease?.dispose(); } finally { await lease?.dispose(); }
         }
-        await deps.showWaveforms(task, waves, prep.config, prep.filePath); task.throwIfCancelled();
-        return { ...summary, waves, vvpFile: prep.vvpFile };
+        const filesWritten = [...waves, ...unsupported];
+        await deps.showWaveforms(task, filesWritten, prep.config, prep.filePath, waves); task.throwIfCancelled();
+        return { ...summary, waves: filesWritten, vvpFile: prep.vvpFile };
     }
     return { lint, simulate };
 }

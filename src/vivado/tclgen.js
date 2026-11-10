@@ -70,8 +70,9 @@ function buildCreateProjectScript(o) {
 function extractVivadoIssues(lines) {
     const issues = [];
     String(lines).split(/\r?\n/).forEach(line => {
-        const m = line.match(/^(ERROR|CRITICAL WARNING):\s*(.*)$/);
-        if (m) issues.push({ level: m[1], text: m[2].slice(0, 300) });
+        // XSim 的运行时断言使用 Error:，Vivado 批处理可能仍返回退出码 0。
+        const m = line.match(/^(ERROR|CRITICAL WARNING):\s*(.*)$/i);
+        if (m) issues.push({ level: m[1].toUpperCase(), text: m[2].slice(0, 300) });
     });
     return issues.slice(0, 50);
 }

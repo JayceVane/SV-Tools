@@ -3,20 +3,12 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const { COPYFILE_EXCL } = require('node:fs').constants;
 const { nativeApi, codeOf } = require('./rust-backend');
+const { waveformFormat } = require('./format');
 
 function cancelled(signal) {
     if (signal?.aborted) throw Object.assign(new Error('波形转换已取消'), { code: 'TOOL_CANCELLED' });
 }
 const identity = stat => [stat.dev, stat.ino, stat.size, stat.mtimeNs, stat.ctimeNs].join(':');
-
-/** 读取内容标记；不能根据 .vcd/.fst 后缀推断仿真器真正写入的格式。 */
-async function isFst(file) {
-    const handle = await fs.open(file, 'r');
-    try {
-        const bytes = Buffer.alloc(9), { bytesRead } = await handle.read(bytes, 0, 9, 0);
-        return bytesRead === 9 && (bytes[0] === 254 || (bytes[0] === 0 && bytes.readBigUInt64BE(1) === 329n));
-    } finally { await handle.close(); }
-}
 
 /**
  * 共用的仿真后处理：只处理本轮实际改变的波形，转换完成才删除 VCD。
@@ -33,7 +25,7 @@ async function postprocessWaveforms(files, options = {}) {
         cancelled(options.signal);
         let temporary, published, lease, committed = false;
         try {
-            if (await isFst(file)) { result.push(file); continue; }
+            if (await waveformFormat(file) === 'fst') { result.push(file); continue; }
             const before = await fs.lstat(file, { bigint: true });
             if (!before.isFile()) throw new Error('只转换普通 VCD 文件');
             temporary = await fs.mkdtemp(path.join(path.dirname(file), '.svtools-fst-'));
@@ -52,7 +44,7 @@ async function postprocessWaveforms(files, options = {}) {
             try { stats = JSON.parse(await (options.native || nativeApi()).waveConvertVcdToFstAsync(file, target)); }
             catch (error) { const parsed = codeOf(error); throw Object.assign(new Error(parsed.message), { code: parsed.code }); }
             cancelled(options.signal);
-            if (!await isFst(target) || !(stats.outputBytes > 0)) throw new Error('FST 输出验证失败');
+            if (await waveformFormat(target) !== 'fst' || !(stats.outputBytes > 0)) throw new Error('FST 输出验证失败');
             if (identity(before) !== identity(await fs.lstat(file, { bigint: true }))) throw new Error('转换期间 VCD 发生变化');
             if (overwrite) {
                 cancelled(options.signal);

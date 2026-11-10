@@ -81,9 +81,9 @@ function activateIverilog(context, deps) {
         }
         return [...new Set(files)];
     }
-    async function showWaveforms(task, waves, config, sourceFile) {
+    async function showWaveforms(task, waves, config, sourceFile, supportedWaves) {
         task.throwIfCancelled(); if (!waves.length) return;
-        const waveform = waves.find(file => /\.(vcd|fst)$/i.test(file)), viewer = String(config.get('waveViewer') || '').trim();
+        const waveform = supportedWaves[0], viewer = String(config.get('waveViewer') || '').trim();
         if (waveform && !viewer && config.get('autoOpenWaveform', true)) await deps.waveViewer?.openWaveform(waveform, { sourceFile });
         task.throwIfCancelled();
         const choice = vscode.window.showInformationMessage('仿真波形已生成：' + path.basename(waves[0]),
