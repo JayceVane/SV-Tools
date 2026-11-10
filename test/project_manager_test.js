@@ -136,3 +136,17 @@ test('移出跟随目录会移除整棵子树，刷新与新增文件不会重�
     await fs.writeFile(path.join(rtl, 'new.sv'), 'module n; endmodule');
     assert.deepEqual((await f.projects.current()).sets[0].files, []);
 });
+test('所选 Vivado 工程被删除后明确提示已不存在，重新选择可恢复', async (t) => {
+    const f = await fixture(t);
+    const xpr = path.join(f.root, 'chip.xpr');
+    const text = '<Project><FileSets><FileSet Name="sources_1" Type="DesignSrcs"><Config><Option Name="TopModule" Val="top"/></Config></FileSet></FileSets></Project>';
+    await fs.writeFile(xpr, text);
+    await f.projects.select({ kind: 'vivado', path: xpr });
+    assert.equal(await f.projects.vivadoSelection.current(), xpr);
+    await fs.unlink(xpr);
+    await assert.rejects(f.projects.vivadoSelection.current(), /已不存在/);
+    const alt = path.join(f.root, 'alt.xpr');
+    await fs.writeFile(alt, text);
+    await f.projects.select({ kind: 'vivado', path: alt });
+    assert.equal(await f.projects.vivadoSelection.current(), alt);
+});

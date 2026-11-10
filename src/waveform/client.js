@@ -19,6 +19,8 @@
     const pending = new Map();
     let requestId = 0, paintPending = false, staticDirty = true, filtered = [], windowBusy = false, windowWanted = null;
     let valuesBusy = false, valuesWanted = null, valuesKey = '', edgeVersion = 0, menu = null, groupDialog = null;
+    // 宿主在 metadata 就绪前后都可能送来同名布局；未初始化时先挂起，initialize 末尾统一消费。
+    let pendingAutoLayout = null;
     let timeNavigation;
     const gestures = window.createWaveRowGestures({ canvas, tracks, state, model: M, renderer,
         refreshRows, commitRows: rebuildRows, paint, onSelection: applySelection,
@@ -505,6 +507,9 @@
         memory.refresh(state.cursorA, state.cursorB, state.secondsPerTick);
         memory.initialize(metadata.vars, saved?.fileKey === BOOT.fileKey ? saved.memory : null);
         applyColumnLayout(); filterCatalog(); rebuildRows();
+        const auto = pendingAutoLayout;
+        pendingAutoLayout = null;
+        if (auto) autoApplyLayout(auto);
         if (!BOOT.metadata) api.postMessage({ type: 'initialized', signals: metadata.vars.length, rows: state.rows.length });
     }
     function applyLayout(layout) {
@@ -519,12 +524,20 @@
         $('layoutReport').hidden = !missing.length; $('layoutReport').textContent = `布局：${missing.length} 条未匹配 ·`;
         $('layoutReport').title = missing.join('\n');
     }
+    // 自动加载同名布局：先在一次性映射上探测匹配数，0 命中视为同名巧合，静默保留默认视图。
+    function autoApplyLayout(layout) {
+        if (!Array.isArray(layout?.tracks) || !layout.tracks.length) return;
+        const probe = new Map([...state.signals].filter(([, signal]) => !signal.parentKey));
+        if (layout.tracks.length - S.restore(layout, probe, state.metadata).missing.length <= 0) return;
+        applyLayout(layout);
+    }
     window.addEventListener('message', event => {
         const message = event.data;
         if(circuitLink.receive(message))return;
         if (message.type === 'response') { const promise = pending.get(message.requestId); if (!promise) return; pending.delete(message.requestId);
             if (message.error) promise.reject(new Error(message.error)); else promise.resolve(message.result); }
         else if (message.type === 'init') initialize(message.metadata);
+        else if (message.type === 'layout-auto') { if (state.metadata) autoApplyLayout(message.layout); else pendingAutoLayout = message.layout; }
         else if (message.type === 'roles' && state.metadata) {
             if (message.vars) { persist(); initialize({ ...state.metadata, vars: message.vars, sourceRoleNote: message.sourceRoleNote }); return; }
             const roles = new Map(message.roles.map(item => [item.path, item]));

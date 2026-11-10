@@ -9,6 +9,7 @@ const { createHash } = require('node:crypto');
 const { createRequire } = require('node:module');
 const { pipeline } = require('node:stream/promises');
 const { prepareMarketplace } = require('../scripts/prepare-marketplace');
+const { verifyMarketplace } = require('../scripts/verify-marketplace');
 const dependency = createRequire(require.resolve('@vscode/vsce'));
 
 async function fixture(t, { sameDocumentation = false } = {}) {
@@ -79,4 +80,24 @@ test('拒绝校验值篡改、源码漂移、版本错配及预览tag', async t 
     await assert.rejects(prepareMarketplace(f), /运行文本/);
     await fs.writeFile(path.join(f.assetsDir, 'SHA256SUMS.txt'), '0'.repeat(64) + `  svtools-${f.tag}-win32-x64.vsix\n`);
     await assert.rejects(prepareMarketplace(f), /SHA256/);
+});
+
+test('Open VSX 等待指定 Windows 版本公开并校验下载的字节', async () => {
+    const packageData = Buffer.from('public vsix');
+    const report = { version: '1.2.3', target: 'win32-x64', sha256: createHash('sha256').update(packageData).digest('hex') };
+    const metadata = 'https://open-vsx.org/api/JayceVane/svtools/win32-x64/1.2.3';
+    const download = metadata + '/file/JayceVane.svtools-1.2.3@win32-x64.vsix';
+    const release = { namespace: 'JayceVane', name: 'svtools', version: report.version, targetPlatform: report.target, files: { download } };
+    const requests = [];
+    const fetchImpl = async input => {
+        requests.push(String(input));
+        if (requests.length === 1) return new Response(null, { status: 404 });
+        return String(input) === metadata ? Response.json(release) : new Response(packageData);
+    };
+    const options = { store: 'open-vsx', attempts: 2, delayMs: 0, fetchImpl };
+    assert.equal((await verifyMarketplace(report, options)).verified, true);
+    assert.deepEqual(requests, [metadata, metadata, download]);
+    await assert.rejects(verifyMarketplace({ ...report, sha256: '0'.repeat(64) }, options), /SHA256不一致/);
+    release.targetPlatform = 'universal';
+    await assert.rejects(verifyMarketplace(report, options), /非预期扩展、版本或目标平台/);
 });

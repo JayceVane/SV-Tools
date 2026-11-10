@@ -2,6 +2,7 @@
 'use strict';
 const { parseArgs } = require('node:util');
 const services = require('../agent/operations');
+const workflow = require('../design/workflow');
 const tasks = require('../agent/tasks');
 const vivado = require('../agent/vivado');
 const { fail, failure } = require('../agent/protocol');
@@ -17,6 +18,32 @@ const help=`SV Tools headless CLI (API 1)
   vivado status
   vivado report timing|utilization|drc [--run synth_1|impl_1]
   vivado run [--run synth_1|impl_1] [--jobs <n>]
+  design arch --top <module> [--depth <n>] [--save <name>]
+  design plan --spec <json|file> [--plan svtools.design.json]
+  design tasks [--plan <file>]
+  design plan-report [--plan <file>] [--out <file.md>] [--force]
+  design claim|submit|return|review --module <id> --actor <name> --revision <n>
+       [--role design|verification] [--token <claim-token>] [--evidence <file>] [--reason <text>]
+  design evidence --module <id> --evidence <file>
+  design scaffold --spec <json|file> [--out <dir>] [--force]
+  design render --top <module> [--format svg] [--style document|presentation] [--out <dir>] [--title <t>]
+                [--detail interfaces|signals] [--boundary-layout auto|ends] [--fold-ports] [--bundle-name <prefix=display>] (repeatable)
+  design check --top <module>
+  design diff --top <module> --baseline <save-name|snapshot-file>
+  design report --top <module> [--out <dir>] [--style document|presentation] [--title <t>] [--boundary-layout auto|ends] (SVG+PNG+json+md bundle)
+  wave signals --file <vcd> [--query <q>] [--scope <s>] [--role input|output|inout|internal]
+              [--min-width <n>] [--max-width <n>] [--limit <n>]
+  wave values --file <vcd> --signals <a,b> --at <ticks|10ns>
+  wave changes --file <vcd> --signals <a,b> [--from <t>] [--to <t>] [--limit <n>]
+  wave edges --file <vcd> --signal <s> [--bit <i>] [--kind any|rise|fall|x|z] [--from <t>] [--to <t>]
+  wave glitches --file <vcd|fst> --signals <a,b> [--from <t>] [--to <t>] [--limit <n>] [--max-values <n>]
+  wave stats --file <vcd|fst> --signals <a,b> [--from <t>] [--to <t>]
+  wave timeline --file <vcd|fst> --signals <a,b> [--from <t>] [--to <t>] [--limit <n>]
+  wave sample --file <vcd> --clock <c> [--clock-edge rise|fall|both] --signals <a,b> [--where <cond>]
+              [--from <t>] [--to <t>] [--limit <n>]   (--where e.g. "dut.q != 8'hA5", "bus contains-x")
+  wave diff --file <a.vcd> --against <b.vcd> [--signals <a,b>] [--from <t>] [--to <t>] [--limit <n>]
+  wave export --file <vcd> --signals <a,b> --out <dir> [--from <t>] [--to <t>] [--at <t>] [--at-b <t>]
+              [--format svg|png|csv|layout] [--title <t>] [--force] (image/csv, or .svwave.json layout; layout 可省 --out)
   task start lint [lint options]
   task list|status|logs|cancel [task-id]
 
@@ -31,21 +58,26 @@ Output:  JSON on stdout; --help and --version return text.
 Node.js >=22. The existing Rust formatter CLI remains available in bin/.
 `;
 function argumentsFor(argv) {
-    const strings=['workspace','config','project','fileset','file','top','iverilog','cygwin','vivado','standard','run','timeout','offset','limit','log-index','max-paths','jobs','name','dir','part','sim-top','target-fileset'];
+    const strings=['workspace','config','project','fileset','file','top','iverilog','cygwin','vivado','standard','run','timeout','offset','limit','log-index','max-paths','jobs','name','dir','part','sim-top','target-fileset','depth','save','spec','format','out','title','style','detail','boundary-layout','baseline','against','clock','query','scope','role','bit','at','at-b','from','to','signal','signals','min-width','max-width','clock-edge','kind','max-values','plan','module','actor','revision','token','evidence','reason'];
     const options=Object.fromEntries(strings.map(name=>[name,{type:'string'}]));
-    for(const name of ['help','version','json','write','check']) options[name]={type:'boolean'};
+    for(const name of ['help','version','json','write','check','fold-ports','force']) options[name]={type:'boolean'};
     options.include={type:'string',multiple:true}; options.define={type:'string',multiple:true}; options.source={type:'string',multiple:true};
+    options['bundle-name']={type:'string',multiple:true}; options.where={type:'string',multiple:true};
     let parsed;
     try { parsed=parseArgs({args:argv,options,allowPositionals:true,strict:true}); }
     catch(error) { fail('INVALID_ARGUMENT',error.message); }
     const input={...parsed.values};
-    for(const [from,to] of [['timeout','timeoutMs'],['log-index','logIndex'],['max-paths','maxPaths'],['jobs','jobs'],['sim-top','simTop'],['source','sources'],['target-fileset','filesetTarget']]) if(input[from]!==undefined) {input[to]=input[from]; delete input[from];}
-    for(const field of ['timeoutMs','offset','limit','logIndex','maxPaths','jobs']) if(input[field]!==undefined) {
+    for(const [from,to] of [['timeout','timeoutMs'],['log-index','logIndex'],['max-paths','maxPaths'],['sim-top','simTop'],['source','sources'],['target-fileset','filesetTarget'],['clock-edge','clockEdge'],['min-width','minWidth'],['max-width','maxWidth'],['at-b','atB'],['max-values','maxValues'],['boundary-layout','boundaryLayout']]) if(input[from]!==undefined) {input[to]=input[from]; delete input[from];}
+    for(const field of ['timeoutMs','offset','limit','logIndex','maxPaths','jobs','depth','maxValues','revision']) if(input[field]!==undefined) {
         if(!/^\d+$/.test(input[field]) || !Number.isSafeInteger(Number(input[field]))) fail('INVALID_ARGUMENT',field+'必须为非负整数');
         input[field]=Number(input[field]);
     }
     if(input.include) {input.includeDirs=input.include;delete input.include;}
     if(input.define) {input.defines=input.define;delete input.define;}
+    if(input['fold-ports']!==undefined) {input.foldPorts=input['fold-ports'];delete input['fold-ports'];}
+    // --format 是导出图像格式；配置层的 format（格式化选项对象）是另一个命名空间，进服务前改名避免冲突。
+    if(input.format!==undefined) {input.imageFormat=input.format;delete input.format;}
+    if(input['bundle-name']!==undefined) {input.bundleNames=input['bundle-name'];delete input['bundle-name'];}
     return {input,positionals:parsed.positionals};
 }
 async function run(argv) {
@@ -57,7 +89,7 @@ async function run(argv) {
         const [command,action,id,...extra]=positionals; let output;
         if(extra.length) fail('INVALID_ARGUMENT','位置参数过多');
         if(command!=='format' && (input.write || input.check)) fail('INVALID_ARGUMENT','--write与--check仅用于format');
-        operation=command==='project' || command==='task'?command+'.'+action:command;
+        operation=command==='project' || command==='task' || command==='design' || command==='wave'?command+'.'+action:command;
         if(command==='doctor' && !action) output=await services.doctor(input);
         else if(command==='project' && !id && ['list','inspect'].includes(action)) output=await services[action==='list'?'projects':'inspect'](input);
         else if(command==='project' && action==='create' && !id) output=await vivado.createProject(input);
@@ -67,6 +99,18 @@ async function run(argv) {
         else if(command==='vivado' && action==='status' && !id) output=await vivado.status(input);
         else if(command==='vivado' && action==='report' && ['timing','utilization','drc'].includes(id)) output=await vivado.report({...input,kind:id});
         else if(command==='vivado' && action==='run' && !id) output=await tasks.start({...input,operation:'vivado.run'});
+        else if(command==='design' && action==='plan' && !id) output=await workflow.createPlan(input);
+        else if(command==='design' && action==='plan-report' && !id) output=await workflow.planReport(input);
+        else if(command==='design' && action==='tasks' && !id) output=await workflow.tasks(input);
+        else if(command==='design' && action==='evidence' && !id) output=await workflow.checkEvidence(input);
+        else if(command==='design' && ['claim','submit','return','review'].includes(action) && !id) output=await workflow.mutate(action,input);
+        else if(command==='design' && action==='arch' && !id) output=await services.arch(input);
+        else if(command==='design' && action==='scaffold' && !id) output=await services.scaffold(input);
+        else if(command==='design' && action==='render' && !id) output=await services.render(input);
+        else if(command==='design' && action==='check' && !id) output=await services.check(input);
+        else if(command==='design' && action==='diff' && !id) output=await services.diff(input);
+        else if(command==='design' && action==='report' && !id) output=await services.report(input);
+        else if(command==='wave' && !id && ['signals','values','changes','edges','glitches','stats','timeline','sample','diff','export'].includes(action)) output=await services[{signals:'waveSignals',values:'waveValues',changes:'waveChanges',edges:'waveEdges',glitches:'waveGlitches',stats:'waveStats',timeline:'waveTimeline',sample:'waveSample',diff:'waveDiff',export:'waveExport'}[action]](input);
         else if(command==='lint' && !action) {
             const controller=new AbortController(), cancel=()=>controller.abort();
             process.once('SIGINT',cancel);process.once('SIGTERM',cancel);

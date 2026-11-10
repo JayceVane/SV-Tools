@@ -23,7 +23,7 @@ ${assets.shared['image-export.css']}</style></head><body>
 <header><div class="heading"><h1 id="designTitle">电路结构</h1><div id="provenance" class="muted">正在连接设计数据</div></div></header>
 <div class="toolbar" role="toolbar" aria-label="电路导航">
 <button id="back" disabled title="返回上一级 Alt + ←">← 返回</button><button id="home" disabled title="返回顶层">顶层</button>
-<select id="modules" aria-label="选择模块" disabled><option>等待设计</option></select><span class="divider"></span>
+<select id="modules" aria-label="选择模块" disabled><option>等待设计</option></select><select id="boundaryLayout" aria-label="接口布局" title="设置模块的顶层接口位置" disabled><option value="auto">接口：自动</option><option value="ends">接口：两端</option></select><span class="divider"></span>
 <button id="fit" title="适配画布 F">适配 F</button><button id="zoomOut" title="缩小 −" aria-label="缩小">−</button><button id="zoomIn" title="放大 +" aria-label="放大">＋</button><span id="zoom" class="zoomValue">—</span><button id="toggleMinimap" aria-pressed="false" title="显示或隐藏导航小地图">小地图</button><button id="toggleInspector" aria-pressed="false" title="显示或隐藏对象属性">属性</button><button id="waveLinkSetup" disabled title="人工确认电路顶层与已打开VCD的根层级">关联波形…</button><button id="traceChoose" disabled title="从实际网表中选择信号，打开局部追踪">追踪信号…</button>
 <span class="grow"></span><div class="searchBox"><input id="search" type="search" aria-label="搜索单元、端口或网络" placeholder="搜索单元 / 网络"><span id="searchCount" aria-live="polite"></span><button id="nextMatch" title="下一个匹配 Enter" disabled aria-label="下一个搜索匹配">↓</button></div><button id="exportImage" disabled title="导出当前电路视图，选择文档黑白或当前主题">导出图片</button><button id="reload" title="重新读取当前设计">刷新</button>
 </div>

@@ -14,6 +14,8 @@ const { runVivadoBatchTask } = require('../src/vivado/batch');
 const { activateIverilog } = require('../src/toolchains/iverilog');
 const { defaultVcdPath } = require('../src/toolchains/waveform-paths');
 const defaults = require('../package.json').contributes.configuration.properties;
+const fstFixture = require('node:fs').readFileSync(path.join(__dirname, 'fixtures/waveform/hierarchy.fst'));
+const vcdTrace = text => '$comment ' + text + ' $end\n';
 
 /** 协议工具是真实 Node 子进程；它测试驱动边界，不冒充厂商编译器。 */
 const DRIVER = `const fs=require('node:fs'),path=require('node:path');
@@ -30,8 +32,19 @@ if(mode==='exit'){console.log('unrecognized tool failure');process.exit(7);}
 if(mode==='inspect')console.log('INPUT '+JSON.stringify({cwd:process.cwd(),source}));
 if(tool==='iverilog'){const index=rest.indexOf('-o');if(index>=0)fs.writeFileSync(rest[index+1],'compiled');}
 if(tool==='vvp'){if(mode==='argcheck'){const input=rest.findIndex(arg=>arg.endsWith('.vvp'));const extended=rest.slice(input+1);console.log('RUNTIME '+JSON.stringify({flags:rest.slice(0,input),input:rest[input],extended,trace:extended.includes('+trace'),seed:extended.find(arg=>arg.startsWith('+seed='))?.slice(6)}));}fs.writeFileSync('vvp-started','yes');if(mode==='wave'||mode==='runtimefailwave')fs.writeFileSync('run.vcd','$timescale 1ns $end $var wire 1 ! clk $end $enddefinitions $end #0 0!');if(mode==='runtimefailwave')process.exitCode=3;}
-if(tool==='vvp'&&mode==='archive'){for(const wave of JSON.parse(fs.readFileSync(path.join(__dirname,'wave-plan.json'),'utf8'))){fs.mkdirSync(path.dirname(wave.file),{recursive:true});fs.writeFileSync(wave.file,wave.text);}}
-if(tool==='vivado'){console.log('SVTOOLS_TEST_MARKER preserved');if(mode==='error')console.log('ERROR: real failure despite exit zero');process.stdout.write('noise '.repeat(1000)+'\\n');}
+if(tool==='vvp'&&mode==='archive'){for(const wave of JSON.parse(fs.readFileSync(path.join(__dirname,'wave-plan.json'),'utf8'))){fs.mkdirSync(path.dirname(wave.file),{recursive:true});fs.writeFileSync(wave.file,wave.bytes ? Buffer.from(wave.bytes,'hex') : wave.text);}}
+if(tool==='vivado'){
+    console.log('SVTOOLS_TEST_MARKER preserved');
+    if(mode==='error')console.log('ERROR: real failure despite exit zero');
+    if(mode==='xsim-assert'){
+        console.log('Error: BOUND_ASSERTION tb.u_a.bound_monitor');
+        console.log('Time: 5 ns  Iteration: 1  Scope: tb.u_a.bound_monitor  File: tb.sv Line: 6');
+        console.log('Critical Warning: sample warning');
+        console.log('INFO: Error: quoted by Tcl');
+        console.log('SVTOOLS_SIM_DONE');
+    }
+    process.stdout.write('noise '.repeat(1000)+'\\n');
+}
 `;
 
 async function fixture(t) {
@@ -179,6 +192,25 @@ test('Vivado退出0但早期ERROR仍失败；早期项目标记在大量输出�
     await task.finish(); await manager.dispose();
 });
 
+test('XSim 的 Error 诊断使退出码 0 的 Vivado 仿真判定失败', async t => {
+    const f = await fixture(t), manager = createToolTaskManager(), task = manager.start('vivado');
+    try {
+        await task.directory(f.root);
+        const result = await runVivadoBatchTask({ task, executable: process.execPath, args: [f.driver, 'vivado', 'xsim-assert'],
+            cwd: f.root, scriptPath: f.file });
+        assert.equal(result.exitCode, 0);
+        assert.equal(result.status, 'failed');
+        assert.equal(result.code, -1);
+        assert.equal(result.totalErrorCount, 1);
+        assert.equal(result.warningCount, 1);
+        assert.deepEqual(result.issues, [
+            { level: 'ERROR', text: 'BOUND_ASSERTION tb.u_a.bound_monitor' },
+            { level: 'CRITICAL WARNING', text: 'sample warning' }
+        ]);
+        assert.match(result.stdout, /SVTOOLS_SIM_DONE/);
+    } finally { await task.finish(); await manager.dispose(); }
+});
+
 function editorHarness(f, getToolchain, options = {}) {
     const handlers = new Map(), commands = new Map(), messages = [], waves = [], bars = [], problems = new Map();
     const doc = document(f.file), config = { lintOnOpen: false, lintOnSave: false, lintOnChange: false, ...options.config };
@@ -194,7 +226,7 @@ function editorHarness(f, getToolchain, options = {}) {
             showErrorMessage: text => { messages.push(text); return Promise.resolve(); }, setStatusBarMessage: text => messages.push(text) },
         workspace: { textDocuments: options.documents || [doc], workspaceFolders: [{ uri: uri(f.root) }], getWorkspaceFolder: () => ({ uri: uri(f.root) }),
             getConfiguration: (namespace, resource) => configuration(namespace, namespace === 'svtools.iverilog' ? { ...config, ...options.configForUri?.(resource) }
-                : namespace === 'svtools.lint' ? options.lintConfig || {} : {}), findFiles: async () => [] },
+                : namespace === 'svtools.lint' ? options.lintConfig || {} : namespace === 'svtools.waveform' ? options.waveformConfig || {} : {}), findFiles: async () => [] },
         commands: { registerCommand(name, handler) { commands.set(name, handler); return disposable(); }, executeCommand: async () => {} } };
     for (const name of ['onDidOpenTextDocument','onDidChangeTextDocument','onDidSaveTextDocument','onDidCloseTextDocument','onDidChangeConfiguration','onDidCreateFiles','onDidDeleteFiles','onDidRenameFiles']) {
         vscode.workspace[name] = handler => { handlers.set(name, handler); return disposable(); };
@@ -276,19 +308,28 @@ for (const engine of ['iverilog', 'xvlog']) test(`当前文件模式隐藏外部
 });
 
 test('修改依赖立即撤销旧错误；依赖未保存时不重新检查读取磁盘的上游', async t => {
-    const f = await fixture(t); let mode = 'dep', probes = 0;
-    const h = editorHarness(f, async () => { probes++; return protocolToolchain(f, mode); },
+    const f = await fixture(t); let mode = 'dep';
+    const checked = [];
+    const h = editorHarness(f, async task => { checked.push(task); return protocolToolchain(f, mode); },
         { config: { lintOnChange: true, lintOnSave: true, lintDebounceMs: 100 }, lintConfig: { currentFileOnly: false } });
     try {
         await h.api.lintDocument(h.doc);
         const dependency = document(path.join(f.root, 'dependency.sv'));
+        const upstream = 'lint:' + h.doc.uri.toString(), dependencyKey = 'lint:' + dependency.uri.toString();
         h.vscode.workspace.textDocuments.push(dependency); dependency.version++;
         h.handlers.get('onDidChangeTextDocument')({ document: dependency, contentChanges: [{}] });
         assert.deepEqual(h.problems.get(dependency.uri.fsPath), []);
-        mode = 'ok'; await waitFor(() => probes === 2); await delay(150);
-        assert.equal(probes, 2); // 只检查依赖的缓冲区；上游要等待保存。
+        mode = 'ok';
+        await waitFor(() => checked.some(task => task.key === dependencyKey));
+        await checked.find(task => task.key === dependencyKey).completion;
+        assert.deepEqual(checked.map(task => task.key), [upstream, dependencyKey]);
+
         dependency.isDirty = false; h.handlers.get('onDidSaveTextDocument')(dependency);
-        await waitFor(() => probes >= 4); await delay(150);
+        // 保存可能合并同版本的依赖检查。只验证上游确实重新检查。
+        let recheck;
+        await waitFor(() => { recheck = checked.find((task, index) => index > 0 && task.key === upstream); return !!recheck; });
+        await recheck.completion;
+        assert.equal(recheck.lastResult?.code, 0);
         assert.deepEqual(h.problems.get(dependency.uri.fsPath), []);
     } finally { await h.api.dispose(); }
 });
@@ -575,7 +616,7 @@ test('Icarus显式VCD归档到工作区，重跑路径稳定，关闭原文件�
     await fs.writeFile(f.file, source);
     const original = path.join(sourceDir, 'waves', 'capture.vcd');
     const target = defaultVcdPath({ root: f.root, sourceFile: f.file, engine: 'iverilog', dumpFile: original });
-    await fs.writeFile(path.join(f.root, 'wave-plan.json'), JSON.stringify([{ file: original, text: 'first trace' }]));
+    await fs.writeFile(path.join(f.root, 'wave-plan.json'), JSON.stringify([{ file: original, text: vcdTrace('first trace') }]));
     let released = false;
     const prepared = [], opened = [];
     const h = editorHarness(f, async () => ({ ...protocolToolchain(f, 'ok'), vvpPrefix: [f.driver, 'vvp', 'archive'] }), {
@@ -588,14 +629,35 @@ test('Icarus显式VCD归档到工作区，重跑路径稳定，关闭原文件�
         const first = await h.api.runSimulation(h.doc); assert.equal(first.ok, true);
         assert.deepEqual(first.waves, [target]); assert.deepEqual(opened, [target]);
         assert.equal(path.dirname(target), path.join(f.root, '.svtools', 'vcd'));
-        assert.equal(await fs.readFile(target, 'utf8'), 'first trace');
+        assert.equal(await fs.readFile(target, 'utf8'), vcdTrace('first trace'));
         await assert.rejects(fs.stat(original), { code: 'ENOENT' });
         assert.ok(prepared[0].paths.includes(original)); assert.ok(prepared[0].paths.includes(target));
         assert.equal(await fs.readFile(f.file, 'utf8'), source);
         assert.equal(await fs.readFile(path.join(sourceDir, 'vvp-started'), 'utf8'), 'yes');
-        await fs.writeFile(path.join(f.root, 'wave-plan.json'), JSON.stringify([{ file: original, text: 'second trace' }]));
+        await fs.writeFile(path.join(f.root, 'wave-plan.json'), JSON.stringify([{ file: original, text: vcdTrace('second trace') }]));
         const second = await h.api.runSimulation(h.doc); assert.equal(second.ok, true);
-        assert.deepEqual(second.waves, [target]); assert.equal(await fs.readFile(target, 'utf8'), 'second trace');
+        assert.deepEqual(second.waves, [target]); assert.equal(await fs.readFile(target, 'utf8'), vcdTrace('second trace'));
+    } finally { await h.api.dispose(); }
+});
+
+test('Icarus FST直接倾倒同样归档进.svtools/vcd并保留后缀，与VCD归档名互不冲突', async t => {
+    const f = await fixture(t), sourceDir = path.join(f.root, 'sim');
+    await fs.mkdir(sourceDir); f.file = path.join(sourceDir, 'tb.sv');
+    // 使用 FST 文件内容，模拟 vvp 在原生 FST 模式直接写出的产物。
+    await fs.writeFile(f.file, 'module tb; initial begin $dumpfile("tb.fst"); $dumpvars(0,tb); end endmodule\n');
+    const original = path.join(sourceDir, 'tb.fst');
+    const target = defaultVcdPath({ root: f.root, sourceFile: f.file, engine: 'iverilog', dumpFile: original, extension: '.fst' });
+    assert.match(path.basename(target), /^tb-[a-f0-9]{12}-iverilog\.fst$/);
+    await fs.writeFile(path.join(f.root, 'wave-plan.json'), JSON.stringify([{ file: original, bytes: fstFixture.toString('hex') }]));
+    const opened = [];
+    const h = editorHarness(f, async () => ({ ...protocolToolchain(f, 'ok'), vvpPrefix: [f.driver, 'vvp', 'archive'] }), {
+        waveViewer: { async prepareForSimulation() { return { dispose() {} }; }, async openWaveform(file) { opened.push(file); } }
+    });
+    try {
+        const result = await h.api.runSimulation(h.doc); assert.equal(result.ok, true);
+        assert.deepEqual(result.waves, [target]); assert.deepEqual(opened, [target]);
+        assert.deepEqual(await fs.readFile(target), fstFixture);
+        await assert.rejects(fs.stat(original), { code: 'ENOENT' }, '源目录的 FST 已被归档移走');
     } finally { await h.api.dispose(); }
 });
 
@@ -605,7 +667,7 @@ test('动态VCD归档前保护新目标，同名子目录输出互不覆盖，�
     await fs.writeFile(f.file, 'module main; initial begin $dumpfile("a/capture.vcd"); $dumpfile("b/capture.vcd"); $dumpvars; end endmodule\n');
     const dynamic = path.join(f.root, 'dynamic.vcd'), untouched = path.join(f.root, 'old.vcd');
     await fs.writeFile(untouched, 'old');
-    await fs.writeFile(path.join(f.root, 'wave-plan.json'), JSON.stringify([...files, dynamic].map((file, i) => ({ file, text: 'trace ' + i }))));
+    await fs.writeFile(path.join(f.root, 'wave-plan.json'), JSON.stringify([...files, dynamic].map((file, i) => ({ file, text: vcdTrace('trace ' + i) }))));
     const prepared = [];
     const h = editorHarness(f, async () => ({ ...protocolToolchain(f, 'ok'), vvpPrefix: [f.driver, 'vvp', 'archive'] }), {
         waveViewer: { async prepareForSimulation(options) { prepared.push(options); return { dispose() {} }; }, openWaveform() {} }
@@ -614,7 +676,7 @@ test('动态VCD归档前保护新目标，同名子目录输出互不覆盖，�
         const result = await h.api.runSimulation(h.doc); assert.equal(result.ok, true);
         const targets = [...files, dynamic].map(dumpFile => defaultVcdPath({ root: f.root, sourceFile: f.file, engine: 'iverilog', dumpFile }));
         assert.deepEqual(new Set(result.waves), new Set(targets)); assert.equal(new Set(targets).size, 3);
-        for (let i = 0; i < targets.length; i++) assert.equal(await fs.readFile(targets[i], 'utf8'), 'trace ' + i);
+        for (let i = 0; i < targets.length; i++) assert.equal(await fs.readFile(targets[i], 'utf8'), vcdTrace('trace ' + i));
         assert.equal(await fs.readFile(untouched, 'utf8'), 'old');
         assert.ok(prepared[0].paths.includes(targets[0])); assert.ok(prepared[0].paths.includes(targets[1]));
         assert.ok(prepared[1].paths.includes(targets[2]));
@@ -625,7 +687,7 @@ test('归档目标被占用或不可写时保留原始VCD并报告失败，不�
     for (const blockedByReader of [true, false]) {
         const f = await fixture(t), original = path.join(f.root, 'dynamic.vcd');
         const target = defaultVcdPath({ root: f.root, sourceFile: f.file, engine: 'iverilog', dumpFile: original });
-        await fs.writeFile(path.join(f.root, 'wave-plan.json'), JSON.stringify([{ file: original, text: 'keep trace' }]));
+        await fs.writeFile(path.join(f.root, 'wave-plan.json'), JSON.stringify([{ file: original, text: vcdTrace('keep trace') }]));
         if (!blockedByReader) await fs.mkdir(target, { recursive: true });
         let released = 0, calls = 0;
         const h = editorHarness(f, async () => ({ ...protocolToolchain(f, 'ok'), vvpPrefix: [f.driver, 'vvp', 'archive'] }), {
@@ -636,9 +698,9 @@ test('归档目标被占用或不可写时保留原始VCD并报告失败，不�
         });
         try {
             const result = await h.api.runSimulation(h.doc); assert.equal(result.status, 'failed');
-            assert.equal(await fs.readFile(original, 'utf8'), 'keep trace'); assert.deepEqual(h.waves, []);
+            assert.equal(await fs.readFile(original, 'utf8'), vcdTrace('keep trace')); assert.deepEqual(h.waves, []);
             assert.equal(released, blockedByReader ? 1 : 2);
-            assert.ok(h.messages.some(line => typeof line === 'string' && line.includes(blockedByReader ? 'archive reader' : 'VCD归档失败')));
+            assert.ok(h.messages.some(line => typeof line === 'string' && line.includes(blockedByReader ? 'archive reader' : '波形归档失败')));
         } finally { await h.api.dispose(); }
     }
 });
@@ -646,31 +708,53 @@ test('归档目标被占用或不可写时保留原始VCD并报告失败，不�
 test('跨卷VCD先完整复制再替换目标，原文件仅在归档成功后移除', async t => {
     const f = await fixture(t), original = path.join(f.root, 'capture.vcd');
     const target = defaultVcdPath({ root: f.root, sourceFile: f.file, engine: 'iverilog', dumpFile: original });
-    await fs.writeFile(path.join(f.root, 'wave-plan.json'), JSON.stringify([{ file: original, text: 'complete trace' }]));
+    await fs.writeFile(path.join(f.root, 'wave-plan.json'), JSON.stringify([{ file: original, text: vcdTrace('complete trace') }]));
     const rename = fs.rename; let copied = false;
     t.mock.method(fs, 'rename', async (from, to) => {
         if (from === original) throw Object.assign(new Error('different volume'), { code: 'EXDEV' });
-        assert.equal(await fs.readFile(original, 'utf8'), 'complete trace');
-        assert.equal(await fs.readFile(from, 'utf8'), 'complete trace'); copied = true;
+        assert.equal(await fs.readFile(original, 'utf8'), vcdTrace('complete trace'));
+        assert.equal(await fs.readFile(from, 'utf8'), vcdTrace('complete trace')); copied = true;
         return rename(from, to);
     });
     const h = editorHarness(f, async () => ({ ...protocolToolchain(f, 'ok'), vvpPrefix: [f.driver, 'vvp', 'archive'] }));
     try {
         const result = await h.api.runSimulation(h.doc); assert.equal(result.ok, true); assert.equal(copied, true);
-        assert.deepEqual(result.waves, [target]); assert.equal(await fs.readFile(target, 'utf8'), 'complete trace');
+        assert.deepEqual(result.waves, [target]); assert.equal(await fs.readFile(target, 'utf8'), vcdTrace('complete trace'));
         await assert.rejects(fs.stat(original), { code: 'ENOENT' });
         assert.deepEqual(await fs.readdir(path.dirname(target)), [path.basename(target)]);
     } finally { await h.api.dispose(); }
 });
 
-test('显式FST模式保留原输出位置，即使文件名后缀为vcd也不按VCD归档', async t => {
+test('Icarus按内容决定后缀并保护目标；非VCD/FST的输出保留原位', async t => {
     const f = await fixture(t), original = path.join(f.root, 'capture.vcd');
-    await fs.writeFile(path.join(f.root, 'wave-plan.json'), JSON.stringify([{ file: original, text: 'FST data' }]));
-    const h = editorHarness(f, async () => ({ ...protocolToolchain(f, 'ok'), vvpPrefix: [f.driver, 'vvp', 'archive'] }), { config: { simArgs: ['-fst'] } });
+    const mislabeled = path.join(f.root, 'other.fst'), lxt = path.join(f.root, 'third.vcd');
+    const lxtBytes = Buffer.from('138000014000000001', 'hex');
+    const options = { root: f.root, sourceFile: f.file, engine: 'iverilog' };
+    const vcdPath = defaultVcdPath({ ...options, dumpFile: original });
+    const fstPath = defaultVcdPath({ ...options, dumpFile: original, extension: '.fst' });
+    const otherPath = defaultVcdPath({ ...options, dumpFile: mislabeled });
+    const prepared = [], opened = [];
+    const h = editorHarness(f, async () => ({ ...protocolToolchain(f, 'ok'), vvpPrefix: [f.driver, 'vvp', 'archive'] }), {
+        config: { simArgs: ['-fst'] }, waveViewer: {
+            async prepareForSimulation(lease) { prepared.push(...lease.paths); return { dispose() {} }; },
+            async openWaveform(file) { opened.push(file); }
+        }
+    });
+    const run = async outputs => {
+        await fs.writeFile(path.join(f.root, 'wave-plan.json'), JSON.stringify(outputs));
+        const result = await h.api.runSimulation(h.doc); assert.equal(result.ok, true); return result.waves;
+    };
     try {
-        const result = await h.api.runSimulation(h.doc); assert.equal(result.ok, true);
-        assert.deepEqual(result.waves, [original]); assert.equal(await fs.readFile(original, 'utf8'), 'FST data');
-        await assert.rejects(fs.stat(path.join(f.root, '.svtools', 'vcd')), { code: 'ENOENT' });
+        assert.deepEqual(await run([{ file: original, text: vcdTrace('first') }]), [vcdPath]);
+        assert.deepEqual(await run([{ file: original, bytes: fstFixture.toString('hex') }]), [fstPath]);
+        assert.equal(await fs.readFile(vcdPath, 'utf8'), vcdTrace('first'));
+        assert.deepEqual(await fs.readFile(fstPath), fstFixture);
+        assert.notEqual(fstPath, vcdPath.replace(/\.vcd$/, '.fst'), '原生 FST 不覆盖转换产物');
+        assert.deepEqual(await run([{ file: mislabeled, text: vcdTrace('wrong suffix') }]), [otherPath]);
+        assert.deepEqual(await run([{ file: lxt, bytes: lxtBytes.toString('hex') }]), [lxt]);
+        assert.deepEqual(await fs.readFile(lxt), lxtBytes);
+        assert.deepEqual(opened, [vcdPath, fstPath, otherPath]);
+        for (const target of opened) assert.ok(prepared.includes(target));
     } finally { await h.api.dispose(); }
 });
 
@@ -720,4 +804,80 @@ test('任务结束后自动封顶到配置数量；keep=0关闭清理', async t 
     await keepAll.dispose();
     assert.equal(path.dirname(path.resolve(root)), path.resolve(os.tmpdir()));
     assert.ok(path.basename(root).startsWith('svtools-retention-mgr-')); await fs.rm(root, { recursive: true, force: true });
+});
+
+
+for (const mode of ['-fst', '-fst-speed', '-fst-space', 'environment']) {
+    test('FST仿真默认输出被预先保护并归档保留后缀，完成后自动打开：' + mode, async t => {
+        const f = await fixture(t), original = path.join(f.root, 'dump.fst');
+        await fs.writeFile(f.file, 'module main; initial $dumpvars(0,main); endmodule');
+        await fs.writeFile(path.join(f.root, 'wave-plan.json'), JSON.stringify([{ file: original, bytes: fstFixture.toString('hex') }]));
+        let prepared, released = false;
+        const opened = [];
+        const h = editorHarness(f, async () => ({ ...protocolToolchain(f, 'ok'),
+            vvpPrefix: [f.driver, 'vvp', 'archive'],
+            env: { ...process.env, IVERILOG_DUMPER: mode === 'environment' ? 'fst' : 'vcd' }
+        }), { config: { simArgs: mode === 'environment' ? [] : [mode] }, waveViewer: {
+            async prepareForSimulation(options) { prepared = options; return { dispose() { released = true; } }; },
+            async openWaveform(file) { assert.equal(released, true); opened.push(file); }
+        } });
+        try {
+            const result = await h.api.runSimulation(h.doc);
+            assert.equal(result.ok, true);
+            assert.ok(prepared.paths.includes(original), '启动工具前保护真实 dump.fst');
+            assert.equal(result.waves.length, 1); assert.match(path.basename(result.waves[0]), /^dump-[a-f0-9]{12}-iverilog\.fst$/);
+            assert.deepEqual(opened, result.waves);
+            assert.deepEqual(await fs.readFile(result.waves[0]), fstFixture);
+            await assert.rejects(fs.stat(original), { code: 'ENOENT' });
+        } finally { await h.api.dispose(); }
+    });
+}
+
+test('FST无后缀的显式dumpfile同时保护原名及补后缀路径，产物归档保留后缀', async t => {
+    const f = await fixture(t), original = path.join(f.root, 'waves', 'capture.fst');
+    await fs.writeFile(f.file, 'module main; initial begin $dumpfile("waves/capture"); $dumpvars(0,main); end endmodule');
+    await fs.writeFile(path.join(f.root, 'wave-plan.json'), JSON.stringify([{ file: original, bytes: fstFixture.toString('hex') }]));
+    let prepared;
+    const h = editorHarness(f, async () => ({ ...protocolToolchain(f, 'ok'), vvpPrefix: [f.driver, 'vvp', 'archive'] }), {
+        config: { simArgs: ['-fst'] }, waveViewer: {
+            async prepareForSimulation(options) { prepared = options; return { dispose() {} }; }, async openWaveform() {}
+        }
+    });
+    try {
+        const result = await h.api.runSimulation(h.doc);
+        assert.equal(result.ok, true);
+        assert.ok(prepared.paths.includes(original));
+        assert.equal(result.waves.length, 1); assert.match(path.basename(result.waves[0]), /^capture-[a-f0-9]{12}-iverilog\.fst$/);
+        assert.deepEqual(await fs.readFile(result.waves[0]), fstFixture);
+    } finally { await h.api.dispose(); }
+});
+
+
+test('仿真后按工作区设置自动转FST，再打开转换后的路径', async t => {
+    const f = await fixture(t), original = path.join(f.root, 'capture.vcd');
+    const text = '$timescale 1ns $end $scope module main $end $var wire 1 ! clk $end $upscope $end $enddefinitions $end #0 0! #10 1! #20 0!';
+    await fs.writeFile(f.file, 'module main; initial begin $dumpfile("capture.vcd"); $dumpvars; end endmodule');
+    await fs.writeFile(path.join(f.root,'wave-plan.json'), JSON.stringify([{file:original,text}]));
+    const h = editorHarness(f, async () => ({...protocolToolchain(f,'ok'),vvpPrefix:[f.driver,'vvp','archive']}), {
+        waveformConfig:{convertVcdToFst:true}
+    });
+    try {
+        const result = await h.api.runSimulation(h.doc); assert.equal(result.ok,true);
+        const vcd = defaultVcdPath({root:f.root,sourceFile:f.file,engine:'iverilog',dumpFile:original});
+        assert.deepEqual(result.waves,[vcd.replace(/\.vcd$/i,'.fst')]); assert.deepEqual(h.waves,result.waves);
+        await assert.rejects(fs.stat(original),{code:'ENOENT'}); await assert.rejects(fs.stat(vcd),{code:'ENOENT'});
+        assert.ok(h.messages.some(text => String(text).includes('FST 已保存')));
+    } finally { await h.api.dispose(); }
+});
+
+test('仿真成功但VCD转换失败仍保留仿真通过与原VCD路径', async t => {
+    const f = await fixture(t), original = path.join(f.root,'capture.vcd');
+    await fs.writeFile(f.file,'module main; initial $dumpfile("capture.vcd"); endmodule');
+    await fs.writeFile(path.join(f.root,'wave-plan.json'),JSON.stringify([{file:original,text:'$timescale incomplete trace'}]));
+    const h = editorHarness(f, async () => ({...protocolToolchain(f,'ok'),vvpPrefix:[f.driver,'vvp','archive']}), {waveformConfig:{convertVcdToFst:true}});
+    try {
+        const result = await h.api.runSimulation(h.doc); assert.equal(result.ok,true); assert.match(result.waves[0],/\.vcd$/);
+        assert.equal(await fs.readFile(result.waves[0],'utf8'),'$timescale incomplete trace');
+        assert.ok(h.messages.some(text=>String(text).includes('原波形已保留')));
+    } finally { await h.api.dispose(); }
 });

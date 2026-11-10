@@ -16,13 +16,19 @@ function bindWaveformPanel({ filePath, panel, channel, createSession = options =
     const initialized = new Promise(resolve => { resolveInitialized = resolve; });
     const activity = { window: 0, values: 0, edge: 0 };
     let disposed = false, cancelled = false, ready = false, metadata = null, lastProgress = null, loadError = null;
-    let cursorSubscribed=false;
+    let cursorSubscribed=false, autoLayout = null, autoLayoutSent = false;
     const roleAbort = new AbortController();
     let roleTimer, roleVersion = 0, rolePending = false, roleDirty = false, roleRetries = 0;
     const log = text => channel?.appendLine('[VCD] ' + text);
     function send(message) {
         if (disposed || !ready) return;
         Promise.resolve(panel.webview.postMessage(message)).catch(error => { if (!disposed) log('页面消息发送失败：' + error.message); });
+    }
+    /** 同名布局只送一次；ready 与加载完成先后不定，ready 之前的消息会被 send 丢弃。 */
+    function maybeSendAutoLayout() {
+        if (!ready || autoLayoutSent || !autoLayout || disposed || cancelled) return;
+        autoLayoutSent = true;
+        send({ type: 'layout-auto', layout: autoLayout });
     }
     function reportState() {
         if (loadError) send({ type: 'error', error: loadError });
@@ -63,7 +69,7 @@ function bindWaveformPanel({ filePath, panel, channel, createSession = options =
     function stopRoles() { roleAbort.abort(); clearTimeout(roleTimer); sourceListener?.dispose(); }
     async function handleMessage(message) {
         if (!message || disposed) return;
-        if (message.type === 'ready') { ready = true; reportState(); return; }
+        if (message.type === 'ready') { ready = true; reportState(); maybeSendAutoLayout(); return; }
         if (message.type === 'initialized') { resolveInitialized({ signals: message.signals, rows: message.rows }); return; }
         if (message.type === 'circuit-cursors') {
             if(!metadata || cancelled || !cursorSubscribed)return;
@@ -117,13 +123,16 @@ function bindWaveformPanel({ filePath, panel, channel, createSession = options =
     const opening = getSourceContext ? Promise.resolve().then(() => getSourceContext({ signal: roleAbort.signal })).catch(error => {
         log('读取RTL方向上下文失败：' + error.message); return undefined;
     }).then(sourceContext => disposed || cancelled ? null : session.open(filePath, sourceContext)) : session.open(filePath);
-    const loaded = opening.then(result => {
+    const loaded = opening.then(async result => {
         if (disposed || cancelled) return;
         if (!result.vars.length) throw new Error('该 VCD 中没有信号定义。');
         metadata = { ...result, secondsPerTick: parseTimescaleSeconds(result.timescale) };
         if (roleDirty || result.sourceRoleRetry) { roleDirty = true; scheduleRoles(); }
         if (result.sourceRoleNote) log(result.sourceRoleNote);
         reportState(); log(`已加载 ${path.basename(filePath)}：${(result.fileBytes / 1048576).toFixed(1)} MiB，${result.vars.length} 条信号`);
+        // 同名 .svwave.json 自动套用：读到才发送；缺失/超限/非法都静默跳过，不干扰默认视图。
+        autoLayout = layoutFiles?.auto ? await layoutFiles.auto().catch(() => null) : null;
+        maybeSendAutoLayout();
         return metadata;
     }).catch(async error => {
         if (disposed || cancelled) return;

@@ -49,6 +49,11 @@ test('真实 Worker 完成顶层索引、Yosys 模型、ELK 路由与源码请�
     assert.equal(graph.moduleId, descriptor.top);
     assert.equal(graph.edges.length, 1);
     assert.ok(graph.width > 0);
+    const ends = await session.request('layout', { moduleId: descriptor.top, boundaryLayout: 'ends' });
+    const input = ends.nodes.find(node => node.kind === 'input'), output = ends.nodes.find(node => node.kind === 'output');
+    assert.ok(input.x + input.width < output.x);
+    assert.equal(ends.stats.boundaryLayout, 'ends');
+    assert.equal(ends.edges[0].id, graph.edges[0].id);
     const source = await session.request('source', { moduleId: descriptor.top });
     assert.equal(source.path, path.join(root, 'top.sv'));
     assert.equal(source.line, 3);

@@ -35,7 +35,10 @@ async function status(input,id) {
     if (output?.context) {
         try {
             const request=await readJson(path.join(folder,'request.json'));
-            sourceCurrent=(await resolveContext(request.options)).context.revision===output.context.revision;
+            const resolved=await resolveContext(request.options);
+            sourceCurrent=request.operation==='vivado.run'
+                ? output.data.inputFingerprint ? (await require('./vivado-inputs').captureInputs(resolved,request.options.run || 'synth_1')).fingerprint===output.data.inputFingerprint : null
+                : resolved.context.revision===output.context.revision;
         } catch(error) { state.contextError={code:error.code || 'CONTEXT_UNAVAILABLE',message:error.message}; }
     }
     return result('task.status',{task:state,result:output,sourceCurrent});
@@ -44,6 +47,11 @@ async function start(input) {
     const resolved=await resolveContext(input), {options,context}=resolved;
     const operation=input.operation || 'lint';
     if(!BACKGROUND_OPERATIONS.has(operation)) fail('INVALID_ARGUMENT','不支持的后台操作：'+operation);
+    let expectedInputFingerprint;
+    if(operation==='vivado.run') {
+        if(context.project?.kind!=='vivado') fail('VIVADO_PROJECT_REQUIRED','Vivado操作需要明确的XPR工程');
+        expectedInputFingerprint=(await require('./vivado-inputs').captureInputs(resolved,options.run || 'synth_1')).fingerprint;
+    }
     const release=await acquireWorkspaceLease(options.workspace,'task-create');
     let folder,id;
     try {
@@ -56,7 +64,7 @@ async function start(input) {
         }
         if(active>=16) fail('TASK_LIMIT','同时活动的后台任务上限为16',{},4);
         id=randomUUID(); folder=await directory(options.workspace,'tasks',id);
-        await writeJson(path.join(folder,'request.json'),{operation,options:{...options,expectedRevision:context.revision}});
+        await writeJson(path.join(folder,'request.json'),{operation,options:{...options,expectedRevision:context.revision,...(expectedInputFingerprint?{expectedInputFingerprint}:{})}});
         await writeJson(path.join(folder,'status.json'),{id,state:'queued',operation,createdAt:new Date().toISOString(),context:{id:context.id,revision:context.revision}});
         const child=spawn(process.execPath,[path.join(__dirname,'worker.js'),options.workspace,id],{detached:true,windowsHide:true,stdio:'ignore',env:{...process.env,ELECTRON_RUN_AS_NODE:'1'}});
         await new Promise((done,reject)=>{child.once('spawn',done);child.once('error',reject);});

@@ -71,7 +71,7 @@ function readElement(token, fail) {
  * @returns {{path:string, dir:string, part:string, sets:Array<{name:string,type:string,top:string,files:string[]}>}}
  * @throws {Error} XML 损坏、非 Project 根、关键文件集属性缺失
  */
-function parseXprText(text, xprPath) {
+function parseXprText(text, xprPath, { onElement } = {}) {
     if (typeof text !== 'string') throw new TypeError('XPR 文本必须是字符串');
     if (typeof xprPath !== 'string' || !xprPath) throw new TypeError('XPR 路径不能为空');
     text = text.replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n');
@@ -130,6 +130,7 @@ function parseXprText(text, xprPath) {
             continue;
         }
         const element = readElement(token, fail);
+        onElement?.({ ...element, start: match.index, end: offset, parents: stack.map(item => ({ name: item.name, attrs: item.attrs })) });
         if (element.closing) {
             const opened = stack.pop();
             if (!opened || opened.name !== element.name) fail('结束标签不匹配：' + element.name);
@@ -150,7 +151,7 @@ function parseXprText(text, xprPath) {
             parsed.sets.push(set);
         } else if (element.name === 'File' && set) {
             if (!attrs.Path) fail('File 缺少 Path');
-            try { set.files.push(resolveXprPath(attrs.Path, parsed.dir)); }
+            try { set.files.push(resolveXprPath(attrs.Path, parsed.dir, path.basename(xprPath, '.xpr'))); }
             catch (error) { fail('File 路径无效：' + error.message); }
         } else if (element.name === 'Option') {
             if (!set && attrs.Name === 'Part' && !hasPart) {
@@ -163,7 +164,7 @@ function parseXprText(text, xprPath) {
                 topNames.add(set.name);
             }
         }
-        if (!element.empty) stack.push({ name: element.name, set });
+        if (!element.empty) stack.push({ name: element.name, set, attrs });
     }
     position = offset;
     checkText(text.slice(offset));
@@ -194,9 +195,14 @@ function parseXpr(xprPath) {
  * @returns {string} 本机文件路径
  * @throws {Error} 空路径或无效 file URL
  */
-function resolveXprPath(reference, xprDir) {
+function resolveXprPath(reference, xprDir, projectName) {
     if (typeof reference !== 'string' || !reference) throw new Error('XPR 文件引用不能为空');
-    const value = reference.replace(/\$PPRDIR(?=[/\\]|$)/g, () => path.resolve(xprDir)).replace(/\\/g, '/');
+    const suffixes = { PSRCDIR: '.srcs', PGENDIR: '.gen', PCACHEDIR: '.cache', PRUNDIR: '.runs', PIPUSERFILESDIR: '.ip_user_files' };
+    const value = reference.replace(/\$(PPRDIR|PSRCDIR|PGENDIR|PCACHEDIR|PRUNDIR|PIPUSERFILESDIR)(?=[/\\]|$)/g, (all,name) => {
+        if (name === 'PPRDIR') return path.resolve(xprDir);
+        if (!projectName) throw new Error('解析工程派生路径需要工程名：' + name);
+        return path.resolve(xprDir,projectName+suffixes[name]);
+    }).replace(/\\/g, '/');
     if (/^file:/i.test(value)) return path.normalize(fileURLToPath(value));
     return path.resolve(xprDir, value);
 }
@@ -221,4 +227,10 @@ function fileSetOf(parsed, absFile) {
     for (const set of parsed.sets) if (set.files.some(file => samePath(file, absFile))) return set.name;
     return null;
 }
-module.exports = { parseXpr, parseXprText, fileSetOf, samePath, resolveXprPath };
+/** 复用严格XML解析器提供源码跨度，重定位时不以正则猜测XML结构。 */
+function inspectXprText(text, xprPath) {
+    const normalized=text.replace(/^\uFEFF/,'').replace(/\r\n?/g,'\n'), elements=[];
+    const parsed=parseXprText(normalized,xprPath,{onElement:element=>elements.push(element)});
+    return {text:normalized,parsed,elements};
+}
+module.exports = { parseXpr, parseXprText, inspectXprText, fileSetOf, samePath, resolveXprPath };

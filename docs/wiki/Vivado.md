@@ -52,3 +52,7 @@
 Vivado 日志中的 `ERROR` 即使进程退出码为 0，也判定任务失败。先定位具体设计单元、端口、语法、器件或许可错误，再查看完整阶段日志。
 
 工程中已有的 IP 可作为 Vivado 上下文使用；插件内新增/定制 Vivado IP 的独立管理功能仍在[后续计划](https://github.com/JayceVane/SV-Tools/blob/v4.1.0/docs/ROADMAP.md)。
+
+## 从 Agent CLI 运行 Vivado（4.2）
+
+`project create/add/set-top` 可创建工程、加入 RTL/XDC 并设置综合和仿真顶层。`vivado run --run synth_1` 启动后台任务，用 `task status <任务 ID>` 查终态，再用 `vivado report utilization --run synth_1` 查看结构化资源报告。运行在隔离构建目录保留输入与产物身份，源码变化会使原报告显示 `stale=true`。涉及外部 Tcl 或无法捕获的工程依赖时，CLI 会提示具体原因。见 [Agent CLI 与 Skills](https://github.com/JayceVane/SV-Tools/wiki/Agent-CLI)。

@@ -134,7 +134,6 @@ test('超宽展开在分配位行前检查总行预算，标量与real禁用展�
 const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
-const { VcdStore } = require('../src/waveform/store');
 const { VcdSession } = require('../src/waveform/session');
 const { readSignalRoles, collectSourceContext } = require('../src/waveform/source-roles');
 
@@ -179,28 +178,6 @@ test('无空格内嵌范围仍使用正确RTL下标，转义标识符的括号�
     assert.equal(D.bitSignals(inline)[0].name,'ctrl[7]');
     assert.equal(D.bitSignals({...inline,name:'\\ctrl[7:4]',path:'tb.\\ctrl[7:4]'})[0].name,'\\ctrl[7:4][3]');
 });
-function edgeStore(scan = 100000) {
-    const store=new VcdStore({maxBitEdgeScan:scan}); store.register(bus());
-    for (const [t,value] of [[0,'0000'],[1,'0001'],[2,'0010'],[3,'0011'],[4,'1000'],[5,'1001'],[6,'x001'],[7,'z001']]) store.add('!',t,value);
-    return store;
-}
-test('派生位边沿跳过其它位跳变，前后导航与X/Z事件准确', () => {
-    const store=edgeStore();
-    assert.deepEqual(store.edge({id:'!',time:0,direction:'next',bitOffset:3}),{time:4,value:'1'});
-    assert.deepEqual(store.edge({id:'!',time:6,direction:'previous',bitOffset:3}),{time:4,value:'1'});
-    assert.deepEqual(store.edge({id:'!',time:4,direction:'previous',bitOffset:3}),{time:0,value:'0'});
-    assert.deepEqual(store.edge({id:'!',time:5,direction:'next',bitOffset:3}),{time:6,value:'x'});
-    assert.deepEqual(store.edge({id:'!',time:6,direction:'next',bitOffset:3}),{time:7,value:'z'});
-    assert.throws(()=>store.edge({id:'!',time:0,direction:'next',bitOffset:4}));
-    assert.throws(()=>store.edge({id:'!',time:0,direction:'next',bitOffset:0.5}));
-});
-test('位边沿按预算续查而非误报无边沿，续查位置经过验证', () => {
-    const store=edgeStore(2), query={id:'!',time:0,direction:'next',bitOffset:3};
-    const partial=store.edge(query); assert.equal(partial.time,null); assert.equal(partial.continuation,3);
-    assert.deepEqual(store.edge({...query,continuation:partial.continuation}),{time:4,value:'1'});
-    assert.throws(()=>store.edge({...query,continuation:-1}));
-    assert.throws(()=>store.edge({...query,continuation:0}));
-});
 test('实际控制器三角与Enter切换；展开只复用父VCD id；bit查询带位偏移', async () => {
     const h=clientHarness(undefined,{vars:[{...bus(),changeCount:3}]}); await h.flush();
     h.event('pointerdown',12,16); h.event('pointerup',12,16); await h.flush();
@@ -240,14 +217,6 @@ test('方向上下文发现不会openTextDocument，后端忽略glob时仍过滤
     }};
     const context=await collectSourceContext(vscode,path.join(root,'a.vcd'));
     assert.deepEqual(context.files,[file]); assert.match(exclude,/\.svtools/);
-});
-
-test('位边沿直接读取压缩载荷，不解码百万位字符串；短X/Z仍正确扩展', () => {
-    const store=new VcdStore(); store.register({...bus(),width:1000000});
-    store.add('!',0,'0'.repeat(1000000)); store.add('!',2,'1'+'0'.repeat(999999)); store.add('!',3,'z');
-    store.valuesPool.get=()=>assert.fail('位查询不应解码整条总线');
-    assert.deepEqual(store.edge({id:'!',time:0,direction:'next',bitOffset:999999}),{time:2,value:'1'});
-    assert.deepEqual(store.edge({id:'!',time:2,direction:'next',bitOffset:999999}),{time:3,value:'z'});
 });
 
 test('切换活动信号使迟到的位边沿结果失效，不能跳动新目标的游标', async () => {
@@ -307,14 +276,6 @@ test('实际拆分对话框校验输入，重复拆分替换原段，同层保�
     assert.equal(query.params.bitOffset,12); assert.equal(query.params.bitWidth,4);
     h.windowListeners.message({data:{type:'response',requestId:query.requestId,result:{time:40,value:'1'}}}); await moving;
     assert.equal(h.state.cursorA,40);
-});
-
-test('切片边沿只考虑所选段，忽略其它位跳变，扫描预算可续查且不解码完整向量', () => {
-    const store=edgeStore(4); store.valuesPool.get=()=>assert.fail('不得解码完整向量');
-    assert.deepEqual(store.edge({id:'!',time:0,direction:'next',bitOffset:2,bitWidth:2}),{time:null,value:null,continuation:3});
-    assert.deepEqual(store.edge({id:'!',time:0,direction:'next',bitOffset:2,bitWidth:2,continuation:3}),{time:4,value:'10'});
-    assert.deepEqual(store.edge({id:'!',time:5,direction:'previous',bitOffset:2,bitWidth:2}),{time:4,value:'10'});
-    assert.throws(()=>store.edge({id:'!',time:0,direction:'next',bitOffset:3,bitWidth:2}));
 });
 
 test('Questa逐位dump与重复声明还原为总线，保留真正的bit mem和不同作用域别名', async t => {

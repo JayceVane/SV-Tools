@@ -58,7 +58,7 @@ npm test 依次运行 JS 语法检查、golden 输出与幂等断言、完整格
 新增格式化样例时，把最小输入放在 example/，生成后人工检查期望输出，再运行完整测试：
 
 ```bash
-bin/svtools.exe example/new_case.sv > example/target/new_case.sv
+bin/svtools-format.exe example/new_case.sv > example/target/new_case.sv
 npm test
 ```
 

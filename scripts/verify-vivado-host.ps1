@@ -1,7 +1,8 @@
-param([Parameter(Mandatory = $true)][string]$CodePath)
+param([Parameter(Mandatory = $true)][string]$CodePath, [string]$ExtensionPath, [string]$RunDirectory)
 $ErrorActionPreference = 'Stop'
 $repoRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
-$testRoot = Join-Path $repoRoot ('bin/vivado-host/run-' + [guid]::NewGuid().ToString('N'))
+if (-not $ExtensionPath) { $ExtensionPath = $repoRoot }
+$testRoot = if ($RunDirectory) { [IO.Path]::GetFullPath($RunDirectory) } else { Join-Path $repoRoot ('bin/vivado-host/run-' + [guid]::NewGuid().ToString('N')) }
 $testWorkspace = Join-Path $testRoot 'workspace'
 $profilePath = Join-Path $testRoot 'profile'
 $extensionsPath = Join-Path $testRoot 'extensions'
@@ -17,7 +18,7 @@ Set-Content -LiteralPath (Join-Path $testWorkspace 'design.xpr') -Encoding utf8 
 $testFile = Join-Path $repoRoot 'test/vscode_vivado_host.js'
 $arguments = @('--new-window','--disable-extensions','--disable-workspace-trust','--skip-welcome','--skip-release-notes',
     ('--user-data-dir="' + $profilePath + '"'),('--extensions-dir="' + $extensionsPath + '"'),
-    ('--extensionDevelopmentPath="' + $repoRoot + '"'),('--extensionTestsPath="' + $testFile + '"'),('"' + $testWorkspace + '"'))
+    ('--extensionDevelopmentPath="' + $ExtensionPath + '"'),('--extensionTestsPath="' + $testFile + '"'),('"' + $testWorkspace + '"'))
 # 独立用户目录、扩展目录和窗口；测试完成由 VS Code 测试宿主退出，不安装到用户环境。
 $process = Start-Process -FilePath $CodePath -ArgumentList $arguments -WindowStyle Hidden -PassThru -Wait `
     -RedirectStandardOutput (Join-Path $testRoot 'stdout.log') -RedirectStandardError (Join-Path $testRoot 'stderr.log')

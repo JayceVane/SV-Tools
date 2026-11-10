@@ -1,7 +1,8 @@
-param([Parameter(Mandatory = $true)][string]$CodePath, [string]$IcarusPath = '', [string]$CygwinPath = '')
+param([Parameter(Mandatory = $true)][string]$CodePath, [string]$IcarusPath = '', [string]$CygwinPath = '', [string]$ExtensionPath, [string]$RunDirectory)
 $ErrorActionPreference = 'Stop'
 $repoRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
-$testRoot = Join-Path $repoRoot ('bin/completion-host/run-' + [guid]::NewGuid().ToString('N'))
+if (-not $ExtensionPath) { $ExtensionPath = $repoRoot }
+$testRoot = if ($RunDirectory) { [IO.Path]::GetFullPath($RunDirectory) } else { Join-Path $repoRoot ('bin/completion-host/run-' + [guid]::NewGuid().ToString('N')) }
 $testWorkspace = Join-Path $testRoot 'workspace'
 $profilePath = Join-Path $testRoot 'profile'
 $extensionsPath = Join-Path $testRoot 'extensions'
@@ -16,7 +17,7 @@ Set-Content -LiteralPath (Join-Path $profilePath 'User/settings.json') -Encoding
 $testFile = Join-Path $repoRoot 'test/vscode_completion_host.js'
 $arguments = @('--new-window','--disable-extensions','--disable-workspace-trust','--skip-welcome','--skip-release-notes',
     ('--user-data-dir="' + $profilePath + '"'),('--extensions-dir="' + $extensionsPath + '"'),
-    ('--extensionDevelopmentPath="' + $repoRoot + '"'),('--extensionTestsPath="' + $testFile + '"'),('"' + $testWorkspace + '"'))
+    ('--extensionDevelopmentPath="' + $ExtensionPath + '"'),('--extensionTestsPath="' + $testFile + '"'),('"' + $testWorkspace + '"'))
 # 宿主拥有独立用户目录、扩展目录和夹具，隐藏启动；完成后由测试宿主退出。
 $process = Start-Process -FilePath $CodePath -ArgumentList $arguments -WindowStyle Hidden -PassThru -Wait `
     -RedirectStandardOutput (Join-Path $testRoot 'stdout.log') -RedirectStandardError (Join-Path $testRoot 'stderr.log')

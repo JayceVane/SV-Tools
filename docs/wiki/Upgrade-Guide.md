@@ -29,3 +29,7 @@
 内置波形只支持VCD；二维mem要求文件保留索引。补全不是完整编译器语义实现。Vivado电路当前是平坦RTL，专门的IP新增/定制面板仍在计划中。超大电路建议按模块查看。
 
 [4.1发布说明](https://github.com/JayceVane/SV-Tools/releases/tag/v4.1.0) · [变更日志](https://github.com/JayceVane/SV-Tools/blob/v4.1.0/CHANGELOG.md)
+
+## 升级到 4.2.0
+
+使用批处理的用户请将 `svtools.exe` 更新为 `svtools-format.exe`。4.2 同页另有独立 Agent ZIP，适合在终端运行工程、架构和波形命令。扩展中的「设计进展」按所选工程根目录读取计划，接入流程见 [架构计划与验证交接](https://github.com/JayceVane/SV-Tools/wiki/Design-Delivery)。

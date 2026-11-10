@@ -45,6 +45,22 @@ test('ready 只加载一次，源码请求使用领域模块 ID', async () => {
     host.close();
 });
 
+test('接口布局切换复用网表并随模块导航保留', async () => {
+    const host = setup();
+    try {
+        await host.send({ type: 'ready' });
+        await host.send({ type: 'boundary-layout', layout: 'ends' });
+        assert.deepEqual(host.calls.at(-1).payload, { moduleId: descriptor.top, boundaryLayout: 'ends' });
+        await host.send({ type: 'navigate', cellId: 'cell/inst' });
+        assert.deepEqual(host.calls.at(-1).payload, { moduleId: 'module/child', boundaryLayout: 'ends' });
+        await host.send({ type: 'boundary-layout', layout: 'auto' });
+        assert.deepEqual(host.calls.at(-1).payload, { moduleId: 'module/child' });
+        await host.send({ type: 'back' });
+        assert.deepEqual(host.calls.at(-1).payload, { moduleId: descriptor.top });
+        assert.equal(host.calls.filter(call => call.command === 'load').length, 1);
+    } finally { host.close(); }
+});
+
 test('顶层布局失败仍保留模块目录，可直接切换较小模块恢复', async () => {
     const host = setup({ request: async (command, payload) => {
         if (command === 'load') return descriptor;

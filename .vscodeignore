@@ -8,6 +8,7 @@ bin/**
 !bin/*.node
 !bin/vendor/elk.bundled.js
 !bin/vendor/ELK-LICENSE.md
+!bin/vendor/resvg-LICENSE.txt
 !bin/vendor/yosys/**
 
 # 开发与测试资源
@@ -44,6 +45,7 @@ __pycache__/**
 .opencode/**
 .sisyphus/**
 .zcode/**
+.workbuddy/**
 .vscode-test/**
 .codeartsdoer/**
 test_project/**
@@ -57,3 +59,6 @@ CONTRIBUTING.md
 SECURITY.md
 nul
 *.vsix
+
+# 本机工具路径配置，不进入 VSIX
+tools.json

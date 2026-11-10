@@ -32,13 +32,19 @@
 
 截图使用公开示例数据与实际 Webview，编号对应 [Wiki 图解](https://github.com/JayceVane/SV-Tools/wiki/Screenshots)。更多实例、配置和使用边界见各专题页。
 
+### 终端与 Agent 快速开始
+
+解压 `svtools-agent-v4.2.0-win32-x64.zip`，使用 Node.js 22 或 24，在解压目录运行 `.\svtools-agent.cmd doctor --workspace D:\rtl\demo`。报告会列出可用命令和本机工具。需要 Agent 使用时，把 `skills/` 下对应目录完整导入客户端。[快速入门](docs/AGENT_QUICKSTART.md)
+
 ### 格式化的基本约束
 
 格式化只能改变普通空格、Tab、CR、LF；其它字符的内容、次数和顺序必须保持，即使输入全部乱码或语法不完整。无法安全提交的布局保留原文，详见 [格式化规范](docs/FORMAT_SPEC.md)。
 
 ## 功能总览
 
-4.2 的开发入口见 [CLI 使用说明](docs/CLI.md)：可在不启动 IDE 的情况下查询工程、格式化源码、运行 Icarus 检查并管理后台任务。Agent 可配合仓库中的 [SV Tools Skill](skills/svtools-agent/SKILL.md) 使用；其余能力按 [4.2 计划](docs/V4_2_PLAN.md)推进。
+**4.2 新增 Agent CLI、架构报告与设计进展。** 在终端可检查工程、运行工具、查询 VCD/FST 和导出报告。Agent 通过五个 Skill 使用同一套命令。在 IDE 的「SV Tools 工程 → 设计进展」可查看模块交接和证据。
+
+[Agent 安装与使用](docs/wiki/Agent-CLI.md) · [架构和验证交接](docs/wiki/Design-Delivery.md) · [CLI 合同](docs/CLI.md)
 
 **格式化**（手动 / 选中区域，`docs/FORMAT_SPEC.md` 为唯一行为规范）
 
@@ -89,7 +95,7 @@
 
 命令面板搜索“电路”，或在 RTL 编辑器右键用内置 Yosys 生成；`svtools.circuit.yosysPath` 默认为 `bundled`，也可指定外部工具。前端默认`auto`：内置工具使用Slang解析SystemVerilog，外部工具兼容旧前端。Vivado 右键入口要求当前文件已保存且属于所选工程综合源，在任务副本中重建 top 与编译顺序。配置、数据语义、容量边界及验证命令见 [电路查看器](docs/CIRCUIT.md)。
 
-**CLI 格式化器**：独立 `svtools.exe`，无需 VSCode。
+**CLI 格式化器**使用独立程序 `svtools-format.exe`，可直接在终端运行。
 
 ## 系统要求
 
@@ -103,7 +109,7 @@
 |---|---|
 | [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=JayceVane.svtools) | 在 VS Code 扩展市场搜索 **SystemVerilog Tools**，确认发布者为 **JayceVane** |
 | [Open VSX](https://open-vsx.org/extension/JayceVane/svtools) | 在使用 Open VSX 的兼容 IDE 中安装，先确认扩展宿主版本满足要求 |
-| [GitHub Releases](https://github.com/JayceVane/SV-Tools/releases) | 下载 `svtools-v4.1.1-win32-x64.vsix`，执行“扩展：从 VSIX 安装…”；同页提供 CLI 和 SHA256 |
+| [GitHub Releases](https://github.com/JayceVane/SV-Tools/releases) | 下载 `svtools-v4.2.0-win32-x64.vsix`，执行“扩展：从 VSIX 安装…”。同页提供 Agent ZIP、独立格式化器和 SHA256 |
 
 扩展 ID 为 **`JayceVane.svtools`**。安装或更新后重载窗口；市场版本以对应页面为准。完整操作见 [安装指南](https://github.com/JayceVane/SV-Tools/wiki/Getting-Started)。
 
@@ -169,16 +175,16 @@ npm run package -- --target win32-x64 # 生成 Windows x64 VSIX
 ### CLI
 
 ```bash
-svtools.exe file.sv                # 格式化到 stdout
-svtools.exe -i file1.sv file2.sv   # 原地格式化
-svtools.exe -c *.sv                # 检查是否需要格式化（CI 可用）
-svtools.exe --port-name-gap 1 f.sv # 常用格式化选项均有对应旗标
-cat file.sv | svtools.exe -        # stdin
+svtools-format.exe file.sv                # 格式化到 stdout
+svtools-format.exe -i file1.sv file2.sv   # 原地格式化
+svtools-format.exe -c *.sv                # 检查是否需要格式化（CI 可用）
+svtools-format.exe --port-name-gap 1 f.sv # 常用格式化选项均有对应旗标
+cat file.sv | svtools-format.exe -        # stdin
 ```
 
 CLI 旗标覆盖常用格式化选项；`svtools.oneBindPerLine`、`svtools.paramOneLine`、`svtools.stripEmptyLine`、`svtools.ignoreTick`、`svtools.importSameLine` 等选项仅在 VS Code 扩展配置中生效。
 
-可执行文件从 [GitHub Releases](https://github.com/JayceVane/SV-Tools/releases) 下载（随版本附 `.node` 与 `svtools.exe`）。
+可执行文件从 [GitHub Releases](https://github.com/JayceVane/SV-Tools/releases) 下载（随版本附 `.node` 与 `svtools-format.exe`）。Windows 附件从 4.2 起使用新名称，升级脚本时请更新可执行文件路径。
 
 ### 效果示例
 

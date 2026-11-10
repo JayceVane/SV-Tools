@@ -45,7 +45,7 @@ async function main() {
     await build('cargo', ['build', '--release', '--bin', 'svtools-cli']);
     fs.mkdirSync(binDir, { recursive: true });
     const nativeName = nativeArtifactName();
-    const executableName = process.platform === 'win32' ? 'svtools.exe' : 'svtools';
+    const executableName = process.platform === 'win32' ? 'svtools-format.exe' : 'svtools';
     const cargoExecutableName = process.platform === 'win32' ? 'svtools-cli.exe' : 'svtools-cli';
     const targetDir = process.env.CARGO_TARGET_DIR
         ? path.resolve(nativeDir, process.env.CARGO_TARGET_DIR) : path.join(nativeDir, 'target');

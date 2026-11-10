@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: '补发到 Marketplace 的正式版本 tag（须与 master 当前版本一致）'
+        description: '补发到扩展市场的正式版本 tag（须与 master 当前版本一致）'
         required: true
         type: string
 
@@ -68,12 +68,17 @@ jobs:
         run: Get-ChildItem bin/*.vsix | ForEach-Object { node scripts/check-public-package.js $_.FullName; if ($LASTEXITCODE -ne 0) { throw '公开安装包检查失败' } }
         shell: pwsh
 
+      - name: 构建和试跑 Agent 便携包
+        env:
+          TAG: ${{ github.ref_name }}
+        run: node scripts/package-agent.cjs "bin/svtools-${env:TAG}-win32-x64.vsix" "bin/svtools-agent-${env:TAG}-win32-x64.zip"
+
       - name: 运行 Rust 回归
         run: cargo test --manifest-path src/native/Cargo.toml
 
       - name: 生成 SHA256 校验清单
         run: |
-          $files = Get-Item bin/*.vsix, bin/svtools.win32-x64-msvc.node, bin/svtools.exe
+          $files = Get-Item bin/*.vsix, bin/svtools-agent-*-win32-x64.zip, bin/svtools.win32-x64-msvc.node, bin/svtools-format.exe
           $lines = $files | ForEach-Object { "{0}  {1}" -f (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant(), $_.Name }
           $lines | Set-Content bin/SHA256SUMS.txt -Encoding ascii
         shell: pwsh
@@ -95,18 +100,26 @@ jobs:
             fi
             gh release create "$TAG" "${options[@]}"
           fi
-          gh release upload "$TAG" bin/svtools.win32-x64-msvc.node bin/svtools.exe bin/*.vsix bin/SHA256SUMS.txt
+          gh release upload "$TAG" bin/svtools.win32-x64-msvc.node bin/svtools-format.exe bin/*.vsix "bin/svtools-agent-$TAG-win32-x64.zip" bin/SHA256SUMS.txt
         shell: bash
 
   marketplace:
-    name: 发布到 VS Code Marketplace
+    name: 发布到 ${{ matrix.name }}
     needs: assets
     if: >-
       always() && github.repository == 'JayceVane/SV-Tools' &&
       ((github.event_name == 'push' && needs.assets.result == 'success' && !contains(github.ref_name, '-')) ||
        (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master'))
     runs-on: windows-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - store: marketplace
+            name: VS Code Marketplace
+          - store: open-vsx
+            name: Open VSX
     permissions:
       contents: read
       id-token: write
@@ -147,18 +160,25 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node scripts/prepare-marketplace.js $env:RELEASE_TAG .release-source bin/marketplace-release
 
-      - name: 使用 Trusted Publishing 发布
+      - name: 使用 Marketplace Trusted Publishing 发布
+        if: matrix.store == 'marketplace'
         env:
           VSIX_PATH: ${{ steps.package.outputs.vsix }}
         run: node node_modules/@vscode/vsce/vsce publish --oidc --packagePath $env:VSIX_PATH --skip-duplicate
 
-      - name: 复核 Marketplace 公开下载
-        run: node scripts/verify-marketplace.js bin/marketplace-release/marketplace/publication.json
+      - name: 使用 Open VSX Trusted Publishing 发布
+        if: matrix.store == 'open-vsx'
+        env:
+          VSIX_PATH: ${{ steps.package.outputs.vsix }}
+        run: npx --yes ovsx@1.4.0 publish --trusted-publishing --skip-duplicate --packagePath $env:VSIX_PATH
+
+      - name: 复核公开安装包
+        run: node scripts/verify-marketplace.js bin/marketplace-release/marketplace/publication.json ${{ matrix.store }}
 
       - name: 保存发布包与校验记录
         if: always() && steps.package.outcome == 'success'
         uses: actions/upload-artifact@v4
         with:
-          name: marketplace-${{ steps.release.outputs.tag }}
+          name: ${{ matrix.store }}-${{ steps.release.outputs.tag }}
           path: bin/marketplace-release/marketplace/*
           retention-days: 30

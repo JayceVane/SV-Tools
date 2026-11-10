@@ -54,7 +54,7 @@
   "cmd.iverilog_lint.title": "Icarus Verilog: Lint Current File",
   "cmd.iverilog_simulate.title": "Icarus Verilog: Run Simulation",
   "cmd.iverilog_stopSimulation.title": "Icarus Verilog: Stop Simulation",
-  "cmd.iverilog_openWaveform.title": "Icarus Verilog: Open VCD Waveform Viewer",
+  "cmd.iverilog_openWaveform.title": "Icarus Verilog: Open VCD/FST Waveform Viewer",
   "cmd.iverilog_waveformFromText.title": "VCD: Open as Waveform",
   "cmd.iverilog_showText.title": "VCD: Show as Text",
   "cmd.vivado_runScript.title": "Vivado: Run TCL Script",
@@ -129,5 +129,8 @@
   "cmd.project.refresh.title": "Refresh Project",
   "cfg.project.traceTrigger.desc": "Choose when project signal tracing runs. Also available in the project actions menu.",
   "cfg.project.traceTrigger.selection": "Trace a selected signal automatically after a short delay.",
-  "cfg.project.traceTrigger.manual": "Trace only through the editor context menu or project command."
+  "cfg.project.traceTrigger.manual": "Trace only through the editor context menu or project command.",
+  "cfg.waveform_convertVcdToFst.desc": "Convert generated VCD waveforms to FST after successful simulation with the embedded converter (no GTKWave required). Disabled by default. Delete VCD only after successful conversion; on failure retain VCD. Existing same-name FST is overwritten by default (see convertVcdToFstOverwrite).",
+  "cfg.waveform_convertVcdToFstOverwrite.desc": "Overwrite the same-name FST file after conversion (atomic same-directory rename; default on). Disable to keep existing FST files and save new output with incrementing -2/-3 suffixes instead.",
+  "cfg.design_planFile.desc": "Architecture task plan relative to the selected project root; the project panel displays read-only, evidence-based progress."
 }

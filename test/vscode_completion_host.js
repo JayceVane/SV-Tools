@@ -136,7 +136,8 @@ endpackage
     await check('超过 30 行的实例端口与参数，已连接项去重', async () => {
         const fixture = await sample('ports.sv', 'module ports; long_leaf #(.WIDTH(8)) dut (\n.clk(0),\n' +
             Array.from({ length: 70 }, (_, index) => '.port_' + index + '(0),').join('\n') + '\n.po/*?*/\n); endmodule');
-        const ports = await complete(fixture); find(ports, 'port_89'); assert.ok(!ports.items.some(item => labelOf(item) === 'port_0'));
+        const ports = await eventually(fixture, list => list.items.some(item => labelOf(item) === 'port_89'));
+        assert.ok(!ports.items.some(item => labelOf(item) === 'port_0'));
         const params = await sample('params.sv', 'module params; long_leaf #(.WIDTH(8), .DE/*?*/) dut (); endmodule'); find(await complete(params), 'DEPTH');
     });
     const toolsFile = path.join(root, '..', 'tools.json');
@@ -251,7 +252,7 @@ endpackage
         } finally { await config.update('maxItems', undefined, vscode.ConfigurationTarget.Workspace); }
     });
 
-    const report = { vscode: vscode.version, version: extension.packageJSON.version, checks, native, nativeSkipped: !hasTools, passed: checks.filter(check => check.passed).length, failed: checks.filter(check => !check.passed).length };
+    const report = { vscode: vscode.version, version: extension.packageJSON.version, extensionPath: extension.extensionPath, checks, native, nativeSkipped: !hasTools, passed: checks.filter(check => check.passed).length, failed: checks.filter(check => !check.passed).length };
     await fs.writeFile(path.join(root, '..', 'host-report.json'), JSON.stringify(report, null, 2));
     console.log('SVTOOLS_COMPLETION_HOST_VALIDATED ' + JSON.stringify(report));
     assert.equal(report.failed, 0, report.failed + ' 项真实补全宿主验收失败，完整原因见 host-report.json');

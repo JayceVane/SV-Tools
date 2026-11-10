@@ -52,7 +52,9 @@
 
     /** @param {object} design 设计身份。 @param {object} graph 模块身份。 @returns {string} 不复用其他输入设计的视图状态键。 */
     function graphStateKey(design, graph) {
-        return JSON.stringify([design?.id || JSON.stringify([design?.title, design?.top, design?.provenance]), graph?.id]);
+        const key = [design?.id || JSON.stringify([design?.title, design?.top, design?.provenance]), graph?.id];
+        if (graph?.stats?.boundaryLayout === 'ends') key.push('ends');
+        return JSON.stringify(key);
     }
 
     /** @param {object} graph 模块图。 @param {string} query 名称片段。 @returns {object[]} 稳定排序且去重的节点/网络匹配。 */
@@ -145,7 +147,7 @@
      * @returns {{receive:function,destroy:function,getState:function}} 生命周期和验收入口。
      */
     function createClient(document, window, bridge, renderer) {
-        const ids = ['designTitle', 'provenance', 'back', 'home', 'modules', 'fit', 'zoomOut', 'zoomIn', 'zoom', 'search', 'searchCount', 'nextMatch', 'reload', 'breadcrumbs', 'graphStats', 'viewport', 'circuit', 'message', 'messageTitle', 'messageDetail', 'selectionEmpty', 'selectionDetails', 'selectionKind', 'selectionName', 'properties', 'enterInstance', 'openSource', 'exportImage', 'status', 'fitHint', 'minimap', 'toggleMinimap', 'toggleInspector', 'inspector'];
+        const ids = ['designTitle', 'provenance', 'back', 'home', 'modules', 'boundaryLayout', 'fit', 'zoomOut', 'zoomIn', 'zoom', 'search', 'searchCount', 'nextMatch', 'reload', 'breadcrumbs', 'graphStats', 'viewport', 'circuit', 'message', 'messageTitle', 'messageDetail', 'selectionEmpty', 'selectionDetails', 'selectionKind', 'selectionName', 'properties', 'enterInstance', 'openSource', 'exportImage', 'status', 'fitHint', 'minimap', 'toggleMinimap', 'toggleInspector', 'inspector'];
         const ui = Object.fromEntries(ids.map(id => [id, document.getElementById(id)]));
         const imageRequests = new Map(); let imageRequestId = 0, exportingImage = false;
         const disposers = [], saved = bridge.getState?.(), views = new Map(Array.isArray(saved?.views) ? saved.views.filter(entry => Array.isArray(entry) && typeof entry[0] === 'string').slice(-MAX_SAVED_VIEWS) : []);
@@ -263,6 +265,7 @@
             ui.exportImage.disabled = mode !== 'graph' || exportingImage;
             for (const control of [ui.fit, ui.zoomOut, ui.zoomIn, ui.search]) control.disabled = mode !== 'graph';
             ui.modules.disabled = mode === 'loading' || !design?.modules?.length;
+            ui.boundaryLayout.disabled = mode !== 'graph' || !!graph?.trace;
             ui.back.disabled = mode === 'loading' || !ui.back.dataset.available;
             ui.home.disabled = mode === 'loading' || !design?.top;
             ui.nextMatch.disabled = mode !== 'graph' || !matches.length;
@@ -323,6 +326,7 @@
             const nextDesign = message.design || design || {};
             const moduleId = graph.moduleId || (nextDesign.modules || []).find(module => module.id === graph.id || module.name === graph.name)?.id || graph.id;
             showDesign(nextDesign, moduleId); stateKey = graphStateKey(design, graph);
+            if (!graph.trace) ui.boundaryLayout.value = graph.stats?.boundaryLayout || 'auto';
             drawing = renderer.renderGraph(ui.circuit, graph); minimap.setGraph(graph, drawing.bounds); lastClickHit = null; selection = undefined; selected = null;
             valueControls.graphReady();
             const crumbs = Array.isArray(message.breadcrumbs) && message.breadcrumbs.length ? message.breadcrumbs : [{ id: graph.id, name: graph.name }];
@@ -377,6 +381,9 @@
         });
         listen(ui.fit, 'click', fit); listen(ui.zoomIn, 'click', () => zoom(1.25)); listen(ui.zoomOut, 'click', () => zoom(.8));
         listen(ui.back, 'click', () => { if (!ui.back.disabled) post({ type: 'back' }); }); listen(ui.home, 'click', () => { if (!ui.home.disabled) post({ type: 'home' }); });
+        listen(ui.boundaryLayout, 'change', () => {
+            if (!ui.boundaryLayout.disabled) post({ type: 'boundary-layout', layout: ui.boundaryLayout.value });
+        });
         listen(ui.modules, 'change', () => { if (!ui.modules.disabled && ui.modules.value !== currentModuleId) post({ type: 'module', moduleId: ui.modules.value }); });
         listen(ui.exportImage, 'click', async () => {
             if (!graph || isLoading || exportingImage) return;

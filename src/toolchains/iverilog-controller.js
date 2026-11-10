@@ -3,6 +3,7 @@ const path = require('node:path');
 const { spawn } = require('node:child_process');
 const { createToolTaskManager } = require('./job');
 const { createIcarusRunner } = require('./iverilog-runner');
+const { postprocessWaveforms } = require('../waveform/conversion');
 const { createBufferedOutput } = require('./channel');
 const { summarizeToolResult, resultFindings } = require('./result');
 const { lintWithXvlog, elaborateWithXvlog, resetXvlogCache } = require('./xvlog');
@@ -44,6 +45,14 @@ function activateIverilog(context, deps) {
         }, compile: deps.compileWithModuleResolution, buildCommonArgs: deps.buildCommonArgs,
         resolvePaths, channel, output, publish: applyDiagnostics, expandFiles,
         prepareWaveforms: options => deps.waveViewer?.prepareForSimulation?.(options),
+        postprocessWaveforms: (files, task, document) => postprocessWaveforms(files, {
+            enabled: vscode.workspace.getConfiguration('svtools.waveform', document.uri).get('convertVcdToFst', false),
+            overwrite: vscode.workspace.getConfiguration('svtools.waveform', document.uri).get('convertVcdToFstOverwrite', true),
+            signal: task.signal, sourceFile: document.uri.fsPath,
+            prepare: options => deps.waveViewer?.prepareForSimulation?.(options),
+            onProgress: text => channel.appendLine(text),
+            onWarning: text => { channel.appendLine(text); vscode.window.showWarningMessage?.(text); }
+        }),
         fileOnly: currentFileOnly, showWaveforms });
 
     function resolvePaths(paths, fallback, uri) {
@@ -72,18 +81,18 @@ function activateIverilog(context, deps) {
         }
         return [...new Set(files)];
     }
-    async function showWaveforms(task, waves, config, sourceFile) {
+    async function showWaveforms(task, waves, config, sourceFile, supportedWaves) {
         task.throwIfCancelled(); if (!waves.length) return;
-        const vcd = waves.find(file => /\.vcd$/i.test(file)), viewer = String(config.get('waveViewer') || '').trim();
-        if (vcd && !viewer && config.get('autoOpenWaveform', true)) await deps.waveViewer?.openWaveform(vcd, { sourceFile });
+        const waveform = supportedWaves[0], viewer = String(config.get('waveViewer') || '').trim();
+        if (waveform && !viewer && config.get('autoOpenWaveform', true)) await deps.waveViewer?.openWaveform(waveform, { sourceFile });
         task.throwIfCancelled();
         const choice = vscode.window.showInformationMessage('仿真波形已生成：' + path.basename(waves[0]),
-            ...(vcd && !viewer ? ['打开波形'] : []), ...(viewer ? ['外部查看器打开'] : []), '在资源管理器中显示');
+            ...(waveform && !viewer ? ['打开波形'] : []), ...(viewer ? ['外部查看器打开'] : []), '在资源管理器中显示');
         Promise.resolve(choice).then(async selected => {
             if (task.signal.aborted) return;
-            if (selected === '打开波形' && vcd) await deps.waveViewer?.openWaveform(vcd, { sourceFile });
+            if (selected === '打开波形' && waveform) await deps.waveViewer?.openWaveform(waveform, { sourceFile });
             else if (selected === '外部查看器打开' && viewer) {
-                const child = spawn(viewer, [vcd || waves[0]], { detached: true, stdio: 'ignore', windowsHide: true });
+                const child = spawn(viewer, [waveform || waves[0]], { detached: true, stdio: 'ignore', windowsHide: true });
                 child.once('error', error => vscode.window.showErrorMessage('启动波形查看器失败：' + error.message)); child.unref();
             } else if (selected === '在资源管理器中显示') await vscode.commands.executeCommand('revealFileInOs', vscode.Uri.file(waves[0]));
         }).catch(error => channel.appendLine('打开仿真产物失败：' + error.message));

@@ -10,7 +10,7 @@ const MAX_ID_LENGTH = 32768;
  */
 function bindCircuitPanel({ panel, load, onSource, onError = console.error, imageFiles, initialTrace, chooseSignal, chooseContext, chooseCandidate, onWave, onWaveInvalidated, session = new CircuitSession() }) {
     let closed = false, started = false, generation = 0, operation = 0, descriptor, currentGraph, breadcrumbs = [];
-    let loadController, sourceStale = false;
+    let loadController, sourceStale = false, boundaryLayout = 'auto';
     let completeLoad;
     const loaded = new Promise(resolve => { completeLoad = resolve; });
     const send = message => { if (!closed) return Promise.resolve(panel.webview.postMessage(message)); };
@@ -36,14 +36,15 @@ function bindCircuitPanel({ panel, load, onSource, onError = console.error, imag
     const waveLink = createCircuitWaveHost({session,trace,instancePath,onWave,onInvalidated:onWaveInvalidated,send,onError,
         readState:()=>({design:descriptor,graph:currentGraph,generation,sourceStale,closed})});
 
-    async function display(path, restore = false) {
+    async function display(path, restore = false, requestedLayout = boundaryLayout) {
         const version = ++generation;
         const previous = currentGraph, previousCrumbs = breadcrumbs;
         currentGraph = null;
         breadcrumbs = path;
         await send({ type: 'loading', message: '正在布局 ' + path.at(-1).name, breadcrumbs, moduleId: path.at(-1).id });
         let graph;
-        try { graph = await session.request('layout', { moduleId: path.at(-1).id }); }
+        const request = { moduleId: path.at(-1).id, ...(requestedLayout === 'ends' ? { boundaryLayout: requestedLayout } : {}) };
+        try { graph = await session.request('layout', request); }
         catch (error) {
             if (closed || version !== generation) return { ok: false };
             // 追踪计算被模块导航取代或显示失败时，必须结束 busy，避免面板一直停在“正在计算”。
@@ -56,6 +57,7 @@ function bindCircuitPanel({ panel, load, onSource, onError = console.error, imag
         if (closed || version !== generation) return { ok: false };
         breadcrumbs = path;
         currentGraph = graph;
+        boundaryLayout = requestedLayout;
         const traceNavigation = trace.moduleShown(path, restore);
         await sendGraph({ type: 'graph', graph, design: descriptor, breadcrumbs, sourceStale, traceNavigation });
         completeLoad({ ok: true, design: descriptor, graph });
@@ -120,6 +122,10 @@ function bindCircuitPanel({ panel, load, onSource, onError = console.error, imag
         module: message => {
             const module = validId(message.moduleId) && descriptor?.modules.find(item => item.id === message.moduleId);
             if (module) return display([module]);
+        },
+        'boundary-layout': message => {
+            if (!currentGraph || currentGraph.trace || !['auto', 'ends'].includes(message.layout) || message.layout === boundaryLayout) return;
+            return display(breadcrumbs, true, message.layout);
         },
         navigate: message => {
             const node = validId(message.cellId) && currentGraph?.nodes.find(item => item.cellId === message.cellId && item.moduleId);

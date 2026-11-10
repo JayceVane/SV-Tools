@@ -60,11 +60,11 @@ endtask
 ## CLI
 
 ```powershell
-.\svtools.exe demo.sv                 # 输出格式化结果
-.\svtools.exe -i demo.sv              # 原地写入
-.\svtools.exe -c demo.sv              # 只检查是否需要格式化
-.\svtools.exe --port-name-gap 1 demo.sv
-.\svtools.exe --help
+.\svtools-format.exe demo.sv                 # 输出格式化结果
+.\svtools-format.exe -i demo.sv              # 原地写入
+.\svtools-format.exe -c demo.sv              # 只检查是否需要格式化
+.\svtools-format.exe --port-name-gap 1 demo.sv
+.\svtools-format.exe --help
 ```
 
 精确规则以[格式化规范](https://github.com/JayceVane/SV-Tools/blob/v4.1.0/docs/FORMAT_SPEC.md)为准；[example](https://github.com/JayceVane/SV-Tools/tree/v4.1.0/example)保存输入和人工期望 golden。
