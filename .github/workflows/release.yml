@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: '补发到 Marketplace 的正式版本 tag（须与 master 当前版本一致）'
+        description: '补发到扩展市场的正式版本 tag（须与 master 当前版本一致）'
         required: true
         type: string
 
@@ -104,14 +104,22 @@ jobs:
         shell: bash
 
   marketplace:
-    name: 发布到 VS Code Marketplace
+    name: 发布到 ${{ matrix.name }}
     needs: assets
     if: >-
       always() && github.repository == 'JayceVane/SV-Tools' &&
       ((github.event_name == 'push' && needs.assets.result == 'success' && !contains(github.ref_name, '-')) ||
        (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master'))
     runs-on: windows-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - store: marketplace
+            name: VS Code Marketplace
+          - store: open-vsx
+            name: Open VSX
     permissions:
       contents: read
       id-token: write
@@ -152,18 +160,25 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node scripts/prepare-marketplace.js $env:RELEASE_TAG .release-source bin/marketplace-release
 
-      - name: 使用 Trusted Publishing 发布
+      - name: 使用 Marketplace Trusted Publishing 发布
+        if: matrix.store == 'marketplace'
         env:
           VSIX_PATH: ${{ steps.package.outputs.vsix }}
         run: node node_modules/@vscode/vsce/vsce publish --oidc --packagePath $env:VSIX_PATH --skip-duplicate
 
-      - name: 复核 Marketplace 公开下载
-        run: node scripts/verify-marketplace.js bin/marketplace-release/marketplace/publication.json
+      - name: 使用 Open VSX Trusted Publishing 发布
+        if: matrix.store == 'open-vsx'
+        env:
+          VSIX_PATH: ${{ steps.package.outputs.vsix }}
+        run: npx --yes ovsx@1.4.0 publish --trusted-publishing --skip-duplicate --packagePath $env:VSIX_PATH
+
+      - name: 复核公开安装包
+        run: node scripts/verify-marketplace.js bin/marketplace-release/marketplace/publication.json ${{ matrix.store }}
 
       - name: 保存发布包与校验记录
         if: always() && steps.package.outcome == 'success'
         uses: actions/upload-artifact@v4
         with:
-          name: marketplace-${{ steps.release.outputs.tag }}
+          name: ${{ matrix.store }}-${{ steps.release.outputs.tag }}
           path: bin/marketplace-release/marketplace/*
           retention-days: 30
