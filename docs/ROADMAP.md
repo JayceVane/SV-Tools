@@ -10,7 +10,7 @@
 
 通过共享服务层优先提供CLI和Skill，MCP作为按需接入的适配层，复用插件现有的格式化、工具任务、电路模型与波形数据服务。详细范围、依赖与验收场景见 [4.2开发计划](V4_2_PLAN.md)。
 
-M1 已提供工程/文件集查询、原生格式化、Icarus 检查及后台任务管理的开发入口，见 [CLI 使用说明](CLI.md)。后续 Vivado、架构、报告与波形服务按里程碑扩展。
+M1 已提供工程/文件集查询、原生格式化、Icarus 检查及后台任务管理的开发入口，见 [CLI 使用说明](../skills/svtools-agent/references/cli.md)。后续 Vivado、架构、报告与波形服务按里程碑扩展。
 
 M5 前先收口 ΔCycle 记录诊断、设计/验证职责与模块报告证据约定，见 [交付流程](../skills/svtools-delivery/references/delivery.md)。复杂任务可使用独立验证子 Agent，流程本身不依赖专用编排服务。
 

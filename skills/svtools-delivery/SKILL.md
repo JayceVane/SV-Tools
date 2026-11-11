@@ -33,4 +33,4 @@ description: RTL 设计/验证交付规范：设计与验证职责分离、需�
 
 ## M5 联合验收
 
-先在一个简单同步模块验证交付链，再用参数化 FIFO/多时钟设计验证复位、握手和瞬态处置，最后进入真实 Vivado 工程与插件/CLI 对照。通过条件是需求、独立检查、运行身份、图表和报告互相可追溯，且注入缺陷能被发现、修复后能按原规则复验。MCP 和自动多 Agent 编排不作为这套流程的前提。完整分批计划见 [references/delivery.md](references/delivery.md) 与 `docs/V4_2_PLAN.md`。
+先在一个简单同步模块验证交付链，再用参数化 FIFO/多时钟设计验证复位、握手和瞬态处置，最后进入真实 Vivado 工程与插件/CLI 对照。通过条件是需求、独立检查、运行身份、图表和报告互相可追溯，且注入缺陷能被发现、修复后能按原规则复验。MCP 和自动多 Agent 编排不作为这套流程的前提。完整分批计划见 [references/delivery.md](references/delivery.md)。

@@ -4,7 +4,7 @@ SV Tools 4.2 提供无 IDE 的 CLI，发行目标为 Windows x64，验收覆盖 
 
 ## 准备与调用
 
-发布包可直接用 `svtools-agent.cmd` 运行。安装和 Skills 入口见 [Agent 快速入门](AGENT_QUICKSTART.md)。也可在构建过的源码目录运行：
+发布包可直接用 `svtools-agent.cmd` 运行。安装和 Skills 入口见 [Agent 快速入门](https://github.com/JayceVane/SV-Tools/blob/v4.2.0/docs/AGENT_QUICKSTART.md)。也可在构建过的源码目录运行：
 
 ```powershell
 node src/cli/main.js doctor
@@ -187,7 +187,7 @@ node src/cli/main.js design arch --workspace D:/project --top top --depth 1 --sa
 
 `design scaffold --spec <json|file> [--out <dir>] [--force]` 按 schemaVersion=1 规格生成架构骨架（默认 `rtl/<top>.sv`）：`typedef struct packed {...} <type>_t;` 虚拟接口、只含 struct 端口的空模块、顶层 struct 总线 wire 与实例化连线。`--spec` 可为规格 JSON 文件路径（相对工作区解析）或内联 JSON（以 `{` 开头）；文件不存在返回 `INVALID_ARGUMENT` 并提示解析后的绝对路径。`--out` 必须是工作区内的目录（创建后按 realpath 复核，拒绝 symlink/junction 逃逸）；目标文件已存在且无 `--force` 时返回 `FILE_EXISTS`，`--out` 指向已有普通文件或非法路径返回 `INVALID_ARGUMENT`，写入失败返回 `DESIGN_FAILED`。主设备 `m_`/从设备 `s_` 命名是 Skill 建议而非门禁：不合建议时生成照常成功，并在 `data.suggestions[]` 返回 `{code:"PORT_NAMING",module,port,message}`，不产生 error diagnostics；其余规格问题返回 `INVALID_ARGUMENT`。规格结构：
 
-默认接口级示例见 [architecture-interface-spec.json](../skills/svtools-design/assets/architecture-interface-spec.json)：每个模块用一个整体 inout packed struct 端口连接逻辑接口，成员内容和收发约定写入架构文档。需要按通道区分方向时，可参考 [architecture-spec.json](../skills/svtools-design/assets/architecture-spec.json)。`master/slave` 是接口角色，不等同于输出/输入。每个端口必须显式指定 `direction`，每个实例必须列出所有端口；显式 `null` 表示有意悬空并产生 `UNCONNECTED_PORT` 提示。生成前拒绝遗漏连接、已知方向的总线多驱动与无驱动输入；整体 inout 的成员方向不在这项检查范围内。
+默认接口级示例见 [architecture-interface-spec.json](../../svtools-design/assets/architecture-interface-spec.json)：每个模块用一个整体 inout packed struct 端口连接逻辑接口，成员内容和收发约定写入架构文档。需要按通道区分方向时，可参考 [architecture-spec.json](../../svtools-design/assets/architecture-spec.json)。`master/slave` 是接口角色，不等同于输出/输入。每个端口必须显式指定 `direction`，每个实例必须列出所有端口；显式 `null` 表示有意悬空并产生 `UNCONNECTED_PORT` 提示。生成前拒绝遗漏连接、已知方向的总线多驱动与无驱动输入；整体 inout 的成员方向不在这项检查范围内。
 
 工作流：`design scaffold` 生成虚拟端口与空模块 → `design arch --top <top>` 检查结构 → `design render` 查看架构 → 按模块补充实现。时钟/复位独立声明，当前 scaffold 仅支持 struct 端口，板级顶层端口需要补充 RTL。架构图是源级结构事实，不得当作综合、时序或功能验证证据。
 
@@ -228,7 +228,7 @@ node src/cli/main.js design render --workspace D:/project --top top --fold-ports
 
 `design report --top <module> [--out <dir>] [--style document|presentation] [--title <t>]` 一次导出报告证据包（默认 `.svtools/agent/design/report/`）：同一架构的 `SVG`、`PNG`（2x 栅格化）、`architecture.json`（含 checks 的完整模型）、`architecture.md`（图 + 模块接口分配表 + 接口连接表 + 结构检查表 + 可追溯性）与 `report.json`（产物清单与哈希、导出参数、evidence）。Markdown 表格方向缩写与 SVG 边界接口表一致（端口 `i/o/io`；连接以端点 A 为视角 `o`/`io`/`bus`，`bus` 表示共享网络、成员方向未声明）。`--out` 与 render/scaffold 同一安全模型。结构存在 error 时报告仍生成（生成不等于结构合格），结论看 `data.checksSummary` 与 Markdown 检查表。
 
-Agent 使用入口见 [SV Tools Skill](../skills/svtools-agent/SKILL.md)。架构建模（`design arch`）、架构图渲染（`design render`，SVG/PNG）、结构检查（`design check`）、架构比较（`design diff`）、报告证据包（`design report`）与波形查询（`wave` 命令族）已提供；MCP 尚未实现。按 `doctor.data.capabilities` 发现实际接口。
+Agent 使用入口见 [SV Tools Skill](../SKILL.md)。架构建模（`design arch`）、架构图渲染（`design render`，SVG/PNG）、结构检查（`design check`）、架构比较（`design diff`）、报告证据包（`design report`）与波形查询（`wave` 命令族）已提供；MCP 尚未实现。按 `doctor.data.capabilities` 发现实际接口。
 
 ## 波形查询（M4）
 
@@ -276,11 +276,11 @@ node src/cli/main.js wave glitches --workspace D:/project --file sim/wave.vcd --
 
 结果包含 `evidence.waveformSha256` 和文件字节数；查询和哈希期间变化返回 `SOURCE_CHANGED`。SHA-256 仅标识文件，`sourceBinding=unverified` 不证明当前 RTL 产生该波形，需由报告的实际仿真输入/命令/运行记录建立关联。
 
-`semantics.recordingCompleteness=unknown`、`absenceProvesNoGlitches=false`、`acceptance=false` 明确证据边界：采集/转换可能折叠中间值。查询成功和零命中都不是功能、CDC、时序或物理无毛刺证明；有命中也不自动判 RTL 缺陷。模块验证报告必须包含该项的信号/窗口、扫描完整性、逐项处置、波形身份与限制，详见 [设计与验证交付约定](../skills/svtools-delivery/references/delivery.md)。
+`semantics.recordingCompleteness=unknown`、`absenceProvesNoGlitches=false`、`acceptance=false` 明确证据边界：采集/转换可能折叠中间值。查询成功和零命中都不是功能、CDC、时序或物理无毛刺证明；有命中也不自动判 RTL 缺陷。模块验证报告必须包含该项的信号/窗口、扫描完整性、逐项处置、波形身份与限制，详见 [设计与验证交付约定](../../svtools-delivery/references/delivery.md)。
 
 底层按信号原始事件索引读取，避免稳定值折叠抹掉记录证据：[wellen Signal API](https://docs.rs/wellen/0.25.7/wellen/struct.Signal.html)。
 
 
 ## 架构计划与模块交接
 
-`design plan --spec` 生成架构报告和模块任务；`design tasks` 只读查询；`design claim/submit/return/review` 按 revision 和令牌变更；`design evidence` 校验当前候选的编译/仿真/ΔCycle 证据；`design plan-report --force` 更新同名 Markdown 报告。详细命令、输入格式与信任范围见 [设计工作流](DESIGN_WORKFLOW.md)。这些命令不自动执行仿真，不调用 Yosys/Vivado。插件原工程侧栏新增只读“设计进展”，通过 `svtools.design.planFile` 选择计划。
+`design plan --spec` 生成架构报告和模块任务；`design tasks` 只读查询；`design claim/submit/return/review` 按 revision 和令牌变更；`design evidence` 校验当前候选的编译/仿真/ΔCycle 证据；`design plan-report --force` 更新同名 Markdown 报告。详细命令、输入格式与信任范围见 [设计工作流](https://github.com/JayceVane/SV-Tools/blob/v4.2.0/docs/DESIGN_WORKFLOW.md)。这些命令不自动执行仿真，不调用 Yosys/Vivado。插件原工程侧栏新增只读“设计进展”，通过 `svtools.design.planFile` 选择计划。

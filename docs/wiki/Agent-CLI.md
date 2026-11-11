@@ -27,4 +27,4 @@ Set-Location .\svtools-agent
 .\svtools-agent.cmd wave values --workspace D:\rtl\demo --file sim/tb.fst --signals tb.clk,tb.dut.valid --at 1250ns
 ```
 
-报告目录包含 Markdown、架构 JSON、SVG、PNG 和产物清单。任务型命令启动后，用 `task status <任务 ID>` 等待终态；仿真和综合结果要看状态、诊断和对应输入。详见 [CLI 合同](https://github.com/JayceVane/SV-Tools/blob/v4.2.0/docs/CLI.md) 和 [架构与验证交接](https://github.com/JayceVane/SV-Tools/wiki/Design-Delivery)。
+报告目录包含 Markdown、架构 JSON、SVG、PNG 和产物清单。任务型命令启动后，用 `task status <任务 ID>` 等待终态；仿真和综合结果要看状态、诊断和对应输入。详见 [CLI 合同](https://github.com/JayceVane/SV-Tools/blob/v4.2.0/skills/svtools-agent/references/cli.md) 和 [架构与验证交接](https://github.com/JayceVane/SV-Tools/wiki/Design-Delivery)。
