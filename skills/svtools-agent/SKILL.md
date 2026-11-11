@@ -20,6 +20,8 @@ description: SV Tools CLI 的通用入口：doctor 能力发现、RTL 工程与�
 
 跨域任务（如"实现并验证一个模块"）同时读取涉及的技能；交付物口径以 `svtools-delivery` 为准。
 
+这类任务按 `svtools-delivery/references/workflow.md` 第 0 节的链路顺序读取技能：`svtools-design` 定契约与报告包 → `svtools-delivery` 领取 / 提交 / 证据口径 → `svtools-waveform` 与 `svtools-vivado` 提供取证 → 回到 `svtools-delivery` 复核；输入变化后从链路的「按模块分发」重新领取复验。该链路是显式编排，工具不自动重跑。
+
 ## 本技能覆盖：工程、格式化、检查与任务
 
 用 `project list`、`project inspect` 确认工程、文件集、top 与文件摘要。歧义时使用返回候选补充 `--project`、`--fileset`、`--file`、`--top`；不要借用另一个工程或编辑器的活动 top。根据任务读取必要的分页，不必一次枚举全部源码。
