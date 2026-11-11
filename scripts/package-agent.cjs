@@ -12,7 +12,10 @@ const { runProcess } = require('../src/toolchains/process');
 
 const root = path.resolve(__dirname, '..');
 const skills = ['agent', 'delivery', 'design', 'vivado', 'waveform'];
-const documents = ['docs/AGENT_QUICKSTART.md', 'docs/CLI.md', 'docs/DESIGN_WORKFLOW.md', 'docs/WAVEFORM.md', 'docs/V4_2_PLAN.md'];
+// 便携包只带被包内文件实际引用到的文档：CLI.md 被 svtools-agent 引用，
+// DESIGN_WORKFLOW.md 被 CLI.md 相对链接，V4_2_PLAN.md 被 svtools-delivery 引用，
+// AGENT_QUICKSTART.md 另存为包根 README。其余 docs/ 文档走 GitHub 链接，不入包。
+const documents = ['docs/AGENT_QUICKSTART.md', 'docs/CLI.md', 'docs/DESIGN_WORKFLOW.md', 'docs/V4_2_PLAN.md'];
 const runtime = name => /^(?:src\/|bin\/|templates\/|package\.json$|LICENSE(?:\.txt)?$|NOTICE$|AUTHORS$|THIRD_PARTY_NOTICES\.md$)/.test(name);
 const launcher = '@echo off\r\nnode "%~dp0src\\cli\\main.js" %*\r\nexit /b %errorlevel%\r\n';
 
