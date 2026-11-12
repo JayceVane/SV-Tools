@@ -12,7 +12,7 @@
 
 将 `skills/` 中所需的完整目录导入支持 Agent Skills 的客户端，包括各自的 `references/` 和 `assets/`。从 `svtools-agent` 开始，再按任务使用 `svtools-design`、`svtools-delivery`、`svtools-vivado` 或 `svtools-waveform`。把解压位置和目标 RTL 工作区告诉客户端。
 
-- [命令与 JSON 合同](https://github.com/JayceVane/SV-Tools/blob/v4.2.0/skills/svtools-agent/references/cli.md)
+- [命令与 JSON 合同](../skills/svtools-agent/references/cli.md)
 - [架构计划、模块交接与设计进展](https://github.com/JayceVane/SV-Tools/blob/v4.2.0/docs/DESIGN_WORKFLOW.md)
 - [波形和布局](https://github.com/JayceVane/SV-Tools/blob/v4.2.0/docs/WAVEFORM.md)
 - [项目与反馈](https://github.com/JayceVane/SV-Tools)
