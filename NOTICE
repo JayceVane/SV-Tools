@@ -154,3 +154,46 @@ references are included in bin/vendor/yosys/THIRD-PARTY-NOTICES.txt.
 Resource file notices are preserved verbatim. Build checksums are in
 bin/vendor/yosys/manifest.json. No Python interpreter is distributed.
 Source package: https://www.npmjs.com/package/@yowasp/yosys/v/0.68.1207
+
+-----------------------------------------------------------------------
+resvg-js 2.6.2 and resvg 0.34.1
+
+The Windows VSIX and Agent ZIP include the prebuilt
+@resvg/resvg-js-win32-x64-msvc 2.6.2 renderer as
+bin/resvg.win32-x64-msvc.node. SV Tools copies the upstream binary
+without modification.
+
+The resvg-js bindings and the bundled resvg fork are available in Source
+Code Form under the Mozilla Public License 2.0 (MPL-2.0). A copy of that
+license is included at bin/vendor/resvg-LICENSE.txt. Recipients can obtain
+the corresponding source free of charge from:
+
+resvg-js 2.6.2 (yisibl and contributors)
+https://github.com/thx/resvg-js/tree/v2.6.2
+
+resvg 0.34.1 (Yevhenii Reizner and contributors), at the revision selected
+by the resvg-js release:
+https://github.com/zimond/resvg/tree/3495d8705b302d6d266748516973606ca9657906
+
+Notices for dependencies identified in the prebuilt renderer are included
+at src/graphics/resvg-NOTICES.txt.
+
+-----------------------------------------------------------------------
+Native waveform components
+
+The native module uses wellen 0.25.7 and fst-reader 0.17.1 for waveform
+reading, and wavefst 0.4.0 for VCD to FST conversion. The copyright notices
+and license terms for these components and their added Windows runtime
+dependencies are in THIRD_PARTY_NOTICES.md.
+
+-----------------------------------------------------------------------
+PyWellen MCP
+
+SV Tools draws on the design of PyWellen MCP's signal_get_statistics,
+debug_build_timeline, format_as_signed, and export_to_csv tools. These
+features are adapted to the SV Tools Rust waveform engine and JavaScript
+CLI, with SV Tools windowing, pagination, and export behavior.
+
+Upstream project: https://github.com/fvutils/pywellen-mcp
+Upstream license: Apache License, Version 2.0. A copy is included in the
+root LICENSE file (LICENSE.txt in the binary archives).
