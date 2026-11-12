@@ -220,6 +220,10 @@ module alu #(
 - [TheClams/SystemVerilog](https://github.com/TheClams/SystemVerilog) — 格式化核心逻辑
 - [poucotm/Verilog-Gadget](https://github.com/poucotm/Verilog-Gadget) — 生产力工具
 - [tree-sitter](https://github.com/tree-sitter/tree-sitter) / [tree-sitter-systemverilog](https://github.com/gmlarumbe/tree-sitter-systemverilog)（MIT）— 符号解析
+- [wellen](https://github.com/ekiwi/wellen) / [fst-reader](https://github.com/ekiwi/fst-reader) — 波形读取与分析
+- [wavefst](https://github.com/0xtaruhi/wavefst) — VCD 转 FST
+- [PyWellen MCP](https://github.com/fvutils/pywellen-mcp) — 波形统计、合并时间线、有符号值和 CSV 导出工具的设计参考
+- [resvg-js](https://github.com/thx/resvg-js) / [resvg](https://github.com/linebender/resvg) — 架构和波形图的 SVG 转 PNG
 
 项目维护与 VS Code 集成：[JayceVane](https://github.com/JayceVane)。项目起源于上述 Sublime Text 插件的移植，并在此基础上持续重构与扩展。
 
@@ -231,4 +235,4 @@ module alu #(
 
 ## 许可证
 
-Copyright (c) 2025 JayceVane — [Apache License, Version 2.0](LICENSE)。第三方代码许可信息见 [NOTICE](NOTICE)。
+Copyright (c) 2025 JayceVane — [Apache License, Version 2.0](LICENSE)。第三方许可证、版权声明及对应源码见 [NOTICE](NOTICE) 和 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
