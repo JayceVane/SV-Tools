@@ -12,7 +12,10 @@ const { runProcess } = require('../src/toolchains/process');
 
 const root = path.resolve(__dirname, '..');
 const skills = ['agent', 'delivery', 'design', 'vivado', 'waveform'];
-const documents = ['docs/AGENT_QUICKSTART.md', 'docs/CLI.md', 'docs/DESIGN_WORKFLOW.md', 'docs/WAVEFORM.md', 'docs/V4_2_PLAN.md'];
+// 便携包不携带 docs/：CLI 参考已并入 skills/svtools-agent/references/cli.md，
+// 设计工作流与开发计划属于仓库文档，走 GitHub 链接；包根 README 由
+// docs/AGENT_QUICKSTART.md 生成。
+const documents = [];
 const runtime = name => /^(?:src\/|bin\/|templates\/|package\.json$|LICENSE(?:\.txt)?$|NOTICE$|AUTHORS$|THIRD_PARTY_NOTICES\.md$)/.test(name);
 const launcher = '@echo off\r\nnode "%~dp0src\\cli\\main.js" %*\r\nexit /b %errorlevel%\r\n';
 
@@ -58,7 +61,12 @@ async function packageAgent(vsix, output) {
             zip.addFile(path.join(root, name), name);
         }
         zip.addBuffer(Buffer.from(launcher), 'svtools-agent.cmd');
-        zip.addFile(path.join(root, 'docs', 'AGENT_QUICKSTART.md'), 'README.md');
+        const cliReference = 'skills/svtools-agent/references/cli.md';
+        const quickStart = await fsp.readFile(path.join(root, 'docs', 'AGENT_QUICKSTART.md'), 'utf8');
+        const repositoryLink = `](../${cliReference})`;
+        assert.ok(tracked.includes(cliReference) && quickStart.includes(repositoryLink), '便携包 README 缺少 CLI 参考或链接');
+        // 快速入门从 docs/ 移到 ZIP 根目录，CLI 参考链接也要从根目录解析。
+        zip.addBuffer(Buffer.from(quickStart.replace(repositoryLink, `](${cliReference})`)), 'README.md');
         zip.addBuffer(Buffer.from(JSON.stringify({ schemaVersion: 1, target: 'win32-x64', ...identity }, null, 2) + '\n'), 'RELEASE.json');
         const write = pipeline(zip.outputStream, fs.createWriteStream(archive, { flags: 'wx' }));
         zip.end();

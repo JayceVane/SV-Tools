@@ -1,5 +1,5 @@
 'use strict';
-// 文档与实现的一致性护栏：CLI.md 错误码判定表中出现的每个 code 必须真实存在于源码。
+// 文档与实现的一致性护栏：skills/svtools-agent/references/cli.md 错误码判定表中出现的每个 code 必须真实存在于源码。
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
@@ -22,8 +22,8 @@ async function readSources() {
     return chunks.join('\n');
 }
 
-test('CLI.md 错误码判定表与源码一致', async () => {
-    const doc = await fs.readFile(path.join(ROOT, 'docs', 'CLI.md'), 'utf8');
+test('CLI 参考的错误码判定表与源码一致', async () => {
+    const doc = await fs.readFile(path.join(ROOT, 'skills', 'svtools-agent', 'references', 'cli.md'), 'utf8');
     const section = doc.split('## 错误码与判定')[1].split('\n## ')[0];
     const codes = [...new Set([...section.matchAll(/`([A-Z][A-Z0-9_]{2,})`/g)].map(match => match[1]))];
     assert(codes.length >= 10, '错误码表缺失或解析失败：' + codes.length);

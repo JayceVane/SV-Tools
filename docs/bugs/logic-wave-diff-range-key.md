@@ -9,7 +9,7 @@
 
 ## 证据与结论
 
-`docs/CLI.md` 对 `wave diff` 的合同写得很明确：
+`skills/svtools-agent/references/cli.md` 对 `wave diff` 的合同写得很明确：
 
 > 两份 VCD 同名信号（**键为路径+向量 range**）双指针对齐比较
 

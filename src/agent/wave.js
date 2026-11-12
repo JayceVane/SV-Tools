@@ -98,7 +98,7 @@ async function openTrace(input) {
         meta = opened.meta;
     } catch (error) {
         // Rust 的错误码与 CLI 码同名，直接透传：`WAVE_FORMAT_UNSUPPORTED` 在
-        // docs/CLI.md 里是独立条目（格式不支持），不能再折叠回 `VCD_PARSE`（语法损坏）——
+        // skills/svtools-agent/references/cli.md 里是独立条目（格式不支持），不能再折叠回 `VCD_PARSE`（语法损坏）——
         // 两者的处置不同（换格式 vs 重新仿真），折叠后调用方无法分派。
         fail(error.code || 'VCD_PARSE', error.message, { file });
     }

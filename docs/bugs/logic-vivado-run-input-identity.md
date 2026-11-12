@@ -6,4 +6,4 @@
 
 修复在创建入口统一检查运行器摘要；每轮使用捕获的工程、源码、头文件和约束副本构建，原工程与构建目录独立。配置指纹涵盖文件集、top、器件、宏、include、文件属性与运行策略，排除自动缓存和运行状态。运行前后核验原始输入，并记录DCP的SHA-256、工具版本及源码副本映射。失败或取消不回退到上次成功报告，旧格式记录只视为未知。
 
-当前隔离边界见 [CLI说明](../CLI.md)：尚不能可靠捕获的IP、外部Tcl钩子等明确拒绝；没有通过把未知输入视为空来维持“成功”。回归位于 `test/vivado_inputs_test.js`、`test/vivado_agent_test.js`，真实工具闭环位于 `test/vivado_real_test.js`。重点检查 top/器件/宏变化、排队和运行期间改源、A→B→A、检查点替换，以及退出非零但已有完成标记。
+当前隔离边界见 [CLI说明](../../skills/svtools-agent/references/cli.md)：尚不能可靠捕获的IP、外部Tcl钩子等明确拒绝；没有通过把未知输入视为空来维持“成功”。回归位于 `test/vivado_inputs_test.js`、`test/vivado_agent_test.js`，真实工具闭环位于 `test/vivado_real_test.js`。重点检查 top/器件/宏变化、排队和运行期间改源、A→B→A、检查点替换，以及退出非零但已有完成标记。

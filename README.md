@@ -44,7 +44,7 @@
 
 **4.2 新增 Agent CLI、架构报告与设计进展。** 在终端可检查工程、运行工具、查询 VCD/FST 和导出报告。Agent 通过五个 Skill 使用同一套命令。在 IDE 的「SV Tools 工程 → 设计进展」可查看模块交接和证据。
 
-[Agent 安装与使用](docs/wiki/Agent-CLI.md) · [架构和验证交接](docs/wiki/Design-Delivery.md) · [CLI 合同](docs/CLI.md)
+[Agent 安装与使用](docs/wiki/Agent-CLI.md) · [架构和验证交接](docs/wiki/Design-Delivery.md) · [CLI 合同](skills/svtools-agent/references/cli.md)
 
 **格式化**（手动 / 选中区域，`docs/FORMAT_SPEC.md` 为唯一行为规范）
 

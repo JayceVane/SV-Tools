@@ -20,6 +20,8 @@ description: SV Tools CLI 的通用入口：doctor 能力发现、RTL 工程与�
 
 跨域任务（如"实现并验证一个模块"）同时读取涉及的技能；交付物口径以 `svtools-delivery` 为准。
 
+这类任务按 `svtools-delivery/references/workflow.md` 第 0 节的链路顺序读取技能：`svtools-design` 定契约与报告包 → `svtools-delivery` 领取 / 提交 / 证据口径 → `svtools-waveform` 与 `svtools-vivado` 提供取证 → 回到 `svtools-delivery` 复核；输入变化后从链路的「按模块分发」重新领取复验。该链路是显式编排，工具不自动重跑。
+
 ## 本技能覆盖：工程、格式化、检查与任务
 
 用 `project list`、`project inspect` 确认工程、文件集、top 与文件摘要。歧义时使用返回候选补充 `--project`、`--fileset`、`--file`、`--top`；不要借用另一个工程或编辑器的活动 top。根据任务读取必要的分页，不必一次枚举全部源码。
@@ -32,4 +34,4 @@ RTL 修改后运行 `lint --file <path> --top <module>`。这属于编译/详细
 
 报告实际运行的命令、工程/源码版本、工具版本、结论和仍未验证的部分。原始日志按需分页读取，避免将整份日志交给模型。
 
-需要配置字段、退出码、分页、include 边界或安装说明时，读取工具目录的 `docs/CLI.md`；用 `--help` 核对当前版本命令。
+需要配置字段、退出码、分页、include 边界或安装说明时，读取 `references/cli.md`；用 `--help` 核对当前版本命令。
