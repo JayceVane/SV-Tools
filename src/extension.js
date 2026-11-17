@@ -35,6 +35,7 @@ const { createProjectManager } = require('./project/manager');
 const { activateProjectView } = require('./project');
 const { createWorkspaceSourceIndex } = require('./workspace/sources');
 const { createLanguageProviders } = require('./editor/language');
+const { activateConditionalHighlighting } = require('./editor/conditional-highlighting');
 const nativeLoader = createNativeLoader();
 let nativeLoadError = null;
 
@@ -63,9 +64,11 @@ function activate(context) {
     const projects = createProjectManager({vscode,state:context.workspaceState,vivadoSelection:createProjectSelection({workspace:vscode.workspace,state:context.workspaceState})});
     context.subscriptions.push(projects);
     const vivado = activateVivado(context,{projectSelection:projects.vivadoSelection,projectView:false});
-    const sourceCatalog = createSourceCatalog({ vscode, getPreferred: createProjectSourceProvider({ vscode, projectSelection: vivado.projectSelection, projects }) });
+    const getProjectSources = createProjectSourceProvider({ vscode, projectSelection: vivado.projectSelection, projects });
+    const sourceCatalog = createSourceCatalog({ vscode, getPreferred: getProjectSources });
     const sourceIndex = createWorkspaceSourceIndex({ workspace: vscode.workspace, sourceCatalog });
     context.subscriptions.push(sourceCatalog, sourceCatalog.onDidChange(sourceIndex.invalidate), vivado.projectSelection.onDidChange(sourceCatalog.invalidate));
+    context.subscriptions.push(activateConditionalHighlighting({ vscode, getProjectSources, sourceCatalog }));
     const dependencies = { vscode, loadNativeModule, reportNativeMissing, sourceCatalog };
     const { formatDocument } = createFormatter(dependencies);
     const languageProviders = createLanguageProviders(dependencies);
@@ -148,7 +151,7 @@ function activate(context) {
     // Icarus Verilog lint 与仿真（诊断、命令、状态栏）
     const waveLinks = createWaveLinks({vscode}); context.subscriptions.push(waveLinks);
     const waveViewer = activateWaveViewer(context, { sourceCatalog, waveLinks });
-    activateIverilog(context, { waveViewer, scanWorkspaceSources: force => sourceIndex.scan(force), invalidateWorkspaceSources: sourceIndex.invalidate });
+    activateIverilog(context, { waveViewer, getProjectSources, scanWorkspaceSources: force => sourceIndex.scan(force), invalidateWorkspaceSources: sourceIndex.invalidate });
 
     // Vivado TCL 批处理运行与工程创建
     const circuit = activateCircuitViewer(context, { vivado, sourceCatalog, waveLinks });

@@ -22,7 +22,7 @@ const DRIVER = `const fs=require('node:fs'),path=require('node:path');
 const tool=process.argv[2],mode=process.argv[3];
 const rest=process.argv.slice(4),prj=path.join(process.cwd(),'svtools.prj');
 let file=rest.at(-1),source='';
-if(tool==='xvlog'&&fs.existsSync(prj))file=fs.readFileSync(prj,'utf8').match(/"([^"]+)"/)[1];
+if(tool==='xvlog'&&fs.existsSync(prj))file=[...fs.readFileSync(prj,'utf8').split('\\n',1)[0].matchAll(/"([^"]+)"/g)].at(-1)[1];
 if(file&&fs.existsSync(file))source=fs.readFileSync(file,'utf8');
 if(mode==='slow'||source.includes('SLOW')){fs.writeFileSync('compile-started','yes');console.log('ready');setTimeout(()=>{console.log('ERROR: [VRFC 1] late failure ['+file+':1]');process.exit(2)},3000);return;}
 if(mode==='dep'){if(tool==='iverilog'){console.error(path.join(__dirname,'dependency.sv')+':4: error: broken dependency');process.exitCode=1;}
@@ -30,6 +30,7 @@ else console.log('ERROR: [VRFC 1] broken dependency ['+path.join(__dirname,'depe
 if(mode==='early'){console.log('ERROR: [VRFC 1] early error ['+file+':2]');process.stdout.write('noise '.repeat(100000)+'\\n');}
 if(mode==='exit'){console.log('unrecognized tool failure');process.exit(7);}
 if(mode==='inspect')console.log('INPUT '+JSON.stringify({cwd:process.cwd(),source}));
+if(mode==='prj-includes')console.log('PRJ '+JSON.stringify(fs.readFileSync(prj,'utf8')));
 if(tool==='iverilog'){const index=rest.indexOf('-o');if(index>=0)fs.writeFileSync(rest[index+1],'compiled');}
 if(tool==='vvp'){if(mode==='argcheck'){const input=rest.findIndex(arg=>arg.endsWith('.vvp'));const extended=rest.slice(input+1);console.log('RUNTIME '+JSON.stringify({flags:rest.slice(0,input),input:rest[input],extended,trace:extended.includes('+trace'),seed:extended.find(arg=>arg.startsWith('+seed='))?.slice(6)}));}fs.writeFileSync('vvp-started','yes');if(mode==='wave'||mode==='runtimefailwave')fs.writeFileSync('run.vcd','$timescale 1ns $end $var wire 1 ! clk $end $enddefinitions $end #0 0!');if(mode==='runtimefailwave')process.exitCode=3;}
 if(tool==='vvp'&&mode==='archive'){for(const wave of JSON.parse(fs.readFileSync(path.join(__dirname,'wave-plan.json'),'utf8'))){fs.mkdirSync(path.dirname(wave.file),{recursive:true});fs.writeFileSync(wave.file,wave.bytes ? Buffer.from(wave.bytes,'hex') : wave.text);}}
@@ -232,7 +233,7 @@ function editorHarness(f, getToolchain, options = {}) {
         vscode.workspace[name] = handler => { handlers.set(name, handler); return disposable(); };
     }
     const api = activateIverilog({ subscriptions: [] }, { vscode, resolveToolchain: getToolchain, startProcess: options.startProcess,
-        xvlogTools: options.xvlogTools, resolveXvlogBinDir: options.resolveXvlogBinDir,
+        xvlogTools: options.xvlogTools, resolveXvlogBinDir: options.resolveXvlogBinDir, getProjectSources: options.getProjectSources,
         scanWorkspaceSources: async () => ({ dirs: [], modules: new Map() }), waveViewer: options.waveViewer || { openWaveform: async file => waves.push(file) } });
     return { api, doc, config, handlers, commands, messages, waves, bars, problems, vscode };
 }
@@ -240,6 +241,27 @@ function protocolToolchain(f, mode) {
     return { iverilog: process.execPath, compilePrefix: [f.driver, 'iverilog', mode],
         vvp: process.execPath, vvpPrefix: [f.driver, 'vvp', 'wave'], env: process.env, cygwinDir: null };
 }
+
+test('编辑器 xvlog 单文件检查传入工程头文件目录，显式 include 路径优先', async t => {
+    const f = await fixture(t), headerDir = path.join(f.root, 'rtl', 'ip headers'), explicit = path.join(f.root, 'overrides');
+    const h = editorHarness(f, () => assert.fail('should run xvlog'), {
+        config: { includePaths: ['overrides'] }, lintConfig: { engine: 'xvlog', currentFileOnly: true },
+        resolveXvlogBinDir: () => f.root,
+        xvlogTools: { xvlog: { command: process.execPath, args: [f.driver, 'xvlog', 'prj-includes'] } },
+        getProjectSources: async request => {
+            assert.deepEqual(request, { root: f.root, file: f.file, findContainingVivado: true });
+            return { files: [f.file, path.join(headerDir, 'width_defs.v')] };
+        }
+    });
+    t.after(() => h.api.dispose());
+    const result = await h.commands.get('svtools.iverilog.lint')();
+    assert.equal(result.status, 'success', JSON.stringify(result));
+    const log = await fs.readFile(result.logPath, 'utf8');
+    const body = JSON.parse(log.match(/^PRJ (.*)$/m)[1]);
+    assert.equal(body.trim().split('\n').length, 1);
+    assert.deepEqual([...body.matchAll(/--include "([^"]+)"/g)].map(match => path.normalize(match[1])), [f.root, explicit, headerDir]);
+    assert.ok(!body.includes('width_defs.v'));
+});
 
 function changedConfiguration(...keys) {
     return { affectsConfiguration: name => keys.some(key => key === name || key.startsWith(name + '.') || name.startsWith(key + '.')) };

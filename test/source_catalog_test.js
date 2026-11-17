@@ -95,3 +95,29 @@ test('空HDL清单的工程上下文回落工作区发现，不把空清单当�
     assert.equal(result.provenance,'workspace');
     catalog.dispose();
 });
+
+test('直接检查 HDL 时按真实成员定位同名 Vivado 工程，普通源码清单仍跟随选中工程', async t => {
+    const { readProjectSnapshot } = require('../src/project/model');
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'svtools-xvlog-project-'));
+    t.after(() => fs.rm(root, { recursive: true, force: true }));
+    async function makeProject(folder) {
+        const directory = path.join(root, folder);
+        await fs.mkdir(directory, { recursive: true });
+        const xpr = path.join(directory, 'demo.xpr');
+        await fs.writeFile(xpr, '<Project><FileSets><FileSet Name="sources_1" Type="DesignSrcs">'
+            + '<File Path="$PSRCDIR/sources_1/rtl/top.sv"/><File Path="$PSRCDIR/sources_1/rtl/header/width_defs.v"/>'
+            + `<Config><Define Name="${folder === 'auxiliary' ? 'DDR32' : 'DDR64'}"/><Define Name="NAME" Val="with space"/></Config>`
+            + '</FileSet></FileSets></Project>');
+        return { xpr, rtl: path.join(directory, 'demo.srcs', 'sources_1', 'rtl') };
+    }
+    const active = await makeProject('auxiliary'), target = await makeProject(path.join('container.xpr', 'demo'));
+    const snapshot = descriptor => readProjectSnapshot(descriptor, { workspaceRoot: root });
+    const provider = createProjectSourceProvider({ projects: { current: () => snapshot({ kind: 'vivado', path: active.xpr }), snapshot },
+        projectSelection: { discover: async () => [active.xpr, target.xpr] } });
+    const file = path.join(target.rtl, 'top.sv');
+    assert.equal(await provider({ root, file }), null);
+    const scope = await provider({ root, file, findContainingVivado: true });
+    assert.deepEqual(scope.files, [file, path.join(target.rtl, 'header', 'width_defs.v')]);
+    assert.deepEqual(scope.defines, ['DDR64', 'NAME=with space']);
+    assert.equal(await provider({ root, file: path.join(target.rtl, 'other.sv'), findContainingVivado: true }), null);
+});
