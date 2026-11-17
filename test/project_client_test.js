@@ -21,7 +21,7 @@ class Element {
 function client() {
     let document;
     const createElement = tag => { const element = new Element(tag); element.focus = () => { document.activeElement = element; }; return element; };
-    const elements = new Map(['progress','tree','menu','choose','projectName','projectKind','files','instances','add','vivadoTools','tools','toggleTools','addVivado','toolBody','toolActions','toolReports','diagnostics','refresh','actions','trace','traceRoot','pin','clear','message','issues'].map(id=>[id,createElement()]));
+    const elements = new Map(['progress','tree','menu','choose','projectName','projectLocation','projectKind','files','instances','add','vivadoTools','tools','toggleTools','addVivado','toolBody','toolActions','toolReports','diagnostics','refresh','actions','trace','traceRoot','pin','clear','message','issues'].map(id=>[id,createElement()]));
     elements.get('menu').hidden = true;
     for (const id of ['actions', 'toolReports']) { elements.get(id).setAttribute('aria-haspopup', 'menu'); elements.get(id).setAttribute('aria-expanded', 'false'); }
     const messages=[],events={},documentEvents={}; let saved;
@@ -128,6 +128,28 @@ test('工程切换分别记忆展开状态，文件名不会作为HTML执行',()
     c.elements.get('instances').click();assert.equal(c.messages.at(-1).projection,'instances');
     c.receive({project:{id:'other',name:'other'},nodes:[{...node,id:'other-src'}]});c.elements.get('files').click();
     assert.equal(c.state().first.projection,'instances');assert.equal(c.state().other.projection,'files');
+});
+
+test('Vivado IP 分组初始折叠，展开后可打开原文件，标题显示当前工程目录', () => {
+    const c = client(), file = { id: 'fifo', label: 'fifo.xci', kind: 'file', file: '/nested/ip/fifo.xci', children: [], flags: [] };
+    const group = { id: 'vivado:ip', label: 'IP · 1', kind: 'set', collapsedByDefault: true, children: [file], flags: [] };
+    const project = { id: 'v', name: 'ps_in', kind: 'vivado', location: 'nested', path: '/nested/ps_in.xpr' };
+    c.receive({ project, nodes: [group] });
+    const tree = c.elements.get('tree'), location = c.elements.get('projectLocation');
+    assert.equal(location.textContent, 'nested');
+    assert.equal(location.hidden, false);
+    assert.equal(c.elements.get('choose').title, '/nested/ps_in.xpr');
+    assert.equal(tree.children.length, 1);
+    assert.equal(tree.children[0].getAttribute('aria-expanded'), 'false');
+    tree.children[0].click();
+    assert.equal(tree.children[0].getAttribute('aria-expanded'), 'true');
+    tree.children[1].click();
+    assert.equal(c.messages.at(-1).action, 'open');
+    assert.equal(c.messages.at(-1).nodeId, 'fifo');
+    c.receive({ project: { id: 'local', name: 'local', kind: 'svtools' } });
+    assert.equal(location.hidden, true);
+    c.receive({ project, nodes: [group] });
+    assert.equal(tree.children[0].getAttribute('aria-expanded'), 'true');
 });
 
 test('进展页只读显示过期证据并保留展开状态，打开证据只发宿主令牌',()=>{

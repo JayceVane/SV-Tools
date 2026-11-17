@@ -133,7 +133,8 @@ function activateIverilog(context, deps) {
             if (kind === 'elaborate' || currentEngine(document) === 'xvlog') {
                 return await (kind === 'elaborate' ? elaborateWithXvlog : lintWithXvlog)(document, {
                     vscode, channel, output, applyDiagnostics, isVerilogDocument, scanWorkspaceSources: scanSources, task, showToolchainError,
-                    toolCommands: deps.xvlogTools, resolveBinDir: deps.resolveXvlogBinDir, top: options.top, projectScope: options.projectScope });
+                    toolCommands: deps.xvlogTools, resolveBinDir: deps.resolveXvlogBinDir, top: options.top, projectScope: options.projectScope,
+                    getProjectSources: deps.getProjectSources });
             }
             return await runner.lint(task, document);
         } catch (error) {

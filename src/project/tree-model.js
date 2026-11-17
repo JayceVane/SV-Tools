@@ -1,6 +1,6 @@
 'use strict';
 const path = require('node:path');
-const { keyOf } = require('./manager');
+const { keyOf } = require('./model');
 const SYMBOLS = { internal: '●', output: '→', input: '←', inout: '↔', unknown: '?' };
 const ROLES = ['internal', 'output', 'input', 'inout', 'unknown'];
 const namesOf = node => node.names?.join('.') || node.moduleName;
@@ -63,10 +63,23 @@ function projectTree(project, { projection = 'files', flow } = {}) {
         return roots;
     }
     const roles = fileRoles(flow?.nodes), roots = [];
+    const category = (id, label, icon) => ({ id: 'vivado:' + id, label, kind: 'set', icon, children: [], flags: [], collapsedByDefault: true });
+    const ips = category('ip', 'IP', 'instance');
+    const designs = category('bd', 'Block Design', 'implement');
+    const blockSources = category('block-sources', '块源文件', 'fileset');
+    const assetGroups = { '.xci': ips, '.xcix': ips, '.bd': designs };
     for (const set of project.sets) {
         const group = { id: 'set:' + set.name, label: set.name + (set.top ? ' · top: ' + set.top : ''), kind: 'set', fileset: set.name, children: [], flags: [] };
         const folders = new Map([['', group]]);
         for (const file of [...set.files].sort()) {
+            const fileKey = keyOf(file), role = roles.get(fileKey);
+            const item = { id: group.id + '/file:' + fileKey, label: path.basename(file), kind: 'file', file, fileset: set.name, children: [],
+                ...(role ? annotation(role.nodes, role.roles, role.ambiguous) : { flags: [] }) };
+            const assets = project.kind === 'vivado' && assetGroups[path.extname(file).toLowerCase()];
+            if (assets) {
+                assets.children.push({ ...item, icon: assets.icon, tooltip: [set.name, item.tooltip].filter(Boolean).join('\n') });
+                continue;
+            }
             const relative = path.relative(project.root, file), directory = path.dirname(relative), segments = directory === '.' ? [] : directory.split(path.sep);
             let parent = group, trail = '';
             for (const segment of segments) {
@@ -78,12 +91,22 @@ function projectTree(project, { projection = 'files', flow } = {}) {
                 }
                 parent = folders.get(trail);
             }
-            const role = roles.get(keyOf(file));
-            parent.children.push({ id: group.id + '/file:' + keyOf(file), label: path.basename(file), kind: 'file', file, fileset: set.name, children: [],
-                ...(role ? annotation(role.nodes, role.roles, role.ambiguous) : { flags: [], tooltip: file }) });
+            parent.children.push(item);
         }
-        roots.push(group);
+        if (project.kind === 'vivado' && set.type === 'BlockSrcs') {
+            // XPR may declare an out-of-context fileset for a BD child with no file entries.
+            if (group.children.length) blockSources.children.push(group);
+        } else {
+            roots.push(group);
+        }
     }
+    for (const assets of [ips, designs]) {
+        if (!assets.children.length) continue;
+        assets.children.sort((a, b) => a.label.localeCompare(b.label) || a.file.localeCompare(b.file));
+        assets.label += ' · ' + assets.children.length;
+        roots.push(assets);
+    }
+    if (blockSources.children.length) roots.push(blockSources);
     return roots;
 }
 module.exports = { projectTree, fileRoles, SYMBOLS };

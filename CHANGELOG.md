@@ -2,6 +2,12 @@
 
 All notable changes to the SystemVerilog VSCode Extension will be documented in this file.
 
+## [4.2.1] - 2026-11-17
+
+- Vivado 工程的文件视图新增默认折叠的 IP 和 Block Design 分组。工程标题显示所在目录，便于区分同名工程。
+- xvlog 单文件检查根据正在编辑的源文件确定所属工程，并将工程成员所在目录纳入头文件搜索范围。
+- SystemVerilog 和 Verilog 编辑器根据工程宏、源码及可解析的头文件淡化未选中的条件编译分支。编辑宏定义后自动更新高亮。
+
 ## [4.2.0] - 2026-11-10
 
 - 新增本地 Agent CLI 与五份 Skills，提供 Windows x64 便携 ZIP。

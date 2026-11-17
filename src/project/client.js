@@ -4,7 +4,7 @@
     const vscode = acquireVsCodeApi(), saved = vscode.getState() || {}, tree = document.getElementById('tree'), menu = document.getElementById('menu');
     let snapshot = { nodes: [], revision: 0 }, state = saved, focusId, menuAnchor;
     const send = (action, extra = {}) => vscode.postMessage({ action, revision: snapshot.revision, ...extra });
-    const currentState = () => state[snapshot.project?.id] || (state[snapshot.project?.id] = { expanded: (snapshot.nodes || []).map(node => node.id), projection: 'files' });
+    const currentState = () => state[snapshot.project?.id] || (state[snapshot.project?.id] = { expanded: (snapshot.nodes || []).filter(node => !node.collapsedByDefault).map(node => node.id), projection: 'files' });
     const remember = () => vscode.setState(state);
     const text = (id, value) => {
         document.getElementById(id).textContent = value || '';
@@ -94,6 +94,9 @@
             remember();
         }
         text('projectName', project?.name || '选择或创建工程');
+        text('projectLocation', project?.location);
+        document.getElementById('projectLocation').hidden = !project?.location;
+        document.getElementById('choose').title = project?.path || '';
         text('projectKind', project?.kind === 'vivado' ? 'Vivado' : project ? 'SV Tools' : '');
         document.getElementById('trace').hidden = !snapshot.tracing;
         text('traceRoot', snapshot.traceRoot || '追踪编辑器所选信号');
@@ -138,7 +141,8 @@
                 padding.style.width = Math.min(depth, 32) * 14 + 'px';
                 const symbol = document.createElement('span');
                 symbol.className = 'symbol';
-                symbol.append(icon(node.kind === 'set' ? 'fileset' : node.kind === 'folder' ? (expanded ? 'folderOpen' : 'folder') : node.kind === 'instance' ? 'instance' : /\.xdc$/i.test(node.file || '') ? 'constraint' : 'file'));
+                const iconName = node.icon || (node.kind === 'set' ? 'fileset' : node.kind === 'folder' ? (expanded ? 'folderOpen' : 'folder') : node.kind === 'instance' ? 'instance' : /\.xdc$/i.test(node.file || '') ? 'constraint' : 'file');
+                symbol.append(icon(iconName));
                 const label = document.createElement('span');
                 label.className = 'label';
                 label.textContent = node.label;
