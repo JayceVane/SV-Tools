@@ -58,7 +58,11 @@ test('报文汇聚简图保留独立实例、标签网络和架构握手证据�
     assert.match(html, /<a class="module-pin" href="#module-\d+-link-\d+"[^>]*><code>enqueue<\/code>/u);
     const pinCount = markup => (markup.match(/schematic-pin/g) || []).length;
     const forced = await exportArchitecture(loaded, 'html', { out: 'architecture-detailed.html', modes: { [top.id]: 'detailed' } });
-    assert.ok(pinCount(await fs.readFile(forced, 'utf8')) > pinCount(html));
+    const forcedHtml = await fs.readFile(forced, 'utf8');
+    assert.ok(pinCount(forcedHtml) > pinCount(html));
+    const anchors = new Set([...forcedHtml.matchAll(/\sid="([^"]+)"/gu)].map(([, id]) => id));
+    const missing = [...forcedHtml.matchAll(/\shref="#([^"]+)"/gu)].map(([, id]) => id).filter(id => !anchors.has(id));
+    assert.deepEqual(missing, [], '完整连线导出的图内跳转必须有目标');
     const invalid = await exportArchitecture(loaded, 'html', { out: 'architecture-invalid.html', modes: { [top.id]: 'bogus' } });
     assert.equal(pinCount(await fs.readFile(invalid, 'utf8')), pinCount(html));
     await fs.writeFile(path.join(workspace, 'svtools.architecture.json'), '{}');

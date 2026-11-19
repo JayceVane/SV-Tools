@@ -23,7 +23,7 @@ async function renderArchitectureBook(book, modes) {
             `<tr><th scope="row">${code(node.name)}</th><td>${node.chapter ? `<a href="#${node.chapter}">${escape(pageName(byId.get(node.chapter)))}</a>` : `${code(node.type)} · 未解析`}${node.implementation === 'stub' ? ' · 实现桩' : ''}</td><td>${sourceLink(node.source, false)}</td></tr>`).join('')}</tbody></table>` : '';
         const interfaces = page.links.filter(link => link.kind === 'interface');
         const targets = new Map(interfaces.flatMap(link => link.endpoints.filter(endpoint => endpoint.boundary).map(endpoint => [endpoint.port, link.id])));
-        const signals = page.links.filter(link => link.kind === 'signal' && (page.auto === 'detailed' || !link.labeled));
+        const signals = page.links.filter(link => link.kind === 'signal' && (mode === 'detailed' || !link.labeled));
         const signalTable = signals.length ? `<h3>普通信号</h3><table><thead><tr><th scope="col">信号</th><th scope="col">端点</th><th scope="col">位宽</th></tr></thead><tbody>${signals.map(link =>
             `<tr id="${link.id}"><th scope="row">${code(link.name)}</th><td>${signalEnds(link, nodes)}</td><td>${link.width ?? '—'}</td></tr>`).join('')}</tbody></table>` : '';
         const rootNote = index === 0 ? '<p class="subtle">源级结构快照。方向来自可解析的端口和 modport 声明，适用于架构复核。功能、时序及握手行为需要通过编译和仿真验证。</p>' : '';
