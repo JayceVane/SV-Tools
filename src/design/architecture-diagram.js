@@ -144,7 +144,12 @@ async function layoutDiagram(page, mode) {
             : direction === 'output' ? { 'org.eclipse.elk.layered.layering.layerConstraint': 'LAST' } : undefined };
     });
     if (!elk) {
-        const Elk = require('../../bin/vendor/elk.bundled.js');
+        let Elk;
+        try { Elk = require('../../bin/vendor/elk.bundled.js'); }
+        catch (error) {
+            if (error.code !== 'MODULE_NOT_FOUND') throw error;
+            throw new Error('架构布局引擎尚未构建：请先运行 npm run build:circuit 生成 bin/vendor/elk.bundled.js。');
+        }
         elk = new Elk();
     }
     // Lay out linked boundaries from verified sources and sinks. Inout remains unconstrained.

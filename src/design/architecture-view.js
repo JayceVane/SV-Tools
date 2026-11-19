@@ -134,12 +134,13 @@ function activateArchitectureViewer(context, { vscode, projects }) {
                     if (doc.getText().replace(/^\uFEFF/u, '') !== captured.replace(/^\uFEFF/u, '')) throw new Error('源码与结构快照内容有差异，请保存后重新读取。');
                     const start = new vscode.Position(site.line - 1, site.column - 1);
                     await vscode.window.showTextDocument(doc, { viewColumn: vscode.ViewColumn.Beside, preview: true, selection: new vscode.Range(start, start) });
-                } else if (message.type === 'export' && !exporting && ['html', 'pdf'].includes(message.format)) {
+                } else if (message.type === 'export' && !exporting && ['html', 'pdf'].includes(message.format)
+                    && (message.modes === undefined || message.modes === null || typeof message.modes === 'object')) {
                     exporting = true;
                     let file;
                     try {
                         await post({ type: 'exporting', busy: true });
-                        file = await exportArchitecture(loaded, message.format);
+                        file = await exportArchitecture(loaded, message.format, { modes: message.modes });
                     } finally {
                         exporting = false;
                         await post({ type: 'exporting', busy: false });

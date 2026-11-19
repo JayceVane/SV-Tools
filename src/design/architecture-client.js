@@ -29,7 +29,9 @@
     function showChapter(id, path = []) {
         page = chapters.get(id);
         if (!page) return;
-        ancestors = path;
+        // 章节按模块定义组织，递归实例会回到同一章节：截断到首次出现，路径中不保留重复章节。
+        const at = path.indexOf(id);
+        ancestors = (at < 0 ? path : path.slice(0, at)).filter((item, index, all) => all.indexOf(item) === index);
         mode = api.getState()?.modes?.[id] || page.auto;
         nodes = new Map(page.nodes.map(node => [node.id, node]));
         links = new Map(page.links.map(link => [link.id, link]));
@@ -246,8 +248,8 @@
     };
     $('back').onclick = hideLink;
     $('refresh').onclick = () => post('refresh');
-    $('export-html').onclick = () => post('export', { format: 'html' });
-    $('export-pdf').onclick = () => post('export', { format: 'pdf' });
+    $('export-html').onclick = () => post('export', { format: 'html', modes: api.getState()?.modes || {} });
+    $('export-pdf').onclick = () => post('export', { format: 'pdf', modes: api.getState()?.modes || {} });
     window.addEventListener('message', event => {
         const message = event.data;
         if (message.type === 'book') {

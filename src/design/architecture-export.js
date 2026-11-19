@@ -10,12 +10,13 @@ const { escape, code, pageName, sourceLink, portTable, renderModuleSymbol, inter
 const { printPdf } = require('./note-export');
 const { create } = require('./workflow-files');
 
-async function renderArchitectureBook(book) {
+async function renderArchitectureBook(book, modes) {
     const byId = new Map(book.pages.map(page => [page.id, page]));
     const css = await fs.readFile(path.join(__dirname, 'architecture.css'), 'utf8');
     const chapters = [];
     for (const [index, page] of book.pages.entries()) {
-        const diagram = renderDiagram(await layoutDiagram(page, page.auto), page, false);
+        const mode = ['overview', 'detailed'].includes(modes?.[page.id]) ? modes[page.id] : page.auto;
+        const diagram = renderDiagram(await layoutDiagram(page, mode), page, false);
         const nodes = new Map(page.nodes.map(node => [node.id, node]));
         const instances = page.nodes.filter(node => node.kind === 'instance');
         const instanceTable = instances.length ? `<h3>子模块</h3><table><thead><tr><th scope="col">实例</th><th scope="col">模块</th><th scope="col">源码</th></tr></thead><tbody>${instances.map(node =>
@@ -45,10 +46,10 @@ async function renderArchitectureBook(book) {
         ${chapters.join('')}</main></body></html>`;
 }
 
-async function exportArchitecture(loaded, format, { out, browser } = {}) {
+async function exportArchitecture(loaded, format, { out, browser, modes } = {}) {
     if (format !== 'html' && format !== 'pdf') throw new Error('架构导出格式必须为 HTML 或 PDF。');
     await assertBookCurrent(loaded);
-    const html = await renderArchitectureBook(loaded.book);
+    const html = await renderArchitectureBook(loaded.book, modes);
     let content = html;
     if (format === 'pdf') {
         const temp = await fs.realpath(os.tmpdir());

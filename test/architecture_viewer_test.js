@@ -56,6 +56,11 @@ test('报文汇聚简图保留独立实例、标签网络和架构握手证据�
     assert.match(html, /<code>u_fifo\.enqueue<\/code> → <code>u_arbiter\.selected<\/code>/u);
     assert.match(html, /<figure class="module-symbol" aria-label="packet_fifo #\(DEPTH=32\) 端口图"/u);
     assert.match(html, /<a class="module-pin" href="#module-\d+-link-\d+"[^>]*><code>enqueue<\/code>/u);
+    const pinCount = markup => (markup.match(/schematic-pin/g) || []).length;
+    const forced = await exportArchitecture(loaded, 'html', { out: 'architecture-detailed.html', modes: { [top.id]: 'detailed' } });
+    assert.ok(pinCount(await fs.readFile(forced, 'utf8')) > pinCount(html));
+    const invalid = await exportArchitecture(loaded, 'html', { out: 'architecture-invalid.html', modes: { [top.id]: 'bogus' } });
+    assert.equal(pinCount(await fs.readFile(invalid, 'utf8')), pinCount(html));
     await fs.writeFile(path.join(workspace, 'svtools.architecture.json'), '{}');
     await assert.rejects(assertBookCurrent(loaded), /已修改/u);
 });

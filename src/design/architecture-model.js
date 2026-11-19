@@ -89,7 +89,11 @@ function typedConnections(unit, module, parsed, values, source) {
         let connections;
         const sites = new Map();
         try { connections = bindings(unit.source, instance.ports, child.ports.map(port => port.name), sites); }
-        catch { continue; }
+        catch (error) {
+            // 语法限制已由结构投影报告为 issue；其余异常说明解析管线有缺陷，不能静默吞掉。
+            if (!/不能静态确定|无法确定顺序/.test(error.message)) throw error;
+            continue;
+        }
         for (const port of child.ports) {
             const [type, view] = port.type.split('.');
             if (parsed.units.get(type)?.scope.kind !== 'interface') continue;
