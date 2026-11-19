@@ -6,7 +6,7 @@ const path = require('node:path');
 const { randomUUID } = require('node:crypto');
 const { assertBookCurrent } = require('./architecture-model');
 const { layoutDiagram, renderDiagram } = require('./architecture-diagram');
-const { escape, code, pageName, sourceLink, portTable, interfaceDetails, signalEnds, backgroundSignals } = require('./architecture-details');
+const { escape, code, pageName, sourceLink, portTable, renderModuleSymbol, interfaceDetails, signalEnds, backgroundSignals } = require('./architecture-details');
 const { printPdf } = require('./note-export');
 const { create } = require('./workflow-files');
 
@@ -21,6 +21,7 @@ async function renderArchitectureBook(book) {
         const instanceTable = instances.length ? `<h3>子模块</h3><table><thead><tr><th scope="col">实例</th><th scope="col">模块</th><th scope="col">源码</th></tr></thead><tbody>${instances.map(node =>
             `<tr><th scope="row">${code(node.name)}</th><td>${node.chapter ? `<a href="#${node.chapter}">${escape(pageName(byId.get(node.chapter)))}</a>` : `${code(node.type)} · 未解析`}${node.implementation === 'stub' ? ' · 实现桩' : ''}</td><td>${sourceLink(node.source, false)}</td></tr>`).join('')}</tbody></table>` : '';
         const interfaces = page.links.filter(link => link.kind === 'interface');
+        const targets = new Map(interfaces.flatMap(link => link.endpoints.filter(endpoint => endpoint.boundary).map(endpoint => [endpoint.port, link.id])));
         const signals = page.links.filter(link => link.kind === 'signal' && (page.auto === 'detailed' || !link.labeled));
         const signalTable = signals.length ? `<h3>普通信号</h3><table><thead><tr><th scope="col">信号</th><th scope="col">端点</th><th scope="col">位宽</th></tr></thead><tbody>${signals.map(link =>
             `<tr id="${link.id}"><th scope="row">${code(link.name)}</th><td>${signalEnds(link, nodes)}</td><td>${link.width ?? '—'}</td></tr>`).join('')}</tbody></table>` : '';
@@ -30,7 +31,8 @@ async function renderArchitectureBook(book) {
             <h2>${index + 1}. ${escape(pageName(page))}</h2>${page.title ? `<p class="module-title">${escape(page.title)}</p>` : ''}${rootNote}
             <p class="subtle">${sourceLink(page.source, false)}${page.empty ? ' · 实现桩' : ''}</p></header>
             ${diagram ? `<div class="diagram-print">${diagram}</div>` : ''}${backgroundSignals(page, false)}
-            <h3>模块端口</h3>${portTable(page.ports, false)}${instanceTable}
+            <h3>模块端口图</h3>${renderModuleSymbol(pageName(page), page.ports, { targets })}
+            ${page.ports.length ? `<h3>端口明细</h3>${portTable(page.ports, false)}` : ''}${instanceTable}
             ${interfaces.length ? `<h3>接口目录</h3><ul class="interface-index">${interfaces.map(link => `<li><a href="#${link.id}">${escape(link.name)} · ${escape(link.type)}</a></li>`).join('')}</ul>` : ''}
             ${signalTable}
             ${interfaces.map(link => `<section class="interface-section" id="${link.id}"><h3>${escape(link.name)}</h3>${interfaceDetails(link, nodes, false)}</section>`).join('')}

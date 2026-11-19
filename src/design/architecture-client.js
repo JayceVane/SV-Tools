@@ -3,14 +3,15 @@
     'use strict';
 
     const api = acquireVsCodeApi();
-    const { escape, code, pageName, parameterText, sourceLink, portTable, interfaceDetails, signalEnds, backgroundSignals } = ArchitectureDetails;
+    const { escape, code, pageName, parameterText, sourceLink, portTable, renderModuleSymbol, portDescription,
+        interfaceDetails, signalEnds, backgroundSignals } = ArchitectureDetails;
     const $ = id => document.getElementById(id);
     const action = (field, id, label) => `<button class="text-action" type="button" data-${field}="${escape(id)}">${escape(label)}</button>`;
     const post = (type, fields = {}) => api.postMessage({ type, revision: book?.revision, ...fields });
     const status = value => { $('status').textContent = value; $('status').hidden = !value; };
     const graph = $('graph');
     const inspector = $('inspector');
-    let book, page, mode, request = 0, layout, selected = null, selectedEdge = null;
+    let book, page, mode, request = 0, layout, selected = null, selectedEdge = null, selectedPort = null;
     let chapters, nodes, links, exportBusy = false, ancestors = [], pendingFocus, fitPreference;
 
     function site(label, module) { return sourceLink(module.source, true, label); }
@@ -35,6 +36,7 @@
         layout = undefined;
         selected = null;
         selectedEdge = null;
+        selectedPort = null;
         pendingFocus = undefined;
         $('graph-content').hidden = false;
         $('interface-view').hidden = true;
@@ -46,9 +48,13 @@
             page.empty && '实现桩', site('', page)].filter(Boolean).join(' · ');
         $('labels').innerHTML = backgroundSignals(page, true);
         $('page-checks').innerHTML = diagnosticMarkup(page);
+        $('graph-tools').hidden = !page.hasStructure;
+        inspector.classList.toggle('symbol-only', !page.hasStructure);
         $('graph-legend').hidden = true;
         updateInspector();
-        draw();
+        graph.hidden = !page.hasStructure;
+        if (page.hasStructure) draw();
+        else graph.replaceChildren();
         api.setState({ ...api.getState(), revision: book.revision, page: id, ancestors });
     }
 
@@ -122,6 +128,20 @@
         }
     }
 
+    function portConnections(port, node) {
+        const owner = node?.id || `boundary:${port}`;
+        return page.links.filter(link => link.endpoints.some(endpoint => endpoint.node === owner && endpoint.port === port));
+    }
+
+    function pinInspector(module) {
+        const current = module.ports.find(port => port.name === selectedPort);
+        const symbol = renderModuleSymbol(pageName(module), module.ports, { interactive: true, selected: selectedPort });
+        const table = module.ports.length ? `<details class="port-details"><summary>端口明细表</summary>${portTable(module.ports, true)}</details>` : '';
+        const details = current ? `<section><h4>${code(current.name)}</h4><p class="subtle">${escape(portDescription(current))} ${sourceLink(current.declaration, true, '端口声明')}</p>
+            ${linkList(portConnections(current.name, module === page ? null : module)) || '<p class="subtle">当前快照无可定位的连接。</p>'}</section>` : '';
+        return { symbol: symbol + table, details };
+    }
+
     function updateInspector() {
         const connected = selected ? page.links.filter(link => link.endpoints.some(endpoint => endpoint.node === selected)) : [];
         const node = nodes.get(selected);
@@ -130,16 +150,19 @@
             const summary = [['上游', relations.upstream, 'forward'], ['下游', relations.downstream, 'reverse'], ['共享 / 待确认', relations.shared, '']]
                 .filter(([, group]) => group.size).map(([title, group, className]) => `<div class="${className}"><strong>${title}</strong><div>${[...group].map(id => action('node', id, nodes.get(id)?.name || id)).join(' ')}</div></div>`).join('');
             const specialization = parameterText(node.parameters);
-            inspector.innerHTML = `<header class="page-header"><div><h3>${escape(node.name)}</h3><p class="subtle">${node.type ? code(node.type) : '模块边界'}${specialization ? ' · ' + code(specialization) : ''}${node.implementation === 'stub' ? ' · 实现桩' : node.implementation === 'unresolved' ? ' · 未解析' : ''} ${site('源码', node)}</p></div><div class="tools">${node.chapter ? action('child', node.chapter, '进入子模块') : ''}<button type="button" data-clear="true">清除选中</button></div></header>
-                ${summary ? `<div class="neighbors">${summary}</div>` : ''}<div class="inspector-grid"><section><h4>端口</h4>${portTable(node.ports, true)}</section><section><h4>连接</h4>${linkList(connected) || '<p class="subtle">当前结构没有已解析的连接。</p>'}</section></div>`;
+            const pins = pinInspector(node);
+            const chapter = chapters.get(node.chapter);
+            inspector.innerHTML = `<header class="page-header"><div><h3>${escape(node.name)}</h3><p class="subtle">${node.type ? code(node.type) : '模块边界'}${specialization ? ' · ' + code(specialization) : ''}${node.implementation === 'stub' ? ' · 实现桩' : node.implementation === 'unresolved' ? ' · 未解析' : ''} ${site('源码', node)}</p></div><div class="tools">${chapter ? action('child', chapter.id, chapter.hasStructure ? '展开内部结构' : '查看模块') : ''}<button type="button" data-clear="true">清除选中</button></div></header>
+                ${summary ? `<div class="neighbors">${summary}</div>` : ''}<div class="inspector-grid"><section><h4>端口图</h4>${pins.symbol}</section>${pins.details || `<section><h4>连接</h4>${linkList(connected) || '<p class="subtle">当前结构没有已解析的连接。</p>'}</section>`}</div>`;
         } else if (selectedEdge) {
             const edge = layout?.edges.find(edge => edge.id === selectedEdge);
             inspector.innerHTML = `<header class="page-header"><h3>连线 · ${edge?.links.length || 0} 条连接</h3><button type="button" data-clear="true">清除选中</button></header>${linkList(edge?.links.map(id => links.get(id)) || [])}`;
         } else {
             const interfaces = page.links.filter(link => link.kind === 'interface');
             const instances = page.nodes.filter(node => node.kind === 'instance');
-            inspector.innerHTML = `<div class="inspector-grid"><section><h3>模块端口</h3>${portTable(page.ports, true)}</section><section><h3>接口</h3>${linkList(interfaces) || '<p class="subtle">没有已解析的 SystemVerilog 接口。</p>'}
-                ${instances.length ? `<h3>实例</h3><ul class="instance-list">${instances.map(node => `<li>${action('node', node.id, node.name)}</li>`).join('')}</ul>` : ''}</section></div>`;
+            const pins = pinInspector(page);
+            inspector.innerHTML = `<div class="inspector-grid"><section><h3>模块端口图</h3>${pins.symbol}</section>${pins.details || `<section>${interfaces.length ? `<h3>接口</h3>${linkList(interfaces)}` : ''}
+                ${instances.length ? `<h3>实例</h3><ul class="instance-list">${instances.map(node => `<li>${action('node', node.id, node.name)}</li>`).join('')}</ul>` : ''}</section>`}</div>`;
         }
         applyHighlight();
     }
@@ -150,6 +173,7 @@
         pendingFocus = origin;
         $('graph-content').hidden = true;
         $('interface-view').hidden = false;
+        $('back').textContent = page.hasStructure ? '返回架构图' : '返回端口图';
         $('connection-title').textContent = link.name;
         $('connection-body').innerHTML = link.kind === 'interface' ? interfaceDetails(link, nodes, true)
             : `<h3>端点</h3><p>${signalEnds(link, nodes)}</p><p class="subtle">位宽 ${link.width ?? '待确认'}${link.labeled ? ' · 标签网络' : ''}</p>`;
@@ -165,11 +189,21 @@
     }
 
     $('viewer').addEventListener('click', event => {
-        const target = event.target.closest('[data-node],[data-edge],[data-link],[data-child],[data-chapter],[data-source],[data-clear]');
+        const target = event.target.closest('[data-node],[data-edge],[data-link],[data-port],[data-child],[data-chapter],[data-source],[data-clear]');
         if (!target || !page) return;
         const data = target.dataset;
         if (data.source) post('source', { source: data.source });
         else if (data.link) showLink(data.link, target);
+        else if (data.port !== undefined) {
+            const owner = nodes.get(selected);
+            const attached = portConnections(data.port, owner);
+            if (attached.length === 1 && attached[0].kind === 'interface') showLink(attached[0].id, target);
+            else {
+                selectedPort = selectedPort === data.port ? null : data.port;
+                updateInspector();
+                [...inspector.querySelectorAll('[data-port]')].find(pin => pin.dataset.port === data.port)?.focus();
+            }
+        }
         else if (data.child) showChapter(data.child, [...ancestors, page.id]);
         else if (data.chapter) {
             const index = ancestors.indexOf(data.chapter);
@@ -177,15 +211,17 @@
         } else if (data.edge) {
             const edge = layout?.edges.find(edge => edge.id === data.edge);
             if (edge?.links.length === 1) showLink(edge.links[0], target);
-            else { selected = null; selectedEdge = data.edge; updateInspector(); }
+            else { selected = null; selectedPort = null; selectedEdge = data.edge; updateInspector(); }
         } else if (data.node) {
             selectedEdge = null;
+            selectedPort = null;
             selected = selected === data.node ? null : data.node;
             updateInspector();
             if (!graph.contains(target) && selected) centerSelected();
         } else if (data.clear) {
             selected = null;
             selectedEdge = null;
+            selectedPort = null;
             updateInspector();
         }
     });

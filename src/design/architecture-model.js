@@ -128,19 +128,23 @@ function modulePage(module, { design, parsed, parameterValues }, chapterIds, pre
     const parameters = Object.fromEntries([...parameterValues.get(module.id) || []].filter(([, value]) => Number.isSafeInteger(value)));
     const instanceByName = new Map(module.cells.map(cell => [cell.name, cell]));
     const typed = typedConnections(unit, module, parsed, parameterValues.get(module.id), source);
-    const portType = (name, unit) => unit?.ports.find(item => item.name === name)?.type;
-    const ports = (items, unit) => items.map(port => {
-        const type = portType(port.name, unit);
-        const [interfaceName] = type?.split('.') || [];
-        const isInterface = parsed.units.get(interfaceName)?.scope.kind === 'interface';
-        const symbol = unit?.ports.find(item => item.name === port.name);
-        return { ...port, type, direction: isInterface ? 'interface' : port.direction, width: isInterface ? undefined : port.width,
-            declaration: symbol && source({ path: unit.source.path, ...position(unit.source.text, symbol.start) }) };
-    });
+    function ports(items, definition) {
+        const symbols = new Map(definition?.ports.map(port => [port.name, port]));
+        const analyzed = new Map(items.map(port => [port.name, port]));
+        return [...new Set([...symbols.keys(), ...analyzed.keys()])].map(name => {
+            const symbol = symbols.get(name), port = analyzed.get(name), type = symbol?.type;
+            const isInterface = parsed.units.get(type?.split('.')[0])?.scope.kind === 'interface';
+            return { name, type, direction: isInterface ? 'interface' : symbol?.direction || port?.direction || 'unknown',
+                width: isInterface ? undefined : port?.width,
+                declaration: symbol && source({ path: definition.source.path, ...position(definition.source.text, symbol.start) }) };
+        });
+    }
     const grouping = property(presentation?.groups, module.name);
+    const boundaryPorts = ports(projection.modules[0].ports, unit);
+    const byPortName = new Map(boundaryPorts.map(port => [port.name, port]));
     const nodes = projection.graph.nodes.map(node => {
         if (node.kind === 'boundary') return { id: node.id, name: node.name, kind: node.kind, direction: node.direction,
-            ports: ports(node.ports, unit) };
+            ports: [byPortName.get(node.name)] };
         const cell = instanceByName.get(node.name), definition = parsed.units.get(cell.type);
         return { id: node.id, name: node.name, type: cell.type, kind: node.kind,
             title: label(property(presentation?.titles, cell.type)), group: label(property(grouping, node.name)),
@@ -162,8 +166,9 @@ function modulePage(module, { design, parsed, parameterValues }, chapterIds, pre
     });
     const instances = nodes.filter(node => node.kind === 'instance');
     const dense = instances.length > 6 || links.length > 18 || nodes.length > 14 || instances.some(node => node.ports.length > 14);
+    const hasStructure = instances.length > 0;
     return { id, name: module.name, title: label(property(presentation?.titles, module.name)), source: source(module.source), empty: unit.empty,
-        nodes, links, checks, parameters, ports: ports(projection.modules[0].ports, unit), auto: dense ? 'overview' : 'detailed' };
+        nodes, links, checks, parameters, hasStructure, ports: boundaryPorts, auto: dense ? 'overview' : 'detailed' };
 }
 
 async function buildArchitectureBook(snapshot, native) {

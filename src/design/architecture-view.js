@@ -18,7 +18,7 @@ function panelHtml(webview, vscode, root) {
     <div class="workspace"><nav id="chapters" class="chapters" aria-label="模块章节"></nav>
     <div class="work-area"><section id="graph-content" aria-labelledby="page-title">
         <header class="page-header"><div><h2 id="page-title"></h2><p id="page-meta" class="subtle"></p></div>
-            <div class="tools" aria-label="架构图模式"><button id="overview" type="button" aria-pressed="false">简图</button><button id="detailed" type="button" aria-pressed="false">完整连线</button><button id="fit" type="button" aria-pressed="true">适应宽度</button></div></header>
+            <div id="graph-tools" class="tools" aria-label="架构图模式"><button id="overview" type="button" aria-pressed="false">简图</button><button id="detailed" type="button" aria-pressed="false">完整连线</button><button id="fit" type="button" aria-pressed="true">适应宽度</button></div></header>
         <div id="graph-legend" class="legend" hidden><span><i class="forward"></i>上游</span><span><i class="reverse"></i>下游</span><span><i class="neutral"></i>共享 / 方向待确认</span><span>点击实例或连线查看详情</span></div>
         <div class="diagram-scroll fitted" id="graph" tabindex="0" aria-label="架构连线图"></div><div id="labels"></div>
         <section id="inspector" class="inspector" aria-label="模块和连接详情"></section>

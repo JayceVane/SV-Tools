@@ -53,6 +53,8 @@ button:focus-visible, a:focus-visible, .diagram-scroll:focus-visible { outline: 
 .architecture-svg .card-title { font-weight: 700; }
 .architecture-svg .net-label, .architecture-svg .wire-label text { font-size: 11px; }
 .architecture-svg .net-label { fill: var(--muted); }
+.architecture-svg .schematic-pin text { font-size: 11px; }
+.schematic-pin circle { fill: var(--panel); stroke: var(--muted); stroke-width: 1.3; }
 .card-frame { fill: var(--panel); stroke: var(--divider); stroke-width: 1.2; }
 .diagram-card.instance .card-frame { fill: color-mix(in srgb, var(--up) 9%, var(--panel)); }
 .diagram-card.junction .card-frame { stroke-dasharray: 4 3; }
@@ -81,8 +83,33 @@ dt { font-weight: 600; }
 dd { margin-inline-start: 0; overflow-wrap: anywhere; }
 .named-connections dl > div { border-top: 1px solid var(--divider); padding: 5px 0; }
 .inspector { border-top: 1px solid var(--divider); padding-top: 12px; margin-top: 12px; }
+.inspector.symbol-only { border-top: 0; padding-top: 0; margin-top: 14px; }
 .inspector-grid { display: grid; grid-template-columns: minmax(0, 3fr) minmax(180px, 2fr); gap: 16px; }
 .inspector-grid h3 { margin-bottom: 7px; }
+.module-symbol { border: 1px solid var(--divider); border-radius: 7px; margin: 6px 9px 8px; background: var(--panel); }
+.module-symbol figcaption { background: color-mix(in srgb, var(--up) 10%, var(--panel)); padding: 8px 12px; text-align: center; font-weight: 700; }
+.module-pin-sides { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.module-pin-sides:empty { display: none; }
+.module-pin-group { min-width: 0; padding: 9px; }
+.module-pin-group.input { grid-column: 1; }
+.module-pin-group.output { grid-column: 2; text-align: right; }
+.module-pin-group h4 { color: var(--muted); margin: 0 0 3px; }
+.module-pin-group ul { list-style: none; padding: 0; margin: 0; display: grid; gap: 2px; }
+.module-pin-group li { position: relative; }
+.module-pin-group.input li::before, .module-pin-group.output li::after {
+    content: ''; position: absolute; width: 15px; height: 2px; top: 50%; background: var(--up); pointer-events: none;
+}
+.module-pin-group.input li::before { left: -17px; }
+.module-pin-group.output li::after { right: -17px; background: var(--down); }
+.module-pin-group.shared { border-top: 1px dashed var(--divider); }
+.module-pin-group.shared ul { display: flex; flex-wrap: wrap; gap: 5px 8px; }
+.module-pin { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 0 6px; padding: 3px 5px;
+    border: 1px solid transparent; border-radius: 4px; color: var(--ink); max-width: 100%; text-align: inherit; }
+.module-pin-group.output .module-pin { justify-content: flex-end; }
+.module-pin-group.shared .module-pin { border-color: var(--divider); }
+.module-pin[aria-pressed=true], .module-pin:hover:is(button, a) { background: color-mix(in srgb, var(--up) 12%, var(--panel)); border-color: var(--focus); }
+.module-pin-group li, .module-pin small { overflow-wrap: anywhere; }
+.port-details { margin: 6px 0 10px; }
 .neighbors, .handshake { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 230px), 1fr)); gap: 8px; margin: 0 0 13px; }
 .neighbors > div, .handshake > div { padding: 8px 10px; border-left: 3px solid currentColor; border-radius: 3px; background: var(--panel); }
 .neighbors button { margin-right: 5px; }
@@ -127,7 +154,7 @@ tbody th { font-weight: 500; }
     .architecture-book main { max-width: none; padding: 0; }
     .chapter { break-before: page; border: 0; padding: 0; }
     h2, h3, h4 { break-after: avoid; }
-    tr, .diagram-print, .handshake, .interface-section { break-inside: avoid; }
+    tr, .diagram-print, .handshake, .interface-section, .module-symbol { break-inside: avoid; }
     .diagram-print .architecture-svg { max-height: 130mm; max-width: 100%; }
     .table-scroll { overflow: visible; }
     thead { display: table-header-group; }
