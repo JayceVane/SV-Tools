@@ -39,6 +39,7 @@ test/*
 !test/vscode_vivado_host.js
 !test/vscode_project_host.js
 !test/vscode_completion_host.js
+!test/vscode_design_notes_host.js
 !test/vscode_circuit_host.js
 !test/vscode_circuit_trace_host.js
 !test/vscode_wave_link_host.js

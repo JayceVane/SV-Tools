@@ -497,3 +497,6 @@ CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
 OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ```
+## Note editor and export
+
+The Note editor and Markdown export bundle Tiptap, ProseMirror, Markdown-it, and the dependencies identified by the bundle build. Their upstream copyright and license texts are reproduced in `bin/vendor/note-LICENSES.txt` in the distribution.

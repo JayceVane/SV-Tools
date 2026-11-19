@@ -3,6 +3,12 @@
     "lineComment": "//",
     "blockComment": ["/*", "*/"]
   },
+  "folding": {
+    "markers": {
+      "start": "^[ \\t]*//<[ \\t]+\\S",
+      "end": "^[ \\t]*//>[ \\t]*$"
+    }
+  },
   "brackets": [
     ["begin", "end"],
     ["case", "endcase"],

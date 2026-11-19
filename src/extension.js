@@ -35,6 +35,10 @@ const { createProjectManager } = require('./project/manager');
 const { activateProjectView } = require('./project');
 const { createWorkspaceSourceIndex } = require('./workspace/sources');
 const { createLanguageProviders } = require('./editor/language');
+const { createDesignNotes } = require('./editor/design-notes');
+const { activateNoteHistory } = require('./design/note-history-view');
+const { activateNoteLinks } = require('./editor/note-links');
+const { activateRichNotes } = require('./design/note-rich-view');
 const nativeLoader = createNativeLoader();
 let nativeLoadError = null;
 
@@ -72,6 +76,11 @@ function activate(context) {
     const { provideDocumentSymbols, provideDefinition, provideCompletionItems, provideHover } = languageProviders;
     context.subscriptions.push({ dispose: languageProviders.dispose });
     const editorCommands = createEditorCommands(dependencies);
+    const designNotes = createDesignNotes(vscode);
+    context.subscriptions.push(vscode.commands.registerCommand('svtools.note.open', designNotes.open));
+    const linkedNotes = activateNoteLinks(context, vscode);
+    activateNoteHistory(context, { vscode, sourceCatalog, designNotes, linkedNotes });
+    activateRichNotes(context, vscode);
     loadNativeModule();
 
     // Register document formatting edit provider for both verilog and systemverilog
@@ -120,7 +129,12 @@ function activate(context) {
             vscode.languages.registerCompletionItemProvider(lang, { provideCompletionItems }, '.', ':', '`', '$', '"', '/')
         );
         context.subscriptions.push(
-            vscode.languages.registerHoverProvider(lang, { provideHover })
+            vscode.languages.registerHoverProvider(lang, {
+                async provideHover(document, position, token) {
+                    const note = await designNotes.provideHover(document, position, token);
+                    return token.isCancellationRequested ? undefined : note ?? provideHover(document, position);
+                }
+            })
         );
     });
 

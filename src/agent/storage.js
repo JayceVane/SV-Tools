@@ -24,11 +24,12 @@ async function commit(temporary, file) {
         }
     }
 }
-async function writeJson(file, value) {
+async function writeText(file, content) {
     const temporary = file + '.' + randomUUID() + '.tmp';
-    try { await fs.writeFile(temporary,JSON.stringify(value,null,2)+'\n',{flag:'wx'}); await commit(temporary,file); }
+    try { await fs.writeFile(temporary,content,{flag:'wx'}); await commit(temporary,file); }
     finally { await fs.rm(temporary,{force:true}); }
 }
+const writeJson = (file, value) => writeText(file, JSON.stringify(value, null, 2) + '\n');
 async function readJson(file, maxBytes = 2*1024*1024) {
     if ((await fs.lstat(file)).isSymbolicLink()) fail('UNSAFE_PATH','服务记录不能为链接');
     const handle = await fs.open(file,'r');
@@ -41,4 +42,4 @@ async function readJson(file, maxBytes = 2*1024*1024) {
     }
     finally { await handle.close(); }
 }
-module.exports = { directory, writeJson, readJson };
+module.exports = { directory, writeJson, writeText, readJson };

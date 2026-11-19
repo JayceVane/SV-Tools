@@ -9,6 +9,9 @@ bin/**
 !bin/vendor/elk.bundled.js
 !bin/vendor/ELK-LICENSE.md
 !bin/vendor/resvg-LICENSE.txt
+!bin/vendor/note-editor.js
+!bin/vendor/note-markdown.cjs
+!bin/vendor/note-LICENSES.txt
 !bin/vendor/yosys/**
 
 # 开发与测试资源
