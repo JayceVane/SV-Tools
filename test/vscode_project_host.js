@@ -101,6 +101,10 @@ async function run() {
     assert.equal((await api.projects.current()).id, project.id);
     assert.equal(other.kind, 'svtools');
     checks.push('多工程切换与Vivado上下文隔离');
+    await vscode.commands.executeCommand('svtools.design.review');
+    await waitFor(() => vscode.window.tabGroups.all.some(group =>
+        group.tabs.some(tab => tab.input?.viewType === 'mainThreadWebview-svtoolsDesignReview' || tab.label === '设计讲解')));
+    checks.push('命令面板可从当前工程打开独立设计讲解');
     const report = { vscode: vscode.version, version: extension.packageJSON.version, extensionPath: extension.extensionPath, checks };
     await fs.writeFile(path.join(root, '..', 'host-report.json'), JSON.stringify(report, null, 2));
     console.log('SVTOOLS_PROJECT_VALIDATED ' + JSON.stringify(report));

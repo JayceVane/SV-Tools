@@ -12,12 +12,72 @@ class Element {
     contains(target) { return this===target || this.children.some(child=>child.contains?.(target)); }
     style = {};
     addEventListener(key,value) { this.events[key]=value; }
-    replaceChildren() { this.children=[]; }
+    replaceChildren(...items) { this.children=items; }
     append(...items) { this.children.push(...items); }
     get childElementCount() { return this.children.length; }
     getBoundingClientRect() { return { left: 8, top: 40, bottom: 64, width: 220, height: 80 }; }
     click() { this.events.click?.({target:this}); }
 }
+
+test('设计讲解允许先读预期，返回同一事件时不会混入上一轮的异步结果', () => {
+    const elements = new Map(), sent = [];
+    const get = id => {
+        if (!elements.has(id)) {
+            const node = new Element();
+            node.scrollIntoView = () => {};
+            elements.set(id, node);
+        }
+        return elements.get(id);
+    };
+    let receive;
+    const context = vm.createContext({
+        document: { getElementById: get, createElement: tag => Object.assign(new Element(tag), { focus() {} }) },
+        window: { addEventListener: (_, callback) => { receive = data => callback({ data }); } },
+        acquireVsCodeApi: () => ({ getState: () => ({}), setState() {}, postMessage: data => sent.push(data) }),
+    });
+    vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/design/review-client.js'), 'utf8'), context);
+    const steps = ['t0', 't1'].map(id => ({ id, title: id, expected: '预期 ' + id, flow: [], refs: [],
+        evidence: [{ token: id, variant: 'a' }] }));
+    steps[0].interfaces = ['hold'];
+    receive({ type: 'review', revision: 1, title: 'fixture', rules: [{
+        id: 'r', title: 'rule', group: '控制器', variants: [{ id: 'a', label: 'A' }], events: steps,
+        interfaces: [{ id: 'hold', title: 'hold', status: 'unresolved', rationale: '待确认',
+            from: { module: '引擎', expectation: '保证', refs: [] },
+            to: { module: '分频器', expectation: '假设', refs: [] } }],
+        changes: [{ title: '末列地址', kind: 'implementation', from: 'A', to: 'B', before: '地址 17', after: '地址 16',
+            impacts: [{ event: 't1', note: '核对有效输出' }], sourceDiffs: [{ label: '查看 RTL 差异', token: 'diff-0' }] }],
+    }] });
+    assert.equal(get('expected').textContent, '预期 t0');
+    assert.equal(get('observed').hidden, true);
+    assert.equal(sent.some(item => item.type === 'observation'), false);
+    assert.equal(get('rules').children[0].textContent, '控制器');
+    assert.equal(get('interface-review').hidden, false);
+    const card = get('interfaces').children[0];
+    assert.equal(card.open, true);
+    assert.equal(card.children[1].children[1].children[0].textContent, '下游前提 · 分频器');
+    assert.ok(!card.children[2].open);
+    assert.equal(get('change-review').hidden, false);
+    const change = get('changes').children[0];
+    assert.equal(change.tagName, 'details');
+    assert.ok(!change.open);
+    assert.deepEqual(change.children[2].children.map(node => node.textContent), ['A', '地址 17', 'B', '地址 16']);
+    change.children[4].children[0].onclick();
+    assert.equal(sent.at(-1).type, 'diff');
+    assert.equal(sent.at(-1).token, 'diff-0');
+    get('reveal').onclick();
+    const old = sent.at(-1);
+    change.children[3].children[0].children[0].onclick();
+    assert.equal(get('expected').textContent, '预期 t1');
+    assert.equal(get('interface-review').hidden, true);
+    assert.equal(get('observed').hidden, true);
+    get('previous').onclick();
+    get('reveal').onclick();
+    const current = sent.at(-1);
+    receive({ ...old, status: 'failed', text: '旧结果', refs: [] });
+    assert.equal(get('observed').children[0].children[1].textContent, '正在核对候选与证据…');
+    receive({ ...current, status: 'not_triggered', text: '新结果', refs: [] });
+    assert.equal(get('observed').children[0].children[1].textContent, '目标场景未触发');
+});
 function client() {
     let document;
     const createElement = tag => { const element = new Element(tag); element.focus = () => { document.activeElement = element; }; return element; };

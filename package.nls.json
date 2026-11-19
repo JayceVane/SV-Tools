@@ -127,8 +127,11 @@
   "cmd.project.addToProject.title": "Add to SV Tools Project…",
   "cmd.project.trace.title": "Trace Selected Signal in Project",
   "cmd.project.refresh.title": "Refresh Project",
+  "cmd.design.review.title": "Open Design Walkthrough",
   "cmd.note.open.title": "Open or Create Design Note",
   "cmd.note.history.title": "Design Note History",
+  "cmd.note.review.title": "Review Pinned Design Note",
+  "cmd.note.pinReview.title": "Create Design Note Review Pin",
   "cfg.project.traceTrigger.desc": "Choose when project signal tracing runs. Also available in the project actions menu.",
   "cfg.project.traceTrigger.selection": "Trace a selected signal automatically after a short delay.",
   "cfg.project.traceTrigger.manual": "Trace only through the editor context menu or project command.",
@@ -137,5 +140,6 @@
   "cfg.design_planFile.desc": "Architecture task plan relative to the selected project root; the project panel displays read-only, evidence-based progress.",
   "cmd.note.linkSelection.title": "Link Design Note to Selection",
   "cmd.note.linkBlock.title": "Link Design Note to Named Block",
-  "cmd.note.editRich.title": "Open Rich Design Note Editor"
+  "cmd.note.editRich.title": "Open Rich Design Note Editor",
+  "cmd.note.export.title": "Export Design Notes"
 }

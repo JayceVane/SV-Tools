@@ -37,6 +37,7 @@ const help=`SV Tools headless CLI (API 1)
   note list|search|check [--topic <name>] [--query <text>]
   note get --note <id>
   note update|reanchor --note <id> --expect <etag> [--body <markdown>|--file <hdl> --offset <n> --end <n>|--symbol]
+  note export [--note <id>|--topic <name>] [--format md|html|pdf] [--out <dir>] [--final]
   wave signals --file <vcd> [--query <q>] [--scope <s>] [--role input|output|inout|internal]
               [--min-width <n>] [--max-width <n>] [--limit <n>]
   wave values --file <vcd> --signals <a,b> --at <ticks|10ns>
@@ -67,8 +68,8 @@ function argumentsFor(argv) {
     const strings=['workspace','config','project','fileset','file','top','iverilog','cygwin','vivado','standard','run','timeout','offset','limit','log-index','max-paths','jobs','name','dir','part','sim-top','target-fileset','depth','save','spec','format','out','title','style','detail','boundary-layout','baseline','against','clock','query','scope','role','bit','at','at-b','from','to','signal','signals','min-width','max-width','clock-edge','kind','max-values','plan','module','actor','revision','token','evidence','reason'];
     const options=Object.fromEntries(strings.map(name=>[name,{type:'string'}]));
     for(const name of ['help','version','json','write','check','fold-ports','force']) options[name]={type:'boolean'};
-    for(const name of ['note','body','topic','expect','engine']) options[name]={type:'string'};
-    for(const name of ['symbol']) options[name]={type:'boolean'};
+    for(const name of ['note','body','topic','expect','engine','browser']) options[name]={type:'string'};
+    for(const name of ['symbol','final']) options[name]={type:'boolean'};
     options.include={type:'string',multiple:true}; options.define={type:'string',multiple:true}; options.source={type:'string',multiple:true};
     options['bundle-name']={type:'string',multiple:true}; options.where={type:'string',multiple:true};
     let parsed;

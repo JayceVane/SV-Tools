@@ -3,6 +3,7 @@ const path=require('node:path'),fs=require('node:fs/promises');
 const {result,fail}=require('../agent/protocol');
 const {readOptions}=require('../agent/context');
 const contract=require('./workflow-contract'),files=require('./workflow-files'),evidence=require('./workflow-evidence');
+const notes = require('./note-export');
 const DEFAULT_PLAN='svtools.design.json';
 function planName(input){const name=input.plan||DEFAULT_PLAN;contract.relative(name,'计划文件');if(!name.endsWith('.json'))fail('INVALID_ARGUMENT','计划文件必须使用.json后缀');return name;}
 async function load(input){const{options}=await readOptions(input),root=options.workspace,planFile=planName(input);let raw;
@@ -34,6 +35,10 @@ function candidateCurrent(ctx,module,item){
 }
 async function computeCandidateCurrent(ctx,module,item){
     if(!item.candidate||item.candidate.contractHash!==contract.contractHash(ctx.plan,module)||!await files.unchanged(ctx.root,item.candidate.inputs)||!await files.artifactCurrent(ctx.root,item.candidate.report))return false;
+    if (item.candidate.noteExport) {
+        try { await notes.inspectExport(ctx.root, await files.json(ctx.root, item.candidate.report.path, notes.MAX_MANIFEST)); }
+        catch { return false; }
+    }
     for(const dependency of module.dependencies){
         const target=ctx.plan.modules.find(other=>other.id===dependency.module),saved=record(ctx.state,dependency.module);
         if(item.candidate.dependencies?.[dependency.module]!==saved.candidate?.id||!await candidateCurrent(ctx,target,saved))return false;
@@ -92,7 +97,16 @@ async function mutate(action,input){
             if(!item.claim||item.claim.token!==input.token||item.claim.actor!==actor)fail('CLAIM_INVALID','领取令牌或负责人不匹配');
             if(item.claim.role==='design'){
                 const inputs=await files.snapshot(ctx.root,module.sources),report=await files.fingerprint(ctx.root,contract.relative(input.evidence,'设计说明'));
+                const exported = /\.json$/i.test(report.path) && report.bytes <= notes.MAX_MANIFEST
+                    ? await files.json(ctx.root, report.path, notes.MAX_MANIFEST).catch(error => { if (!(error instanceof SyntaxError)) throw error; }) : undefined;
+                const noteExport = exported?.kind === notes.KIND;
+                if (noteExport) {
+                    if (exported.module !== undefined && exported.module !== module.id) fail('EVIDENCE_INVALID', '定版笔记属于其他模块');
+                    await notes.inspectExport(ctx.root, exported);
+                    if (!await files.artifactCurrent(ctx.root, report)) fail('EVIDENCE_STALE', '设计说明清单已变化');
+                }
                 item.candidate={id:'candidate:'+contract.hash({contract:contract.contractHash(ctx.plan,module),inputs:inputs.map(({path,sha256})=>({path,sha256})),report:report.sha256,dependencies:module.dependencies.map(dep=>[dep.module,record(state,dep.module).candidate?.id])}),contractHash:contract.contractHash(ctx.plan,module),inputs,report,dependencies:Object.fromEntries(module.dependencies.map(dep=>[dep.module,record(state,dep.module).candidate?.id]))};
+                if (noteExport) item.candidate.noteExport = true;
                 item.designActor=actor;item.stage='design-submitted';delete item.verification;delete item.reviewActor;
             }else{
                 if(!await candidateCurrent(live,module,item))fail('EVIDENCE_STALE','设计候选已变化');

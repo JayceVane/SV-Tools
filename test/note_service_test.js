@@ -44,4 +44,6 @@ test('Note CLI 用 etag 防止写覆盖，具名块改名和搬移后仍能重�
     const check = await cli('note', 'check', '--note', initial.id);
     assert.equal(check.exitCode, 1);
     assert.equal(check.output.data.notes[0].status, 'ambiguous');
+    const refused = await cli('note', 'export', '--note', initial.id, '--out', 'rejected', '--final');
+    assert.equal(refused.output.diagnostics[0].code, 'EVIDENCE_STALE');
 });

@@ -33,12 +33,14 @@ const { createProjectSourceProvider } = require('./workspace/project-sources');
 const { createProjectSelection } = require('./vivado/projects');
 const { createProjectManager } = require('./project/manager');
 const { activateProjectView } = require('./project');
+const { activateReviewView } = require('./design/review-view');
 const { createWorkspaceSourceIndex } = require('./workspace/sources');
 const { createLanguageProviders } = require('./editor/language');
 const { createDesignNotes } = require('./editor/design-notes');
 const { activateNoteHistory } = require('./design/note-history-view');
 const { activateNoteLinks } = require('./editor/note-links');
 const { activateRichNotes } = require('./design/note-rich-view');
+const { activateNoteExport } = require('./design/note-export-view');
 const nativeLoader = createNativeLoader();
 let nativeLoadError = null;
 
@@ -81,6 +83,7 @@ function activate(context) {
     const linkedNotes = activateNoteLinks(context, vscode);
     activateNoteHistory(context, { vscode, sourceCatalog, designNotes, linkedNotes });
     activateRichNotes(context, vscode);
+    activateNoteExport(context, vscode);
     loadNativeModule();
 
     // Register document formatting edit provider for both verilog and systemverilog
@@ -166,7 +169,8 @@ function activate(context) {
 
     // Vivado TCL 批处理运行与工程创建
     const circuit = activateCircuitViewer(context, { vivado, sourceCatalog, waveLinks });
-    const projectView = activateProjectView(context,{vscode,projects,vivado,sourceCatalog});
+    const designReview = activateReviewView(context, { vscode, projects, waveViewer });
+    const projectView = activateProjectView(context,{vscode,projects,vivado,sourceCatalog,designReview});
     return { vivado, circuit, waveViewer, waveLinks, projects, projectView };
 }
 

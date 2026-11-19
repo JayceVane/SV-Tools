@@ -155,3 +155,175 @@ test('同一侧栏的只读进展读取计划，链接限定当前工程且不�
     await h.message({action:'openProgress',linkId:link.id,revision:snapshot.revision-1});assert.equal(h.calls.length,count);
     h.setProject({id:'other',name:'other',kind:'svtools',root,sets:[]});await h.api.refresh();await h.message({action:'openProgress',linkId:link.id,revision:h.api.getSnapshot().revision});assert.equal(h.calls.length,count);
 });
+
+test('设计讲解保留未触发结论，候选变化后收起原判断，并拒绝工程外路径', async t => {
+    const { createHash } = require('node:crypto');
+    const { loadReview, revealObservation, loadReviewSample } = require('../src/design/review-model');
+    const root = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'svtools-review-'));
+    t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+    const trace = '$timescale 1 ns $end\n$scope module t $end $var wire 4 ! q [3:0] $end $upscope $end $enddefinitions $end\n#10 b1000 !\n';
+    const files = [['rtl', 'top.sv', 'module top; endmodule'], ['log', 'run.log', 'cover hits: 0'], ['vcd', 'trace.vcd', trace]];
+    for (const [, file, content] of files) fs.writeFileSync(path.join(root, file), content);
+    const manifest = { schemaVersion: 1, title: 'Review', files: files.map(([id, file, content]) => ({
+        id, path: file, sha256: createHash('sha256').update(content).digest('hex'),
+    })), rules: [{ id: 'ready', title: 'Ready', module: 'top', contract: 'ready at n+1',
+        group: 'Bus',
+        interfaces: [{ id: 'handoff', title: 'Write response to address',
+            from: { module: 'source', expectation: 'can hold VALID', refs: [{ file: 'rtl', label: 'source', line: 1 }] },
+            to: { module: 'sink', expectation: 'sample with READY' }, status: 'unresolved', rationale: 'needs a timing test' }],
+        mechanism: 'hold', stimulus: 'requests', checker: 'cover', variants: [{ id: 'a', label: 'A', inputs: ['rtl'] }],
+        events: [{ id: 'n1', title: 'n+1', expected: 'ready', interfaces: ['handoff'], flow: [{ label: 'control', detail: 'observe' }],
+            expectedValues: [{ id: 'sample-expected', label: 'signed data', encoding: 'signed', value: '-8' }],
+            refs: [{ file: 'rtl', label: 'source', line: 1 }],
+            observations: [{ variant: 'a', status: 'not_triggered', text: 'cover hits: 0',
+                refs: [{ file: 'log', label: 'coverage', line: 1 },
+                    { file: 'vcd', label: 'sample', sample: { at: '10', signals: ['t.q'],
+                        expect: [{ signal: 't.q', id: 'sample-expected' }] } }] }] }],
+    }] };
+    const file = path.join(root, 'svtools.review.json');
+    fs.writeFileSync(file, JSON.stringify(manifest));
+    const { snapshot, links, observations } = await loadReview(root);
+    const rule = snapshot.rules[0];
+    assert.equal(rule.group, 'Bus');
+    assert.deepEqual(rule.events[0].interfaces, ['handoff']);
+    assert.equal(rule.interfaces[0].to.expectation, 'sample with READY');
+    assert.equal(links.get(rule.interfaces[0].from.refs[0].token).file.path, 'top.sv');
+    const request = snapshot.rules[0].events[0].evidence[0];
+    assert.deepEqual(Object.keys(request).sort(), ['token', 'variant']);
+    const observation = observations.get(request.token);
+    assert.equal((await revealObservation(root, observation)).status, 'not_triggered');
+    const sample = await loadReviewSample(root, links.get(observation.refs[1].token));
+    assert.deepEqual(sample.checks.map(item => [item.signal, item.actual, item.status]), [['t.q', '-8', 'match']]);
+    fs.appendFileSync(path.join(root, 'top.sv'), '\n//changed');
+    const stale = await revealObservation(root, observation);
+    assert.equal(stale.status, 'unavailable');
+    assert.deepEqual(stale.refs, []);
+    const expectedBinding = manifest.rules[0].events[0].observations[0].refs[1].sample.expect[0];
+    expectedBinding.id = 'missing';
+    fs.writeFileSync(file, JSON.stringify(manifest));
+    await assert.rejects(loadReview(root), /sample\.expect/);
+    expectedBinding.id = 'sample-expected';
+    manifest.rules[0].events[0].interfaces = ['missing'];
+    fs.writeFileSync(file, JSON.stringify(manifest));
+    await assert.rejects(loadReview(root), /events\.n1\.interfaces/);
+    manifest.files[0].path = '../outside.sv';
+    fs.writeFileSync(file, JSON.stringify(manifest));
+    await assert.rejects(loadReview(root), /files\.rtl\.path/);
+});
+
+test('定版 Note 可独立打开，测试台变更使原仿真证据退出当前结论', async t => {
+    const { createHash } = require('node:crypto');
+    const history = require('../src/design/note-history-store');
+    const { loadReview, verifiedNote, revealObservation, verifyObservationLink } = require('../src/design/review-model');
+    const root = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'svtools-review-note-'));
+    t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+    const noteId = 'nt_pinned', content = '# Hold\n\nPinned design explanation\n';
+    const hash = value => createHash('sha256').update(value).digest('hex');
+    const version = await history.record(root, noteId, content, 'checkpoint', 'Before review');
+    const inputs = [
+        ['rtl', 'fifo.sv', 'module fifo;\n//: Hold [note:nt_pinned]\nendmodule\n', 'RTL'],
+        ['tb', 'tb.sv', 'module tb; endmodule\n', '测试台'],
+        ['log', 'run.log', 'TC-01 passed\n', '运行日志'],
+    ];
+    const files = inputs.map(([id, file, text, label]) => {
+        fs.writeFileSync(path.join(root, file), text);
+        return { id, path: file, label, sha256: hash(text) };
+    });
+    const runText = JSON.stringify({ schemaVersion: 1, inputs: files.slice(0, 2), artifacts: [files[2]] });
+    fs.writeFileSync(path.join(root, 'run.json'), runText);
+    files.push({ id: 'run', path: 'run.json', label: '运行记录', sha256: hash(runText) });
+    const manifest = { schemaVersion: 1, title: 'Pinned review', files, rules: [{
+        id: 'hold', title: 'Hold', module: 'fifo', note: {
+            id: noteId, version, sha256: hash(content), anchor: { file: 'rtl', line: 2 },
+        }, contract: 'Hold', mechanism: 'Enable', stimulus: 'Stall', checker: 'Compare',
+        variants: [{ id: 'v', label: 'Run 1', inputs: ['rtl', 'tb'], run: 'run' }],
+        events: [{ id: 'e', title: 'Hold', expected: 'Stable', refs: [], flow: [{ label: 'Wait', detail: 'No enable' }],
+            observations: [{ variant: 'v', status: 'passed', text: 'One check passed', refs: [{ file: 'log', label: 'Log' }] }] }],
+    }] };
+    const indexFile = path.join(root, 'svtools.review.json');
+    fs.writeFileSync(indexFile, JSON.stringify(manifest));
+    const view = await loadReview(root);
+    const pin = view.notes.get(view.snapshot.rules[0].note.token);
+    const observation = view.observations.values().next().value;
+    assert.equal((await verifiedNote(root, pin)).content, content);
+    assert.equal((await revealObservation(root, observation)).status, 'passed');
+
+    fs.appendFileSync(path.join(root, 'tb.sv'), '// changed test\n');
+    assert.deepEqual(await revealObservation(root, observation), {
+        status: 'unavailable', text: '以下定版输入或产物需重新核对。', refs: [],
+        issues: [{ label: '测试台', path: 'tb.sv', reason: 'changed' }],
+    });
+    await assert.rejects(verifyObservationLink(root, view.links.get(observation.refs[0].token)), /测试台/);
+    assert.equal((await verifiedNote(root, pin)).content, content);
+
+    files[1].sha256 = hash(fs.readFileSync(path.join(root, 'tb.sv')));
+    fs.writeFileSync(indexFile, JSON.stringify(manifest));
+    const rebound = await loadReview(root);
+    assert.deepEqual((await revealObservation(root, rebound.observations.values().next().value)).issues,
+        [{ label: '测试台', path: 'tb.sv', reason: 'run-input' }]);
+
+    fs.writeFileSync(path.join(root, 'tb.sv'), inputs[1][2]);
+    files[1].sha256 = hash(inputs[1][2]);
+    manifest.rules[0].note.anchor.line = 3;
+    fs.writeFileSync(indexFile, JSON.stringify(manifest));
+    const edit = await loadReview(root);
+    assert.deepEqual((await revealObservation(root, edit.observations.values().next().value)).issues,
+        [{ label: 'RTL 锚点', path: 'fifo.sv', reason: 'anchor' }]);
+    manifest.rules[0].note.sha256 = 'b'.repeat(64);
+    fs.writeFileSync(indexFile, JSON.stringify(manifest));
+    const tampered = await loadReview(root);
+    await assert.rejects(verifiedNote(root, tampered.notes.values().next().value), /定版记录不一致/);
+});
+
+test('编辑器定版从运行记录创建可复核快照并保留已有规则', async t => {
+    const { createHash } = require('node:crypto');
+    const history = require('../src/design/note-history-store');
+    const { preparePin, savePin } = require('../src/design/review-pin');
+    const { loadReview, verifiedNote, revealObservation } = require('../src/design/review-model');
+    const root = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'svtools-note-pin-'));
+    t.after(() => fs.rm(root, { recursive: true, force: true }, () => {}));
+    const id = 'nt_freeze', content = '# 复核标题\n\n说明与代码锚点绑定。\n';
+    fs.mkdirSync(path.join(root, 'docs/design-notes'), { recursive: true });
+    fs.writeFileSync(path.join(root, history.notePath(id)), content);
+    function artifact(file, text) {
+        fs.writeFileSync(path.join(root, file), text);
+        return { path: file, sha256: createHash('sha256').update(text).digest('hex') };
+    }
+    const rtl = artifact('engine.sv', 'module engine;\n//: 冻结 [note:nt_freeze]\nendmodule\n');
+    const testbench = artifact('tb.sv', 'module tb;\ninitial check_bit();\nendmodule\n');
+    const wave = artifact('wave.vcd', 'VCD output');
+    const log = artifact('run.log', 'check result');
+    artifact('run.json', JSON.stringify({ schemaVersion: 1, runId: 'run-42', entry: testbench.path,
+        inputs: [rtl, testbench], artifacts: [log, { ...wave, sample: { at: '5 ns', signals: ['tb.hold'] } }] }));
+    const prepared = await preparePin(root, id, 'run.json');
+    assert.deepEqual(prepared.anchors, [{ path: rtl.path, line: 2, title: '冻结' }]);
+    const selection = { anchor: prepared.anchors[0], testbench: testbench.path, line: 2, artifacts: prepared.run.artifacts };
+
+    fs.appendFileSync(path.join(root, testbench.path), '// diff\n');
+    await assert.rejects(savePin(root, id, prepared, selection), /tb\.sv/);
+    assert.equal(fs.existsSync(path.join(root, 'svtools.review.json')), false);
+    assert.deepEqual((await history.listRevisions(root, id)).revisions, []);
+    fs.writeFileSync(path.join(root, testbench.path), 'module tb;\ninitial check_bit();\nendmodule\n');
+
+    const first = await savePin(root, id, prepared, selection);
+    let review = await loadReview(root);
+    const pinned = review.snapshot.rules[0];
+    const frozen = await verifiedNote(root, review.notes.get(pinned.note.token));
+    assert.equal(frozen.content, content);
+    assert.equal(pinned.id, first);
+    const observed = await revealObservation(root, review.observations.get(pinned.events[0].evidence[0].token));
+    assert.equal(observed.status, 'pending_review');
+    assert.deepEqual(observed.refs.map(ref => ref.label), ['打开运行记录', 'run.log', 'wave.vcd']);
+    const waveLink = review.links.get(observed.refs[2].token);
+    assert.deepEqual(waveLink.sample.signals, ['tb.hold']);
+    assert.equal(waveLink.sample.at, '5 ns');
+    assert.equal(review.links.get(pinned.events[0].refs[1].token).line, 2);
+
+    fs.writeFileSync(path.join(root, history.notePath(id)), '# 下一次定版\n');
+    const second = await savePin(root, id, prepared, selection);
+    review = await loadReview(root);
+    assert.deepEqual(review.snapshot.rules.map(rule => rule.id), [first, second]);
+    assert.equal((await verifiedNote(root, review.notes.get(review.snapshot.rules[0].note.token))).content, content);
+    const source = JSON.parse(fs.readFileSync(path.join(root, 'svtools.review.json'), 'utf8'));
+    assert.equal(source.files.length, 5);
+});

@@ -53,7 +53,7 @@ function activateIverilog(context, deps) {
             onProgress: text => channel.appendLine(text),
             onWarning: text => { channel.appendLine(text); vscode.window.showWarningMessage?.(text); }
         }),
-        fileOnly: currentFileOnly, showWaveforms });
+        fileOnly: currentFileOnly, showWaveforms, recordReviewRuns: true });
 
     function resolvePaths(paths, fallback, uri) {
         const base = vscode.workspace.getWorkspaceFolder(uri)?.uri.fsPath || fallback;

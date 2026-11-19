@@ -115,7 +115,8 @@ async function command(action, input) {
         const anchor = action === 'reanchor' ? await sourceAnchor(root, input) : undefined;
         if (action === 'update' && content === undefined && input.topic === undefined) fail('INVALID_ARGUMENT', '需要 --body 或 --topic');
         data = await edit(root, id, input.expect, current => ({ content: content ?? current, anchor, topic: input.topic }));
-    } else fail('INVALID_ARGUMENT', '未知的 note 命令');
+    } else if (action === 'export') data = await require('./note-export').exportNotes(root, input);
+    else fail('INVALID_ARGUMENT', '未知的 note 命令');
     return result('note.' + action, data);
 }
 

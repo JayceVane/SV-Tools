@@ -27,7 +27,7 @@ const RUN_ACTIONS = [
  * @param {{vscode:object,projects:object,vivado:object}} dependencies
  * @returns {object} 刷新、显式追踪及销毁。
  */
-function activateProjectView(context, { vscode, projects, vivado }) {
+function activateProjectView(context, { vscode, projects, vivado, designReview }) {
     let view, project, nodes = [], revision = 0, refreshGeneration = 0, disposed = false, message, busy = false, timer, selectionTimer;
     let progress=null, progressLinks=new Map(), progressTimer;
     const nodeIndex = new Map(), projections = new Map(), expandedState = context.workspaceState.get('svtools.project.views', {});
@@ -297,6 +297,9 @@ function activateProjectView(context, { vscode, projects, vivado }) {
         }
         else if(data.action==='openProgress') {
             await openProgressLink(progressLinks,data.linkId,project,vscode);
+        }
+        else if (data.action === 'designReview' && project?.root && progress) {
+            designReview?.open(project.root);
         }
         else if (data.action === 'refresh') {
             if((projections.get(project?.id)||expandedState[project?.id]?.projection)==='progress'){await refresh();return;}

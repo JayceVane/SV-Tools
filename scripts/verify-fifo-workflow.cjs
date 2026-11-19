@@ -7,7 +7,7 @@ const {spawn}=require('node:child_process');
 const tool=path.resolve(__dirname,'..'),candidateRuntime=process.env.SVTOOLS_CANDIDATE_ROOT||tool;
 const {run}=require(path.join(candidateRuntime,'src/cli/main'));
 const {parseArgs}=require('node:util');
-const {values}=parseArgs({options:{iverilog:{type:'string'},cygwin:{type:'string'}}});
+const {values}=parseArgs({options:{iverilog:{type:'string'},cygwin:{type:'string'},review:{type:'boolean'}}});
 const {findIverilogBinDir,findCygwinBinDir,buildChildEnv}=require(path.join(tool,'src/toolchains/iverilog'));
 const toolBin=findIverilogBinDir(values.iverilog);
 assert.ok(toolBin,'Icarus 不可用；使用 --iverilog <bin> 指定安装位置');
@@ -156,6 +156,14 @@ async function cycle(label,extraCompileArgs,expectedPass){
                {id:'TC-RD-RESET-HAZARD',requirements:['R3'],status:passed?'passed':'failed',oracle:'en_rd held through rd-side reset; o_empty must stay 1, zero phantom reads'},
                {id:'TC-WR-RESET',requirements:['R3'],status:'passed',oracle:'wr-side reset couples both domains; recovery from empty'},
                {id:'TC-COINCIDENT-EDGES',requirements:['R4'],status:'passed',oracle:'20ns/36ns clock pair (LCM 180) exercises recurring common edges for the whole run'}]});
+    if (values.review && ['injected-defect', 'repaired'].includes(label)) {
+        const archive = 'reports/' + label + '.vcd';
+        await fs.copyFile(path.join(root, waveform.path), path.join(root, archive));
+        const saved = await ref(archive);
+        assert.equal(saved.sha256, waveform.sha256);
+        await file('reports/' + label + '-run.json', { schemaVersion: 1, runId: label, simulator: 'Icarus Verilog', entry: 'sim/tb_fifo.sv',
+            top: 'tb', arguments: compileArgs, inputs: [...inputs, ...verificationInputs], artifacts: [compileLog, simLog, sim, saved] });
+    }
     const signals='tb.o_empty,tb.o_full,tb.i_rst_n_rd,tb.i_rst_n_wr';
     const query=['wave','glitches','--workspace',root,'--file',waveform.path,'--signals',signals];
     const glitches=await run(query);assert.equal(glitches.exitCode,0);assert.equal(glitches.output.data.complete,true);
@@ -191,6 +199,8 @@ async function main(){
     await command('return',['--module','afifo','--actor','review-phase','--revision',String(state.revision),'--reason','Hazard reproduced; restore synchronizer reset']);
     await cycle('repaired',[],true);
     const summary={root,iverilog:(await execute(path.join(toolBin,process.platform==='win32'?'iverilog.exe':'iverilog'),['-V'])).stdout.split('\n')[0],outcomes,execution:'single-agent-phased'};
-    await file('reports/summary.json',summary);console.log(JSON.stringify(summary,null,2));
+    await file('reports/summary.json',summary);
+    if (values.review) summary.review = await require('./fifo-review.cjs').build(root);
+    console.log(JSON.stringify(summary,null,2));
 }
 main().catch(error=>{console.error(error);process.exitCode=1;});

@@ -33,6 +33,32 @@ async function workspace(t, name, text) {
     return directory;
 }
 
+test('设计讲解读取完整波形路径，缺失实例不会匹配同名信号', async t => {
+    const trace = VCD_A.replace('$var wire 8 # q [7:0] $end', '$var wire 8 # q [7:0] $end $var wire 8 # q [7:0] $end');
+    const directory = await workspace(t, 'trace.vcd', trace);
+    const { values } = require('../src/agent/wave');
+    const args = { workspace: directory, file: 'trace.vcd', at: '30', asyncOpen: true };
+    const sample = await values({ ...args, exactSignals: ['tb.q'] });
+    assert.equal(sample.data.values['tb.q'].signed, '3');
+    await assert.rejects(values({ ...args, exactSignals: ['q'] }), { code: 'SIGNAL_NOT_FOUND' });
+});
+
+test('设计讲解采样比对区分二补码差异、未知值、无值和非法预期', () => {
+    const { validExpectedValue, compareReviewSample } = require('../src/design/review-sample');
+    const values = { data: { bits: '1110', width: 4 }, held: { bits: 'z', width: 1 },
+        absent: null, actual: { bits: '1', width: 1 }, analog: { bits: '1', width: 1, type: 'real' } };
+    const bindings = [
+        ['data', 'signed', '-2'], ['data', 'unsigned', '12'], ['held', 'bits', '1'],
+        ['absent', 'bits', '0'], ['actual', 'signed', '1'], ['actual', 'bits', '01'], ['analog', 'bits', '1'],
+    ].map(([signal, encoding, value]) => ({ signal, expected: { encoding, value } }));
+    assert.deepEqual(compareReviewSample(values, bindings).map(item => [item.status, item.actual]), [
+        ['match', '-2'], ['mismatch', '14'], ['unknown', 'Z'], ['missing', undefined],
+        ['invalid', undefined], ['invalid', undefined], ['unavailable', undefined],
+    ]);
+    assert.equal(validExpectedValue('bits', '1X'), false);
+    assert.equal(validExpectedValue('unsigned', '-1'), false);
+});
+
 test('wave signals/values/changes：tick 字符串、解码值、游标分页与文件更新感知', async t => {
     const directory = await workspace(t, 'trace.vcd', VCD_A);
     const first = (await run(['wave', 'signals', '--workspace', directory, '--file', 'trace.vcd', '--query', 'q'])).output;
@@ -227,7 +253,8 @@ test('wave 服务：成功、失败、不同文件及同文件并发均释放各
 });
 
 test('真实 FST：同一信号的别名共享身份，短名及条件查询与 VCD 一致', async t => {
-    const directory = await workspace(t, 'alias.fst', await fsp.readFile(path.join(__dirname, 'fixtures/waveform/aliases.fst')));
+    const fst = await fsp.readFile(path.join(__dirname, 'fixtures/waveform/aliases.fst'));
+    const directory = await workspace(t, 'alias.fst', fst);
     const api = nativeWave(), before = api.waveSessionCount();
     const opened = JSON.parse(api.waveSessionOpen(path.join(directory, 'alias.fst')));
     try {
@@ -244,6 +271,12 @@ test('真实 FST：同一信号的别名共享身份，短名及条件查询与 
     const response = await run(['wave', 'values', '--workspace', directory, '--file', 'alias.fst', '--signals', 'q', '--at', '5ns']);
     assert.equal(response.exitCode, 0, JSON.stringify(response.output));
     assert.equal(response.output.data.values['tb.q'].bits, '1');
+    const { loadReviewSample } = require('../src/design/review-model');
+    const sha256 = require('node:crypto').createHash('sha256').update(fst).digest('hex');
+    const signal = 'tb.dut.q';
+    const sample = await loadReviewSample(directory, { file: { path: 'alias.fst', sha256 },
+        sample: { at: '5ns', signals: [signal], bindings: [{ signal, expected: { encoding: 'unsigned', value: '1' } }] } });
+    assert.deepEqual(sample.checks.map(item => [item.signal, item.actual, item.status]), [[signal, '1', 'match']]);
     assert.equal(api.waveSessionCount(), before);
 });
 

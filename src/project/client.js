@@ -38,6 +38,14 @@
     function renderProgress() {
         const progress=snapshot.progress,local=currentState();
         local.progressExpanded||=[];
+        if (snapshot.project) {
+            const review = document.createElement('button');
+            review.type = 'button';
+            review.className = 'progress-link';
+            review.textContent = '打开设计讲解';
+            review.addEventListener('click', () => send('designReview'));
+            tree.append(review);
+        }
         const note=document.createElement('div');note.className='progress-note';
         if(!progress?.available){note.textContent=progress?.message||'正在读取设计进展…';tree.append(note);return;}
         const summary=progress.summary;
