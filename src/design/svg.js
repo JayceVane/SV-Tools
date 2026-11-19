@@ -187,7 +187,7 @@ function prepareBoundaryNode(node, boundaryLayout) {
     const height = 36;
     const side = node.direction === 'output' || (boundaryLayout === 'ends' && node.direction === 'inout') ? 'WEST' : 'EAST';
     const port = { id: node.id + '/' + node.ports[0].name, label: node.name, direction: node.ports[0].direction,
-        width: node.ports[0].width, bitWidth: node.ports[0].width, bits: [], side, x: side === 'WEST' ? 0 : width, y: height / 2, width: 0, height: 0 };
+        bitWidth: node.ports[0].width, bits: [], side, x: side === 'WEST' ? 0 : width, y: height / 2, width: 0, height: 0 };
     return { id: node.id, kind: 'boundary', label, name: node.name, direction: node.direction, boundary: true,
         width, height, paintBounds: { left: -10, top: -10, right: width + 10, bottom: height + 10 }, ports: [port] };
 }

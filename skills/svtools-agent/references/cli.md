@@ -169,7 +169,18 @@ node src/cli/main.js design arch --workspace D:/project --top top
 node src/cli/main.js design arch --workspace D:/project --top top --depth 1 --save arch-1
 ```
 
-`design arch` 从已捕获文本建立隔离快照，字面量 include 改写到快照，源码位置映射回原文件；CLI 在返回/导出前复查上下文，变更时返回 `CONTEXT_CHANGED`。宏 include 返回 `UNSUPPORTED_INCLUDE`；未捕获的初始化数据不从实时工程补读。内置 Yosys 链接空模块：`read_verilog -sv` → `hierarchy -top <top>` → `proc` → `memory_collect` → `write_json`，不跑 `prep`/`opt`（避免优化掉未连接的实例）。只投影用户模块实例：顶层 `assign`/`always_ff`/存储产生的 `$` 单元不绘制为节点。架构图节点为顶层实例（空模块 blackbox 与已实现模块统一折叠为盒），顶层端口为边界节点（输入在左、输出在右），边为经顶层 `netnames` 合并的端口到端口总线连接；子模块内部实现与存储不入图。实例盒标签与端口位宽以实例参数覆盖后的连接为准；模块接口表保留声明默认值。模型是源级结构事实，不能当作综合、时序或功能验证证据。
+`design arch` 从已捕获文本建立隔离快照，字面量 include 改写到快照，源码位置映射回原文件；CLI 在返回/导出前复查上下文，变更时返回 `CONTEXT_CHANGED`。宏 include 返回 `UNSUPPORTED_INCLUDE`；未捕获的初始化数据不从实时工程补读。Yosys 路径链接空模块，依次执行 `read_verilog -sv`、`hierarchy -top <top>`、`proc`、`memory_collect`、`write_json`。图按顶层实例和边界端口组织。实例盒位宽以参数覆盖后的连接为准，模块接口表保留声明默认值。
+
+工程中存在 SV `interface` 或实现省略符 `...` 时，架构命令选用结构前端。`--engine struct` 和 `--engine yosys` 可以显式选择。结构模型保留 `interface/modport` 的声明成员和方向，图上把接口呈现为共享总线。复杂表达式和模板实例需要结合诊断。结构输出供架构设计和审阅使用。
+
+```powershell
+node src/cli/main.js struct parse --file rtl/top.sv
+node src/cli/main.js design arch --top top --engine struct --save before
+node src/cli/main.js design render --top top --engine struct --format svg
+node src/cli/main.js design check --top top --engine struct
+node src/cli/main.js design lower --file rtl/top.sv
+node src/cli/main.js design diff --top top --baseline before
+```
 
 `data` 关键字段：
 

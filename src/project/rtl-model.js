@@ -85,7 +85,7 @@ function initializer(document, symbol) {
     }
     return tokens.slice(index + 2, end);
 }
-function bindings(document, range, orderedNames) {
+function bindings(document, range, orderedNames, locations) {
     if (!range) {
         return new Map();
     }
@@ -121,6 +121,7 @@ function bindings(document, range, orderedNames) {
             throw new Error('重复或无法确定顺序的端口/参数连接');
         }
         result.set(name, value);
+        locations?.set(name, group[0].start);
     }
     return result;
 }
@@ -522,4 +523,4 @@ function createRTLIndex(documents, { defines = [] } = {}) {
 function buildRTLDesign(documents, options) {
     return createRTLIndex(documents, options).build(options.top);
 }
-module.exports = { buildRTLDesign, createRTLIndex, protectedRanges, sourceAt, MAX_TOKENS, MAX_MODULES, MAX_BITS };
+module.exports = { buildRTLDesign, createRTLIndex, protectedRanges, sourceAt, bindings, MAX_TOKENS, MAX_MODULES, MAX_BITS };

@@ -18,7 +18,9 @@ const help=`SV Tools headless CLI (API 1)
   vivado status
   vivado report timing|utilization|drc [--run synth_1|impl_1]
   vivado run [--run synth_1|impl_1] [--jobs <n>]
-  design arch --top <module> [--depth <n>] [--save <name>]
+  design arch --top <module> [--engine struct|yosys] [--depth <n>] [--save <name>]
+  struct parse [--file <hdl>]
+  design lower [--file <hdl>] [--out <dir>]
   design plan --spec <json|file> [--plan svtools.design.json]
   design tasks [--plan <file>]
   design plan-report [--plan <file>] [--out <file.md>] [--force]
@@ -61,6 +63,7 @@ function argumentsFor(argv) {
     const strings=['workspace','config','project','fileset','file','top','iverilog','cygwin','vivado','standard','run','timeout','offset','limit','log-index','max-paths','jobs','name','dir','part','sim-top','target-fileset','depth','save','spec','format','out','title','style','detail','boundary-layout','baseline','against','clock','query','scope','role','bit','at','at-b','from','to','signal','signals','min-width','max-width','clock-edge','kind','max-values','plan','module','actor','revision','token','evidence','reason'];
     const options=Object.fromEntries(strings.map(name=>[name,{type:'string'}]));
     for(const name of ['help','version','json','write','check','fold-ports','force']) options[name]={type:'boolean'};
+    options.engine={type:'string'};
     options.include={type:'string',multiple:true}; options.define={type:'string',multiple:true}; options.source={type:'string',multiple:true};
     options['bundle-name']={type:'string',multiple:true}; options.where={type:'string',multiple:true};
     let parsed;
@@ -89,7 +92,7 @@ async function run(argv) {
         const [command,action,id,...extra]=positionals; let output;
         if(extra.length) fail('INVALID_ARGUMENT','位置参数过多');
         if(command!=='format' && (input.write || input.check)) fail('INVALID_ARGUMENT','--write与--check仅用于format');
-        operation=command==='project' || command==='task' || command==='design' || command==='wave'?command+'.'+action:command;
+        operation=['project','task','design','wave','struct'].includes(command)?command+'.'+action:command;
         if(command==='doctor' && !action) output=await services.doctor(input);
         else if(command==='project' && !id && ['list','inspect'].includes(action)) output=await services[action==='list'?'projects':'inspect'](input);
         else if(command==='project' && action==='create' && !id) output=await vivado.createProject(input);
@@ -99,6 +102,7 @@ async function run(argv) {
         else if(command==='vivado' && action==='status' && !id) output=await vivado.status(input);
         else if(command==='vivado' && action==='report' && ['timing','utilization','drc'].includes(id)) output=await vivado.report({...input,kind:id});
         else if(command==='vivado' && action==='run' && !id) output=await tasks.start({...input,operation:'vivado.run'});
+        else if(!id && (command==='struct' && action==='parse' || command==='design' && action==='lower')) output=await require('../design/struct').command(action, input);
         else if(command==='design' && action==='plan' && !id) output=await workflow.createPlan(input);
         else if(command==='design' && action==='plan-report' && !id) output=await workflow.planReport(input);
         else if(command==='design' && action==='tasks' && !id) output=await workflow.tasks(input);
