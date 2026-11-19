@@ -101,11 +101,13 @@ function parseVivadoDiagnostics(raw, cwd, mainFile) {
 }
 
 /** 生成 xvlog -prj 工程文件内容（work 库；绕开 Windows 命令行长度限制）。 */
-function buildPrjBody(files) {
+function buildPrjBody(files, includeDirs = []) {
+    if (includeDirs.some(dir => /["\0\r\n]/.test(dir))) throw new Error('xvlog 工程 include 目录包含不支持的引号或换行');
+    const includes = includeDirs.map(dir => ' --include "' + dir.replace(/\\/g, '/') + '"').join('');
     const lines = [];
     for (const f of files) {
         const lang = /\.svh?$/i.test(f) ? 'sv' : 'verilog';
-        lines.push(lang + ' work "' + f.replace(/\\/g, '/') + '"');
+        lines.push(lang + ' work' + includes + ' "' + f.replace(/\\/g, '/') + '"');
     }
     return lines.join('\n') + '\n';
 }

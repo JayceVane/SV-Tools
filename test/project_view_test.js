@@ -3,6 +3,7 @@ const test = require('node:test'), assert = require('node:assert/strict'), fs = 
 const { createRequire } = require('node:module');
 const { projectHtml } = require('../src/project/view');
 const { projectTree } = require('../src/project/tree-model');
+const { parseXprText } = require('../src/vivado/xpr');
 const noop = () => ({ dispose() {
     } });
 async function host(t) {
@@ -139,6 +140,39 @@ test('文件视图聚合角色，实例视图区分同文件多实例，信号�
     assert.equal(instances.length, 2);
     assert.notEqual(instances[0].id, instances[1].id);
     assert.ok(instances.every(n => !n.label.includes('r_data')));
+});
+
+test('Vivado 文件视图按 IP 和 BD 分组，保留实际成员的路径和所属文件集', async t => {
+    const h = await host(t), root = path.resolve('bin'), file = path.join(root, 'nested', 'example.xpr');
+    const parsed = parseXprText(`<Project><FileSets>
+        <FileSet Name="sources_1" Type="DesignSrcs">
+            <File Path="$PPRDIR/top.sv"/><File Path="$PPRDIR/ip/z_fifo/z_fifo.xci"/><File Path="$PPRDIR/bd/sys/sys.bd"/>
+        </FileSet>
+        <FileSet Name="a_fifo" Type="BlockSrcs">
+            <File Path="$PPRDIR/ip/a_fifo/a_fifo.XCIX"/><File Path="$PPRDIR/ip/a_fifo/config.prj"/>
+            <Config><Option Name="TopModule" Val="a_fifo"/></Config>
+        </FileSet>
+        <FileSet Name="sys_child" Type="BlockSrcs"><Config><Option Name="TopModule" Val="sys_child"/></Config></FileSet>
+        <FileSet Name="sim_1" Type="SimulationSrcs"/>
+    </FileSets></Project>`, file);
+    h.setProject({ id: file, name: 'example', kind: 'vivado', path: file, root, sets: parsed.sets });
+    await h.api.refresh();
+    const snapshot = h.sent.at(-1), [sources, sim, ips, bd, blockSources] = snapshot.nodes;
+    assert.deepEqual(snapshot.nodes.map(node => node.label), ['sources_1', 'sim_1', 'IP · 2', 'Block Design · 1', '块源文件']);
+    assert.equal(snapshot.project.location, 'nested');
+    assert.equal(snapshot.project.path, file);
+    assert.deepEqual(sources.children[0].children.map(node => node.label), ['top.sv']);
+    assert.deepEqual(sim.children, []);
+    assert.equal(ips.collapsedByDefault, true);
+    assert.deepEqual(ips.children.map(node => [node.label, node.fileset]), [['a_fifo.XCIX', 'a_fifo'], ['z_fifo.xci', 'sources_1']]);
+    assert.equal(bd.children[0].fileset, 'sources_1');
+    assert.equal(blockSources.children[0].fileset, 'a_fifo');
+    const ip = ips.children[0];
+    await h.message({ action: 'open', revision: snapshot.revision, nodeId: ip.id });
+    assert.deepEqual(h.calls.at(-1), ['vscode.open', { fsPath: path.join(root, 'nested', 'ip', 'a_fifo', 'a_fifo.XCIX'), scheme: 'file' }]);
+    await h.message({ action: 'command', revision: h.api.getSnapshot().revision, command: 'removeFile', nodeId: ip.id });
+    assert.equal(h.calls.at(-1)[0], 'svtools.vivado.tree.removeFile');
+    assert.equal(h.calls.at(-1)[1].nodeData.fileset, 'a_fifo');
 });
 
 test('同一侧栏的只读进展读取计划，链接限定当前工程且不创建状态',async t=>{

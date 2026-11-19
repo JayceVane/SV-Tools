@@ -153,6 +153,9 @@ function parseXprText(text, xprPath, { onElement } = {}) {
             if (!attrs.Path) fail('File 缺少 Path');
             try { set.files.push(resolveXprPath(attrs.Path, parsed.dir, path.basename(xprPath, '.xpr'))); }
             catch (error) { fail('File 路径无效：' + error.message); }
+        } else if (element.name === 'Define' && set && stack.at(-1)?.name === 'Config' && stack.at(-2)?.name === 'FileSet'
+            && /^[A-Za-z_][A-Za-z0-9_$]*$/.test(attrs.Name || '')) {
+            (set.defines ||= []).push(Object.hasOwn(attrs, 'Val') ? `${attrs.Name}=${attrs.Val}` : attrs.Name);
         } else if (element.name === 'Option') {
             if (!set && attrs.Name === 'Part' && !hasPart) {
                 if (!Object.hasOwn(attrs, 'Val')) fail('Part 缺少 Val');

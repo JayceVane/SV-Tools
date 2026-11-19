@@ -19,22 +19,34 @@ async function prepare(document, ctx, task) {
     let binDir;
     try { binDir = (ctx.resolveBinDir || rules.resolveXvlogBinDir)(configured); }
     catch (error) { ctx.showToolchainError?.(error.message, 'svtools.vivado.path'); throw error; }
-    const folder = vscode.workspace.getWorkspaceFolder?.(document.uri) || vscode.workspace.workspaceFolders?.[0];
+    const documentFolder = vscode.workspace.getWorkspaceFolder?.(document.uri);
+    const folder = documentFolder || vscode.workspace.workspaceFolders?.[0];
     const base = folder?.uri.fsPath || os.tmpdir();
     const workDir = await task.directory(path.join(base, '.svtools', 'tasks'), 'xvlog');
     let lintTarget = filePath;
     if (document.isDirty) { lintTarget = path.join(workDir, path.basename(filePath)); await fs.writeFile(lintTarget, text); }
     task.throwIfCancelled();
     const options = vscode.workspace.getConfiguration('svtools.iverilog', document.uri);
-    const includeDirs = [...new Set([path.dirname(filePath), ...(ctx.projectScope?.includePaths || []), ...(options.get('includePaths', []) || []).map(dir => path.resolve(folder?.uri.fsPath || path.dirname(filePath), dir))])];
+    let project;
+    if (!ctx.projectScope) {
+        try {
+            project = await ctx.getProjectSources?.({ root: documentFolder?.uri.fsPath, file: filePath, findContainingVivado: true });
+        } catch (error) { ctx.channel.appendLine('[xvlog] 工程源码读取失败：' + error.message); }
+        task.throwIfCancelled();
+    }
+    const configuredDirs = (options.get('includePaths', []) || []).map(dir => path.resolve(folder?.uri.fsPath || path.dirname(filePath), dir));
+    const includeDirs = [...new Set([path.dirname(filePath), ...(ctx.projectScope?.includePaths || []), ...configuredDirs,
+        ...(project?.includeDirs || []), ...(project?.files || []).map(file => path.dirname(file))])];
     const libraryArgs = [], timescale = text.match(/`timescale\s+([0-9.]+[munpf]?s\s*\/\s*[0-9.]+[munpf]?s)/i);
     let uvmTimescale;
     if (rules.detectUvmUsage(text)) {
         libraryArgs.push('-L', 'UVM'); uvmTimescale = timescale ? timescale[1].replace(/\s+/g, '') : '1ns/1ps';
-        const uvmDir = rules.findUvmIncludeDir(binDir); if (uvmDir) includeDirs.push(uvmDir);
+        const uvmDir = rules.findUvmIncludeDir(binDir); if (uvmDir && !includeDirs.includes(uvmDir)) includeDirs.push(uvmDir);
     }
+    // The project file can carry many include directories without exceeding the Windows batch command length.
     return { task, document, ctx, binDir, workDir, filePath, lintTarget, libraryArgs, uvmTimescale,
-        includeArgs: includeDirs.flatMap(dir => ['-i', dir]), top: ctx.top ?? firstModuleName(text), version };
+        includeArgs: project ? [] : includeDirs.flatMap(dir => ['-i', dir]), projectIncludeDirs: project ? includeDirs : [],
+        top: ctx.top ?? firstModuleName(text), version };
 }
 
 /** 每个阶段独立捕获诊断；完整输出写盘，有界尾部只用于展示。 */
@@ -53,7 +65,7 @@ async function runStage(prep, tool, args) {
 }
 
 async function compile(prep, files, incremental) {
-    await fs.writeFile(path.join(prep.workDir, 'svtools.prj'), rules.buildPrjBody(files)); prep.task.throwIfCancelled();
+    await fs.writeFile(path.join(prep.workDir, 'svtools.prj'), rules.buildPrjBody(files, prep.projectIncludeDirs)); prep.task.throwIfCancelled();
     return runStage(prep, 'xvlog', ['--nolog', ...prep.libraryArgs, ...prep.includeArgs,
         ...(incremental ? ['--incr'] : []), '-prj', 'svtools.prj']);
 }

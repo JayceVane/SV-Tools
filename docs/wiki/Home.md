@@ -1,8 +1,8 @@
 # SV Tools 4.2 使用指南
 
-SV Tools 为 Verilog/SystemVerilog 开发提供格式化、代码生成、语义补全、Icarus/Vivado 工具链，以及内嵌波形和电路查看。本指南对应 **4.2.0**，以 Windows x64 发布包为安装基线。
+SV Tools 为 Verilog/SystemVerilog 开发提供格式化、代码生成、语义补全、Icarus/Vivado 工具链，以及内嵌波形和电路查看。本指南对应 **4.2.1**，以 Windows x64 发布包为安装基线。
 
-[Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=JayceVane.svtools) · [Open VSX](https://open-vsx.org/extension/JayceVane/svtools) · [GitHub Releases](https://github.com/JayceVane/SV-Tools/releases/tag/v4.2.0) · [带编号的界面图解](https://github.com/JayceVane/SV-Tools/wiki/Screenshots)
+[Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=JayceVane.svtools) · [Open VSX](https://open-vsx.org/extension/JayceVane/svtools) · [GitHub Releases](https://github.com/JayceVane/SV-Tools/releases/tag/v4.2.1) · [带编号的界面图解](https://github.com/JayceVane/SV-Tools/wiki/Screenshots)
 
 ## 从这里开始
 
@@ -42,7 +42,7 @@ SV Tools 为 Verilog/SystemVerilog 开发提供格式化、代码生成、语义
 - [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=JayceVane.svtools)：在 VS Code 中搜索 SystemVerilog Tools，确认发布者 JayceVane。
 - [Open VSX](https://open-vsx.org/extension/JayceVane/svtools)：供使用 Open VSX 的兼容 IDE 安装。
 - [GitHub Releases](https://github.com/JayceVane/SV-Tools/releases)：VSIX、独立 CLI、原生模块和 SHA256 清单。
-- [4.2.0 发布说明](https://github.com/JayceVane/SV-Tools/releases/tag/v4.2.0)。市场版本以各页面为准，扩展 ID 均为 `JayceVane.svtools`。
+- [4.2.1 发布说明](https://github.com/JayceVane/SV-Tools/releases/tag/v4.2.1)。市场版本以各页面为准，扩展 ID 均为 `JayceVane.svtools`。
 - [问题反馈](https://github.com/JayceVane/SV-Tools/issues)：附最小复现、插件版本、IDE 版本和完整日志路径。
 
 安装 VSIX 自带格式化原生模块与离线 Yosys，无需另装 Rust、Python 或 Yosys。Icarus 和 Vivado 按需安装；Vivado 仍需自己的器件支持与许可。

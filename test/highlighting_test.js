@@ -4,6 +4,7 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const { test } = require('node:test');
 const grammar = require('../syntaxes/systemverilog.tmLanguage.json');
+const { inactiveRanges, activateConditionalHighlighting } = require('../src/editor/conditional-highlighting');
 const literals = ["'0", "'1", "'x", "'X", "'z", "'Z"];
 const numericMatches = source => grammar.repository.numbers.patterns.flatMap(rule =>
     [...source.matchAll(new RegExp(rule.match, 'g'))].map(match => ({ start: match.index, text: match[0], scope: rule.name })));
@@ -25,6 +26,66 @@ test('现有有位宽及无位宽进制常量仍完整识别', () => {
     for (const literal of ["8'b1010_0011", "1'b0", "16'shff", "'hCAFE", "'sd12", '42', '1.5e-3']) {
         assert.ok(numericMatches(literal).some(token => token.start === 0 && token.text === literal), literal);
     }
+});
+
+const ports = ['`include"width_defs.v"', 'module demo(', '  `ifdef DDR16', '  inout [15:0] dq,',
+    '  `elsif DDR32', '  inout [31:0] dq,', '  `elsif DDR64', '  inout [63:0] dq,', '  `endif', '  output ready', ');', 'endmodule'].join('\n');
+const dimmed = (text, ranges) => ranges.map(([start, end]) => text.slice(start, end).trim());
+
+test('条件端口按头文件的宏定义选分支，指令和 endif 后的端口保持可读', async () => {
+    const ranges = await inactiveRanges({ file: 'top.sv', text: ports, async readInclude(file, name) {
+        assert.equal(file, 'top.sv');
+        assert.equal(name, 'width_defs.v');
+        return { file: name, text: '//`define DDR16\n/*`define DDR32*/\n`define DDR64 0\n' };
+    } });
+    assert.deepEqual(dimmed(ports, ranges), ['inout [15:0] dq,', 'inout [31:0] dq,']);
+});
+
+test('嵌套条件和宏的定义顺序生效，已选分支不会读入后续分支的 include', async () => {
+    const text = ['`ifndef GUARDED', '`define GUARDED', '`ifdef MODE', '`define INNER', '`elsif ALTERNATE', '`include "missing.v"',
+        '`else', '`undef MODE', '`endif', '`ifdef INNER', 'wire valid;', '`endif', '`endif', '`undef MODE', '`ifdef MODE', 'wire disabled;',
+        '`else', 'wire enabled;', '`endif'].join('\n');
+    const ranges = await inactiveRanges({ file: 'top.sv', text, defines: ['MODE=0', 'ALTERNATE'], readInclude() { assert.fail('inactive include'); } });
+    assert.deepEqual(dimmed(text, ranges), ['`include "missing.v"', '`undef MODE', 'wire disabled;']);
+});
+
+test('活动 include 缺失或条件指令尚未闭合时保留原有高亮', async () => {
+    assert.deepEqual(await inactiveRanges({ file: 'top.sv', text: ports, readInclude: async () => null }), []);
+    assert.deepEqual(await inactiveRanges({ file: 'top.sv', text: '`ifdef MISSING\nwire partial;\n' }), []);
+});
+
+test('编辑器自动按当前工程中的头文件更新可见模块的分支淡化', async t => {
+    const root = await fs.mkdtemp(path.join(require('node:os').tmpdir(), 'svtools-conditional-highlight-'));
+    t.after(() => fs.rm(root, { recursive: true, force: true }));
+    const headerPath = path.join(root, 'header', 'width_defs.v');
+    await fs.mkdir(path.dirname(headerPath));
+    await fs.writeFile(headerPath, '`define DDR64\n');
+    const uri = file => ({ scheme: 'file', fsPath: file, toString: () => file });
+    const document = { uri: uri(path.join(root, 'top.sv')), getText: () => ports, languageId: 'systemverilog', positionAt: offset => offset };
+    let content = '`define DDR32\n', changed, closed;
+    const header = { uri: uri(headerPath), getText: () => content };
+    const updates = [], editor = { document, setDecorations: (_, ranges) => updates.push(ranges.map(({start,end}) => [start,end])) };
+    const disposable = () => ({ dispose() {} });
+    const vscode = { Range: class { constructor(start, end) { Object.assign(this, { start, end }); } }, DecorationRangeBehavior: { ClosedClosed: 1 },
+        window: { visibleTextEditors: [editor], createTextEditorDecorationType: disposable, onDidChangeVisibleTextEditors: disposable },
+        workspace: { textDocuments: [document], getWorkspaceFolder: () => ({ uri: uri(root) }), getConfiguration: () => ({ get: () => [] }),
+            onDidChangeTextDocument: callback => { changed = callback; return disposable(); },
+            onDidCloseTextDocument: callback => { closed = callback; return disposable(); } } };
+    const highlighting = activateConditionalHighlighting({ vscode, sourceCatalog: { onDidChange: disposable },
+        getProjectSources: async () => ({ files: [document.uri.fsPath, headerPath] }) });
+    t.after(() => highlighting.dispose());
+    async function waitForUpdate(count) {
+        for (let attempt = 0; updates.length < count && attempt < 60; attempt++) await new Promise(resolve => setTimeout(resolve, 25));
+        assert.equal(updates.length, count);
+        return dimmed(ports, updates.at(-1));
+    }
+    assert.deepEqual(await waitForUpdate(1), ['inout [15:0] dq,', 'inout [31:0] dq,']);
+    vscode.workspace.textDocuments.push(header);
+    changed({ document: header, contentChanges: [{}] });
+    assert.deepEqual(await waitForUpdate(2), ['inout [15:0] dq,', 'inout [63:0] dq,']);
+    vscode.workspace.textDocuments.pop();
+    closed(header);
+    assert.deepEqual(await waitForUpdate(3), ['inout [15:0] dq,', 'inout [31:0] dq,']);
 });
 
 // 复用本机编辑器的真实TextMate/Oniguruma；CI无编辑器时仍运行上面的词法合同。

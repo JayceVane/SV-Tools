@@ -4,23 +4,39 @@ const path = require('node:path');
 const { parseXprText, samePath } = require('../vivado/xpr');
 const inside = (file, root) => { const relative = path.relative(root, file); return relative !== '..' && !relative.startsWith('..' + path.sep) && !path.isAbsolute(relative); };
 
+function projectSources(project, root, file) {
+    if (root && !inside(root, project.root) && !inside(project.root, root)) return null;
+    const filesets = project.sets.filter(set => ['DesignSrcs', 'SimulationSrcs'].includes(set.type));
+    const owners = file ? filesets.filter(set => set.files.some(member => samePath(member, file))) : [];
+    if (file && !owners.length && (!/\.(vcd|fst)$/i.test(file) || !inside(file, project.root))) return null;
+    const matching = owners.filter(set => set.type === 'SimulationSrcs');
+    // An empty HDL list must let consumers fall back to workspace discovery.
+    const files = [...new Set(filesets.filter(set => set.type === 'DesignSrcs' || matching.length !== 1 || matching.includes(set))
+        .flatMap(set => set.files).filter(member => /\.(?:sv|v|svh|vh)$/i.test(member)))];
+    if (!files.length) return null;
+    const macroSets = owners.map(set => [...new Set((set.defines || []).map(define => define.split('=')[0]))].sort().join('\0'));
+    return { key: project.key, files, roots: [...new Set([project.root, ...files.map(file => path.dirname(file))])],
+        includeDirs: project.includeDirs || [], defines: [...(project.defines || []), ...(owners[0]?.defines || [])],
+        ambiguousDefines: macroSets.some(macros => macros !== macroSets[0]) };
+}
+
 /** @param {{vscode:object,projectSelection:object}} deps @returns {Function} 当前工程成员适配；有多个仿真集且无法定位时保留全部，避免猜测。 */
 function createProjectSourceProvider({ vscode, projectSelection, projects }) {
     let cached;
-    return async ({ root, file }) => {
-        const active = projects ? await projects.current() : null;
-        if (active) {
-            const filesets = active.sets.filter(set => ['DesignSrcs','SimulationSrcs'].includes(set.type));
-            const member = file && filesets.some(set => set.files.some(member => samePath(member,file)));
-            if (root && !inside(root,active.root) && !inside(active.root,root)) return null;
-            if (file && !member && (!/\.(vcd|fst)$/i.test(file) || !inside(file,active.root))) return null;
-            const matching = filesets.filter(set => set.type === 'SimulationSrcs' && set.files.some(member => samePath(member,file || '')));
-            // 与XPR旧路径一致：只把HDL计入成员，且空清单必须回落工作区发现，
-            // 否则空工程/零HDL工程会以空文件集屏蔽 iverilog -y、xvlog 与 OOC 依赖收集。
-            const files = [...new Set(filesets.filter(set => set.type === 'DesignSrcs' || matching.length !== 1 || matching.includes(set)).flatMap(set => set.files))]
-                .filter(member => /\.(?:sv|v|svh|vh)$/i.test(member));
-            if (!files.length) return null;
-            return {key:active.key,files,roots:[...new Set([active.root,...files.map(file => path.dirname(file))])]};
+    return async ({ root, file, findContainingVivado = false }) => {
+        if (projects) {
+            const active = await projects.current();
+            const scope = active && projectSources(active, root, file);
+            if (scope || !findContainingVivado || !file) return scope;
+            const candidates = (await projectSelection.discover())
+                .filter(xpr => !samePath(xpr, active?.path) && inside(file, path.dirname(xpr)))
+                .sort((a, b) => path.dirname(b).length - path.dirname(a).length);
+            for (const xpr of candidates) {
+                const candidate = await projects.snapshot({ kind: 'vivado', path: xpr });
+                const scope = projectSources(candidate, root, file);
+                if (scope) return scope;
+            }
+            return null;
         }
         const xpr = await projectSelection.current(); if (!xpr) return null;
         const stat = await fs.stat(xpr), key = xpr + ':' + stat.mtimeMs + ':' + stat.size;
@@ -28,16 +44,7 @@ function createProjectSourceProvider({ vscode, projectSelection, projects }) {
         if (cached?.key !== key) cached = { key, project: parseXprText(new TextDecoder('utf-8', { fatal:true }).decode(await fs.readFile(xpr)), xpr) };
         const project = cached.project, folder = vscode.workspace.getWorkspaceFolder(vscode.Uri.file(xpr))?.uri.fsPath || project.dir;
         if (root && !inside(xpr, root) && !inside(root, folder)) return null;
-        const hdl = project.sets.filter(set => ['DesignSrcs','SimulationSrcs'].includes(set.type));
-        const member = file && hdl.some(set => set.files.some(member => samePath(member,file)));
-        if (file && !member && (!/\.(vcd|fst)$/i.test(file) || !inside(file,folder))) return null;
-        const simulation = hdl.filter(set => set.type === 'SimulationSrcs');
-        const matching = file ? simulation.filter(set => set.files.some(member => samePath(member,file))) : [];
-        const chosen = matching.length === 1 ? matching : simulation;
-        const sets = hdl.filter(set => set.type === 'DesignSrcs' || chosen.includes(set));
-        const files = [...new Set(sets.flatMap(set => set.files).filter(file => /\.(?:sv|v|svh|vh)$/i.test(file)))];
-        if (!files.length) return null;
-        return { key, files, roots: [...new Set([folder, ...files.map(file => path.dirname(file))])] };
+        return projectSources({ ...project, key, root: folder }, undefined, file);
     };
 }
 module.exports = { createProjectSourceProvider };

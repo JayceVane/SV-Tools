@@ -74,7 +74,12 @@ function activateProjectView(context, { vscode, projects, vivado, designReview }
             return;
         }
         const currentFlow = flow.get(), projection = projections.get(project?.id) || expandedState[project?.id]?.projection || 'files';
-        void view.webview.postMessage({ type: 'snapshot', revision, project: project ? { id: project.id, name: project.name, kind: project.kind } : null, nodes, projection, progress,
+        const projectLabel = project ? { id: project.id, name: project.name, kind: project.kind } : null;
+        if (project?.kind === 'vivado') {
+            projectLabel.location = path.relative(project.root, path.dirname(project.path));
+            projectLabel.path = project.path;
+        }
+        void view.webview.postMessage({ type: 'snapshot', revision, project: projectLabel, nodes, projection, progress,
             tracing: !!currentFlow, traceId: currentFlow?.traceId, traceRoot: currentFlow ? `${currentFlow.contextKind === 'simulation' ? '仿真' : '设计'}追踪根：${currentFlow.top}${currentFlow.rootFallback ? '（所选模块）' : ''}` : '', pinned: currentFlow?.pinned, busy, message,
             actions: actionList().filter(action => !action.group), toolActions: project?.kind === 'vivado' ? RUN_ACTIONS : [], issues: currentFlow?.issues ||
                 (projection === 'instances' ? ['源码引用预览；执行信号追踪后显示静态RTL连接中可确定的实例层级'] : []) });

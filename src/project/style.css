@@ -8,7 +8,8 @@ button:focus-visible, summary:focus-visible { outline: 1px solid var(--vscode-fo
 .grow { flex: 1; min-width: 0; }
 header { padding: 8px 8px 6px; }
 .project { width: 100%; min-height: 34px; display: flex; align-items: center; gap: 8px; text-align: left; padding: 5px 8px; border: 1px solid var(--vscode-dropdown-border, var(--vscode-panel-border)); background: var(--vscode-dropdown-background); color: var(--vscode-dropdown-foreground); }
-#projectName { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#projectName, #projectLocation { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#projectLocation { color: var(--vscode-descriptionForeground); font-size: 0.9em; }
 .badge { padding: 1px 6px; border-radius: 4px; background: var(--vscode-badge-background); color: var(--vscode-badge-foreground); font-size: 11px; white-space: nowrap; }
 .project .chevron { transform: rotate(90deg); }
 .modes { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; padding: 0 8px 5px; border-bottom: 1px solid var(--vscode-panel-border); flex-shrink: 0; }
