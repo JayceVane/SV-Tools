@@ -63,7 +63,7 @@ function html(title, content) {
         render.render(content) + '</main></html>\n';
 }
 
-async function printPdf(directory, browser) {
+async function printPdf(directory, browser, basename = 'notes') {
     const candidates = [browser, process.env.SVTOOLS_PDF_BROWSER,
         ...[process.env['ProgramFiles(x86)'], process.env.ProgramFiles].filter(Boolean).map(dir => path.join(dir, 'Microsoft', 'Edge', 'Application', 'msedge.exe'))].filter(Boolean);
     let executable;
@@ -73,10 +73,10 @@ async function printPdf(directory, browser) {
     if (!executable) fail('TOOL_NOT_FOUND', '找不到用于 PDF 导出的 Edge/Chromium，请提供 --browser');
     const temp = await fs.realpath(os.tmpdir());
     const profile = await fs.mkdtemp(path.join(temp, 'svtools-note-print-'));
-    const target = path.join(directory, 'notes.pdf');
+    const target = path.join(directory, basename + '.pdf');
     try {
         const run = await promisify(execFile)(executable, ['--headless', '--disable-gpu', '--disable-background-networking', '--no-pdf-header-footer', '--no-first-run',
-            '--user-data-dir=' + profile, '--print-to-pdf=' + target, pathToFileURL(path.join(directory, 'notes.html')).href],
+            '--user-data-dir=' + profile, '--print-to-pdf=' + target, pathToFileURL(path.join(directory, basename + '.html')).href],
         { windowsHide: true, timeout: 60_000 });
         for (let attempt = 0; attempt < 100; attempt++) {
             const bytes = await fs.readFile(target).catch(error => { if (error.code !== 'ENOENT') throw error; });
@@ -192,4 +192,4 @@ async function exportNotes(root, options = {}) {
     }
 }
 
-module.exports = { exportNotes, inspectExport, KIND, MAX_MANIFEST };
+module.exports = { exportNotes, inspectExport, printPdf, KIND, MAX_MANIFEST };

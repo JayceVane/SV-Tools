@@ -1,0 +1,20 @@
+{
+  "titles": {
+    "packet_hub": "四路采集与报文汇聚",
+    "sample_lane": "采集与封包",
+    "packet_arbiter": "四路仲裁",
+    "packet_fifo": "报文 FIFO",
+    "packet_router": "出口选择",
+    "control_bank": "控制寄存器",
+    "status_merge": "告警汇总",
+    "sample_monitor": "采集活动观察"
+  },
+  "groups": {
+    "packet_hub": {
+      "u_lane0": "四路独立采集与封包",
+      "u_lane1": "四路独立采集与封包",
+      "u_lane2": "四路独立采集与封包",
+      "u_lane3": "四路独立采集与封包"
+    }
+  }
+}

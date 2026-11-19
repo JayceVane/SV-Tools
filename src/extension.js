@@ -34,6 +34,7 @@ const { createProjectSelection } = require('./vivado/projects');
 const { createProjectManager } = require('./project/manager');
 const { activateProjectView } = require('./project');
 const { activateReviewView } = require('./design/review-view');
+const { activateArchitectureViewer } = require('./design/architecture-view');
 const { createWorkspaceSourceIndex } = require('./workspace/sources');
 const { createLanguageProviders } = require('./editor/language');
 const { createDesignNotes } = require('./editor/design-notes');
@@ -170,6 +171,7 @@ function activate(context) {
     // Vivado TCL 批处理运行与工程创建
     const circuit = activateCircuitViewer(context, { vivado, sourceCatalog, waveLinks });
     const designReview = activateReviewView(context, { vscode, projects, waveViewer });
+    activateArchitectureViewer(context, { vscode, projects });
     const projectView = activateProjectView(context,{vscode,projects,vivado,sourceCatalog,designReview});
     return { vivado, circuit, waveViewer, waveLinks, projects, projectView };
 }

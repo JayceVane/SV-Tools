@@ -28,4 +28,6 @@ $demo = '.\example\struct-packet-hub'
 
 基准检查应为 `clean`。在副本里将 `u_fifo` 的 `.clk(clk)` 改为 `.clk()`，应得到 `UNDRIVEN_INPUT`。将 `u_monitor` 的 `.watched(adc0)` 改为 `.watched(telemetry)`，应得到 `ARCH_INTERFACE_TYPE`。把 `adc0` 改为 `sample_link.sink`，应得到 `ARCH_MODPORT_MISMATCH`。还原后给 `packet_fifo` 加入实际 RTL 语句，再用 `diff --workspace $demo --top packet_hub --baseline baseline` 查看 `u_fifo` 的骨架状态变化。
 
-图上接口束按共享连接呈现。成员方向可在 `parse` 的 `modports` 数据里核对。
+在 VS Code 中把本目录作为工作区打开，运行「SV Tools: 打开架构查看器」，选择 `packet_hub`。图上点选 `u_fifo` 可核对上游仲裁器、下游路由器和告警支路。打开 `arbitrated`，查看 `payload / lane / last / valid` 从仲裁器流向 FIFO，`ready` 从 FIFO 返回仲裁器。端口声明和例化连接均可跳转到源码。
+
+`svtools.architecture.json` 为模块补充职责名称，并把四个 `sample_lane` 实例放进同一个功能框。完整连线仍显示四个独立实例。CLI 静态图把接口束作为共享连接；成员方向可在 `parse` 的 `modports` 数据里核对。

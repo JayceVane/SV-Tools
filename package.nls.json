@@ -128,6 +128,7 @@
   "cmd.project.trace.title": "Trace Selected Signal in Project",
   "cmd.project.refresh.title": "Refresh Project",
   "cmd.design.review.title": "Open Design Walkthrough",
+  "cmd.design.architecture.title": "Open Architecture Viewer",
   "cmd.note.open.title": "Open or Create Design Note",
   "cmd.note.history.title": "Design Note History",
   "cmd.note.review.title": "Review Pinned Design Note",

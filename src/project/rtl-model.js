@@ -164,7 +164,7 @@ function createRTLIndex(documents, { defines = [] } = {}) {
     }
     const indexIssues = [...issues];
     return { build(top) {
-            const modules = [], cache = new Map(), issues = new Set(indexIssues);
+            const modules = [], cache = new Map(), issues = new Set(indexIssues), parameterValues = new Map();
             let totalBits = 0, sequence = 0;
             const issue = message => {
                 if (issues.size < 256) {
@@ -201,6 +201,7 @@ function createRTLIndex(documents, { defines = [] } = {}) {
                 const aliases = [], drivers = new Map(), uncertain = new Set();
                 modules.push(module);
                 cache.set(key, module);
+                parameterValues.set(id, values);
                 function find(bit) {
                     let root = bit;
                     while (parents.has(root))
@@ -516,7 +517,7 @@ function createRTLIndex(documents, { defines = [] } = {}) {
             }
             const main = instantiate(top);
             const design = createDesign({ schemaVersion: 1, title: top, top: main.id, provenance: { engine: 'rtl-static', version: '1', stage: 'source-connections' }, modules });
-            return { design, issues: [...issues] };
+            return { design, issues: [...issues], parameterValues };
         } };
 }
 /** @param {{path:string,text:string}[]} documents 源码。 @param {{top:string,defines?:string[]}} options 顶层与宏。 @returns {object} 独立静态模型。 */

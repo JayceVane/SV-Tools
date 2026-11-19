@@ -15,7 +15,7 @@ const { nativeArtifactName } = require('../src/native-loader');
 const execute = promisify(execFile);
 const root = path.resolve(__dirname, '..');
 const sample = 'example/struct-packet-hub';
-const exampleFiles = ['README.md', 'channels.sv', 'blocks.sv', 'packet_hub.sv'];
+const exampleFiles = ['README.md', 'channels.sv', 'blocks.sv', 'packet_hub.sv', 'svtools.architecture.json'];
 const top = 'packet_hub';
 
 async function copyFile(source, destination) {

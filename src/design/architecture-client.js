@@ -1,0 +1,253 @@
+/* global acquireVsCodeApi, ArchitectureDetails */
+(function () {
+    'use strict';
+
+    const api = acquireVsCodeApi();
+    const { escape, code, pageName, parameterText, sourceLink, portTable, interfaceDetails, signalEnds, backgroundSignals } = ArchitectureDetails;
+    const $ = id => document.getElementById(id);
+    const action = (field, id, label) => `<button class="text-action" type="button" data-${field}="${escape(id)}">${escape(label)}</button>`;
+    const post = (type, fields = {}) => api.postMessage({ type, revision: book?.revision, ...fields });
+    const status = value => { $('status').textContent = value; $('status').hidden = !value; };
+    const graph = $('graph');
+    const inspector = $('inspector');
+    let book, page, mode, request = 0, layout, selected = null, selectedEdge = null;
+    let chapters, nodes, links, exportBusy = false, ancestors = [], pendingFocus, fitPreference;
+
+    function site(label, module) { return sourceLink(module.source, true, label); }
+    function exportButtons() {
+        for (const id of ['export-html', 'export-pdf']) $(id).disabled = !book || exportBusy;
+    }
+
+    function diagnosticMarkup(page) {
+        const all = [...page.checks, ...(page === book.pages[0] ? [...book.diagnostics, ...book.issues] : [])];
+        if (!all.length) return '';
+        return `<details class="page-diagnostics"><summary>静态诊断 <span>${all.length}</span></summary><ul>${all.map(item =>
+            `<li>${escape(item.message || item)}${item.source?.path || item.source?.file ? ` <small>${escape(item.source.path || item.source.file)}:${item.source.line || 1}</small>` : ''}</li>`).join('')}</ul></details>`;
+    }
+
+    function showChapter(id, path = []) {
+        page = chapters.get(id);
+        if (!page) return;
+        ancestors = path;
+        mode = api.getState()?.modes?.[id] || page.auto;
+        nodes = new Map(page.nodes.map(node => [node.id, node]));
+        links = new Map(page.links.map(link => [link.id, link]));
+        layout = undefined;
+        selected = null;
+        selectedEdge = null;
+        pendingFocus = undefined;
+        $('graph-content').hidden = false;
+        $('interface-view').hidden = true;
+        $('breadcrumbs').innerHTML = [...ancestors.map(parent => action('chapter', parent, chapters.get(parent).name)),
+            `<span aria-current="page">${escape(page.name)}</span>`].join('<span aria-hidden="true" class="separator">›</span>');
+        $('chapters').innerHTML = `<h2>模块章节</h2>${book.pages.map(module => `<button type="button" data-chapter="${module.id}"${module.id === id ? ' aria-current="page"' : ''}>${module.title ? `<span>${escape(module.title)}</span>` : ''}${code(pageName(module))}</button>`).join('')}`;
+        $('page-title').textContent = page.title || page.name;
+        $('page-meta').innerHTML = [page.title ? code(pageName(page)) : parameterText(page.parameters) && code(parameterText(page.parameters)),
+            page.empty && '实现桩', site('', page)].filter(Boolean).join(' · ');
+        $('labels').innerHTML = backgroundSignals(page, true);
+        $('page-checks').innerHTML = diagnosticMarkup(page);
+        $('graph-legend').hidden = true;
+        updateInspector();
+        draw();
+        api.setState({ ...api.getState(), revision: book.revision, page: id, ancestors });
+    }
+
+    function draw() {
+        for (const id of ['overview', 'detailed']) $(id).setAttribute('aria-pressed', String(mode === id));
+        graph.textContent = '正在布局…';
+        graph.hidden = false;
+        $('graph-legend').hidden = true;
+        post('layout', { page: page.id, mode, request: ++request });
+    }
+
+    function linkList(items) {
+        if (!items.length) return '';
+        return `<ul class="link-list">${items.map(link => `<li>${action('link', link.id, link.name)}<small>${escape(link.kind === 'interface'
+            ? `${link.type}${link.handshake ? ' · 双向握手' : ''}` : `${link.width ?? '—'} 位`)}</small></li>`).join('')}</ul>`;
+    }
+
+    function neighbors(id) {
+        const upstream = new Set(), downstream = new Set(), shared = new Set();
+        const tags = new Map();
+        for (const link of page.links) {
+            if (link.labeled || !link.endpoints.some(endpoint => endpoint.node === id)) continue;
+            let before = false, after = false;
+            for (const route of link.routes) {
+                const from = link.endpoints[route.source].node, to = link.endpoints[route.target].node;
+                if (from === id && to !== id) { downstream.add(to); after = true; }
+                if (to === id && from !== id) { upstream.add(from); before = true; }
+            }
+            if (!before && !after) for (const endpoint of link.endpoints) if (endpoint.node !== id) shared.add(endpoint.node);
+            tags.set(link.id, before && after ? 'both' : before ? 'upstream' : after ? 'downstream' : 'related');
+        }
+        return { upstream, downstream, shared, tags };
+    }
+
+    function applyHighlight() {
+        if (!layout) return;
+        const selection = selected ? neighbors(selected) : null;
+        for (const element of graph.querySelectorAll('[data-node]')) {
+            const id = element.dataset.node;
+            const state = id === selected ? 'selected' : selection?.upstream.has(id) && selection.downstream.has(id) ? 'both'
+                : selection?.upstream.has(id) ? 'upstream' : selection?.downstream.has(id) ? 'downstream'
+                : selection?.shared.has(id) ? 'related' : selection ? 'dimmed' : 'normal';
+            element.dataset.state = state;
+            element.setAttribute('aria-pressed', String(id === selected));
+        }
+        const edges = new Map(layout.edges.map(edge => [edge.id, edge]));
+        const cards = new Map(layout.cards.map(card => [card.id, card]));
+        for (const element of graph.querySelectorAll('[data-edge]')) {
+            const edge = edges.get(element.dataset.edge);
+            const roles = new Set(edge.links.map(link => selection?.tags.get(link)).filter(Boolean));
+            const includes = card => cards.get(card)?.nodes.includes(selected);
+            const incident = includes(edge.from) || includes(edge.to) || cards.get(edge.from)?.link || cards.get(edge.to)?.link;
+            element.dataset.state = selectedEdge === edge.id ? 'selected' : !selection ? 'normal' : !roles.size || !incident ? 'dimmed'
+                : roles.has('both') || roles.has('upstream') && roles.has('downstream') ? 'both'
+                : roles.has('upstream') ? 'upstream' : roles.has('downstream') ? 'downstream' : 'related';
+        }
+    }
+
+    function setFit(fitted) {
+        graph.classList.toggle('fitted', fitted);
+        $('fit').setAttribute('aria-pressed', String(fitted));
+    }
+
+    function centerSelected() {
+        if (graph.classList.contains('fitted')) return;
+        const target = [...graph.querySelectorAll('[data-node]')].find(element => element.dataset.node === selected);
+        if (!target) return;
+        const viewport = graph.getBoundingClientRect(), bounds = target.getBoundingClientRect();
+        if (bounds.left < viewport.left || bounds.right > viewport.right) {
+            graph.scrollLeft += (bounds.left + bounds.right - viewport.left - viewport.right) / 2;
+        }
+    }
+
+    function updateInspector() {
+        const connected = selected ? page.links.filter(link => link.endpoints.some(endpoint => endpoint.node === selected)) : [];
+        const node = nodes.get(selected);
+        if (node) {
+            const relations = neighbors(node.id);
+            const summary = [['上游', relations.upstream, 'forward'], ['下游', relations.downstream, 'reverse'], ['共享 / 待确认', relations.shared, '']]
+                .filter(([, group]) => group.size).map(([title, group, className]) => `<div class="${className}"><strong>${title}</strong><div>${[...group].map(id => action('node', id, nodes.get(id)?.name || id)).join(' ')}</div></div>`).join('');
+            const specialization = parameterText(node.parameters);
+            inspector.innerHTML = `<header class="page-header"><div><h3>${escape(node.name)}</h3><p class="subtle">${node.type ? code(node.type) : '模块边界'}${specialization ? ' · ' + code(specialization) : ''}${node.implementation === 'stub' ? ' · 实现桩' : node.implementation === 'unresolved' ? ' · 未解析' : ''} ${site('源码', node)}</p></div><div class="tools">${node.chapter ? action('child', node.chapter, '进入子模块') : ''}<button type="button" data-clear="true">清除选中</button></div></header>
+                ${summary ? `<div class="neighbors">${summary}</div>` : ''}<div class="inspector-grid"><section><h4>端口</h4>${portTable(node.ports, true)}</section><section><h4>连接</h4>${linkList(connected) || '<p class="subtle">当前结构没有已解析的连接。</p>'}</section></div>`;
+        } else if (selectedEdge) {
+            const edge = layout?.edges.find(edge => edge.id === selectedEdge);
+            inspector.innerHTML = `<header class="page-header"><h3>连线 · ${edge?.links.length || 0} 条连接</h3><button type="button" data-clear="true">清除选中</button></header>${linkList(edge?.links.map(id => links.get(id)) || [])}`;
+        } else {
+            const interfaces = page.links.filter(link => link.kind === 'interface');
+            const instances = page.nodes.filter(node => node.kind === 'instance');
+            inspector.innerHTML = `<div class="inspector-grid"><section><h3>模块端口</h3>${portTable(page.ports, true)}</section><section><h3>接口</h3>${linkList(interfaces) || '<p class="subtle">没有已解析的 SystemVerilog 接口。</p>'}
+                ${instances.length ? `<h3>实例</h3><ul class="instance-list">${instances.map(node => `<li>${action('node', node.id, node.name)}</li>`).join('')}</ul>` : ''}</section></div>`;
+        }
+        applyHighlight();
+    }
+
+    function showLink(id, origin) {
+        const link = links.get(id);
+        if (!link) return;
+        pendingFocus = origin;
+        $('graph-content').hidden = true;
+        $('interface-view').hidden = false;
+        $('connection-title').textContent = link.name;
+        $('connection-body').innerHTML = link.kind === 'interface' ? interfaceDetails(link, nodes, true)
+            : `<h3>端点</h3><p>${signalEnds(link, nodes)}</p><p class="subtle">位宽 ${link.width ?? '待确认'}${link.labeled ? ' · 标签网络' : ''}</p>`;
+        $('connection-title').focus();
+    }
+
+    function hideLink() {
+        $('interface-view').hidden = true;
+        $('graph-content').hidden = false;
+        if (pendingFocus?.isConnected) pendingFocus.focus();
+        else graph.focus();
+        pendingFocus = undefined;
+    }
+
+    $('viewer').addEventListener('click', event => {
+        const target = event.target.closest('[data-node],[data-edge],[data-link],[data-child],[data-chapter],[data-source],[data-clear]');
+        if (!target || !page) return;
+        const data = target.dataset;
+        if (data.source) post('source', { source: data.source });
+        else if (data.link) showLink(data.link, target);
+        else if (data.child) showChapter(data.child, [...ancestors, page.id]);
+        else if (data.chapter) {
+            const index = ancestors.indexOf(data.chapter);
+            showChapter(data.chapter, index < 0 ? [] : ancestors.slice(0, index));
+        } else if (data.edge) {
+            const edge = layout?.edges.find(edge => edge.id === data.edge);
+            if (edge?.links.length === 1) showLink(edge.links[0], target);
+            else { selected = null; selectedEdge = data.edge; updateInspector(); }
+        } else if (data.node) {
+            selectedEdge = null;
+            selected = selected === data.node ? null : data.node;
+            updateInspector();
+            if (!graph.contains(target) && selected) centerSelected();
+        } else if (data.clear) {
+            selected = null;
+            selectedEdge = null;
+            updateInspector();
+        }
+    });
+    graph.addEventListener('keydown', event => {
+        if (!['Enter', ' '].includes(event.key) || !event.target.matches('[role=button]')) return;
+        event.preventDefault();
+        event.target.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    for (const id of ['overview', 'detailed']) $(id).onclick = () => {
+        if (mode === id) return;
+        mode = id;
+        selectedEdge = null;
+        const previous = api.getState();
+        api.setState({ ...previous, modes: { ...previous?.modes, [page.id]: id } });
+        updateInspector();
+        draw();
+    };
+    $('fit').onclick = () => {
+        fitPreference = !graph.classList.contains('fitted');
+        setFit(fitPreference);
+        centerSelected();
+    };
+    $('back').onclick = hideLink;
+    $('refresh').onclick = () => post('refresh');
+    $('export-html').onclick = () => post('export', { format: 'html' });
+    $('export-pdf').onclick = () => post('export', { format: 'pdf' });
+    window.addEventListener('message', event => {
+        const message = event.data;
+        if (message.type === 'book') {
+            book = message.book;
+            chapters = new Map(book.pages.map(page => [page.id, page]));
+            const previous = api.getState(), same = previous?.revision === book.revision;
+            if (!same) api.setState({ revision: book.revision });
+            $('snapshot').textContent = `${book.top} · 源级结构快照 ${book.revision.slice(0, 12)}`;
+            $('viewer').hidden = false;
+            exportButtons();
+            status('');
+            showChapter(same && chapters.has(previous.page) ? previous.page : book.pages[0].id, same ? previous.ancestors || [] : []);
+        } else if (message.type === 'layout' && message.revision === book?.revision && message.request === request && message.page === page?.id) {
+            layout = message;
+            graph.innerHTML = message.html;
+            graph.hidden = !message.html;
+            $('graph-legend').hidden = !message.html;
+            $('fit').disabled = !message.html;
+            const width = graph.querySelector('svg')?.viewBox.baseVal.width;
+            setFit(fitPreference ?? (!width || graph.clientWidth >= width * .77));
+            applyHighlight();
+            centerSelected();
+        } else if (message.type === 'loading') {
+            book = undefined;
+            $('viewer').hidden = true;
+            exportButtons();
+            status('正在读取工程…');
+        } else if (message.type === 'error' && (message.request === undefined || message.request === request)) {
+            if (message.request !== undefined) { graph.hidden = true; $('graph-legend').hidden = true; }
+            status(message.message);
+        } else if (message.type === 'exporting') {
+            exportBusy = message.busy;
+            exportButtons();
+            if (message.busy) status('正在导出架构章节…');
+            else status('');
+        }
+    });
+    post('ready');
+})();

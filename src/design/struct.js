@@ -3,7 +3,7 @@
 const path = require('node:path');
 const { createHash } = require('node:crypto');
 const { tokenize, parseDocument, matchDelimiters } = require('../editor/completion/syntax');
-const { buildRTLDesign, bindings } = require('../project/rtl-model');
+const { buildRTLDesign, bindings, protectedRanges } = require('../project/rtl-model');
 const { constantValue, MAX_WIDTH } = require('../project/rtl-expression');
 const { createNativeLoader } = require('../native-loader');
 const { resolveContext, assertCurrent } = require('../agent/context');
@@ -56,7 +56,9 @@ function parseFiles(workspace, input, native = loader.load()) {
         const at = { path: source.local, ...position(source.text, scope.start) };
         if (units.has(scope.name)) fail('AMBIGUOUS_MODULE', '结构声明重名：' + scope.name, { source: at });
         const symbols = source.parsed.symbols.filter(symbol => symbol.scope === scope.id).sort((a, b) => a.start - b.start);
-        const ports = symbols.filter(symbol => symbol.kind === 'port');
+        const ports = symbols.filter(symbol => symbol.kind === 'port' || scope.kind === 'module'
+            && symbol.kind === 'variable' && symbol.start < scope.headerEnd && symbol.type)
+            .map(symbol => symbol.kind === 'port' ? symbol : { ...symbol, kind: 'port' });
         const parameters = symbols.filter(symbol => ['parameter', 'localparam'].includes(symbol.kind));
         const members = symbols.filter(symbol => ['net', 'variable'].includes(symbol.kind));
         const modports = symbols.filter(symbol => symbol.kind === 'modport');
@@ -70,27 +72,44 @@ function parseFiles(workspace, input, native = loader.load()) {
     return { sources, units, diagnostics };
 }
 
-function scalarWidth(unit, symbol, values) {
+function scalarWidth(unit, symbol, values, previous) {
     const { tokens, pairs } = unit.source;
     const index = tokens.findIndex(token => token.start === symbol.start);
     const end = index - 1;
+    if (symbol.array || tokens[index + 1]?.value === '[') return;
+    if (tokens[end]?.value === ',' && previous?.type === symbol.type) return previous.width;
+    const scalar = ({ bit: 1, logic: 1, wire: 1, reg: 1, byte: 8, shortint: 16, int: 32, integer: 32, longint: 64, time: 64 })[symbol.type];
+    if (scalar === undefined) return;
     if (tokens[end]?.value === ']' && pairs.has(end)) {
+        if (tokens[pairs.get(end) - 1]?.value === ']') return;
         const dimension = tokens.slice(pairs.get(end) + 1, end), colon = dimension.findIndex(token => token.value === ':');
         if (colon < 1) return;
         const left = constantValue(dimension.slice(0, colon), values), right = constantValue(dimension.slice(colon + 1), values);
-        if (Number.isSafeInteger(left) && Number.isSafeInteger(right) && Math.abs(left - right) < MAX_WIDTH) return Math.abs(left - right) + 1;
+        const width = (Math.abs(left - right) + 1) * scalar;
+        if (Number.isSafeInteger(left) && Number.isSafeInteger(right) && width <= MAX_WIDTH) return width;
         return;
     }
-    return ({ byte: 8, shortint: 16, int: 32, integer: 32, longint: 64, time: 64 })[symbol.type] ?? 1;
+    return scalar;
 }
 
 function unitInterface(unit, overrides = new Map()) {
     const values = new Map();
-    for (const parameter of unit.parameters) values.set(parameter.name, overrides.get(parameter.name) ?? constantValue(parameter.default || '', values));
-    const members = unit.members.map(member => ({ name: member.name, type: member.type, width: scalarWidth(unit, member, values) }));
+    for (const parameter of unit.parameters) values.set(parameter.name, overrides.has(parameter.name)
+        ? overrides.get(parameter.name) : constantValue(parameter.default || '', values));
+    const members = [];
+    for (const member of unit.members) members.push({ name: member.name, type: member.type, width: scalarWidth(unit, member, values, members.at(-1)) });
     const width = members.some(member => member.width === undefined) ? undefined : members.reduce((total, member) => total + member.width, 0);
     return { members, width, modports: unit.modports.map(port => ({ name: port.name,
         members: port.members.map(member => ({ name: member.sourceName || member.name, direction: member.direction })) })) };
+}
+
+function interfaceOverrides(parent, instance, definition, values = new Map()) {
+    const names = definition.parameters.filter(parameter => parameter.kind === 'parameter').map(parameter => parameter.name);
+    try {
+        return new Map([...bindings(parent.source, instance.parameters, names)].map(([name, tokens]) => [name, constantValue(tokens, values)]));
+    } catch {
+        return new Map(names.map(name => [name, undefined]));
+    }
 }
 
 const symbolOut = ({ name, type, direction, default: fallback }) => ({ name, type, direction, default: fallback });
@@ -161,11 +180,7 @@ function syntheticModel(parsed) {
         for (const instance of unit.instances) {
             const intf = parsed.units.get(instance.type);
             if (intf?.scope.kind !== 'interface') continue;
-            const overrides = new Map();
-            if (instance.parameters) {
-                const raw = unit.source.normalized.slice(instance.parameters.start + 1, instance.parameters.end - 1);
-                for (const match of raw.matchAll(/\.([A-Za-z_$][\w$]*)\s*\(\s*([^()]+)\s*\)/gu)) overrides.set(match[1], constantValue(match[2]));
-            }
+            const overrides = interfaceOverrides(unit, instance, intf);
             const { width } = unitInterface(intf, overrides);
             const length = width && width <= MAX_WIDTH ? width : 1;
             const original = unit.source.normalized.slice(instance.start, instance.end);
@@ -187,14 +202,15 @@ function usesProfile(files) {
             tokenize(file.text).some(token => token.kind === 'identifier' && token.value === 'interface')));
 }
 
-async function build(options) {
-    const { workspace, files, top, defines, contextRevision } = options;
+function analyzeStructure(options) {
+    const { workspace, files, top, defines = [] } = options;
     const parsed = parseFiles(workspace, files, options.native);
     const main = parsed.units.get(top);
     if (main?.scope.kind !== 'module') fail('MODULE_NOT_FOUND', '结构输入缺少顶层模块：' + top);
     let basis;
     try { basis = buildRTLDesign(syntheticModel(parsed), { top, defines }); }
     catch (error) { fail('DESIGN_FAILED', error.message, { diagnostics: parsed.diagnostics }); }
+    for (const source of parsed.sources) source.conditional = protectedRanges(source.tokens, defines);
     for (const module of basis.design.modules) {
         const original = parsed.units.get(module.name);
         if (!original) continue;
@@ -210,8 +226,14 @@ async function build(options) {
         }
         if (!original.empty) module.processes = { structuralBody: true };
     }
+    return { ...basis, parsed, main };
+}
+
+async function build(options) {
+    const { workspace, files, top, contextRevision } = options;
+    const { design, parsed, main, issues } = analyzeStructure(options);
     const { projectArchitecture, archHash } = require('./arch');
-    const output = projectArchitecture(basis.design, options);
+    const output = projectArchitecture(design, options);
     output.engine = 'struct';
     output.structuralUnits = [...parsed.units.values()].map(unit => publicUnit(unit, parsed.units));
     output.checks = [...parsed.diagnostics, ...output.checks];
@@ -229,7 +251,7 @@ async function build(options) {
     output.designId = 'design:' + digest(JSON.stringify([top, output.sourceFiles])).slice(0, 16);
     output.contextRevision = contextRevision || null;
     output.limitations = ['源级结构投影。接口在图中作为一条共享连接，modport 成员方向和位宽在 structuralUnits 中列出。',
-        '未执行全量 elaboration、编译或时序分析。复杂 generate、宏和表达式中的不确定连接需要结合诊断阅读。', ...basis.issues];
+        '未执行全量 elaboration、编译或时序分析。复杂 generate、宏和表达式中的不确定连接需要结合诊断阅读。', ...issues];
     output.archSha256 = archHash(output);
     output.modelSha256 = output.archSha256;
     return output;
@@ -266,4 +288,4 @@ async function command(action, input, { native } = {}) {
     return parsed.diagnostics.some(item => item.severity === 'error') ? { ...response, status: 'failed' } : response;
 }
 
-module.exports = { usesProfile, build, command, normalize };
+module.exports = { usesProfile, build, command, normalize, analyzeStructure, unitInterface, interfaceOverrides, position };

@@ -128,6 +128,7 @@
   "cmd.project.trace.title": "在工程中追踪所选信号",
   "cmd.project.refresh.title": "刷新工程",
   "cmd.design.review.title": "打开设计讲解",
+  "cmd.design.architecture.title": "打开架构查看器",
   "cmd.note.open.title": "打开或创建设计笔记",
   "cmd.note.history.title": "文档历史",
   "cmd.note.review.title": "核对笔记定版",

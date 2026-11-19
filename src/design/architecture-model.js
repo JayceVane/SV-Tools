@@ -1,0 +1,212 @@
+'use strict';
+
+const path = require('node:path');
+const { resolveContext, assertCurrent, hash } = require('../agent/context');
+const { json } = require('./workflow-files');
+const { projectArchitecture } = require('./arch');
+const { analyzeStructure, unitInterface, interfaceOverrides, position } = require('./struct');
+const { bindings } = require('../project/rtl-model');
+
+const CONFIG = 'svtools.architecture.json';
+const labeledSignal = /(?:^|_)(?:clk|clock|rst|reset)(?:_n|_b)?$/i;
+const instanceId = name => 'instance:' + name;
+const boundaryId = name => 'boundary:' + name;
+const portKey = (node, port) => JSON.stringify([node, port]);
+const property = (object, key) => object && Object.hasOwn(object, key) ? object[key] : undefined;
+const label = value => typeof value === 'string' ? value.trim().slice(0, 140) : '';
+const flip = direction => ({ input: 'output', output: 'input' })[direction] || direction;
+
+async function readPresentation(root) {
+    return json(root, CONFIG, 256 * 1024).catch(error => {
+        if (error.code === 'ENOENT') return null;
+        throw error;
+    });
+}
+
+function connectionEvidence(endpoints, model) {
+    const members = model.members.map(member => {
+        const directions = endpoints.map(endpoint => {
+            if (!endpoint.modport || endpoint.invalid) return 'unknown';
+            const view = model.modports.find(view => view.name === endpoint.modport);
+            if (!view) return 'unknown';
+            if (!view.members.some(item => item.name === member.name)) return 'unlisted';
+            return view.members.find(item => item.name === member.name).direction || 'unknown';
+        });
+        const effective = directions.map((direction, index) => endpoints[index].boundary ? flip(direction) : direction);
+        const drivers = effective.flatMap((direction, index) => direction === 'output' ? [index] : []);
+        const receivers = effective.flatMap((direction, index) => direction === 'input' ? [index] : []);
+        const proven = drivers.length === 1 && receivers.length > 0 && effective.every(direction => ['input', 'output', 'unlisted'].includes(direction));
+        return { ...member, directions, drivers, receivers, proven };
+    });
+    const valid = members.find(member => member.name === 'valid');
+    const ready = members.find(member => member.name === 'ready');
+    const producer = valid?.proven ? valid.drivers[0] : null;
+    const handshake = producer !== null && ready?.proven && ready.receivers.includes(producer) && valid.receivers.includes(ready.drivers[0]);
+    for (const member of members) {
+        member.flow = !member.proven ? 'unknown'
+            : producer === member.drivers[0] ? 'forward'
+            : producer !== null && member.receivers.includes(producer) ? 'reverse' : 'directed';
+    }
+    // Interfaces without a proven valid signal can still carry a unidirectional route.
+    const senders = new Set(members.filter(member => member.proven).flatMap(member => member.drivers));
+    const leading = producer ?? (senders.size === 1 ? [...senders][0] : null);
+    const routes = leading === null ? [] : [...new Set(members.filter(member => member.proven && member.drivers[0] === leading)
+        .flatMap(member => member.receivers))].map(target => ({ source: leading, target }));
+    return { members, handshake, routes };
+}
+
+function typedConnections(unit, module, parsed, values, source) {
+    const groups = new Map(), connectedPorts = new Set(), unitPorts = [...unit.ports];
+    const at = (definition, offset) => source({ path: definition.source.path, ...position(definition.source.text, offset) });
+    const endpoint = (definition, port, node, options = {}) => {
+        const [interfaceName, modport] = port.type.split('.');
+        const intf = parsed.units.get(interfaceName);
+        const view = intf.modports.find(item => item.name === modport);
+        return { node, port: port.name, name: options.name ?? port.name, type: port.type, modport, ...options,
+            declaration: at(definition, port.start), modportSource: view && at(intf, view.start) };
+    };
+    for (const symbol of [...unitPorts, ...unit.instances.filter(item => item.scope === unit.scope.id)]) {
+        if (unit.source.conditional(symbol.start)) continue;
+        const [type, modport] = symbol.type.split('.');
+        const intf = parsed.units.get(type);
+        if (intf?.scope.kind !== 'interface' || intf.source.conditional(intf.scope.start)) continue;
+        const boundary = symbol.kind === 'port';
+        // A boundary can be connected to a parameterized instance in its parent.
+        const overrides = boundary ? new Map(intf.parameters.filter(parameter => parameter.kind === 'parameter').map(parameter => [parameter.name, undefined]))
+            : interfaceOverrides(unit, symbol, intf, values);
+        const model = unitInterface(intf, overrides);
+        const members = model.members.map((member, index) => ({ ...member,
+            declaration: at(intf, intf.members[index].start) }));
+        const endpoints = boundary ? [endpoint(unit, symbol, boundaryId(symbol.name), { boundary })] : [];
+        if (boundary) connectedPorts.add(portKey(boundaryId(symbol.name), symbol.name));
+        groups.set(symbol.name, { type, modport, model: { ...model, members }, endpoints,
+            declaration: at(unit, symbol.start), definition: at(intf, intf.scope.start) });
+    }
+    const declared = new Map(unit.instances.filter(instance => instance.scope === unit.scope.id).map(instance => [instance.name, instance]));
+    for (const cell of module.cells) {
+        const instance = declared.get(cell.name), child = parsed.units.get(cell.type);
+        if (!instance || !cell.moduleId || !child || unit.source.conditional(instance.start)) continue;
+        let connections;
+        const sites = new Map();
+        try { connections = bindings(unit.source, instance.ports, child.ports.map(port => port.name), sites); }
+        catch { continue; }
+        for (const port of child.ports) {
+            const [type, view] = port.type.split('.');
+            if (parsed.units.get(type)?.scope.kind !== 'interface') continue;
+            const node = instanceId(cell.name);
+            connectedPorts.add(portKey(node, port.name));
+            const tokens = connections.get(port.name);
+            const actual = !tokens && connections.has('*') ? port.name : tokens?.length === 1 ? tokens[0].value : undefined;
+            const group = groups.get(actual);
+            if (group?.type !== type || child.source.conditional(port.start)) continue;
+            const invalid = Boolean(view && group.modport && group.modport !== view);
+            group.endpoints.push(endpoint(child, port, node, { name: cell.name + '.' + port.name, invalid,
+                binding: at(unit, sites.get(port.name) ?? instance.start) }));
+        }
+    }
+    const links = [];
+    for (const [name, group] of groups) {
+        if (!group.endpoints.length) continue;
+        links.push({ name, kind: 'interface', type: group.type, endpoints: group.endpoints, declaration: group.declaration,
+            definition: group.definition, ...connectionEvidence(group.endpoints, group.model) });
+    }
+    return { links, connectedPorts };
+}
+
+function ordinaryConnection(edge, undirected) {
+    const names = edge.netNames?.length ? edge.netNames : [edge.sourcePort + ' → ' + edge.targetPort];
+    return { name: names.join(' / '), kind: 'signal', width: edge.width, names,
+        labeled: Boolean(edge.netNames?.length && edge.netNames.every(name => labeledSignal.test(name))),
+        endpoints: [{ node: edge.sourceNode, port: edge.sourcePort }, { node: edge.targetNode, port: edge.targetPort }],
+        routes: undirected ? [] : [{ source: 0, target: 1 }] };
+}
+
+function modulePage(module, { design, parsed, parameterValues }, chapterIds, presentation, source, workspace) {
+    const unit = parsed.units.get(module.name);
+    const id = chapterIds.get(module.id);
+    const projection = projectArchitecture({ ...design, top: module.id }, { workspace });
+    const parameters = Object.fromEntries([...parameterValues.get(module.id) || []].filter(([, value]) => Number.isSafeInteger(value)));
+    const instanceByName = new Map(module.cells.map(cell => [cell.name, cell]));
+    const typed = typedConnections(unit, module, parsed, parameterValues.get(module.id), source);
+    const portType = (name, unit) => unit?.ports.find(item => item.name === name)?.type;
+    const ports = (items, unit) => items.map(port => {
+        const type = portType(port.name, unit);
+        const [interfaceName] = type?.split('.') || [];
+        const isInterface = parsed.units.get(interfaceName)?.scope.kind === 'interface';
+        const symbol = unit?.ports.find(item => item.name === port.name);
+        return { ...port, type, direction: isInterface ? 'interface' : port.direction, width: isInterface ? undefined : port.width,
+            declaration: symbol && source({ path: unit.source.path, ...position(unit.source.text, symbol.start) }) };
+    });
+    const grouping = property(presentation?.groups, module.name);
+    const nodes = projection.graph.nodes.map(node => {
+        if (node.kind === 'boundary') return { id: node.id, name: node.name, kind: node.kind, direction: node.direction,
+            ports: ports(node.ports, unit) };
+        const cell = instanceByName.get(node.name), definition = parsed.units.get(cell.type);
+        return { id: node.id, name: node.name, type: cell.type, kind: node.kind,
+            title: label(property(presentation?.titles, cell.type)), group: label(property(grouping, node.name)),
+            chapter: chapterIds.get(cell.moduleId), ports: ports(node.ports, definition), source: source(cell.source),
+            parameters: Object.fromEntries([...parameterValues.get(cell.moduleId) || []].filter(([, value]) => Number.isSafeInteger(value))),
+            implementation: node.empty ? 'stub' : node.status === 'unresolved' ? 'unresolved' : 'defined' };
+    });
+    const raw = [...projection.graph.edges.map(edge => [edge, false]), ...projection.interfaces.filter(link => link.direction === 'connection')
+        .flatMap(link => link.bindings.map(binding => [binding, true]))];
+    const typedPort = (node, port) => typed.connectedPorts.has(portKey(node, port));
+    const ordinary = raw.filter(([edge]) => !typedPort(edge.sourceNode, edge.sourcePort) && !typedPort(edge.targetNode, edge.targetPort))
+        .map(([edge, undirected]) => ordinaryConnection(edge, undirected));
+    const links = [...typed.links, ...ordinary].map((link, index) => ({ ...link, id: `${id}-link-${index + 1}` }));
+    const checks = projection.checks.filter(item => {
+        const { instance, port } = item.details || {};
+        // Synthetic widths are placeholders for the shared interface; use the real interface bindings above.
+        return !instance || !port || !typedPort(instanceId(instance), port) || item.code === 'UNCONNECTED_PORT' &&
+            !typed.links.some(link => link.endpoints.some(endpoint => endpoint.node === instanceId(instance) && endpoint.port === port));
+    });
+    const instances = nodes.filter(node => node.kind === 'instance');
+    const dense = instances.length > 6 || links.length > 18 || nodes.length > 14 || instances.some(node => node.ports.length > 14);
+    return { id, name: module.name, title: label(property(presentation?.titles, module.name)), source: source(module.source), empty: unit.empty,
+        nodes, links, checks, parameters, ports: ports(projection.modules[0].ports, unit), auto: dense ? 'overview' : 'detailed' };
+}
+
+async function buildArchitectureBook(snapshot, native) {
+    const { context, contents } = snapshot;
+    const workspace = context.workspace;
+    const presentation = await readPresentation(workspace);
+    const presentationRevision = hash(JSON.stringify(presentation));
+    const basis = analyzeStructure({ workspace, files: [...contents].map(([path, item]) => ({ path, text: item.text })),
+        top: context.top, defines: context.defines, native });
+    const { design } = basis;
+    const byId = new Map(design.modules.map(module => [module.id, module]));
+    const ids = new Map();
+    function visit(id) {
+        const module = byId.get(id);
+        if (!module || ids.has(id)) return;
+        ids.set(id, 'module-' + (ids.size + 1));
+        for (const cell of module.cells) visit(cell.moduleId);
+    }
+    visit(design.top);
+    const sourceLocations = new Map();
+    const sourceIds = new Map();
+    function source(location) {
+        if (!location || !contents.has(location.path)) return;
+        const key = JSON.stringify(location);
+        let id = sourceIds.get(key);
+        if (!id) {
+            id = 'source-' + (sourceIds.size + 1);
+            sourceIds.set(key, id);
+            sourceLocations.set(id, location);
+        }
+        return { id, file: path.relative(workspace, location.path).split(path.sep).join('/'), line: location.line };
+    }
+    const pages = [...ids.keys()].map(id => modulePage(byId.get(id), basis, ids, presentation, source, workspace));
+    const loaded = { snapshot, presentationRevision, sourceLocations, book: { revision: hash(context.revision + presentationRevision),
+        top: context.top, pages, diagnostics: basis.parsed.diagnostics, issues: basis.issues } };
+    await assertBookCurrent(loaded);
+    return loaded;
+}
+
+async function assertBookCurrent({ snapshot, presentationRevision }) {
+    await assertCurrent(snapshot);
+    if (hash(JSON.stringify(await readPresentation(snapshot.context.workspace))) !== presentationRevision)
+        throw new Error(CONFIG + ' 已修改，请重新读取架构。');
+}
+
+module.exports = { buildArchitectureBook, assertBookCurrent, resolveContext };
