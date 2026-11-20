@@ -7,6 +7,7 @@ const { cancelledError } = require('../toolchains/job');
 const { parseXpr, samePath } = require('./xpr');
 const { script, readRows, rowsOf, parametersOf, removeFromProject } = require('./asset-task');
 const { openBlockDesignPanels } = require('./block-design-view');
+const { openIpPanels } = require('./ip-view');
 const ip = require('./ip');
 const bd = require('./block-design');
 
@@ -23,10 +24,12 @@ function assets(project, extension) {
 }
 
 const hash = async file => createHash('sha256').update(await fs.readFile(file)).digest('hex');
+const IP_LANGUAGES = ['verilog', 'systemverilog', 'vhdl'];
 
 function activateAssetCommands(context, { vscode, findProjectXpr, incrementalAction, runIncrementalTcl, pickerToken, refresh }) {
     const catalogCache = new Map();
     const window = vscode.window;
+    let lastHdlEditor = window.activeTextEditor;
     const pick = (items, title, options = {}) => window.showQuickPick(items, {
         title, matchOnDescription: true, matchOnDetail: true, ...options
     }, pickerToken());
@@ -121,10 +124,10 @@ function activateAssetCommands(context, { vscode, findProjectXpr, incrementalAct
         const result = await session.run('ip_template', ip.template(target.file, file.value), { target });
         const templatePath = artifact(result, /\.(veo|vho)$/u);
         const text = await fs.readFile(templatePath, 'utf8');
-        const editor = window.activeTextEditor;
-        if (editor && ['verilog', 'systemverilog', 'vhdl'].includes(editor.document.languageId) &&
+        const editor = lastHdlEditor;
+        if (editor && !editor.document.isClosed && IP_LANGUAGES.includes(editor.document.languageId) &&
             (file.value === '.vho') === (editor.document.languageId === 'vhdl') &&
-            await confirm('将 Vivado 生成的例化模板插入当前编辑器光标处？', '插入')) {
+            await confirm(`将 Vivado 生成的例化模板插入 ${path.basename(editor.document.fileName)} 的光标处？`, '插入')) {
             if (!await editor.edit(edit => edit.insert(editor.selection.active, text))) throw new Error('编辑器已变化，未能插入模板');
         } else {
             await window.showTextDocument(vscode.Uri.file(templatePath), { preview: false });
@@ -137,44 +140,52 @@ function activateAssetCommands(context, { vscode, findProjectXpr, incrementalAct
         await window.showTextDocument(vscode.Uri.file(artifact(result, /\.rpt$/u)), { preview: false });
     }
 
-    async function manageIp(session, target) {
+    function ipDetails(rows) {
+        const [name, vlnv, locked, upgrade, checkpoint, ...targets] = rowsOf(rows, 'ip')[0];
+        const readOnly = ['1', 'true'].includes(locked);
+        return { name, vlnv, locked: readOnly, upgrade, targets, parameters: parametersOf(rows),
+            actions: [
+                ...(!readOnly ? [{ id: 'generate', label: '生成产物…' }] : []),
+                ...(['1', 'true'].includes(checkpoint) && !readOnly ? [{ id: 'synth', label: 'OOC 综合' }] : []),
+                ...(targets.includes('instantiation_template') && !readOnly ? [{ id: 'template', label: '例化模板…' }] : []),
+                ...(upgrade ? [{ id: 'upgrade', label: '升级 IP…' }] : []),
+                { id: 'remove', label: '移出工程…' }
+            ] };
+    }
+
+    async function readIp(session, target) {
         // Vivado 在只读工程中把所有 IP 标成锁定，查询实际状态需要正常打开工程。
         const { rows } = await session.run('ip_properties', ip.info(target.file), { target, readOnly: true, needsWritableProject: true });
-        const [name, vlnv, locked, upgrade, checkpoint, ...targets] = rowsOf(rows, 'ip')[0];
-        const parameters = parametersOf(rows);
-        const action = (await pick(choices([
-            ...(parameters.length ? [['config', locked === '1' ? '查看参数' : '配置参数', `${parameters.length} 项`]] : []),
-            ['generate', '生成或更新输出产物'],
-            ...(['1', 'true'].includes(checkpoint) && locked !== '1' ? [['synth', '运行 IP OOC 综合']] : []),
-            ...(targets.includes('instantiation_template') ? [['template', '查看或插入例化模板']] : []),
-            ...(upgrade ? [['upgrade', '升级 IP', upgrade]] : []),
-            ['report', '打开工程 IP 状态报告'],
-            ['remove', '移出工程', '保留源文件']
-        ]), `${name} · ${vlnv}${locked === '1' ? ' · 已锁定' : ''}`))?.value;
-        if (action === 'config') {
-            if (locked === '1') {
-                await pick(parameters.map(param => ({ label: param.key, description: param.value })), '锁定 IP 的参数');
-                return;
-            }
-            const changes = await parameterChanges(parameters, '配置 ' + name);
-            if (changes?.length) await session.run('ip_configure', ip.configure(target.file, changes), { target });
-        } else if (action === 'generate') {
+        return ipDetails(rows);
+    }
+
+    async function runIpAction(session, target, info, action, changes) {
+        if (action === 'load') return { info: await readIp(session, target) };
+        if (action === 'apply') {
+            const { rows } = await session.run('ip_configure', ip.configure(target.file, changes, { readBack: true }), { target });
+            return { info: ipDetails(rows), message: 'Vivado 已应用参数。' };
+        }
+        if (action === 'generate') {
             const labels = { all: '全部', synthesis: '综合', simulation: '仿真', instantiation_template: '例化模板',
                 example_design: '示例设计', changelog: '变更说明' };
-            const selected = await pick(ip.TARGETS.filter(item => item === 'all' || targets.includes(item))
+            const selected = await pick(ip.TARGETS.filter(item => item === 'all' || info.targets.includes(item))
                 .map(value => ({ label: labels[value], value })), '生成目标');
-            if (selected) await session.run('ip_generate', ip.generate(target.file, selected.value), { target });
+            if (!selected) return;
+            await session.run('ip_generate', ip.generate(target.file, selected.value), { target });
+            return { message: 'Vivado 已生成 ' + selected.label + ' 产物。' };
         } else if (action === 'synth') {
             await session.run('ip_ooc', ip.synthesize(target.file), { target });
+            return { message: 'IP OOC 综合已完成。' };
         } else if (action === 'template') {
             await template(session, target);
-        } else if (action === 'upgrade' && await confirm(`升级 ${name}？Vivado 会更新此 IP 的配置及产物。`, '升级')) {
+        } else if (action === 'upgrade' && await confirm(`升级 ${info.name}？Vivado 会更新此 IP 的配置及产物。`, '升级')) {
             await session.run('ip_upgrade', ip.upgrade(target.file), { target });
-        } else if (action === 'report') {
-            await reportIpStatus(session);
-        } else if (action === 'remove' && await confirm(`将 ${name} 从 ${target.fileset} 移出？`, '移出')) {
+            return { info: await readIp(session, target), message: 'IP 已升级。' };
+        } else if (action === 'remove' && await confirm(`将 ${info.name} 从 ${target.fileset} 移出？`, '移出')) {
             await session.run('ip_remove', removeFromProject(target.file, target.fileset), { target });
-            if (member(parseXpr(session.xpr), target.file, target.fileset)) throw new Error('工程没有保存 IP 移出结果');
+            const updated = parseXpr(session.xpr);
+            if (member(updated, target.file, target.fileset)) throw new Error('工程没有保存 IP 移出结果');
+            return { members: assets(updated, IP_EXTENSION), message: 'IP 已从工程移出。' };
         }
     }
 
@@ -196,55 +207,75 @@ function activateAssetCommands(context, { vscode, findProjectXpr, incrementalAct
             after = before.filter(dir => dir !== selection.dir);
         }
         await session.run('ip_update_catalog', ip.setRepositories(before, after));
+        return true;
     }
 
+    async function createIp(session) {
+        const vlnv = await definition(session, false);
+        if (!vlnv) return;
+        const name = await nameInput('IP 模块名', vlnv.split(':')[2].replace(/[^\w]/gu, '_') + '_0');
+        if (!name) return;
+        const location = await pick(choices([['local', '保存在工程内'], ['external', '选择外部目录']]), 'IP 保存位置');
+        if (!location) return;
+        const directory = location.value === 'external'
+            ? (await files({ canSelectFolders: true, canSelectFiles: false, openLabel: '选择 IP 保存目录' }))?.[0]?.fsPath : undefined;
+        if (location.value === 'external' && !directory) return;
+        const { rows } = await session.run('ip_create', ip.create({ vlnv, name, directory }));
+        return rowsOf(rows, 'created')[0]?.[0];
+    }
+
+    async function importIp(session) {
+        const filename = (await files({ filters: { 'Vivado IP': ['xci', 'xcix'] }, openLabel: '选择 IP 源文件' }))?.[0]?.fsPath;
+        if (!filename) return;
+        const choice = await pick(choices([['ref', '引用原位置'], ['copy', '复制到当前工程']]), '添加方式');
+        if (!choice) return;
+        const { rows } = await session.run('ip_import', ip.importSource(filename, choice.value === 'copy'));
+        return rowsOf(rows, 'imported')[0]?.[0];
+    }
+
+    async function addIp(session, action) {
+        const file = await (action === 'create' ? createIp(session) : importIp(session));
+        if (!file) return;
+        const items = assets(parseXpr(session.xpr), IP_EXTENSION);
+        const focus = items.find(item => samePath(item.file, file));
+        if (!focus) throw new Error('Vivado 未将所选 IP 加入工程');
+        return { xpr: session.xpr, members: items, focus };
+    }
+
+    async function refreshIps(session, target) {
+        const items = assets(parseXpr(session.xpr), IP_EXTENSION);
+        const focus = (target && items.find(item => item.fileset === target.fileset && samePath(item.file, target.file))) || items[0];
+        return { members: items, focus, ...(focus ? { info: await readIp(session, focus) } : {}) };
+    }
+
+    const ipPanels = openIpPanels(context, vscode, (xpr, action, target, info, changes) =>
+        projectAction('Vivado IP 管理', xpr, async session => {
+            if (action === 'create' || action === 'import') return addIp(session, action);
+            if (action === 'report') return reportIpStatus(session);
+            if (action === 'refresh') return refreshIps(session, target);
+            if (action === 'repositories') {
+                if (await repositories(session)) return refreshIps(session, target);
+                return;
+            }
+            if (!target || !member(session.project, target.file, target.fileset)) {
+                throw new Error('此 IP 已不在当前工程中，请重新读取工程。');
+            }
+            return runIpAction(session, target, info, action, changes);
+        }));
+
     async function ipManager(node) {
-        return projectAction('Vivado IP 管理', node?.xpr, async session => {
+        const snapshot = await projectAction('Vivado IP 管理', node?.xpr, async session => {
             const members = assets(session.project, IP_EXTENSION);
-            if (node?.file) {
-                const target = members.find(item => item.fileset === node.fileset && samePath(item.file, node.file));
-                if (!target) throw new Error('此 IP 已不在当前工程的文件集中');
-                return manageIp(session, target);
-            }
-            const selected = await pick([
-                { label: '从 IP Catalog 创建', action: 'create' },
-                { label: '添加现有 IP', action: 'import' },
-                { label: '自定义 IP 仓库', action: 'repositories' },
-                { label: '打开工程 IP 状态报告', action: 'report' },
-                ...members
-            ], 'Vivado IP 管理 · ' + path.basename(session.xpr));
-            if (selected?.action === 'create') {
-                const vlnv = await definition(session, false);
-                if (!vlnv) return;
-                const name = await nameInput('IP 模块名', vlnv.split(':')[2].replace(/[^\w]/gu, '_') + '_0');
-                if (!name) return;
-                const location = await pick(choices([['local', '保存在工程内'], ['external', '选择外部目录']]), 'IP 保存位置');
-                if (!location) return;
-                const directory = location.value === 'external'
-                    ? (await files({ canSelectFolders: true, canSelectFiles: false, openLabel: '选择 IP 保存目录' }))?.[0]?.fsPath : undefined;
-                if (location.value === 'external' && !directory) return;
-                const result = await session.run('ip_create', ip.create({ vlnv, name, directory }));
-                const created = rowsOf(result.rows, 'created')[0]?.[0];
-                const target = assets(parseXpr(session.xpr), IP_EXTENSION).find(item => created && samePath(item.file, created));
-                if (!target) throw new Error('Vivado 未将新建 IP 加入工程');
-                await manageIp(session, target);
-            } else if (selected?.action === 'import') {
-                const filename = (await files({ filters: { 'Vivado IP': ['xci', 'xcix'] }, openLabel: '选择 IP 源文件' }))?.[0]?.fsPath;
-                if (!filename) return;
-                const choice = await pick(choices([['ref', '引用原位置'], ['copy', '复制到当前工程']]), '添加方式');
-                if (choice) {
-                    const result = await session.run('ip_import', ip.importSource(filename, choice.value === 'copy'));
-                    const added = rowsOf(result.rows, 'imported')[0]?.[0];
-                    if (!added || !member(parseXpr(session.xpr), added)) throw new Error('Vivado 未将所选 IP 加入工程');
-                }
-            } else if (selected?.action === 'repositories') {
-                await repositories(session);
-            } else if (selected?.action === 'report') {
-                await reportIpStatus(session);
-            } else if (selected?.file) {
-                await manageIp(session, selected);
-            }
+            const focus = node?.file && members.find(item => item.fileset === node.fileset && samePath(item.file, node.file));
+            if (node?.file && !focus) throw new Error('此 IP 已不在当前工程的文件集中');
+            return { xpr: session.xpr, members, focus };
         });
+        if (snapshot?.xpr) ipPanels.open(snapshot);
+    }
+
+    async function ipCatalog(node) {
+        const result = await projectAction('IP Catalog', node?.xpr, session => addIp(session, 'create'));
+        if (result?.xpr) ipPanels.open(result);
     }
 
     async function readBlock(session, target) {
@@ -388,8 +419,13 @@ function activateAssetCommands(context, { vscode, findProjectXpr, incrementalAct
 
     context.subscriptions.push(
         vscode.commands.registerCommand('svtools.vivado.assets.ip', node => ipManager(node?.nodeData)),
+        vscode.commands.registerCommand('svtools.vivado.assets.catalog', node => ipCatalog(node?.nodeData)),
         vscode.commands.registerCommand('svtools.vivado.assets.bd', node => blockManager(node?.nodeData))
     );
+    const editorSelection = window.onDidChangeActiveTextEditor?.(editor => {
+        if (editor && IP_LANGUAGES.includes(editor.document.languageId)) lastHdlEditor = editor;
+    });
+    if (editorSelection) context.subscriptions.push(editorSelection);
     const configuration = vscode.workspace.onDidChangeConfiguration?.(event => {
         if (event.affectsConfiguration('svtools.vivado.path')) catalogCache.clear();
     });

@@ -54,13 +54,15 @@ const select = file => [
     'set ip [lindex $matching 0]'
 ];
 
-const info = file => [
-    ...select(file),
+const inspect = [
     'sv_row ip $ip [sv_prop $ip IPDEF] [sv_prop $ip IS_LOCKED] [sv_prop $ip UPGRADE_VERSIONS] [sv_prop $ipFile GENERATE_SYNTH_CHECKPOINT] {*}[sv_prop $ip SUPPORTED_TARGETS]',
     'sv_parameters $ip'
 ];
+const info = file => [...select(file), ...inspect];
 
-const configure = (file, changes) => [...select(file), ...properties(changes, '$ip')];
+const configure = (file, changes, { readBack = false } = {}) => [
+    ...select(file), ...properties(changes, '$ip'), ...(readBack ? inspect : [])
+];
 const TARGETS = ['all', 'synthesis', 'simulation', 'instantiation_template', 'example_design', 'changelog'];
 
 function generate(file, target) {

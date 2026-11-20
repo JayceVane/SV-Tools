@@ -13,6 +13,7 @@ const { script, readRows, rowsOf, parametersOf, literal, removeFromProject } = r
 const ip = require('../src/vivado/ip');
 const bd = require('../src/vivado/block-design');
 const { resolveSelection } = require('../src/vivado/block-design-view');
+const { resolveEdits } = require('../src/vivado/ip-view');
 const { parseXpr, samePath } = require('../src/vivado/xpr');
 
 test('资产动作拒绝无效名称、任意生成目标、异类端点和只读元数据修改', () => {
@@ -32,6 +33,12 @@ test('资产动作拒绝无效名称、任意生成目标、异类端点和只�
     assert.equal(resolveSelection(model, { action: 'connect', endpoint: 1, level: 0 }).level, '/scope');
     assert.equal(Boolean(resolveSelection(model, { action: 'disconnect', endpoint: 1, net: 1 })), false);
     assert.equal(resolveSelection(model, { action: 'disconnect', endpoint: 1, net: 0 }).net.id, '/scope/wire');
+    const params = { parameters: [{ key: 'CONFIG.WIDTH', value: '4' }, { key: 'CONFIG.MODE', value: 'a' }] };
+    const edits = [{ key: 'CONFIG.WIDTH', before: 'forged', value: '8' }, { key: 'CONFIG.MODE', value: 'a' }];
+    assert.deepEqual(resolveEdits(edits, params), [{ key: 'CONFIG.WIDTH', before: '4', value: '8' }]);
+    assert.equal(resolveEdits(edits, { ...params, locked: true }), undefined);
+    assert.equal(resolveEdits([edits[0], edits[0]], params), undefined);
+    assert.equal(resolveEdits([{ key: 'CONFIG.FORGED', value: '8' }], params), undefined);
 });
 
 const realBin = process.env.SVTOOLS_TEST_VIVADO_ASSETS === '1' && findVivadoBinDir('');
@@ -83,8 +90,9 @@ test('真实 Vivado 管理 IP 与 Block Design', { skip: !realBin && '需 SVTOOL
     assert(width);
     const change = { key: width.key, before: width.value, value: '4' };
     const generated = await launch('配置宽度并生成综合、仿真和模板', [
-        ...ip.configure(ipFile, [change]), ...ip.generate(ipFile, 'synthesis'), ...ip.generate(ipFile, 'simulation'), ...ip.template(ipFile, '.veo')
+        ...ip.configure(ipFile, [change], { readBack: true }), ...ip.generate(ipFile, 'synthesis'), ...ip.generate(ipFile, 'simulation'), ...ip.template(ipFile, '.veo')
     ], xpr);
+    assert.equal(parametersOf(generated.rows).find(param => param.key === width.key).value, '4');
     assert.match(await fs.readFile(path.join(generated.folder, 'template.veo'), 'utf8'), /fixed_value/u);
     const stale = await launch('拒绝覆盖已变化的参数', ip.configure(ipFile, [change]), xpr, false, true);
     assert.match(stale.output.stdout, /CONFIG\.CONST_WIDTH/u);

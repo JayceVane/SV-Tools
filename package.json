@@ -216,6 +216,12 @@
         "enablement": "svtools.vivado.hasProject && !svtools.vivado.busy"
       },
       {
+        "command": "svtools.vivado.assets.catalog",
+        "title": "%cmd.vivado_assets_catalog.title%",
+        "category": "SV Tools",
+        "enablement": "svtools.vivado.hasProject && !svtools.vivado.busy"
+      },
+      {
         "command": "svtools.vivado.createProject",
         "title": "%cmd.vivado_createProject.title%",
         "category": "SystemVerilog Tools"
