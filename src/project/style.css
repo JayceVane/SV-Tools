@@ -17,6 +17,7 @@ header { padding: 8px 8px 6px; }
 .modes button[aria-pressed=true] { color: var(--vscode-tab-activeForeground, var(--vscode-foreground)); background: var(--vscode-toolbar-hoverBackground); box-shadow: inset 0 -2px var(--vscode-focusBorder); }
 .icon-button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-width: 28px; }
 #vivadoTools { color: var(--vscode-textLink-foreground); }
+#ipManager { color: var(--vscode-textLink-foreground); }
 .trace { margin: 6px 8px 2px; padding: 3px 4px 3px 8px; display: flex; align-items: center; gap: 2px; border-left: 2px solid var(--vscode-focusBorder); background: color-mix(in srgb, var(--vscode-focusBorder) 5%, transparent); flex-shrink: 0; }
 #traceRoot { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #pin { white-space: nowrap; }
@@ -51,6 +52,9 @@ header { padding: 8px 8px 6px; }
 .tool-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px; padding-top: 4px; }
 .tool-grid button { min-height: 30px; display: flex; align-items: center; justify-content: flex-start; gap: 7px; padding: 4px 8px; border: 1px solid var(--vscode-button-border, var(--vscode-panel-border)); background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); white-space: nowrap; }
 .tool-grid button:hover { background: var(--vscode-button-secondaryHoverBackground); }
+.asset-actions { margin-top: 5px; padding-top: 5px; border-top: 1px solid var(--vscode-panel-border); }
+.asset-actions button { background: transparent; color: inherit; }
+.asset-actions button:hover { background: var(--vscode-toolbar-hoverBackground); }
 #toolReports { width: 100%; margin-top: 5px; display: flex; align-items: center; gap: 7px; min-height: 28px; text-align: left; }
 #toolReports .chevron { min-height: 16px; transform: rotate(90deg); }
 #diagnostics { flex-shrink: 0; border-top: 1px solid var(--vscode-panel-border); padding: 5px 12px; max-height: 25vh; overflow: auto; }

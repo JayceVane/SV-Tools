@@ -111,13 +111,18 @@ test('工程菜单允许切换自动/手动追踪，并即时显示当前模式'
     assert.deepEqual(h.errors,[]);
 });
 
-test('Vivado流程独立提供七项命令，仍校验工程身份与快照世代', async t => {
+test('Vivado 流程提供构建、报告和资产入口并校验快照世代', async t => {
     const h=await host(t),local=h.api.getSnapshot().project;
     assert.deepEqual(h.sent.at(-1).toolActions,[]);
     h.setProject({...local,id:'vivado',kind:'vivado',path:path.resolve('bin/top.xpr')});
     await h.api.refresh();
     let snapshot=h.sent.at(-1);
-    assert.equal(snapshot.toolActions.length,7);
+    assert.equal(snapshot.toolActions.length,9);
+    assert.deepEqual(snapshot.toolActions.filter(action=>action.group==='assets').map(action=>action.id),['blockDesign','ipCatalog']);
+    await h.message({action:'command',revision:snapshot.revision,command:'ipCatalog'});
+    assert.equal(h.calls.at(-1)[0],'svtools.vivado.assets.catalog');
+    assert.equal(h.calls.at(-1)[1].nodeData.xpr,path.resolve('bin/top.xpr'));
+    snapshot=h.sent.at(-1);
     assert.equal(snapshot.actions.some(action=>action.id==='synthesize'),false);
     await h.message({action:'command',revision:snapshot.revision,command:'implement'});
     assert.equal(h.calls.at(-1)[0],'svtools.vivado.tree.implement');

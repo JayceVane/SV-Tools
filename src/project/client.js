@@ -16,23 +16,26 @@
     function renderTools(local) {
         const isVivado = snapshot.project?.kind === 'vivado';
         document.getElementById('add').hidden = isVivado;
+        document.getElementById('ipManager').hidden = !isVivado;
         document.getElementById('vivadoTools').hidden = !isVivado;
         document.getElementById('tools').hidden = !isVivado;
         const expanded = local.toolsExpanded !== false;
         document.getElementById('toggleTools').setAttribute('aria-expanded', String(expanded));
         document.getElementById('toolBody').hidden = !expanded;
         const actions = document.getElementById('toolActions');
+        const assets = document.getElementById('assetActions');
         actions.replaceChildren();
+        assets.replaceChildren();
         if (!isVivado) return;
         for (const action of snapshot.toolActions || []) {
-            if (action.group !== 'build') continue;
+            if (!['build', 'assets'].includes(action.group)) continue;
             const button = document.createElement('button'), label = document.createElement('span');
             button.type = 'button';
             button.dataset.command = action.id;
             label.textContent = action.label;
             button.append(icon(action.icon), label);
             button.addEventListener('click', () => send('command', { command: action.id }));
-            actions.append(button);
+            (action.group === 'assets' ? assets : actions).append(button);
         }
     }
     function renderProgress() {
@@ -266,6 +269,7 @@
         document.getElementById(id).addEventListener('click', () => send(id));
     document.getElementById('actions').addEventListener('click', () => toggleMenu());
     document.getElementById('addVivado').addEventListener('click', () => send('add'));
+    document.getElementById('ipManager').addEventListener('click', () => send('command', { command: 'ipManager' }));
     document.getElementById('toggleTools').addEventListener('click', () => {
         currentState().toolsExpanded = currentState().toolsExpanded === false;
         remember();

@@ -18,6 +18,8 @@
         close: 'M4 4l8 8m0-8-8 8',
         synthesize: 'm3 12 6-6M6 3l3-1 5 5-2 2-2-2-2 2-3-3ZM2 12l2 2',
         implement: 'M2 2h5v5H2Zm7 7h5v5H9ZM10 2h4v4h-4ZM2 10h4v4H2ZM7 4.5h3M4.5 7v3M6 12h3',
+        blockDesign: 'M2 3h4v4H2Zm8 6h4v4h-4ZM6 5h6v4M4 7v4h6',
+        catalog: 'M2 3h4v4H2Zm8 0h4v4h-4ZM2 9h4v4H2Zm8 0h4v4h-4Z',
         bitstream: 'M5 1.5h6v13H5ZM2 4h3m-3 4h3m-3 4h3m6-8h3m-3 4h3m-3 4h3M8 4l-1 4h2l-1 4',
         report: 'M9.5 1.5h-7v13h11v-9ZM9.5 1.5v4h4M5 12V9m3 3V7m3 5v-2',
         stop: 'M4 4h8v8H4Z'

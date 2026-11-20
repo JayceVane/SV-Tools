@@ -53,13 +53,13 @@ Vivado 日志中的 `ERROR` 即使进程退出码为 0，也判定任务失败�
 
 ## IP 管理（4.3）
 
-在 Vivado 工程侧栏打开「工程操作 → IP 管理」，也可从已加入工程的 IP 右键进入。新建时搜索本机 IP Catalog，选择确切的 VLNV 和版本、模块名及保存目录。已有 `.xci` 或 `.xcix` 可引用原文件或复制到工程。自定义 IP 仓库支持添加、移出和刷新。
+在 Vivado 工程侧栏顶部点击「IP 管理」，也可从已有 IP 的右键菜单直接打开该项。左栏按名称和文件集筛选工程 IP。右栏按接口、时钟、数据等类别显示 Vivado 返回的参数，提供搜索、枚举选项和当前值。切换 IP 可保留各自的待应用修改。点击「应用参数」时，Vivado 校验并写入该 IP，页面随后显示写入后的值。
 
-「配置参数」显示 Vivado 读到的当前值和可用选项。编辑一项或多项后选择「应用」，Vivado 校验并保存对应参数。IP 管理还可生成综合、仿真和例化模板，查看状态报告，并在 Vivado 报告可用升级时单独升级。启用综合检查点的 IP 可运行 OOC 综合。模板支持 Verilog、SystemVerilog 和 VHDL；有匹配语言的活动编辑器时，可以插到光标处。[AMD Vivado IP 指南](https://docs.amd.com/r/2022.1-English/ug896-vivado-ip)
+「Vivado 流程」和「IP 管理」都可以打开本机 IP Catalog，搜索 VLNV 或版本后创建 IP。已有 `.xci` 或 `.xcix` 可引用原文件或复制进工程，自定义仓库可添加、移出和刷新。IP 管理还可生成综合、仿真和例化模板，查看状态报告，并在 Vivado 报告可用升级时单独升级。启用综合检查点的 IP 可运行 OOC 综合。模板支持 Verilog、SystemVerilog 和 VHDL，可插入最近编辑的匹配语言文件。[AMD Vivado IP 指南](https://docs.amd.com/r/2022.1-English/ug896-vivado-ip)
 
 ## Block Design（4.3）
 
-在「工程操作 → Block Design」新建、引用已有 `.bd` 或选择工程成员。面板按层级显示模块、端口和连接。点击连接会高亮两端，通过端口选择同层级的目标可连接普通信号或总线接口。可以添加目录 IP、工程 RTL 模块引用和层级块，配置模块和外部端口，新增顶层信号端口或协议接口，也可从模块引出端口、断开连接及删除选中对象。
+在「Vivado 流程 → Block Design」新建、引用已有 `.bd` 或选择工程成员。面板按层级显示模块、端口和连接。点击连接会高亮两端，通过端口选择同层级的目标可连接普通信号或总线接口。可以添加目录 IP、工程 RTL 模块引用和层级块，配置模块和外部端口，新增顶层信号端口或协议接口，也可从模块引出端口、断开连接及删除选中对象。
 
 编辑操作由 Vivado 写入 `.bd`。工具栏提供地址自动分配、校验并保存传播后的参数、产物生成、将 HDL wrapper 加入工程及导出可重建的 Tcl。板卡预设、专用 IP 配置向导和自动化布线仍可直接在 Vivado IP Integrator 中执行。[AMD IP Integrator 指南](https://docs.amd.com/r/2022.1-English/ug994-vivado-ip-subsystems)
 
