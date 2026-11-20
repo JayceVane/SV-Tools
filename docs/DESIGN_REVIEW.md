@@ -37,9 +37,15 @@ node src/cli/main.js design submit --module afifo --actor designer --revision 1 
 
 `etag` 同时保护正文、主题和锚点。`note check` 查找失效或歧义锚点，`note reanchor` 用新的选区更新锚点。导出清单用于设计角色提交，验证角色仍提交包含编译、仿真和 ΔCycle 检查的运行证据。
 
+「固定笔记版本」对应 CLI 的 `--final`。导出内容逐篇显示笔记的复核状态。清单中 `notes[].verification.status` 为 `unbound`、`pending_review` 或 `review_recorded`。`outcomes` 保留原始观察状态，包括失败和未触发。已经关联的运行证据仍需通过输入与产物哈希校验。
+
 ## 复跑 FIFO 复位试点
 
 `node scripts/verify-fifo-workflow.cjs --review` 生成保留两次 VCD 的试点工程、回归日志、主题导出和审阅题面。试点验证短复位后的幻影读和修复结果。题面可配合 `conv3x3` 做两轮人工对照。
+
+## 复跑背压保持试点
+
+执行 `node scripts/verify-backpressure-review.cjs`。如需指定 Icarus，追加 `--iverilog <bin>`。打开终端输出的工程目录，阅读 `TASK.md` 后进入设计讲解。两次运行均检查两个接收字节，一次执行 0 次保持检查，另一次执行 3 次。`verification.json` 记录了日志计数及 VCD 独立读取结果。
 
 ## 清单格式（4.3 原型）
 
@@ -56,6 +62,7 @@ node src/cli/main.js design submit --module afifo --actor designer --revision 1 
 | `rules[].changes[]` | 可选候选变更，包含 `id`、`title`、`kind`（`contract`、`implementation` 或 `verification`）、候选 ID `from` 和 `to`、说明 `before` 和 `after`、受影响事件 `impacts[]`（`event`、`note`），以及可选的 `sourceDiffs[]`（`before` 和 `after` 为对应候选中的文件 ID，另含 `label` 和可选的 `afterLine`） |
 | `rules[].events[]` | `id`、`title`、`expected`、可读的结构步骤 `flow[]`、`refs[]`、`observations[]` |
 | `rules[].events[].interfaces[]` | 可选，填本事件涉及的接口约定 ID，顺序按阅读路径排列 |
+| `rules[].events[].architecture` | 可选，含顶层 `top`、架构章节对应的 RTL 文件 ID `file`、从顶层向下的实例路径 `path[]`、本章高亮的 `instances[]` 和 `links[]`。后三项省略时为空。使用 RTL 里的实例名与连接名或网络名 |
 | `rules[].events[].expectedValues[]` | 可选的共用预期值，填 `id`、`label`、`encoding` 和字符串 `value` |
 | `flow[]` | `label`、`detail`，可用 `active: true` 标记当前环节 |
 | `observations[]` | `variant` 候选 ID、`status`、运行摘要 `text`、提供依据的 `refs[]` |
@@ -63,6 +70,8 @@ node src/cli/main.js design submit --module afifo --actor designer --revision 1 
 | `observations[].refs[].sample.expect[]` | 可选。用 `{ signal, id }` 将本采样的完整信号路径绑定到事件中的预期值。一个信号最多绑定一次 |
 
 `status` 可填 `passed`、`failed`、`not_triggered`、`inconclusive` 或 `pending_review`。`pending_review` 表示已经绑定运行材料，尚待复核。审阅后应以场景中的实际检查结果为准。例如最后一次寄存器读回可通过，与此同时相邻事务的覆盖属性可能从未触发。分别记录两个结果。
+
+事件定义 `architecture` 后，可点击「在架构图定位」，后续切换事件会更新高亮。在架构图实例或连接详情中可点「查看相关讲解」，回到绑定的事件。跳转会核对 RTL 文件哈希和架构中的实际实例及连接。
 
 接口约定的 `status` 可填 `compatible`（相容）、`mismatch`（不一致）或 `unresolved`（待确认）。用 `rationale` 写明适用的配置、条件或候选，界面将其作为讲解者判断呈现。运行观察继续按事件和候选记录。
 
