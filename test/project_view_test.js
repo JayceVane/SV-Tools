@@ -168,7 +168,11 @@ test('Vivado 文件视图按 IP 和 BD 分组，保留实际成员的路径和�
     assert.equal(bd.children[0].fileset, 'sources_1');
     assert.equal(blockSources.children[0].fileset, 'a_fifo');
     const ip = ips.children[0];
-    await h.message({ action: 'open', revision: snapshot.revision, nodeId: ip.id });
+    await h.message({ action: 'command', revision: snapshot.revision, command: 'ipManager', nodeId: ip.id });
+    assert.deepEqual(h.calls.at(-1), ['svtools.vivado.assets.ip', { nodeData: { file: ip.file, fileset: 'a_fifo', xpr: file } }]);
+    await h.message({ action: 'command', revision: h.api.getSnapshot().revision, command: 'blockDesign', nodeId: bd.children[0].id });
+    assert.deepEqual(h.calls.at(-1), ['svtools.vivado.assets.bd', { nodeData: { file: bd.children[0].file, fileset: 'sources_1', xpr: file } }]);
+    await h.message({ action: 'open', revision: h.api.getSnapshot().revision, nodeId: ip.id });
     assert.deepEqual(h.calls.at(-1), ['vscode.open', { fsPath: path.join(root, 'nested', 'ip', 'a_fifo', 'a_fifo.XCIX'), scheme: 'file' }]);
     await h.message({ action: 'command', revision: h.api.getSnapshot().revision, command: 'removeFile', nodeId: ip.id });
     assert.equal(h.calls.at(-1)[0], 'svtools.vivado.tree.removeFile');

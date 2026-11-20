@@ -170,18 +170,18 @@ function activateVivado(context, deps) {
     }
 
     /** 独立动作目录保存脚本；准备后再次核对工程及文件集，busy 时不触碰现有脚本。 */
-    async function runIncrementalTcl(name, scriptBody, xpr, validate) {
+    async function runIncrementalTcl(name, scriptBody, xpr, validate, options = {}) {
         if (incrementalCancelled) return { code: null, status: 'cancelled' };
         if (running) { vscode.window.showWarningMessage('Vivado 正在运行，请先等待或停止。'); return { code: null, error: 'busy' }; }
         if (!await sameEditorProject(xpr)) return { code: null, status: 'cancelled', error: 'project-changed' };
-        const valid = () => {
-            if (validate(parseXpr(xpr))) return true;
+        const valid = async () => {
+            if (await validate(parseXpr(xpr))) return true;
             vscode.window.showWarningMessage('工程文件集或成员已变化，已取消操作，请重新执行命令。'); return false;
         };
-        if (!valid()) return { code: null, status: 'cancelled', error: 'project-changed' };
+        if (!await valid()) return { code: null, status: 'cancelled', error: 'project-changed' };
         return runScript({ anchor: xpr, name, body: scriptBody, async validate() {
-            if (incrementalCancelled || !await sameEditorProject(xpr) || !valid()) throw cancelledError('工程已切换或操作已取消');
-        } }, { editorAction: true });
+            if (incrementalCancelled || !await sameEditorProject(xpr) || !await valid()) throw cancelledError('工程已切换或操作已取消');
+        } }, { editorAction: true, ...options });
     }
 
     async function addCurrentToProject() {
@@ -496,7 +496,7 @@ function activateVivado(context, deps) {
             return { code: null, status: job.signal.aborted || error.code === 'TOOL_CANCELLED' ? 'cancelled' : 'failed', error: error.message };
         } finally {
             try { await job.finish({ keepArtifacts: true }); } catch (error) { log('任务产物清理失败：' + error.message); }
-            if (running === task) { running = null; status(null); projectTree?.setRunning(null); }
+            if (running === task) { running = null; status(null); projectTree?.setRunning(incrementalOperation ? 'preparing' : null); }
         }
     }
 
@@ -686,6 +686,12 @@ function activateVivado(context, deps) {
     } catch (err) {
         log('[vivado] 工程树初始化失败: ' + (err && err.message));
     }
+
+    require('./asset-commands').activateAssetCommands(context, {
+        vscode, findProjectXpr, incrementalAction, runIncrementalTcl,
+        pickerToken: () => incrementalPicker?.token,
+        refresh: () => projectTree?.refresh()
+    });
 
     return {
         runScript, stopRun, createProject, simulateWithVivado,

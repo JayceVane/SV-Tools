@@ -60,6 +60,8 @@
   "cmd.vivado_runScript.title": "Vivado: 运行 TCL 脚本",
   "cmd.vivado_runActiveScript.title": "Vivado: 运行当前 TCL 脚本",
   "cmd.vivado_stop.title": "Vivado: 停止",
+  "cmd.vivado_assets_ip.title": "Vivado: IP 管理",
+  "cmd.vivado_assets_bd.title": "Vivado: Block Design",
   "cmd.vivado_createProject.title": "Vivado: 创建工程",
   "cfg.vivado_path.desc": "Vivado 安装目录（如 D:/Xilinx/Vivado/2022.1，也接受其 bin 目录或 vivado.bat 全路径）。留空 = 从 XILINX_VIVADO、PATH 和常见安装位置自动探测。",
   "cfg.vivado_part.desc": "工程创建向导的默认器件型号（-part，如 xc7a35tcsg324-1）。留空 = 建好后在 Vivado 中选择。",

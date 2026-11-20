@@ -61,7 +61,7 @@
     "vscode:prepublish": "npm test && node scripts/check-public-package.js",
     "check": "node scripts/check-js.js",
     "cli": "node src/cli/main.js",
-    "test:agent": "node --test --test-concurrency=1 test/agent_storage_test.js test/agent_context_test.js test/agent_service_test.js test/agent_task_test.js test/vivado_agent_test.js test/vivado_inputs_test.js test/vivado_real_test.js test/cli_doc_test.js",
+    "test:agent": "node --test --test-concurrency=1 test/agent_storage_test.js test/agent_context_test.js test/agent_service_test.js test/agent_task_test.js test/vivado_agent_test.js test/vivado_inputs_test.js test/vivado_real_test.js test/vivado_assets_test.js test/cli_doc_test.js",
     "test:retention": "node --test test/task_retention_test.js",
     "build:circuit": "node scripts/build-circuit-assets.js",
     "test:circuit": "npm run build:circuit && node scripts/test-circuit.js",
@@ -202,6 +202,18 @@
         "command": "svtools.vivado.stop",
         "title": "%cmd.vivado_stop.title%",
         "category": "SystemVerilog Tools"
+      },
+      {
+        "command": "svtools.vivado.assets.ip",
+        "title": "%cmd.vivado_assets_ip.title%",
+        "category": "SV Tools",
+        "enablement": "svtools.vivado.hasProject && !svtools.vivado.busy"
+      },
+      {
+        "command": "svtools.vivado.assets.bd",
+        "title": "%cmd.vivado_assets_bd.title%",
+        "category": "SV Tools",
+        "enablement": "svtools.vivado.hasProject && !svtools.vivado.busy"
       },
       {
         "command": "svtools.vivado.createProject",

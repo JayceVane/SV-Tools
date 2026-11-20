@@ -29,7 +29,7 @@ M5 前先收口 ΔCycle 记录诊断、设计/验证职责与模块报告证据�
 
 [架构查看器](ARCHITECTURE_VIEWER.md)提供分层结构图、上下游高亮、接口握手方向和章节导出。
 
-IP/BD 和分层 XDC 继续作为 Vivado 候选能力，按试点中理解模块原理、接口关系及验证场景的实际需要安排。IP 目录管理和图形配置的范围仍见下文「4.3 候选：Vivado IP 管理（技术细节）」。
+[Vivado 工程资产](wiki/Vivado.md)已接入 IP Catalog、参数和产物管理，以及 Block Design 的分层读取、编辑和生成。分层 XDC 继续按工程试点的实际需求安排。
 
 ## 4.1：信号追踪（已确认计划）
 
@@ -44,38 +44,6 @@ IP/BD 和分层 XDC 继续作为 Vivado 候选能力，按试点中理解模块�
 P1 波形联动已完成：信号与 VCD 的显式映射、双向定位、游标值及 A/B 差异均已实现，无法确认实例或位映射时明确提示或让用户选择，不凭同名猜测；波形联动未阻塞核心追踪的独立交付。详见 [电路与 VCD 双向定位](WAVE_LINKS.md)。
 
 局部追踪复用现有独立模型、Worker、Yosys/Vivado 适配器与 ELK.js + SVG；按模型版本维护有界拓扑索引和布局状态。更大设计按需加载、跨次生成缓存与 Vivado 层级保留按实际需求另行评估。
-
-Vivado IP 管理推迟到 4.3 候选范围（见上），不进入 4.2。
-
-## 4.3 候选：Vivado IP 管理（技术细节）
-
-4.2 不实现 IP 管理；以下为 4.3 候选范围的技术细节。
-
-目标：在 Xilinx 工程管理面板增加 IP 分组，插件提供操作界面，本机 Vivado 执行目录查询、创建、配置和产物生成。
-
-计划范围：
-
-1. **新建 IP**：搜索本机 IP Catalog，选择版本、模块名、保存位置和参数，加入当前选定工程。
-2. **添加已有 IP**：选择 `.xci`，区分引用原文件与复制进工程。
-3. **自定义仓库**：维护 IP 仓库目录，刷新 Catalog。
-4. **已有 IP 管理**：查看配置和状态、重新生成仿真/综合产物、执行 OOC 综合、插入例化模板；升级作为独立操作。
-5. **配置界面**：FIFO、BRAM、Clock Wizard、ILA 等常用 IP 优先采用专用表单；其他 IP 提供通用参数编辑，并保留在 Vivado 中配置的入口。复杂 IP 的专有图形配置不承诺在插件中完整复刻。
-
-实现约束：
-
-- 复用现有工程选择、Vivado 任务生命周期、取消、日志和面板刷新，保持操作所属工程一致。
-- 从真实 Vivado 获取目录与属性，按工具版本、器件和仓库缓存，不维护固定 IP 名单或假参数校验。
-- 添加独立 IP 业务模块，避免将目录、参数配置和生成逻辑堆入工程树或通用 Tcl 模块。
-- 功能完成后使用隔离的真实 Vivado 工程验收创建、导入、配置、生成、取消和刷新，再检查例化及仿真/综合产物。
-
-官方技术依据：
-
-- [create_ip：从 IP Catalog 创建 IP](https://docs.amd.com/r/2022.1-English/ug835-vivado-tcl-commands/create_ip)
-- [已有 IP 的引用与导入](https://docs.amd.com/r/2022.2-English/ug895-vivado-system-level-design-entry/Tcl-Commands-for-Adding-Existing-IP-Sources)
-- [IP 参数配置](https://docs.amd.com/r/2021.2-English/ug896-vivado-ip/Creating-an-IP-Customization)
-- [generate_target：生成 IP 产物](https://docs.amd.com/r/2022.1-English/ug835-vivado-tcl-commands/generate_target)
-
-各条目是待实现计划，不表示当前插件已提供这些入口。FSDB 保持此前取消的决定。
 
 ## 4.0 历史里程碑
 
