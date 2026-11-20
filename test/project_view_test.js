@@ -313,6 +313,7 @@ test('编辑器定版从运行记录创建可复核快照并保留已有规则',
     const { createHash } = require('node:crypto');
     const history = require('../src/design/note-history-store');
     const { preparePin, savePin } = require('../src/design/review-pin');
+    const { exportNotes } = require('../src/design/note-export');
     const { loadReview, verifiedNote, revealObservation } = require('../src/design/review-model');
     const root = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'svtools-note-pin-'));
     t.after(() => fs.rm(root, { recursive: true, force: true }, () => {}));
@@ -347,6 +348,14 @@ test('编辑器定版从运行记录创建可复核快照并保留已有规则',
     assert.equal(pinned.id, first);
     const observed = await revealObservation(root, review.observations.get(pinned.events[0].evidence[0].token));
     assert.equal(observed.status, 'pending_review');
+    const pending = await exportNotes(root, { note: id, final: true, out: 'pending-notes', imageFormat: 'md' });
+    assert.deepEqual(pending.notes[0].verification, { status: 'pending_review', outcomes: ['pending_review'] });
+    const file = path.join(root, 'svtools.review.json');
+    const index = JSON.parse(fs.readFileSync(file, 'utf8'));
+    index.rules[0].events[0].observations[0].status = 'not_triggered';
+    fs.writeFileSync(file, JSON.stringify(index));
+    const captured = await exportNotes(root, { note: id, final: true, out: 'reviewed-notes', imageFormat: 'md' });
+    assert.deepEqual(captured.notes[0].verification, { status: 'review_recorded', outcomes: ['not_triggered'] });
     assert.deepEqual(observed.refs.map(ref => ref.label), ['打开运行记录', 'run.log', 'wave.vcd']);
     const waveLink = review.links.get(observed.refs[2].token);
     assert.deepEqual(waveLink.sample.signals, ['tb.hold']);

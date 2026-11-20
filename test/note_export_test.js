@@ -31,9 +31,11 @@ test('合并主题 Markdown 和 HTML，安全导出，并用定版清单参与�
     const note = await ok('note', 'add', '--note', 'nt_b', '--title', '用例推导', '--topic', '设计约定');
     const exported = await ok('note', 'export', '--topic', '设计约定', '--format', 'html', '--out', 'review', '--final', '--module', 'top');
     assert.deepEqual(exported.notes.map(note => note.id), ['nt_a', 'nt_b']);
+    assert.ok(exported.notes.every(note => note.verification.status === 'unbound'));
     const html = await fs.readFile(path.join(root, 'review/notes.html'), 'utf8');
     assert.match(html, /<strong>加粗<\/strong>/u);
     assert.match(html, /用例推导/u);
+    assert.match(html, /笔记版本已固定。未绑定仿真运行/u);
     assert.doesNotMatch(html, /<script>/iu);
     const spec = { schemaVersion: 1, id: 'study', title: 'Fixture', overview: 'Design submission', top: 'top', requirements: [{ id: 'R1', text: 'Fixture' }],
         modules: [{ id: 'top', name: 'top', responsibility: 'Fixture', sources: ['top.sv'], requirements: ['R1'], deltaSignals: ['tb.signal'] }] };

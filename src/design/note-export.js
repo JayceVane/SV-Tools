@@ -25,31 +25,42 @@ const MarkdownIt = () => {
 
 async function reviewedEvidence(root, selected) {
     const review = require('./review-model');
+    const refs = new Map(), verification = new Map();
     let loaded;
     try { loaded = await review.loadReview(root); }
-    catch (error) { if (error.code === 'ENOENT') return []; throw error; }
+    catch (error) { if (error.code === 'ENOENT') return { refs, verification }; throw error; }
     const selectedById = new Map(selected.map(note => [note.id, note]));
     const latest = new Map();
     for (const rule of loaded.snapshot.rules) if (selectedById.has(rule.note?.id)) latest.set(rule.note.id, rule);
-    if (!latest.size) return [];
-    const refs = new Map();
     for (const rule of latest.values()) {
         const frozen = loaded.notes.get(rule.note.token);
         if (frozen.sha256 !== selectedById.get(frozen.id).sha256) fail('EVIDENCE_STALE', '笔记在绑定仿真后已修改：' + frozen.id);
         if (frozen.binding) refs.set(frozen.binding.path, frozen.binding);
+        const outcomes = new Set();
+        let observedCount = 0, boundCount = 0;
         for (const event of rule.events) for (const item of event.evidence) {
             const record = loaded.observations.get(item.token);
             const observation = await review.revealObservation(root, record);
             if (observation.status === 'unavailable') fail('EVIDENCE_STALE', '笔记关联的运行证据已变化', { issues: observation.issues });
+            observedCount++;
+            if (record.run) boundCount++;
+            outcomes.add(observation.status);
             for (const entry of record.files) {
                 const previous = refs.get(entry.path);
                 if (previous && previous.sha256 !== entry.sha256) fail('EVIDENCE_STALE', '定版中存在两个版本的同一文件：' + entry.path);
                 refs.set(entry.path, { path: entry.path, sha256: entry.sha256 });
             }
         }
+        const status = boundCount === 0 ? 'unbound'
+            : boundCount < observedCount || outcomes.has('pending_review') || outcomes.has('inconclusive') ? 'pending_review'
+                : 'review_recorded';
+        verification.set(frozen.id, { status, outcomes: [...outcomes].sort() });
     }
-    return [...refs.values()].sort((a, b) => a.path.localeCompare(b.path, 'en'));
+    return { refs, verification };
 }
+
+const verificationLabels = { unbound: '未绑定仿真运行', pending_review: '已有运行材料，仍待复核',
+    review_recorded: '已有复核结论，结果见清单' };
 
 function html(title, content) {
     const render = new (MarkdownIt())({ html: false, linkify: false });
@@ -141,11 +152,15 @@ async function exportNotes(root, options = {}) {
         }
         snapshots.push({ ...entry, content, location });
     }
-    const evidence = final ? await reviewedEvidence(root, snapshots) : [];
+    const reviews = final ? await reviewedEvidence(root, snapshots) : null;
+    const evidence = reviews ? [...reviews.refs.values()].sort((a, b) => a.path.localeCompare(b.path, 'en')) : [];
     const stamped = [];
     for (const entry of snapshots) {
         const record = { id: entry.id, path: entry.path, sha256: entry.sha256 };
-        if (final) record.revision = await history.record(root, entry.id, entry.content, 'save');
+        if (final) {
+            record.revision = await history.record(root, entry.id, entry.content, 'save');
+            record.verification = reviews.verification.get(entry.id) || { status: 'unbound', outcomes: [] };
+        }
         if (entry.location?.status === 'resolved') {
             record.anchor = { path: entry.location.path, line: entry.location.line, metadata: (await file.fingerprint(root, anchors.anchorPath(entry.id))).sha256 };
             if (final && !evidence.some(item => item.path === record.anchor.path)) {
@@ -156,9 +171,11 @@ async function exportNotes(root, options = {}) {
         stamped.push(record);
     }
     const heading = title.replace(/[\r\n]/gu, ' ');
-    const content = '# ' + heading + '\n\n' + snapshots.map(entry => {
+    const content = '# ' + heading + '\n\n' + snapshots.map((entry, index) => {
         const ref = entry.location?.status === 'resolved' ? `> 源码位置 ${entry.location.path}:${entry.location.line}\n\n` : '';
-        return ref + entry.content.replace(/(?:\r?\n)+$/u, '');
+        const verification = stamped[index].verification;
+        const status = verification ? `> 笔记版本已固定。${verificationLabels[verification.status]}。\n\n` : '';
+        return status + ref + entry.content.replace(/(?:\r?\n)+$/u, '');
     }).join('\n\n---\n\n') + '\n';
     const output = relative(options.out || 'docs/design-note-export', '输出目录');
     const destination = await file.safePath(root, output, { missing: true });

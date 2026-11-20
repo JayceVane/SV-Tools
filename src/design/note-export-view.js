@@ -25,7 +25,7 @@ function activateNoteExport(context, vscode) {
             const formats = [{ label: 'HTML', id: 'html' }, { label: 'Markdown', id: 'md' }, { label: 'PDF', id: 'pdf' }];
             const file = await window.showQuickPick(formats, { title: '选择导出格式' });
             if (!file) return;
-            const mode = await window.showQuickPick(['定版', '草稿'], { title: '导出类型' });
+            const mode = await window.showQuickPick(['固定笔记版本', '草稿'], { title: '导出类型' });
             if (!mode) return;
             const out = await window.showInputBox({ title: '工程内的输出目录', value: 'docs/note-export-' + Date.now() });
             if (!out) return;
@@ -33,7 +33,7 @@ function activateNoteExport(context, vscode) {
             const paths = new Set(candidates.map(note => Uri.joinPath(Uri.file(root), note.path).toString()));
             if (workspace.textDocuments.some(doc => doc.isDirty && paths.has(doc.uri.toString()))) throw new Error('请先保存选中的笔记。');
             const result = await window.withProgress({ location: vscode.ProgressLocation.Notification, title: '导出设计笔记' },
-                () => exportNotes(root, { ...scope, imageFormat: file.id, final: mode === '定版', out }));
+                () => exportNotes(root, { ...scope, imageFormat: file.id, final: mode === '固定笔记版本', out }));
             const action = await window.showInformationMessage('已导出设计笔记 · ' + result.manifest, '打开清单');
             if (action) await window.showTextDocument(await workspace.openTextDocument(Uri.joinPath(Uri.file(root), result.manifest)));
         } catch (error) { window.showErrorMessage('SV Tools · ' + error.message); }
