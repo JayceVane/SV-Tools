@@ -218,4 +218,30 @@ async function assertBookCurrent({ snapshot, presentationRevision }) {
         throw new Error(CONFIG + ' 已修改，请重新读取架构。');
 }
 
-module.exports = { buildArchitectureBook, assertBookCurrent, resolveContext };
+function resolveReviewFocus(book, target) {
+    if (book.top !== target.top) return;
+    const chapters = new Map(book.pages.map(page => [page.id, page]));
+    let page = book.pages[0];
+    const ancestors = [];
+    for (const instance of target.path) {
+        ancestors.push(page.id);
+        page = chapters.get(page.nodes.find(node => node.kind === 'instance' && node.name === instance)?.chapter);
+        if (!page) return;
+    }
+    if (page.source?.file !== target.source.path) return;
+    const nodes = [];
+    for (const name of target.instances) {
+        const node = page.nodes.find(node => node.kind === 'instance' && node.name === name);
+        if (!node) return;
+        nodes.push(node.id);
+    }
+    const links = new Set();
+    for (const name of target.links) {
+        const matches = page.links.filter(link => link.name === name || link.names?.includes(name));
+        if (!matches.length) return;
+        for (const link of matches) links.add(link.id);
+    }
+    return { page: page.id, ancestors, nodes, links: [...links] };
+}
+
+module.exports = { buildArchitectureBook, assertBookCurrent, resolveContext, resolveReviewFocus };

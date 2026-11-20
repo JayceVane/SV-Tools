@@ -1,9 +1,11 @@
 'use strict';
 
 const { randomBytes } = require('node:crypto');
-const { resolveContext, buildArchitectureBook, assertBookCurrent } = require('./architecture-model');
+const fs = require('node:fs/promises');
+const { resolveContext, buildArchitectureBook, assertBookCurrent, resolveReviewFocus } = require('./architecture-model');
 const { layoutDiagram, renderDiagram } = require('./architecture-diagram');
 const { exportArchitecture } = require('./architecture-export');
+const { loadReview, verifiedFile } = require('./review-model');
 
 function panelHtml(webview, vscode, root) {
     const uri = name => webview.asWebviewUri(vscode.Uri.joinPath(root, name));
@@ -29,7 +31,7 @@ function panelHtml(webview, vscode, root) {
     <script nonce="${nonce}" src="${uri('architecture-details.js')}"></script><script nonce="${nonce}" src="${uri('architecture-client.js')}"></script></body></html>`;
 }
 
-function activateArchitectureViewer(context, { vscode, projects }) {
+function activateArchitectureViewer(context, { vscode, projects, openReview }) {
     const panels = new Map();
     const resources = vscode.Uri.joinPath(context.extensionUri, 'src', 'design');
 
@@ -71,22 +73,46 @@ function activateArchitectureViewer(context, { vscode, projects }) {
         return { snapshot: await resolveContext(input), input };
     }
 
-    async function open() {
-        const workspace = await chooseInput();
+    async function open(workspace, selection, active = () => true) {
         if (!workspace) return;
         const chosen = await chooseSnapshot(workspace);
-        if (!chosen) return;
+        if (!chosen || !active()) return;
         const { snapshot: initial, input } = chosen;
         const key = JSON.stringify([initial.context.id, initial.context.top]);
         const previous = panels.get(key);
-        if (previous) { previous.reveal(); return; }
-        const panel = vscode.window.createWebviewPanel('svtoolsArchitectureViewer', '架构 · ' + initial.context.top, vscode.ViewColumn.Active,
+        if (previous) {
+            previous.panel.reveal(undefined, Boolean(selection));
+            if (selection) await previous.focus(selection, active);
+            return true;
+        }
+        const column = selection ? { viewColumn: vscode.ViewColumn.Beside, preserveFocus: true } : vscode.ViewColumn.Active;
+        const panel = vscode.window.createWebviewPanel('svtoolsArchitectureViewer', '架构 · ' + initial.context.top, column,
             { enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [resources] });
-        panels.set(key, panel);
         let current, initialSnapshot = initial, generation = 0, closed = false, exporting = false;
+        let pending = selection && { selection, active };
         const layouts = new Map();
         panel.onDidDispose(() => { closed = true; panels.delete(key); layouts.clear(); });
         const post = message => !closed && panel.webview.postMessage(message);
+        async function focus(target, isActive) {
+            const request = { selection: target, active: isActive };
+            pending = request;
+            const loaded = current;
+            if (!loaded || !isActive()) return;
+            if (!target) return post({ type: 'review-focus', revision: loaded.book.revision });
+            let focused;
+            try {
+                focused = resolveReviewFocus(loaded.book, target);
+                if (!focused) throw new Error('讲解事件对应的实例或连线未出现在当前架构。');
+                await assertBookCurrent(loaded);
+            } catch (error) {
+                if (pending === request && loaded === current && isActive())
+                    await post({ type: 'review-focus', revision: loaded.book.revision });
+                throw error;
+            }
+            if (pending === request && loaded === current && isActive())
+                await post({ type: 'review-focus', revision: loaded.book.revision, focus: focused });
+        }
+        panels.set(key, { panel, focus, root: initial.context.workspace, top: initial.context.top });
         async function refresh() {
             const version = ++generation;
             current = undefined;
@@ -99,6 +125,7 @@ function activateArchitectureViewer(context, { vscode, projects }) {
                 if (!closed && version === generation) {
                     current = loaded;
                     await post({ type: 'book', book: loaded.book });
+                    if (pending?.selection) await focus(pending.selection, pending.active);
                 }
             } catch (error) {
                 if (version === generation) await post({ type: 'error', message: error.message });
@@ -124,6 +151,24 @@ function activateArchitectureViewer(context, { vscode, projects }) {
                     await post({ type: 'layout', request: message.request, revision: loaded.book.revision, page: page.id,
                         html: renderDiagram(diagram, page, true), edges: diagram.edges.map(edge => ({ id: edge.id, links: edge.links, from: edge.from, to: edge.to })),
                         cards: diagram.cards.map(card => ({ id: card.id, nodes: card.nodes.map(node => node.id), link: card.link })) });
+                } else if (message.type === 'review') {
+                    const page = loaded.book.pages.find(item => item.id === message.page);
+                    if (!page || !(page.nodes.some(node => node.id === message.node) || page.links.some(link => link.id === message.link))) return;
+                    const root = loaded.snapshot.context.workspace;
+                    let review;
+                    try { review = await loadReview(root); }
+                    catch (error) { if (error.code !== 'ENOENT') throw error; }
+                    const choices = (review?.snapshot.rules || []).flatMap(rule => rule.events.flatMap(event => {
+                        const match = event.architecture && resolveReviewFocus(loaded.book, event.architecture);
+                        return match?.page === page.id && (match.nodes.includes(message.node) || match.links.includes(message.link))
+                            ? [{ label: event.title, description: rule.title, ruleId: rule.id, eventId: event.id, source: event.architecture.source }] : [];
+                    }));
+                    if (!choices.length) throw new Error('这个实例或连接尚未关联设计讲解事件。');
+                    const selected = choices.length === 1 ? choices[0] : await vscode.window.showQuickPick(choices, { title: '选择讲解事件' });
+                    if (!selected) return;
+                    await assertBookCurrent(loaded);
+                    await verifiedFile(root, selected.source);
+                    if (!closed && loaded === current) openReview?.(root, selected);
                 } else if (message.type === 'source') {
                     const site = loaded.sourceLocations.get(message.source);
                     if (!site) return;
@@ -153,12 +198,34 @@ function activateArchitectureViewer(context, { vscode, projects }) {
             }
         });
         panel.webview.html = panelHtml(panel.webview, vscode, resources);
+        return true;
     }
 
     context.subscriptions.push(vscode.commands.registerCommand('svtools.design.architecture', async () => {
-        try { await open(); }
+        try { await open(await chooseInput()); }
         catch (error) { vscode.window.showErrorMessage('架构查看器：' + error.message); }
-    }), { dispose() { for (const panel of panels.values()) panel.dispose(); } });
+    }), { dispose() { for (const { panel } of panels.values()) panel.dispose(); } });
+    return {
+        async showReview(root, target, reveal, active) {
+            const workspace = await fs.realpath(root);
+            const workspacePanels = [...panels.values()].filter(entry => entry.root === workspace);
+            try { if (target) await verifiedFile(workspace, target.source); }
+            catch (error) {
+                if (active()) await Promise.all(workspacePanels.map(panel => panel.focus(undefined, active)));
+                throw error;
+            }
+            if (!active()) return;
+            const matches = workspacePanels.filter(entry => !target || entry.top === target.top);
+            await Promise.all(workspacePanels.filter(entry => !matches.includes(entry)).map(panel => panel.focus(undefined, active)));
+            if (!active()) return;
+            if (target && reveal && !matches.length) {
+                return open({ workspace, top: target.top }, target, active);
+            }
+            if (target && reveal) matches[0].panel.reveal(undefined, true);
+            await Promise.all(matches.map(panel => panel.focus(target, active)));
+            return matches.length > 0;
+        }
+    };
 }
 
 module.exports = { activateArchitectureViewer };

@@ -53,7 +53,7 @@ function reviewHtml(webview, vscode, extensionUri) {
 </main><script nonce="${nonce}" src="${resource('review-client.js')}"></script></body></html>`;
 }
 
-function activateReviewView(context, { vscode, projects, waveViewer }) {
+function activateReviewView(context, { vscode, projects, waveViewer, showArchitecture }) {
     const panels = new Map();
     async function chooseRoot() {
         const project = await projects.current();
@@ -97,7 +97,7 @@ function activateReviewView(context, { vscode, projects, waveViewer }) {
             reveal(selection) { panel.reveal(); if (selection) { focus = selection; void refresh(); } },
             dispose: () => panel.dispose()
         });
-        let current, revision = 0, disposed = false;
+        let current, revision = 0, architectureRequest = 0, disposed = false;
         const linkColumn = () => panel.viewColumn !== undefined && panel.viewColumn < vscode.ViewColumn.Nine
             ? panel.viewColumn + 1 : vscode.ViewColumn.Beside;
         const post = data => {
@@ -114,8 +114,9 @@ function activateReviewView(context, { vscode, projects, waveViewer }) {
                 const focusRule = focus?.ruleId ?? (focus?.noteId
                     ? loaded.snapshot.rules.findLast(rule => rule.note?.id === focus.noteId)?.id : undefined);
                 const message = focus?.noteId && !focusRule ? '当前 Note 尚未关联设计讲解中的定版记录。' : '';
+                const focusEvent = focus?.eventId;
                 focus = undefined;
-                await post({ type: 'review', revision: version, ...loaded.snapshot, focusRule, message });
+                await post({ type: 'review', revision: version, ...loaded.snapshot, focusRule, focusEvent, message });
             } catch (error) {
                 if (version !== revision) return;
                 await post({ type: 'load-error', revision: version, text: error.code === 'ENOENT' ?
@@ -126,6 +127,20 @@ function activateReviewView(context, { vscode, projects, waveViewer }) {
             if (disposed) return;
             if (message?.type === 'ready' || message?.type === 'refresh') { await refresh(); return; }
             const version = revision;
+            if (current && message?.revision === version && message.type === 'architecture') {
+                const request = ++architectureRequest;
+                const active = () => !disposed && version === revision && request === architectureRequest;
+                const rule = current.snapshot.rules.find(rule => rule.id === message.rule);
+                const event = rule?.events.find(event => event.id === message.event);
+                try {
+                    const shown = await showArchitecture?.(root, event?.architecture, message.reveal === true, active);
+                    if (shown && message.reveal === true && event?.architecture && active())
+                        await post({ type: 'architecture-ready', revision: version });
+                } catch (error) {
+                    if (active()) await post({ type: 'link-error', revision: version, error: error.message });
+                }
+                return;
+            }
             if (!current || message?.revision !== version || typeof message.token !== 'string'
                 || !Number.isSafeInteger(message.interaction)) return;
             const metadata = { revision: version, token: message.token, interaction: message.interaction };

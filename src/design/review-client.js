@@ -7,10 +7,13 @@
     const set = (id, value) => { $(id).textContent = value; };
     const observations = new Map(), samples = new Map();
     let snapshot, currentRule, currentStep = 0, visible = false, revision = 0, interaction = 0, revealScroll;
+    let followArchitecture = false;
     const saved = vscode.getState() || {};
     const visited = new Map();
     const send = (type, token) => vscode.postMessage({ type, revision, token, interaction });
     const currentEvent = () => currentRule?.events[currentStep];
+    const showArchitecture = reveal => vscode.postMessage({ type: 'architecture', revision,
+        rule: currentRule?.id, event: currentEvent()?.id, reveal });
 
     function element(tag, text, className) {
         const node = document.createElement(tag);
@@ -116,7 +119,10 @@
         $('expected-values').hidden = !expectations.length;
         $('expected-values').replaceChildren(...expectations.map(item =>
             element('li', item.label + ' · ' + expectedValue(item))));
-        $('step-links').replaceChildren(...linkButtons(event.refs));
+        const links = linkButtons(event.refs);
+        if (event.architecture) links.push(button('在架构图定位', () => showArchitecture(true)));
+        $('step-links').replaceChildren(...links);
+        if (followArchitecture) showArchitecture(false);
         renderInterfaces(event);
         if (focusStep) steps[currentStep].focus();
     }
@@ -287,7 +293,10 @@
             status(data.message || '');
             $('content').hidden = false;
             const rule = data.rules.find(item => item.id === (data.focusRule || saved.rule)) || data.rules[0];
-            selectRule(rule, visited.get(rule.id));
+            selectRule(rule, data.focusEvent || visited.get(rule.id));
+        } else if (data.revision === revision && data.type === 'architecture-ready') {
+            followArchitecture = true;
+            showArchitecture(false);
         } else if (data.revision === revision && data.interaction === interaction && data.type === 'observation' && visible &&
             currentEvent()?.evidence.some(item => item.token === data.token)) {
             observations.set(data.token, data);

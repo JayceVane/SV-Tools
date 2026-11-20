@@ -12,6 +12,7 @@
     const graph = $('graph');
     const inspector = $('inspector');
     let book, page, mode, request = 0, layout, selected = null, selectedEdge = null, selectedPort = null;
+    let reviewFocus;
     let chapters, nodes, links, exportBusy = false, ancestors = [], pendingFocus, fitPreference;
 
     function site(label, module) { return sourceLink(module.source, true, label); }
@@ -39,6 +40,7 @@
         selected = null;
         selectedEdge = null;
         selectedPort = null;
+        reviewFocus = undefined;
         pendingFocus = undefined;
         $('graph-content').hidden = false;
         $('interface-view').hidden = true;
@@ -94,12 +96,13 @@
     function applyHighlight() {
         if (!layout) return;
         const selection = selected ? neighbors(selected) : null;
+        const reviewNodes = new Set(reviewFocus?.nodes), reviewLinks = new Set(reviewFocus?.links);
         for (const element of graph.querySelectorAll('[data-node]')) {
             const id = element.dataset.node;
             const state = id === selected ? 'selected' : selection?.upstream.has(id) && selection.downstream.has(id) ? 'both'
                 : selection?.upstream.has(id) ? 'upstream' : selection?.downstream.has(id) ? 'downstream'
                 : selection?.shared.has(id) ? 'related' : selection ? 'dimmed' : 'normal';
-            element.dataset.state = state;
+            element.dataset.state = reviewNodes.has(id) ? 'selected' : state;
             element.setAttribute('aria-pressed', String(id === selected));
         }
         const edges = new Map(layout.edges.map(edge => [edge.id, edge]));
@@ -109,7 +112,7 @@
             const roles = new Set(edge.links.map(link => selection?.tags.get(link)).filter(Boolean));
             const includes = card => cards.get(card)?.nodes.includes(selected);
             const incident = includes(edge.from) || includes(edge.to) || cards.get(edge.from)?.link || cards.get(edge.to)?.link;
-            element.dataset.state = selectedEdge === edge.id ? 'selected' : !selection ? 'normal' : !roles.size || !incident ? 'dimmed'
+            element.dataset.state = selectedEdge === edge.id || edge.links.some(id => reviewLinks.has(id)) ? 'selected' : !selection ? 'normal' : !roles.size || !incident ? 'dimmed'
                 : roles.has('both') || roles.has('upstream') && roles.has('downstream') ? 'both'
                 : roles.has('upstream') ? 'upstream' : roles.has('downstream') ? 'downstream' : 'related';
         }
@@ -154,7 +157,7 @@
             const specialization = parameterText(node.parameters);
             const pins = pinInspector(node);
             const chapter = chapters.get(node.chapter);
-            inspector.innerHTML = `<header class="page-header"><div><h3>${escape(node.name)}</h3><p class="subtle">${node.type ? code(node.type) : '模块边界'}${specialization ? ' · ' + code(specialization) : ''}${node.implementation === 'stub' ? ' · 实现桩' : node.implementation === 'unresolved' ? ' · 未解析' : ''} ${site('源码', node)}</p></div><div class="tools">${chapter ? action('child', chapter.id, chapter.hasStructure ? '展开内部结构' : '查看模块') : ''}<button type="button" data-clear="true">清除选中</button></div></header>
+            inspector.innerHTML = `<header class="page-header"><div><h3>${escape(node.name)}</h3><p class="subtle">${node.type ? code(node.type) : '模块边界'}${specialization ? ' · ' + code(specialization) : ''}${node.implementation === 'stub' ? ' · 实现桩' : node.implementation === 'unresolved' ? ' · 未解析' : ''} ${site('源码', node)}</p></div><div class="tools">${chapter ? action('child', chapter.id, chapter.hasStructure ? '展开内部结构' : '查看模块') : ''}${node.kind === 'instance' ? action('review-node', node.id, '查看相关讲解') : ''}<button type="button" data-clear="true">清除选中</button></div></header>
                 ${summary ? `<div class="neighbors">${summary}</div>` : ''}<div class="inspector-grid"><section><h4>端口图</h4>${pins.symbol}</section>${pins.details || `<section><h4>连接</h4>${linkList(connected) || '<p class="subtle">当前结构没有已解析的连接。</p>'}</section>`}</div>`;
         } else if (selectedEdge) {
             const edge = layout?.edges.find(edge => edge.id === selectedEdge);
@@ -179,6 +182,7 @@
         $('connection-title').textContent = link.name;
         $('connection-body').innerHTML = link.kind === 'interface' ? interfaceDetails(link, nodes, true)
             : `<h3>端点</h3><p>${signalEnds(link, nodes)}</p><p class="subtle">位宽 ${link.width ?? '待确认'}${link.labeled ? ' · 标签网络' : ''}</p>`;
+        $('connection-body').insertAdjacentHTML('beforeend', action('review-link', id, '查看相关讲解'));
         $('connection-title').focus();
     }
 
@@ -191,10 +195,11 @@
     }
 
     $('viewer').addEventListener('click', event => {
-        const target = event.target.closest('[data-node],[data-edge],[data-link],[data-port],[data-child],[data-chapter],[data-source],[data-clear]');
+        const target = event.target.closest('[data-node],[data-edge],[data-link],[data-port],[data-child],[data-chapter],[data-source],[data-clear],[data-review-node],[data-review-link]');
         if (!target || !page) return;
         const data = target.dataset;
-        if (data.source) post('source', { source: data.source });
+        if (data.reviewNode || data.reviewLink) post('review', { page: page.id, node: data.reviewNode, link: data.reviewLink });
+        else if (data.source) post('source', { source: data.source });
         else if (data.link) showLink(data.link, target);
         else if (data.port !== undefined) {
             const owner = nodes.get(selected);
@@ -215,12 +220,14 @@
             if (edge?.links.length === 1) showLink(edge.links[0], target);
             else { selected = null; selectedPort = null; selectedEdge = data.edge; updateInspector(); }
         } else if (data.node) {
+            reviewFocus = undefined;
             selectedEdge = null;
             selectedPort = null;
             selected = selected === data.node ? null : data.node;
             updateInspector();
             if (!graph.contains(target) && selected) centerSelected();
         } else if (data.clear) {
+            reviewFocus = undefined;
             selected = null;
             selectedEdge = null;
             selectedPort = null;
@@ -262,6 +269,20 @@
             exportButtons();
             status('');
             showChapter(same && chapters.has(previous.page) ? previous.page : book.pages[0].id, same ? previous.ancestors || [] : []);
+        } else if (message.type === 'review-focus' && message.revision === book?.revision) {
+            const focus = message.focus;
+            if (focus && (page.id !== focus.page || !$('interface-view').hidden)) showChapter(focus.page, focus.ancestors);
+            reviewFocus = focus;
+            if (focus) {
+                selected = null;
+                selectedEdge = null;
+                selectedPort = null;
+                if (mode === 'overview' && focus.links.some(id => links.get(id)?.labeled)) {
+                    mode = 'detailed';
+                    draw();
+                }
+            }
+            updateInspector();
         } else if (message.type === 'layout' && message.revision === book?.revision && message.request === request && message.page === page?.id) {
             layout = message;
             graph.innerHTML = message.html;

@@ -175,10 +175,21 @@ function parseReview(input) {
                 detail: string(item.detail, ekey + '.flow.detail', 200),
                 active: item.active === true,
             }));
+            let architecture;
+            if (event.architecture !== undefined) {
+                const target = event.architecture;
+                const location = ekey + '.architecture';
+                const source = files.get(target?.file);
+                check(source && /\.(?:v|sv)$/iu.test(source.path), location + '.file');
+                const names = (key, max) => list(target[key] ?? [], `${location}.${key}`, max, 0)
+                    .map(name => string(name, `${location}.${key}`, 160));
+                architecture = { top: string(target.top, location + '.top', 160), source,
+                    path: names('path', 32), instances: names('instances', 32), links: names('links', 32) };
+            }
             return {
                 title: string(event.title, ekey + '.title', 100), flow,
                 expected: string(event.expected, ekey + '.expected'), expectedValues,
-                refs: references(event.refs, ekey + '.refs'), evidence, interfaces: activeInterfaces,
+                refs: references(event.refs, ekey + '.refs'), evidence, interfaces: activeInterfaces, architecture,
             };
         });
         const eventIds = new Set(events.map(event => event.id));

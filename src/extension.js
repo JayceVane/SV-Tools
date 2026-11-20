@@ -173,8 +173,8 @@ function activate(context) {
 
     // Vivado TCL 批处理运行与工程创建
     const circuit = activateCircuitViewer(context, { vivado, sourceCatalog, waveLinks });
-    const designReview = activateReviewView(context, { vscode, projects, waveViewer });
-    activateArchitectureViewer(context, { vscode, projects });
+    const architecture = activateArchitectureViewer(context, { vscode, projects, openReview: (root, target) => designReview.open(root, target) });
+    const designReview = activateReviewView(context, { vscode, projects, waveViewer, showArchitecture: architecture.showReview });
     const projectView = activateProjectView(context,{vscode,projects,vivado,sourceCatalog,designReview});
     return { vivado, circuit, waveViewer, waveLinks, projects, projectView };
 }
