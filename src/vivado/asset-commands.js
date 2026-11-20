@@ -46,7 +46,7 @@ function activateAssetCommands(context, { vscode, findProjectXpr, incrementalAct
             if (expectedXpr && !samePath(expectedXpr, xpr)) throw new Error('工程已切换，请从当前工程重新打开');
             const project = parseXpr(xpr);
 
-            async function run(name, body, { readOnly = false, needsWritableProject = false, target, guard } = {}) {
+            async function run(name, body, { readOnly = false, needsWritableProject = false, target, guard, quiet = readOnly } = {}) {
                 const result = await runIncrementalTcl(name + '.tcl', script(xpr, body, { readOnly: readOnly && !needsWritableProject }), xpr, async current => {
                     if (pickerToken()?.isCancellationRequested) return false;
                     if (target && !member(current, target.file, target.fileset)) return false;
@@ -54,7 +54,7 @@ function activateAssetCommands(context, { vscode, findProjectXpr, incrementalAct
                         throw new Error('Block Design 已在其他位置修改，请先刷新');
                     }
                     return true;
-                }, { quiet: readOnly });
+                }, { quiet });
                 if (result?.status === 'cancelled') throw cancelledError('Vivado 操作已取消');
                 if (result?.code !== 0 || !result.logPath) {
                     const detail = result?.stdout?.match(/^SVTOOLS_TCL_ERROR (.*)$/mu)?.[1];
@@ -290,7 +290,7 @@ function activateAssetCommands(context, { vscode, findProjectXpr, incrementalAct
         const filename = target.file;
         const guard = state.stamp;
         const update = async (name, body) => {
-            const { rows } = await session.run(name, [...body, ...bd.inspect()], { target, guard });
+            const { rows } = await session.run(name, [...body, ...bd.inspect()], { target, guard, quiet: true });
             return { model: bd.snapshot(rows), stamp: await hash(filename) };
         };
         if (action === 'refresh') return readBlock(session, target);
@@ -335,7 +335,7 @@ function activateAssetCommands(context, { vscode, findProjectXpr, incrementalAct
             if (changes?.length)
                 return update('bd_set_config', selection.endpoint ? bd.configurePort(filename, item, changes) : bd.configure(filename, item.id, changes));
         } else if (action === 'connect') {
-            const { endpoint, net, level } = selection;
+            const { endpoint, net, level, destination } = selection;
             const parent = id => id.slice(0, id.lastIndexOf('/'));
             const connected = new Set(state.model.nets.filter(link => parent(link.id) === level &&
                 bd.isInterface(link) === bd.isInterface(endpoint)).flatMap(link => link.endpoints));
@@ -343,8 +343,9 @@ function activateAssetCommands(context, { vscode, findProjectXpr, incrementalAct
                 (candidate.cell === level || candidate.cell && parent(candidate.cell) === level) &&
                 !connected.has(candidate.id) && bd.isInterface(candidate) === bd.isInterface(endpoint));
             if (!candidates.length) throw new Error('当前层级没有可接入的同类端点');
-            const dest = (await pick(candidates.map(item => ({ label: item.id, description: item.direction + ' · ' + (item.type || item.kind), item })),
-            '连接到 ' + endpoint.id, { placeHolder: '选择未连接的同类端点，由 Vivado 检查方向和位宽' }))?.item;
+            if (destination && !candidates.includes(destination)) throw new Error('目标端口已连接或已变化，请刷新后重新选择');
+            const dest = destination || (await pick(candidates.map(item => ({ label: item.id, description: item.direction + ' · ' + (item.type || item.kind), item })),
+                '连接到 ' + endpoint.id, { placeHolder: '选择未连接的同类端点，由 Vivado 检查方向和位宽' }))?.item;
             if (dest) return update('bd_connect', bd.connect(filename, endpoint, dest, net, level));
         } else if (action === 'externalize') {
             return update('bd_externalize', bd.externalize(filename, selection.endpoint));

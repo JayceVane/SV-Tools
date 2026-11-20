@@ -45,12 +45,14 @@ function inspect() {
         '}',
         'foreach pin [get_bd_intf_pins -quiet -hierarchical] {',
         '    sv_row interface_pin $pin [sv_prop $pin MODE] [sv_prop $pin VLNV]',
+        '    sv_row interface_members $pin {*}[get_bd_pins -quiet -of_objects $pin]',
         '}',
         'foreach port [get_bd_ports -quiet] {',
         '    sv_row port $port [sv_prop $port DIR] [sv_prop $port TYPE] [sv_prop $port LEFT] [sv_prop $port RIGHT]',
         '}',
         'foreach port [get_bd_intf_ports -quiet] {',
         '    sv_row interface_port $port [sv_prop $port MODE] [sv_prop $port VLNV]',
+        '    sv_row interface_members $port {*}[get_bd_ports -quiet -of_objects $port]',
         '}',
         'foreach net [get_bd_nets -quiet -hierarchical] {',
         '    sv_row net $net {*}[get_bd_pins -quiet -of_objects $net] {*}[get_bd_ports -quiet -of_objects $net]',
@@ -84,11 +86,20 @@ function endpoint(item) {
 }
 
 function snapshot(rows) {
+    const members = new Map(), interfaces = new Map();
+    for (const [id, ...pins] of rowsOf(rows, 'interface_members')) {
+        if (!pins.length) continue;
+        members.set(id, pins);
+        for (const pin of pins) interfaces.set(pin, id);
+    }
     return {
         name: rowsOf(rows, 'design')[0]?.[0],
         cells: rowsOf(rows, 'cell').map(([id, type, vlnv]) => ({ id, type: vlnv.split(':')[1] === 'module_ref' ? 'module' : type, vlnv })),
         endpoints: rows.filter(([kind]) => Object.hasOwn(endpointKinds, kind))
-            .map(([kind, id, direction, type, left, right]) => ({ id, kind, direction, type, left, right, cell: kind.endsWith('pin') ? id.slice(0, id.lastIndexOf('/')) : '' })),
+            .map(([kind, id, direction, type, left, right]) => ({
+                id, kind, direction, type, left, right, cell: kind.endsWith('pin') ? id.slice(0, id.lastIndexOf('/')) : '',
+                ...(kind.startsWith('interface_') ? { members: members.get(id) } : { interfaceId: interfaces.get(id) })
+            })),
         nets: rows.filter(([kind]) => ['net', 'interface_net'].includes(kind)).map(([kind, id, ...endpoints]) => ({ id, kind, endpoints })),
         addresses: rowsOf(rows, 'address').map(([space, id, offset, range]) => ({ space, id, offset, range }))
     };

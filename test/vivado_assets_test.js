@@ -13,6 +13,7 @@ const { script, readRows, rowsOf, parametersOf, literal, removeFromProject } = r
 const ip = require('../src/vivado/ip');
 const bd = require('../src/vivado/block-design');
 const { resolveSelection } = require('../src/vivado/block-design-view');
+const { layoutSchematic } = require('../src/vivado/block-design-layout');
 const { resolveEdits } = require('../src/vivado/ip-view');
 const { parseXpr, samePath } = require('../src/vivado/xpr');
 
@@ -31,6 +32,8 @@ test('资产动作拒绝无效名称、任意生成目标、异类端点和只�
     assert.equal(resolveSelection(model, { action: 'remove', cell: 'constructor' }), undefined);
     assert.equal(resolveSelection(model, { action: 'connect', endpoint: 1 }), undefined);
     assert.equal(resolveSelection(model, { action: 'connect', endpoint: 1, level: 0 }).level, '/scope');
+    assert.equal(resolveSelection(model, { action: 'connect', endpoint: 1, level: 0, destination: 0 }).destination.id, '/scope/pin');
+    assert.equal(resolveSelection(model, { action: 'connect', endpoint: 1, level: 0, destination: 1 }), undefined);
     assert.equal(Boolean(resolveSelection(model, { action: 'disconnect', endpoint: 1, net: 1 })), false);
     assert.equal(resolveSelection(model, { action: 'disconnect', endpoint: 1, net: 0 }).net.id, '/scope/wire');
     const params = { parameters: [{ key: 'CONFIG.WIDTH', value: '4' }, { key: 'CONFIG.MODE', value: 'a' }] };
@@ -39,6 +42,49 @@ test('资产动作拒绝无效名称、任意生成目标、异类端点和只�
     assert.equal(resolveEdits(edits, { ...params, locked: true }), undefined);
     assert.equal(resolveEdits([edits[0], edits[0]], params), undefined);
     assert.equal(resolveEdits([{ key: 'CONFIG.FORGED', value: '8' }], params), undefined);
+});
+
+test('Block Design 正交布局保留信号扇出、独立接口、边界端口和层级', async () => {
+    const model = bd.snapshot([
+        ['design', 'diagram'], ['cell', '/source', 'ip', 'test:ip:source:1.0'], ['cell', '/receiver', 'ip', 'test:ip:receiver:1.0'],
+        ['cell', '/sub', 'hier', ''], ['cell', '/sub/sink', 'ip', 'test:ip:sink:1.0'],
+        ['pin', '/source/range', 'O', 'data', '7', '0'], ['pin', '/receiver/in_data', 'I', 'data', '7', '0'],
+        ['pin', '/sub/in_data', 'I', 'data', '7', '0'], ['pin', '/sub/sink/tap', 'I', 'data', '7', '0'],
+        ['pin', '/source/irq', 'O', 'data', '0', '0'], ['port', '/irq_o', 'O', 'data', '0', '0'],
+        ['interface_pin', '/source/S_AXI', 'Slave', 'test:interface:aximm:1.0'],
+        ['interface_port', '/config', 'Slave', 'test:interface:aximm:1.0'],
+        ['pin', '/source/axi_awready', 'O', 'data', '0', '0'], ['port', '/config_awready', 'O', 'data', '0', '0'],
+        ['interface_members', '/source/S_AXI', '/source/axi_awready', '/source/irq'],
+        ['interface_members', '/config', '/config_awready'],
+        ['net', '/shared', '/source/range', '/receiver/in_data', '/sub/in_data'],
+        ['interface_net', '/configuration', '/config', '/source/S_AXI'], ['net', '/interrupt', '/source/irq', '/irq_o'],
+        ['net', '/sub/inner', '/sub/in_data', '/sub/sink/tap']
+    ]);
+    const Elk = require('elkjs/lib/elk.bundled.js');
+    const options = { elk: new Elk() };
+    const top = await layoutSchematic(model, '', options);
+    const source = top.nodes.find(node => node.name === '/source');
+    assert.equal(source.ports.find(port => port.label === 'range[7:0]').side, 'EAST');
+    assert.equal(source.ports.find(port => port.label === 'S_AXI').side, 'WEST');
+    assert(!source.ports.some(port => port.label === 'axi_awready'));
+    assert(source.ports.some(port => port.label === 'irq'));
+    assert(top.nodes.find(node => node.ports.some(port => port.name === '/config')).x < source.x);
+    assert(top.nodes.find(node => node.ports.some(port => port.name === '/irq_o')).x > source.x);
+    assert.equal(top.nodes.filter(node => node.kind === 'fork').length, 1);
+    assert.equal(top.edges.filter(edge => edge.kind === 'bus').length, 3);
+    assert.equal(top.edges.filter(edge => edge.kind === 'interface').length, 1);
+    assert(!top.nodes.some(node => node.name === '/sub/sink'));
+    const inner = await layoutSchematic(model, '/sub', options);
+    assert.equal(inner.edges.length, 1);
+    assert(inner.nodes.some(node => node.kind === 'boundary' && node.ports[0].name === '/sub/in_data'));
+    const expanded = await layoutSchematic(model, '', { ...options, expandedInterfaces: true });
+    assert(expanded.nodes.find(node => node.name === '/source').ports.some(port => port.label === 'axi_awready'));
+    for (const edge of [...top.edges, ...inner.edges]) {
+        for (const section of edge.sections) {
+            const points = [section.startPoint, ...(section.bendPoints || []), section.endPoint];
+            assert(points.slice(1).every(({ x, y }, index) => x === points[index].x || y === points[index].y), edge.id);
+        }
+    }
 });
 
 const realBin = process.env.SVTOOLS_TEST_VIVADO_ASSETS === '1' && findVivadoBinDir('');
