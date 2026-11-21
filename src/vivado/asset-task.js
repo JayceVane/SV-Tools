@@ -70,6 +70,24 @@ function script(xpr, body, { readOnly = false } = {}) {
     ].join('\n') + '\n';
 }
 
+/**
+ * 常驻会话脚本：工程已由会话打开，只负责写出结果文件并执行动作。
+ * body 与批处理共用，保证两条路径的执行语义一致。
+ */
+function sessionScript(body) {
+    return [
+        ...helpers,
+        'set sv_output [open ' + RESULT_FILE + ' w]',
+        'puts $sv_output SVTOOLS_ASSETS_V1',
+        'set ::svtools_body_rc [catch {',
+        ...body.map(line => '    ' + line),
+        '    puts $sv_output END',
+        '} ::svtools_body_msg]',
+        'catch { close $sv_output }',
+        'if {$::svtools_body_rc} { error $::svtools_body_msg }'
+    ].join('\n') + '\n';
+}
+
 async function readRows(directory) {
     const file = path.join(directory, RESULT_FILE);
     const { size } = await fs.stat(file);
@@ -119,4 +137,4 @@ function requireVlnv(value) {
     return literal(value);
 }
 
-module.exports = { literal, filePath, list, script, readRows, rowsOf, parametersOf, properties, removeFromProject, requireName, requireVlnv };
+module.exports = { literal, filePath, list, script, sessionScript, readRows, rowsOf, parametersOf, properties, removeFromProject, requireName, requireVlnv };

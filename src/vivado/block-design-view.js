@@ -24,6 +24,11 @@ function html(webview, vscode, resources) {
         </div>
     </header>
     <main id="main" hidden>
+        <nav class="tabs" role="tablist" aria-label="视图切换">
+            <button id="tab-diagram" role="tab" aria-selected="true" aria-controls="diagram-view">Diagram</button>
+            <button id="tab-address" role="tab" aria-selected="false" aria-controls="address-view">Address Editor</button>
+        </nav>
+        <div id="diagram-view" class="view">
         <section class="schematic" aria-labelledby="blocks-title">
             <div class="canvas-tools" aria-label="原理图操作">
                 <div class="tools"><h2 id="blocks-title">原理图</h2><button id="level-up" title="返回上一级" aria-label="返回上一级">↑</button>
@@ -53,10 +58,21 @@ function html(webview, vscode, resources) {
             </div>
             <input id="filter" type="search" aria-label="筛选连接或对象" placeholder="筛选…">
             <ul id="objects" class="list"></ul>
-            <details id="address-section" hidden><summary>地址映射</summary>
-                <table><thead><tr><th>主地址空间</th><th>段</th><th>起始地址</th><th>范围</th></tr></thead><tbody id="addresses"></tbody></table>
-            </details>
         </aside>
+        </div>
+        <section id="address-view" class="view" aria-label="地址编辑器" hidden>
+            <div class="tools address-tools">
+                <h2>地址编辑器</h2>
+                <button data-action="assign">自动分配地址</button>
+                <button data-action="validate">校验地址映射</button>
+                <span id="address-summary" class="muted"></span>
+            </div>
+            <table class="address-table">
+                <thead><tr><th>Cell · 主地址空间</th><th>从设备接口</th><th>基地址名称</th><th>偏移地址</th><th>范围</th><th>最高地址</th><th></th></tr></thead>
+                <tbody id="addresses"></tbody>
+            </table>
+            <p id="address-empty" class="muted" hidden>此 Block Design 还没有地址空间。先连接带地址能力的 IP（例如 AXI 从设备），再执行「自动分配地址」。</p>
+        </section>
     </main>
     <p id="status" role="status" aria-live="polite"></p>
     <script nonce="${nonce}" src="${uri('block-design-canvas.js')}"></script>
@@ -64,6 +80,11 @@ function html(webview, vscode, resources) {
 }
 
 const general = new Set(['refresh', 'add-port', 'assign', 'validate', 'generate', 'wrapper', 'export', 'remove-design']);
+const hexAddress = value => {
+    const text = String(value === undefined || value === null ? '' : value).replace(/[\s_]/gu, '');
+    return /^0x[0-9a-f]{1,16}$/iu.test(text) ? text.toLowerCase() : undefined;
+};
+
 function resolveSelection(model, message) {
     const itemAt = (list, index) => Number.isInteger(index) ? list[index] : undefined;
     const cell = itemAt(model.cells, message.cell);
@@ -72,6 +93,20 @@ function resolveSelection(model, message) {
     const level = itemAt(model.cells, message.level);
     // Webview 只传索引，宿主从当前工程快照取得 Vivado 对象名。
     if (general.has(message.action)) return {};
+    if (message.action === 'address-edit') {
+        const space = (model.spaces || []).find(item => item.id === message.space);
+        const segment = space?.segments.find(item => item.id === message.segment);
+        if (!space || !segment || !hexAddress(segment.offset)) return;
+        const offset = hexAddress(message.offset), range = hexAddress(message.range);
+        if (!offset || !range) return;
+        if (offset === hexAddress(segment.offset) && range === hexAddress(segment.range)) return;
+        return { space: space.id, segment: segment.id, offset, range };
+    }
+    if (message.action === 'address-map') {
+        const segment = (model.spaces || []).flatMap(space => space.segments).find(item => item.id === message.segment);
+        if (!segment || hexAddress(segment.offset)) return;
+        return { segment: segment.id };
+    }
     if (message.action === 'add-cell') return message.cell === undefined ? {} : cell?.type === 'hier' && { cell };
     if (message.action === 'config' && cell && cell.type !== 'hier') return { cell };
     if (message.action === 'config-port' && endpoint?.kind.endsWith('port')) return { endpoint };

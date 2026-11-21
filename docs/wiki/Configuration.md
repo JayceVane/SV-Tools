@@ -55,6 +55,8 @@
 | `svtools.vivado.path` | `""` | Vivado 安装目录（如 D:/Xilinx/Vivado/2022.1，也接受其 bin 目录或 vivado.bat 全路径）。留空 = 从 XILINX_VIVADO、PATH 和常见安装位置自动探测。 |
 | `svtools.vivado.part` | `""` | 工程创建向导的默认器件型号（-part，如 xc7a35tcsg324-1）。留空 = 建好后在 Vivado 中选择。 |
 | `svtools.vivado.timeoutMs` | `0` | Vivado batch 超时时间（毫秒）；0 = 不限时（可通过命令或状态栏停止） |
+| `svtools.vivado.session` | `true` | IP 管理与 Block Design 复用常驻 Vivado Tcl 会话，避免每次点击重新启动并打开工程。会话无法启动时自动回退批处理。 |
+| `svtools.vivado.sessionIdleMinutes` | `10` | 常驻会话空闲多少分钟后关闭并释放工程（1–240）。 |
 | `svtools.vivado.simRuntime` | `""` | Vivado xsim 仿真运行时长（xsim.simulate.runtime），如 1000ns。留空 = 跑到 $finish（xsim -runall） |
 | `svtools.vivado.structure` | `{"sources":["src","rtl","rtl/**","src/**"],"sim":["sim","tb","sim/**","tb/**"],"constraints":["constraints","xdc","constraints/**","xdc/**","*.xdc"],"projectDir":"prj"}` | 工程创建向导使用的工程结构模板：按目录 glob 把文件划入 sources / sim / constraints 文件集，并指定 Vivado 工程输出目录。默认遵循 src/sim/prj 布局。 |
 | `svtools.completion.uvmVersion` | `"1.2"` | UVM 补全接口版本：UVM 1.2、IEEE 1800.2-2020（Accellera 2020.3.2）或关闭。独立于编译器配置。 |

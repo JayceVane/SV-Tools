@@ -244,6 +244,138 @@
         container.append(toolbar);
     }
 
+    // ---- 地址编辑器：主地址空间、已映射段与未映射从设备段 ----
+    const hexNumber = value => {
+        const text = String(value === undefined || value === null ? '' : value).replace(/[\s_]/g, '');
+        return /^0x[0-9a-f]{1,16}$/i.test(text) ? BigInt(text) : undefined;
+    };
+    function hexText(value, digits) {
+        let text = value.toString(16).toUpperCase();
+        if (digits) text = text.padStart(digits, '0');
+        return '0x' + text.replace(/\B(?=(?:[0-9A-F]{4})+(?![0-9A-F]))/g, '_');
+    }
+    const sizeText = value => {
+        const hit = [[1n << 30n, 'G'], [1n << 20n, 'M'], [1n << 10n, 'K']]
+            .find(([unit]) => value >= unit && value % unit === 0n);
+        return hit ? (value / hit[0]).toString() + hit[1] : value.toString();
+    };
+    const bitWidth = value => { let bits = 0; while ((1n << BigInt(bits)) < value) bits += 1; return bits; };
+    const spaceParent = id => id.slice(0, id.lastIndexOf('/'));
+    const spaceSlug = id => spaceParent(id).split('/').filter(Boolean).join('_');
+    const segmentLabel = segment => segment.name || segment.id.slice(segment.id.lastIndexOf('/') + 1);
+    const isExternal = space => space.owner.kind === 'port';
+    const isMasterSpace = space => isExternal(space) || (space.owner.kind === 'pin' && space.owner.mode === 'Master');
+    const isSlaveSpace = space => space.owner.kind === 'pin' && space.owner.mode === 'Slave';
+    function slaveOf(name, spaces) {
+        for (const space of spaces) {
+            if (!isSlaveSpace(space)) continue;
+            const prefix = 'SEG_' + spaceSlug(space.id) + '_';
+            for (const segment of space.segments) if (prefix + segmentLabel(segment) === name) return { space, segment };
+        }
+    }
+    function addressInput(space, segment, field) {
+        const input = node('input');
+        input.type = 'text';
+        input.value = (field === 'offset' ? segment.offset : segment.range) || '';
+        input.spellcheck = false;
+        input.autocomplete = 'off';
+        input.dataset.field = field;
+        input.disabled = busy || preview;
+        input.setAttribute('aria-label', (field === 'offset' ? '偏移地址 ' : '范围 ') + segment.id);
+        input.onchange = () => {
+            const row = input.closest('tr');
+            mutate('address-edit', { space: space.id, segment: segment.id,
+                offset: row.querySelector('input[data-field=offset]').value,
+                range: row.querySelector('input[data-field=range]').value });
+        };
+        const cell = node('td');
+        cell.append(input);
+        return cell;
+    }
+    function mappedRow(space, segment, spaces) {
+        const row = node('tr');
+        const slave = slaveOf(segmentLabel(segment), spaces);
+        const offset = hexNumber(segment.offset), range = hexNumber(segment.range);
+        row.append(node('td', slave ? slave.space.id : '—'));
+        row.append(node('td', segmentLabel(segment)));
+        row.append(addressInput(space, segment, 'offset'));
+        row.append(addressInput(space, segment, 'range'));
+        const width = String(segment.offset || '').replace(/^0x/i, '').length;
+        row.append(node('td', offset !== undefined && range !== undefined && range > 0n ? hexText(offset + range - 1n, width) : '—', 'addr-number'));
+        row.append(node('td', slave ? slave.segment.id : '', 'muted'));
+        row.append(node('td'));
+        return row;
+    }
+    function unmappedRow(space, segment) {
+        const row = node('tr', undefined, 'addr-unmapped');
+        row.append(node('td', '—'));
+        row.append(node('td', space.id));
+        row.append(node('td', segmentLabel(segment)));
+        const range = hexNumber(segment.range);
+        const hint = node('td', range ? sizeText(range) : '', 'muted');
+        hint.colSpan = 3;
+        row.append(hint);
+        const action = node('button', '映射…');
+        action.type = 'button';
+        action.disabled = busy || preview;
+        action.onclick = () => mutate('address-map', { segment: segment.id });
+        const cell = node('td');
+        cell.append(action);
+        row.append(cell);
+        return row;
+    }
+    function groupRow(title, detail) {
+        const row = node('tr', undefined, 'addr-group');
+        const cell = node('td');
+        cell.colSpan = 7;
+        cell.append(node('strong', title));
+        if (detail) cell.append(node('span', ' ' + detail, 'muted'));
+        row.append(cell);
+        return row;
+    }
+    function drawAddresses() {
+        const body = $('addresses');
+        if (!model) { body.replaceChildren(); return; }
+        const spaces = model.spaces || [];
+        const masters = spaces.filter(isMasterSpace);
+        const mapped = new Set(masters.flatMap(space => space.segments.map(segmentLabel)));
+        const unmapped = spaces.filter(isSlaveSpace).flatMap(space => space.segments.map(segment => ({ space, segment })))
+            .filter(({ space, segment }) => !mapped.has('SEG_' + spaceSlug(space.id) + '_' + segmentLabel(segment)));
+        const rows = [];
+        for (const space of masters) {
+            const range = hexNumber(space.range);
+            rows.push(groupRow(space.id, range ? bitWidth(range) + ' 位 · 0x0000_0000 [' + sizeText(range) + '] · ' + (isExternal(space) ? '外部主设备' : '内部主设备')
+                : (isExternal(space) ? '外部主设备' : '内部主设备')));
+            if (!space.segments.length) {
+                const empty = node('tr');
+                const cell = node('td', '尚未分配从设备段', 'muted');
+                cell.colSpan = 7;
+                empty.append(cell);
+                rows.push(empty);
+            }
+            for (const segment of space.segments) rows.push(mappedRow(space, segment, spaces));
+        }
+        if (unmapped.length) {
+            rows.push(groupRow('未映射的从设备段', unmapped.length + ' 个'));
+            for (const { space, segment } of unmapped) rows.push(unmappedRow(space, segment));
+        }
+        body.replaceChildren(...rows);
+        $('address-empty').hidden = rows.length > 0;
+        const total = masters.reduce((sum, space) => sum + space.segments.length, 0);
+        $('address-summary').textContent = rows.length ? masters.length + ' 个主地址空间 · ' + total + ' 个已映射段' : '';
+    }
+    let view = 'diagram';
+    function showView(next) {
+        view = next === 'address' ? 'address' : 'diagram';
+        $('diagram-view').hidden = view !== 'diagram';
+        $('address-view').hidden = view !== 'address';
+        $('tab-diagram').setAttribute('aria-selected', String(view === 'diagram'));
+        $('tab-address').setAttribute('aria-selected', String(view === 'address'));
+        if (view === 'address') drawAddresses();
+    }
+    $('tab-diagram').onclick = () => showView('diagram');
+    $('tab-address').onclick = () => showView('address');
+
     function drawObjects() {
         const query = $('filter').value.trim().toLowerCase();
         const provider = objectMode === 'net' ? [['net', scope.nets]] : [['cell', scope.cells], ['endpoint', scope.endpoints]];
@@ -268,6 +400,7 @@
 
     function drawControls() {
         for (const control of document.querySelectorAll('[data-action]')) control.disabled = busy || control.dataset.action !== 'refresh' && (!model || preview);
+        for (const control of document.querySelectorAll('#addresses input, #addresses button')) control.disabled = busy || preview;
         for (const id of ['zoom-in', 'zoom-out', 'zoom-reset', 'zoom-fit']) $(id).disabled = !hasLayout;
         $('wire-mode').disabled = busy || preview || !scope?.endpoints.length;
         $('interface-members').disabled = !scope?.endpoints.some(index => model.endpoints[index].interfaceId);
@@ -386,12 +519,7 @@
             $('path').textContent = data.file;
             $('path').title = data.file;
             $('main').hidden = false;
-            $('address-section').hidden = !model.addresses.length;
-            $('addresses').replaceChildren(...model.addresses.map(address => {
-                const row = node('tr');
-                for (const value of [address.space, address.id, address.offset || '待分配', address.range]) row.append(node('td', value));
-                return row;
-            }));
+            drawAddresses();
             report(data.message);
             drawLevel(!level && !expandedInterfaces ? data.rootLayout : undefined);
         } else if (data.type === 'layout' && data.revision === revision && data.request === request && data.level === level) {

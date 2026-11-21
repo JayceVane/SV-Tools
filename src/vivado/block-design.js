@@ -61,8 +61,17 @@ function inspect() {
         '    sv_row interface_net $net {*}[get_bd_intf_pins -quiet -of_objects $net] {*}[get_bd_intf_ports -quiet -of_objects $net]',
         '}',
         'foreach space [get_bd_addr_spaces -quiet] {',
+        '    set ports [get_bd_intf_ports -quiet -of_objects $space]',
+        '    set pins [get_bd_intf_pins -quiet -of_objects $space]',
+        '    set ownerKind ""; set owner ""; set ownerMode ""',
+        '    if {[llength $ports] == 1} {',
+        '        set owner [lindex $ports 0]; set ownerKind port; set ownerMode [sv_prop $owner MODE]',
+        '    } elseif {[llength $pins] == 1} {',
+        '        set owner [lindex $pins 0]; set ownerKind pin; set ownerMode [sv_prop $owner MODE]',
+        '    }',
+        '    sv_row address_space $space [sv_prop $space RANGE] $ownerKind $owner $ownerMode',
         '    foreach segment [get_bd_addr_segs -quiet -of_objects $space] {',
-        '        sv_row address $space $segment [sv_prop $segment OFFSET] [sv_prop $segment RANGE]',
+        '        sv_row address $space $segment [sv_prop $segment NAME] [sv_prop $segment OFFSET] [sv_prop $segment RANGE]',
         '    }',
         '}'
     ];
@@ -101,7 +110,13 @@ function snapshot(rows) {
                 ...(kind.startsWith('interface_') ? { members: members.get(id) } : { interfaceId: interfaces.get(id) })
             })),
         nets: rows.filter(([kind]) => ['net', 'interface_net'].includes(kind)).map(([kind, id, ...endpoints]) => ({ id, kind, endpoints })),
-        addresses: rowsOf(rows, 'address').map(([space, id, offset, range]) => ({ space, id, offset, range }))
+        addresses: rowsOf(rows, 'address').map(([space, id, name, offset, range]) => ({ space, id, name, offset, range })),
+        spaces: rowsOf(rows, 'address_space').map(([id, range, kind, owner, mode]) => ({
+            id, range,
+            owner: { kind: kind || '', id: owner || '', mode: mode || '' },
+            segments: rowsOf(rows, 'address').filter(([space]) => space === id)
+                .map(([, segment, name, offset, size]) => ({ id: segment, name: name || segment.slice(segment.lastIndexOf('/') + 1), offset, range: size }))
+        }))
     };
 }
 
@@ -159,6 +174,34 @@ function addInterfacePort(file, { name, mode, vlnv }) {
     return [...select(file), ...edit(['create_bd_intf_port -mode ' + mode + ' -vlnv ' + requireVlnv(vlnv) + ' ' + requireName(name)])];
 }
 
+/** 校验十六进制地址：只接受 0x 前缀的无符号整数，避免把 Tcl 表达式带进脚本。 */
+function addressValue(value, label) {
+    const text = String(value === undefined || value === null ? '' : value).replace(/_/gu, '');
+    if (!/^0[xX][0-9a-fA-F]{1,16}$/u.test(text)) throw new Error(label + '须为 0x 前缀的十六进制地址');
+    return literal(text);
+}
+
+const addressSegment = id => 'set segment [sv_exact [get_bd_addr_segs -quiet] ' + literal(id) + ' "Address segment"]';
+
+/** 修改已映射段：Vivado 按主设备 aperture 校验，越界会直接报错。 */
+function setAddress(file, id, { offset, range }) {
+    return [...select(file), ...edit([
+        addressSegment(id),
+        'if {[catch { set_property range ' + addressValue(range, '范围') + ' $segment } message]} { error "范围无效：$message" }',
+        'if {[catch { set_property offset ' + addressValue(offset, '偏移地址') + ' $segment } message]} { error "偏移地址无效：$message" }'
+    ])];
+}
+
+/** 把未映射的从设备段分配进主地址空间（对应 Vivado Address Editor 的映射操作）。 */
+function mapAddress(file, { space, segment, offset, range }) {
+    return [...select(file), ...edit([
+        'set space [sv_exact [get_bd_addr_spaces -quiet] ' + literal(space) + ' "Address space"]',
+        addressSegment(segment),
+        'if {[catch { assign_bd_address -target_address_space $space -offset ' + addressValue(offset, '偏移地址')
+            + ' -range ' + addressValue(range, '范围') + ' $segment } message]} { error "地址映射失败：$message" }'
+    ])];
+}
+
 const assignAddresses = file => [...select(file), ...edit(['assign_bd_address'])];
 const validate = file => [...select(file), ...edit(['validate_bd_design'])];
 const generate = file => [...validate(file), 'generate_target all $bd'];
@@ -166,4 +209,5 @@ const wrapper = file => [...generate(file), 'make_wrapper -files $bd -top -impor
 const exportTcl = file => [...select(file), 'write_bd_tcl [file join [pwd] block-design.tcl]', 'sv_row artifact block-design.tcl'];
 
 module.exports = { create, importSource, read, inspect, snapshot, isInterface, addCell, parameters, configure, connect, disconnect, remove,
-    externalize, addPort, addInterfacePort, portParameters, configurePort, assignAddresses, validate, generate, wrapper, exportTcl };
+    externalize, addPort, addInterfacePort, portParameters, configurePort, assignAddresses, setAddress, mapAddress, addressValue,
+    validate, generate, wrapper, exportTcl };

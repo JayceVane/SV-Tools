@@ -9,7 +9,7 @@ const { createToolTaskManager } = require('../src/toolchains/job');
 const { runVivadoBatchTask } = require('../src/vivado/batch');
 const { buildBatchArgs, findVivadoBinDir } = require('../src/vivado/toolchain');
 const { tclQuote } = require('../src/vivado/tclgen');
-const { script, readRows, rowsOf, parametersOf, literal, removeFromProject } = require('../src/vivado/asset-task');
+const { script, sessionScript, readRows, rowsOf, parametersOf, literal, removeFromProject } = require('../src/vivado/asset-task');
 const ip = require('../src/vivado/ip');
 const bd = require('../src/vivado/block-design');
 const { resolveSelection, createSchematicLayouts } = require('../src/vivado/block-design-view');
@@ -19,6 +19,7 @@ const { resolveEdits } = require('../src/vivado/ip-view');
 const { savedBlock, savedIp } = require('../src/vivado/asset-preview');
 const { createIpMetadata } = require('../src/vivado/ip-metadata');
 const { parseXpr, samePath } = require('../src/vivado/xpr');
+const summary = require('../src/vivado/summary');
 
 test('资产动作拒绝无效名称、任意生成目标、异类端点和只读元数据修改', () => {
     assert.throws(() => ip.create({ vlnv: 'xilinx.com:ip:xlconstant:1.1', name: 'new; exit' }), /名称/u);
@@ -46,6 +47,56 @@ test('资产动作拒绝无效名称、任意生成目标、异类端点和只�
     assert.equal(resolveEdits(edits, { ...params, preview: true }), undefined);
     assert.equal(resolveEdits([edits[0], edits[0]], params), undefined);
     assert.equal(resolveEdits([{ key: 'CONFIG.FORGED', value: '8' }], params), undefined);
+});
+
+test('地址编辑器按主地址空间分组，改址与映射只接受快照里可验证的段', () => {
+    const model = bd.snapshot([
+        ['address_space', '/S_AXI_0', '0x0000000000008000', 'port', '/S_AXI_0', 'Slave'],
+        ['address', '/S_AXI_0', '/S_AXI_0/SEG_bram_Mem0', 'SEG_bram_Mem0', '0x0000', '0x1000'],
+        ['address_space', '/bram/S_AXI', '0x00008000', 'pin', '/bram/S_AXI', 'Slave'],
+        ['address', '/bram/S_AXI', '/bram/S_AXI/Mem0', 'Mem0', '', '0x00001000']
+    ]);
+    assert.equal(model.spaces.length, 2);
+    assert.deepEqual(model.spaces[0].owner, { kind: 'port', id: '/S_AXI_0', mode: 'Slave' });
+    assert.equal(model.spaces[0].segments[0].name, 'SEG_bram_Mem0');
+    assert.equal(model.spaces[1].segments[0].offset, '');
+    const edit = resolveSelection(model, { action: 'address-edit', space: '/S_AXI_0', segment: '/S_AXI_0/SEG_bram_Mem0',
+        offset: '0x1000', range: '0x1000' });
+    assert.deepEqual(edit, { space: '/S_AXI_0', segment: '/S_AXI_0/SEG_bram_Mem0', offset: '0x1000', range: '0x1000' });
+    assert.equal(resolveSelection(model, { action: 'address-edit', space: '/S_AXI_0', segment: '/S_AXI_0/SEG_bram_Mem0',
+        offset: '0x', range: '0x1000' }), undefined);
+    assert.equal(resolveSelection(model, { action: 'address-edit', space: '/S_AXI_0', segment: '/missing', offset: '0x1000', range: '0x1000' }), undefined);
+    assert.deepEqual(resolveSelection(model, { action: 'address-map', segment: '/bram/S_AXI/Mem0' }), { segment: '/bram/S_AXI/Mem0' });
+    assert.equal(resolveSelection(model, { action: 'address-map', segment: '/S_AXI_0/SEG_bram_Mem0' }), undefined);
+    assert.throws(() => bd.setAddress('x.bd', '/a/b', { offset: '4096', range: '0x1000' }), /十六进制/u);
+    assert.throws(() => bd.mapAddress('x.bd', { space: '/s', segment: '/a/b', offset: '0x1000', range: '0x1000; exit' }), /十六进制/u);
+    const script = bd.mapAddress('x.bd', { space: '/S_AXI_0', segment: '/bram/S_AXI/Mem0', offset: '0x2000', range: '0x1000' }).join('\n');
+    assert.equal(script.includes('assign_bd_address -target_address_space $space -offset '), true);
+    assert.match(bd.setAddress('x.bd', '/S_AXI_0/SEG_bram_Mem0', { offset: '0x1000', range: '0x1000' }).join('\n'), /set_property range/);
+});
+
+test('常驻会话脚本不重开工程，工程概览解析run状态与消息', () => {
+    const body = sessionScript(['sv_row design demo']);
+    assert.match(body, /SVTOOLS_ASSETS_V1/);
+    assert.match(body, /sv_row design demo/);
+    assert.doesNotMatch(body, /open_project|close_project|exit 1/);
+    const data = summary.parse([
+        ['project', 'demo', 'xc7a35tcsg324-1', 'C:/demo', 'top', ''],
+        ['run', 'synth_1', 'Complete', '100%', 'Vivado Synthesis Defaults', '0', 'synth_design', '00:01:22', '', '', '', '', '0.5', '0'],
+        ['run', 'impl_1', 'Running', 'Running', 'Performance', '1', 'place_design', '00:00:31', '-0.123', '-1.2', '0.05', '0', '1.2', '1'],
+        ['messages', '2', '7']
+    ]);
+    assert.equal(data.project.name, 'demo');
+    assert.equal(data.project.part, 'xc7a35tcsg324-1');
+    assert.equal(data.runs.length, 2);
+    assert.equal(data.runs[1].timing.wns, -0.123);
+    assert.equal(data.runs[1].needsRefresh, true);
+    assert.equal(data.runs[1].implementation, true);
+    assert.equal(summary.isActive(data.runs[1]), true);
+    assert.equal(summary.isActive(data.runs[0]), false);
+    assert.deepEqual(data.messages, { errors: 2, warnings: 7 });
+    const paths = summary.runPaths(data, path.join('C:', 'work', 'demo.xpr'));
+    assert.equal(paths.impl_1.log.endsWith(path.join('demo.runs', 'impl_1', 'runme.log')), true);
 });
 
 test('Block Design 布局在宿主重启后复用坐标，结构、层级和接口展开状态分别匹配', async t => {

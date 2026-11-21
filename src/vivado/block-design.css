@@ -44,8 +44,23 @@ select { max-width: 195px; }
 .more > .tools { position: absolute; right: 0; top: calc(100% + 5px); display: grid; min-width: 170px; padding: 5px;
     border: 1px solid var(--frame); background: var(--vscode-menu-background, var(--panel-bg)); box-shadow: 0 3px 10px var(--vscode-widget-shadow); }
 .more > .tools button { text-align: left; white-space: nowrap; }
-main { min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(235px, 281px); overflow: hidden; }
-main.wide-canvas { grid-template-columns: minmax(0, 1fr); }
+main { min-height: 0; display: grid; grid-template-rows: auto minmax(0, 1fr); overflow: hidden; }
+main > .view { min-height: 0; overflow: hidden; }
+#diagram-view { display: grid; grid-template-columns: minmax(0, 1fr) minmax(235px, 281px); }
+main.wide-canvas #diagram-view { grid-template-columns: minmax(0, 1fr); }
+.tabs { display: flex; gap: 2px; padding: 0 8px; background: var(--panel-bg); border-bottom: 1px solid var(--frame); }
+.tabs button { border-radius: 4px 4px 0 0; border-color: transparent; padding: 4px 13px; }
+.tabs button[aria-selected=true] { background: var(--drawing-bg); border-color: var(--frame); border-bottom-color: var(--drawing-bg); margin-bottom: -1px; }
+#address-view { overflow: auto; padding: 8px 11px; }
+.address-tools { gap: 8px; padding: 0 0 8px; }
+.address-tools h2 { margin-inline-end: auto; }
+.address-table { width: 100%; border-collapse: collapse; }
+.address-table th { position: sticky; top: 0; z-index: 1; background: var(--panel-bg); border-bottom: 1px solid var(--frame); }
+.address-table th, .address-table td { text-align: left; vertical-align: middle; padding: 4px 6px; border-bottom: 1px solid color-mix(in srgb, var(--frame) 55%, transparent); }
+.address-table tr.addr-group td { padding-top: 13px; background: color-mix(in srgb, var(--interface) 9%, transparent); }
+.address-table tr.addr-unmapped td { color: var(--muted); }
+.address-table input { width: 100%; min-width: 96px; padding: 2px 5px; border-radius: 3px; font-variant-numeric: tabular-nums; }
+.address-table .addr-number { font-variant-numeric: tabular-nums; white-space: nowrap; }
 .schematic { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; min-width: 0; min-height: 0; }
 .canvas-tools, .canvas-footer { padding: 5px 8px; background: var(--panel-bg); }
 .canvas-tools { border-bottom: 1px solid var(--frame); column-gap: 8px; }
@@ -79,7 +94,6 @@ aside { min-width: 0; min-height: 0; overflow: auto; border-left: 1px solid var(
 .connected-endpoint { display: flex; gap: 4px; align-items: center; }
 .connected-endpoint .selector { flex: 1; min-width: 0; }
 .connected-endpoint > button:last-child { flex-shrink: 0; }
-#address-section summary { padding-inline: 0; }
 table { width: 100%; border-collapse: collapse; font-size: .88em; overflow-wrap: anywhere; }
 td, th { text-align: left; vertical-align: top; padding: 3px; border-bottom: 1px solid var(--frame); }
 #status { min-height: 28px; max-height: 90px; overflow: auto; padding: 4px 10px; border-top: 1px solid var(--frame); background: var(--panel-bg); overflow-wrap: anywhere; }
@@ -116,7 +130,7 @@ td, th { text-align: left; vertical-align: top; padding: 3px; border-bottom: 1px
 .bd-pin.picked .bd-hit, .bd-pin.wire-start .bd-hit, .bd-pin:focus-visible .bd-hit { fill: color-mix(in srgb, var(--wire-active) 18%, transparent); }
 .canvas.wiring [data-kind=endpoint] { cursor: crosshair; }
 @media (max-width: 650px) {
-    main { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) min(29vh, 210px); }
-    main.wide-canvas { grid-template-rows: minmax(0, 1fr); }
+    #diagram-view { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) min(29vh, 210px); }
+    main.wide-canvas #diagram-view { grid-template-rows: minmax(0, 1fr); }
     aside { border-left: 0; border-top: 1px solid var(--frame); }
 }

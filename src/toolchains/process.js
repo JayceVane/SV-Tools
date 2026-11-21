@@ -228,4 +228,4 @@ function startProcess(command, args, options = {}) {
 /** @param {string} command @param {string[]} args @param {Parameters<typeof startProcess>[2]} [options] @returns {ReturnType<typeof startProcess>['completion']} */
 function runProcess(command, args, options) { return startProcess(command, args, options).completion; }
 
-module.exports = { cmdQuote, terminateProcessTree, startProcess, runProcess };
+module.exports = { cmdQuote, batchInvocation, terminateProcessTree, startProcess, runProcess };

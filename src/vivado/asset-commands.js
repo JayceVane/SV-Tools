@@ -5,7 +5,7 @@ const path = require('node:path');
 const { createHash } = require('node:crypto');
 const { cancelledError } = require('../toolchains/job');
 const { parseXpr, samePath } = require('./xpr');
-const { script, readRows, rowsOf, parametersOf, removeFromProject } = require('./asset-task');
+const { script, sessionScript, readRows, rowsOf, parametersOf, removeFromProject } = require('./asset-task');
 const { openBlockDesignPanels } = require('./block-design-view');
 const { openIpPanels } = require('./ip-view');
 const { openCatalogPanels } = require('./ip-catalog-view');
@@ -66,7 +66,7 @@ function activateAssetCommands(context, { vscode, findProjectXpr, incrementalAct
                         throw new Error('资产文件已在其他位置修改，请先刷新');
                     }
                     return true;
-                }, { quiet });
+                }, { quiet, sessionBody: sessionScript(body), watch: target ? [target.file] : [] });
                 if (result?.status === 'cancelled') throw cancelledError('Vivado 操作已取消');
                 if (result?.code !== 0 || !result.logPath) {
                     const detail = result?.stdout?.match(/^SVTOOLS_TCL_ERROR (.*)$/mu)?.[1];
@@ -465,6 +465,26 @@ function activateAssetCommands(context, { vscode, findProjectXpr, incrementalAct
             const item = selection[kind];
             if (await confirm(`删除 ${item.id}？Vivado 会更新与它相关的连接。`, '删除'))
                 return update('bd_remove', bd.remove(filename, kind, item));
+        } else if (action === 'address-edit') {
+            return update('bd_address_set', bd.setAddress(filename, selection.segment, { offset: selection.offset, range: selection.range }));
+        } else if (action === 'address-map') {
+            const hex = value => /^0x[0-9a-f]{1,16}$/iu.test(String(value).replace(/[_\s]/gu, ''));
+            const spaces = (state.model.spaces || []).filter(space => space.owner.kind === 'port' ||
+                space.owner.kind === 'pin' && space.owner.mode === 'Master');
+            if (!spaces.length) throw new Error('当前 Block Design 没有可用的主地址空间');
+            const slave = (state.model.spaces || []).flatMap(space => space.segments.map(segment => ({ ...segment, space: space.id })))
+                .find(segment => segment.id === selection.segment);
+            if (!slave) throw new Error('从设备段已变化，请刷新后重试');
+            const target = spaces.length === 1 ? spaces[0].id : (await pick(spaces.map(space => ({
+                label: space.id, description: space.owner.kind === 'port' ? '外部主设备' : '内部主设备', value: space.id
+            })), '映射到主地址空间'))?.value;
+            if (!target) return;
+            const validateInput = value => hex(value) ? undefined : '请输入 0x 前缀的十六进制地址';
+            const offset = await input('偏移地址', { value: '0x0000_0000', validateInput });
+            if (!offset) return;
+            const range = await input('范围', { value: slave.range || '0x00001000', validateInput });
+            if (!range) return;
+            return update('bd_address_map', bd.mapAddress(filename, { space: target, segment: selection.segment, offset, range }));
         } else if (action === 'assign') {
             return update('bd_assign_address', bd.assignAddresses(filename));
         } else if (action === 'validate') {
