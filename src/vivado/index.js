@@ -688,7 +688,7 @@ function activateVivado(context, deps) {
     }
 
     require('./asset-commands').activateAssetCommands(context, {
-        vscode, findProjectXpr, incrementalAction, runIncrementalTcl,
+        vscode, findProjectXpr, incrementalAction, runIncrementalTcl, resolveBinDir,
         pickerToken: () => incrementalPicker?.token,
         refresh: () => projectTree?.refresh()
     });

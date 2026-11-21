@@ -64,41 +64,31 @@ function readElement(token, fail) {
     return { name, closing: false, attrs: readAttributes(empty ? body.slice(0, -1) : body, fail), empty };
 }
 
-/**
- * 解析完整 XPR 文本；仅支持 Vivado 使用的 XML 1.0，无 DTD 或外部 entity。
- * @param {string} text UTF-8 解码后的文本
- * @param {string} xprPath 工程文件路径，用于诊断和解析相对引用
- * @returns {{path:string, dir:string, part:string, sets:Array<{name:string,type:string,top:string,files:string[]}>}}
- * @throws {Error} XML 损坏、非 Project 根、关键文件集属性缺失
- */
-function parseXprText(text, xprPath, { onElement } = {}) {
-    if (typeof text !== 'string') throw new TypeError('XPR 文本必须是字符串');
-    if (typeof xprPath !== 'string' || !xprPath) throw new TypeError('XPR 路径不能为空');
+/** 读取 Vivado 使用的 UTF-8 XML 1.0，无 DTD 或外部 entity。 */
+function walkXml(text, filename, root, { onElement, onText, label = 'XML' } = {}) {
+    if (typeof text !== 'string') throw new TypeError('XML 文本必须是字符串');
     text = text.replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n');
     let position = 0;
     const fail = message => {
         const line = text.slice(0, position).split('\n').length;
-        throw new Error('XPR XML 无效（' + xprPath + '，第 ' + line + ' 行）：' + message);
+        throw new Error(label + ' 无效（' + filename + '，第 ' + line + ' 行）：' + message);
     };
     for (const character of text) {
         if (!isXmlCharacter(character.codePointAt(0))) fail('包含 XML 1.0 不允许的字符');
         position += character.length;
     }
     position = 0;
-    const parsed = { path: xprPath, dir: path.dirname(xprPath), part: '', sets: [] };
     const stack = [];
-    const names = new Set();
-    const topNames = new Set();
-    let hasProject = false;
-    let hasPart = false;
+    let hasRoot = false;
     const tokens = new RegExp(XML_TOKEN.source, 'g');
     let offset = 0;
     let match;
     const checkText = fragment => {
-        if (fragment.includes('<')) fail('标记未闭合或不受支持（XPR 不支持 DTD）');
-        if (!stack.length && !XML_SPACE.test(fragment)) fail('Project 根元素外含有文本');
+        if (fragment.includes('<')) fail('标记未闭合或不受支持（不支持 DTD）');
+        if (!stack.length && !XML_SPACE.test(fragment)) fail('根元素外含有文本');
         if (fragment.includes(']]>')) fail('普通 XML 文本不能包含 ]]>');
-        decodeEntities(fragment, fail);
+        const value = decodeEntities(fragment, fail);
+        if (stack.length && value) onText?.(value, stack);
     };
     while ((match = tokens.exec(text))) {
         position = offset;
@@ -126,21 +116,41 @@ function parseXprText(text, xprPath, { onElement } = {}) {
             continue;
         }
         if (token.startsWith('<![CDATA[')) {
-            if (!stack.length) fail('CDATA 必须位于 Project 内');
+            if (!stack.length) fail('CDATA 必须位于根元素内');
+            onText?.(token.slice(9, -3), stack);
             continue;
         }
         const element = readElement(token, fail);
-        onElement?.({ ...element, start: match.index, end: offset, parents: stack.map(item => ({ name: item.name, attrs: item.attrs })) });
+        const event = { ...element, start: match.index, end: offset };
         if (element.closing) {
-            const opened = stack.pop();
+            const opened = stack.at(-1);
             if (!opened || opened.name !== element.name) fail('结束标签不匹配：' + element.name);
+            onElement?.(event, stack, fail);
+            stack.pop();
             continue;
         }
         if (!stack.length) {
-            if (hasProject || element.name !== 'Project') fail('文件必须包含且仅包含一个 Project 根元素');
-            hasProject = true;
+            if (hasRoot || !root.test(element.name)) fail('文件必须包含且仅包含一个受支持的根元素');
+            hasRoot = true;
         }
-        let set = stack.length ? stack[stack.length - 1].set : null;
+        const entry = onElement?.(event, stack, fail);
+        if (!element.empty) stack.push({ name: element.name, attrs: element.attrs, data: entry });
+    }
+    position = offset;
+    checkText(text.slice(offset));
+    if (!hasRoot) fail('缺少根元素');
+    if (stack.length) fail('文件未写完，缺少结束标签：' + stack[stack.length - 1].name);
+}
+
+function parseXprText(text, xprPath, { onElement } = {}) {
+    if (typeof xprPath !== 'string' || !xprPath) throw new TypeError('XPR 路径不能为空');
+    const parsed = { path: xprPath, dir: path.dirname(xprPath), part: '', sets: [] };
+    const names = new Set(), topNames = new Set();
+    let hasPart = false;
+    walkXml(text, xprPath, /^Project$/, { label: 'XPR XML', onElement(element, stack, fail) {
+        onElement?.({ ...element, parents: stack.map(({ name, attrs }) => ({ name, attrs })) });
+        if (element.closing) return;
+        let set = stack.at(-1)?.data;
         const attrs = element.attrs;
         if (element.name === 'FileSet') {
             if (set) fail('FileSet 不能嵌套');
@@ -167,12 +177,8 @@ function parseXprText(text, xprPath, { onElement } = {}) {
                 topNames.add(set.name);
             }
         }
-        if (!element.empty) stack.push({ name: element.name, set, attrs });
-    }
-    position = offset;
-    checkText(text.slice(offset));
-    if (!hasProject) fail('缺少 Project 根元素');
-    if (stack.length) fail('文件未写完，缺少结束标签：' + stack[stack.length - 1].name);
+        return set;
+    } });
     return parsed;
 }
 
@@ -236,4 +242,4 @@ function inspectXprText(text, xprPath) {
     const parsed=parseXprText(normalized,xprPath,{onElement:element=>elements.push(element)});
     return {text:normalized,parsed,elements};
 }
-module.exports = { parseXpr, parseXprText, inspectXprText, fileSetOf, samePath, resolveXprPath };
+module.exports = { parseXpr, parseXprText, inspectXprText, fileSetOf, samePath, resolveXprPath, walkXml };

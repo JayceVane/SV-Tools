@@ -3,14 +3,14 @@
 const path = require('node:path');
 const { literal, filePath, list, properties, requireName, requireVlnv } = require('./asset-task');
 
-function catalog(forBlockDesign) {
+function catalog() {
     return [
         'sv_row tool [version -short] [sv_prop [current_project] PART]',
-        'foreach definition [get_ipdefs -quiet -all] {',
-        forBlockDesign ? '    if {"IPI" ni [sv_prop $definition DESIGN_TOOL_CONTEXTS]} { continue }' : '',
-        '    sv_row definition $definition [sv_prop $definition DISPLAY_NAME] [sv_prop $definition DESCRIPTION]',
+        'foreach definition [get_ipdefs -quiet] {',
+        '    set ipi [expr {"IPI" in [sv_prop $definition DESIGN_TOOL_CONTEXTS]}]',
+        '    sv_row definition $definition [sv_prop $definition DISPLAY_NAME] [sv_prop $definition DESCRIPTION] $ipi {*}[sv_prop $definition TAXONOMY]',
         '}'
-    ].filter(Boolean);
+    ];
 }
 
 function create({ vlnv, name, directory }) {
@@ -56,6 +56,8 @@ const select = file => [
 
 const inspect = [
     'sv_row ip $ip [sv_prop $ip IPDEF] [sv_prop $ip IS_LOCKED] [sv_prop $ip UPGRADE_VERSIONS] [sv_prop $ipFile GENERATE_SYNTH_CHECKPOINT] {*}[sv_prop $ip SUPPORTED_TARGETS]',
+    'set definitions [get_ipdefs -quiet -of_objects $ip]',
+    'if {[llength $definitions] == 1} { sv_row definition_xml [sv_prop [lindex $definitions 0] XML_FILE_NAME] }',
     'sv_parameters $ip'
 ];
 const info = file => [...select(file), ...inspect];

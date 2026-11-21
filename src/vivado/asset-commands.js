@@ -8,6 +8,9 @@ const { parseXpr, samePath } = require('./xpr');
 const { script, readRows, rowsOf, parametersOf, removeFromProject } = require('./asset-task');
 const { openBlockDesignPanels } = require('./block-design-view');
 const { openIpPanels } = require('./ip-view');
+const { openCatalogPanels } = require('./ip-catalog-view');
+const { readAssetText, savedBlock, savedIp } = require('./asset-preview');
+const { createIpMetadata } = require('./ip-metadata');
 const ip = require('./ip');
 const bd = require('./block-design');
 
@@ -26,8 +29,11 @@ function assets(project, extension) {
 const hash = async file => createHash('sha256').update(await fs.readFile(file)).digest('hex');
 const IP_LANGUAGES = ['verilog', 'systemverilog', 'vhdl'];
 
-function activateAssetCommands(context, { vscode, findProjectXpr, incrementalAction, runIncrementalTcl, pickerToken, refresh }) {
-    const catalogCache = new Map();
+function activateAssetCommands(context, { vscode, findProjectXpr, incrementalAction, runIncrementalTcl, pickerToken, refresh, resolveBinDir }) {
+    const cacheName = 'svtools.vivado.ipCatalog.v2';
+    const describeIp = createIpMetadata(resolveBinDir);
+    const catalogCache = new Map(context.workspaceState?.get(cacheName, []) || []), blockCache = new Map(), ipCache = new Map();
+    let reads = Promise.resolve();
     const window = vscode.window;
     let lastHdlEditor = window.activeTextEditor;
     const pick = (items, title, options = {}) => window.showQuickPick(items, {
@@ -39,19 +45,23 @@ function activateAssetCommands(context, { vscode, findProjectXpr, incrementalAct
     const files = options => window.showOpenDialog({ canSelectMany: false, ...options });
     const confirm = async (message, button) => await window.showWarningMessage(message, { modal: true }, button) === button;
 
+    async function projectFor(expectedXpr) {
+        const xpr = await findProjectXpr();
+        if (!xpr) throw new Error('请先选择 Vivado 工程（.xpr）');
+        if (expectedXpr && !samePath(expectedXpr, xpr)) throw new Error('工程已切换，请从当前工程重新打开');
+        return { xpr, project: parseXpr(xpr) };
+    }
+
     function projectAction(label, expectedXpr, callback) {
         return incrementalAction(label, async () => {
-            const xpr = await findProjectXpr();
-            if (!xpr) throw new Error('请先选择 Vivado 工程（.xpr）');
-            if (expectedXpr && !samePath(expectedXpr, xpr)) throw new Error('工程已切换，请从当前工程重新打开');
-            const project = parseXpr(xpr);
+            const { xpr, project } = await projectFor(expectedXpr);
 
             async function run(name, body, { readOnly = false, needsWritableProject = false, target, guard, quiet = readOnly } = {}) {
                 const result = await runIncrementalTcl(name + '.tcl', script(xpr, body, { readOnly: readOnly && !needsWritableProject }), xpr, async current => {
                     if (pickerToken()?.isCancellationRequested) return false;
                     if (target && !member(current, target.file, target.fileset)) return false;
                     if (guard && await hash(target.file) !== guard) {
-                        throw new Error('Block Design 已在其他位置修改，请先刷新');
+                        throw new Error('资产文件已在其他位置修改，请先刷新');
                     }
                     return true;
                 }, { quiet });
@@ -63,7 +73,11 @@ function activateAssetCommands(context, { vscode, findProjectXpr, incrementalAct
                 const directory = path.dirname(result.logPath);
                 const rows = await readRows(directory);
                 if (!readOnly) {
-                    catalogCache.clear();
+                    if (name.startsWith('ip_') || name.startsWith('bd_')) ipCache.clear();
+                    if (name === 'ip_update_catalog') {
+                        catalogCache.clear();
+                        await context.workspaceState?.update(cacheName, []);
+                    }
                     await refresh();
                 }
                 return { rows, directory };
@@ -73,19 +87,43 @@ function activateAssetCommands(context, { vscode, findProjectXpr, incrementalAct
         });
     }
 
-    async function definition(session, forBlockDesign) {
-        const key = session.xpr + '\0' + forBlockDesign;
-        const before = await hash(session.xpr);
-        let catalog = catalogCache.get(key);
-        if (catalog?.stamp !== before || (catalog?.expires || 0) < Date.now()) {
-            const { rows } = await session.run('ip_catalog', ip.catalog(forBlockDesign), { readOnly: true });
-            const [version, part] = rowsOf(rows, 'tool')[0];
-            catalog = { version, part, stamp: before, expires: Date.now() + 120000,
-                items: rowsOf(rows, 'definition').map(([value, label, detail]) => ({ label: label || value, description: value, value, detail })) };
-            if (await hash(session.xpr) === before) catalogCache.set(key, catalog);
-        }
-        if (!catalog.items.length) throw new Error('当前器件和仓库没有可用的 IP 定义');
-        return (await pick(catalog.items, `IP Catalog · ${catalog.part} · Vivado ${catalog.version}`, {
+    function queueAction(label, xpr, callback, active = () => true) {
+        const request = reads.then(() => active() ? projectAction(label, xpr, callback) : undefined);
+        reads = request.catch(() => {});
+        return request;
+    }
+
+    function store(map, key, value, limit) {
+        map.delete(key);
+        map.set(key, value);
+        while (map.size > limit) map.delete(map.keys().next().value);
+    }
+
+    const catalogKey = xpr => [xpr, resolveBinDir?.() || ''].join('\0');
+    async function cachedCatalog(xpr) {
+        const item = catalogCache.get(catalogKey(xpr));
+        if (item?.stamp === await hash(xpr)) return item;
+    }
+
+    async function loadCatalog(session) {
+        const key = catalogKey(session.xpr), stamp = await hash(session.xpr);
+        const { rows } = await session.run('ip_catalog', ip.catalog(), { readOnly: true });
+        const [version, part] = rowsOf(rows, 'tool')[0];
+        if (await hash(session.xpr) !== stamp || catalogKey(session.xpr) !== key) throw new Error('工程或 Vivado 安装已变化，请刷新目录');
+        const result = { version, part, stamp, expires: Date.now() + 120000,
+            items: rowsOf(rows, 'definition').map(([value, label, detail, ipi, ...categories]) =>
+                ({ label: label || value, value, detail, ipi: ipi === '1', categories: categories.filter(Boolean) })) };
+        store(catalogCache, key, result, 3);
+        await context.workspaceState?.update(cacheName, [...catalogCache]);
+        return result;
+    }
+
+    async function definition(session) {
+        let catalog = await cachedCatalog(session.xpr);
+        if (!catalog || catalog.expires < Date.now()) catalog = await loadCatalog(session);
+        const items = catalog.items.filter(item => item.ipi).map(item => ({ ...item, description: item.value }));
+        if (!items.length) throw new Error('当前器件和仓库没有可用的 Block Design IP 定义');
+        return (await pick(items, `IP Catalog · ${catalog.part} · Vivado ${catalog.version}`, {
             placeHolder: '按名称、厂商或 VLNV 搜索，选择精确版本'
         }))?.value;
     }
@@ -95,9 +133,9 @@ function activateAssetCommands(context, { vscode, findProjectXpr, incrementalAct
         while (!pickerToken()?.isCancellationRequested) {
             const selected = await pick([
                 ...(edits.size ? [{ label: `应用 ${edits.size} 项修改`, apply: true }] : []),
-                ...parameters.map(parameter => ({ label: parameter.key.slice(7),
+                ...parameters.filter(parameter => !parameter.readOnly).map(parameter => ({ label: parameter.label || parameter.key.slice(7),
                     description: edits.has(parameter.key) ? `${parameter.value} → ${edits.get(parameter.key)}` : parameter.value,
-                    detail: parameter.key, parameter }))
+                    detail: [parameter.group, parameter.help || parameter.key].filter(Boolean).join(' · '), parameter }))
             ], title, { placeHolder: '搜索参数，修改后选「应用」一次提交' });
             if (!selected) return;
             if (selected.apply) return parameters.filter(param => edits.has(param.key)).map(({ key, value }) => ({
@@ -153,17 +191,29 @@ function activateAssetCommands(context, { vscode, findProjectXpr, incrementalAct
             ] };
     }
 
-    async function readIp(session, target) {
+    const ipKey = (session, target) => [catalogKey(session.xpr), target.file, target.fileset].join('\0');
+    function rememberIp(session, target, info, projectStamp) {
+        store(ipCache, ipKey(session, target), { stamp: info.stamp, projectStamp, expires: Date.now() + 120000, info }, 16);
+        return info;
+    }
+
+    async function readIp(session, target, force = false) {
+        const stamp = await hash(target.file), projectStamp = await hash(session.xpr);
+        const cached = ipCache.get(ipKey(session, target));
+        if (!force && cached?.stamp === stamp && cached.projectStamp === projectStamp && cached.expires > Date.now()) return cached.info;
         // Vivado 在只读工程中把所有 IP 标成锁定，查询实际状态需要正常打开工程。
         const { rows } = await session.run('ip_properties', ip.info(target.file), { target, readOnly: true, needsWritableProject: true });
-        return ipDetails(rows);
+        if (await hash(target.file) !== stamp || await hash(session.xpr) !== projectStamp) throw new Error('IP 或工程已在读取期间变化，请重新读取');
+        const info = await describeIp({ ...ipDetails(rows), stamp }, rowsOf(rows, 'definition_xml')[0]?.[0]);
+        return rememberIp(session, target, info, projectStamp);
     }
 
     async function runIpAction(session, target, info, action, changes) {
         if (action === 'load') return { info: await readIp(session, target) };
         if (action === 'apply') {
-            const { rows } = await session.run('ip_configure', ip.configure(target.file, changes, { readBack: true }), { target });
-            return { info: ipDetails(rows), message: 'Vivado 已应用参数。' };
+            const { rows } = await session.run('ip_configure', ip.configure(target.file, changes, { readBack: true }), { target, guard: info.stamp, quiet: true });
+            const next = await describeIp({ ...ipDetails(rows), stamp: await hash(target.file) }, rowsOf(rows, 'definition_xml')[0]?.[0]);
+            return { info: rememberIp(session, target, next, await hash(session.xpr)), message: 'Vivado 已应用参数。' };
         }
         if (action === 'generate') {
             const labels = { all: '全部', synthesis: '综合', simulation: '仿真', instantiation_template: '例化模板',
@@ -210,9 +260,7 @@ function activateAssetCommands(context, { vscode, findProjectXpr, incrementalAct
         return true;
     }
 
-    async function createIp(session) {
-        const vlnv = await definition(session, false);
-        if (!vlnv) return;
+    async function createIp(session, vlnv) {
         const name = await nameInput('IP 模块名', vlnv.split(':')[2].replace(/[^\w]/gu, '_') + '_0');
         if (!name) return;
         const location = await pick(choices([['local', '保存在工程内'], ['external', '选择外部目录']]), 'IP 保存位置');
@@ -220,7 +268,7 @@ function activateAssetCommands(context, { vscode, findProjectXpr, incrementalAct
         const directory = location.value === 'external'
             ? (await files({ canSelectFolders: true, canSelectFiles: false, openLabel: '选择 IP 保存目录' }))?.[0]?.fsPath : undefined;
         if (location.value === 'external' && !directory) return;
-        const { rows } = await session.run('ip_create', ip.create({ vlnv, name, directory }));
+        const { rows } = await session.run('ip_create', ip.create({ vlnv, name, directory }), { quiet: true });
         return rowsOf(rows, 'created')[0]?.[0];
     }
 
@@ -233,8 +281,8 @@ function activateAssetCommands(context, { vscode, findProjectXpr, incrementalAct
         return rowsOf(rows, 'imported')[0]?.[0];
     }
 
-    async function addIp(session, action) {
-        const file = await (action === 'create' ? createIp(session) : importIp(session));
+    async function addIp(session, action, vlnv) {
+        const file = await (action === 'create' ? createIp(session, vlnv) : importIp(session));
         if (!file) return;
         const items = assets(parseXpr(session.xpr), IP_EXTENSION);
         const focus = items.find(item => samePath(item.file, file));
@@ -245,12 +293,33 @@ function activateAssetCommands(context, { vscode, findProjectXpr, incrementalAct
     async function refreshIps(session, target) {
         const items = assets(parseXpr(session.xpr), IP_EXTENSION);
         const focus = (target && items.find(item => item.fileset === target.fileset && samePath(item.file, target.file))) || items[0];
-        return { members: items, focus, ...(focus ? { info: await readIp(session, focus) } : {}) };
+        return { members: items, focus, ...(focus ? { info: await readIp(session, focus, true) } : {}) };
     }
 
-    const ipPanels = openIpPanels(context, vscode, (xpr, action, target, info, changes) =>
-        projectAction('Vivado IP 管理', xpr, async session => {
-            if (action === 'create' || action === 'import') return addIp(session, action);
+    const openCatalog = openCatalogPanels(context, vscode, {
+        cached: async xpr => { await projectFor(xpr); return cachedCatalog(xpr); },
+        async refresh(xpr, active) {
+            const result = await queueAction('IP Catalog', xpr, loadCatalog, active);
+            if (!result?.items) throw new Error(result?.error || 'IP 目录读取已取消');
+            return result;
+        },
+        async create(xpr, vlnv) {
+            const result = await queueAction('创建 IP', xpr, session => addIp(session, 'create', vlnv));
+            if (result?.xpr) { ipPanels.open(result); return '已创建 ' + result.focus.label; }
+            return result?.error;
+        }
+    });
+
+    const ipPanels = openIpPanels(context, vscode, async (xpr, action, target, info, changes, active) => {
+        if (action === 'create') return openCatalog(xpr);
+        if (action === 'preview') {
+            const session = await projectFor(xpr);
+            if (!target || !member(session.project, target.file, target.fileset) || path.extname(target.file).toLowerCase() !== '.xci') return;
+            const preview = await readAssetText(target.file).then(({ text }) => savedIp(text, target.file)).catch(() => undefined);
+            return preview && { info: await describeIp(preview) };
+        }
+        return queueAction('Vivado IP 管理', xpr, async session => {
+            if (action === 'import') return addIp(session, action);
             if (action === 'report') return reportIpStatus(session);
             if (action === 'refresh') return refreshIps(session, target);
             if (action === 'repositories') {
@@ -261,28 +330,48 @@ function activateAssetCommands(context, { vscode, findProjectXpr, incrementalAct
                 throw new Error('此 IP 已不在当前工程中，请重新读取工程。');
             }
             return runIpAction(session, target, info, action, changes);
-        }));
+        }, active);
+    });
 
     async function ipManager(node) {
-        const snapshot = await projectAction('Vivado IP 管理', node?.xpr, async session => {
+        try {
+            const session = await projectFor(node?.xpr);
             const members = assets(session.project, IP_EXTENSION);
             const focus = node?.file && members.find(item => item.fileset === node.fileset && samePath(item.file, node.file));
             if (node?.file && !focus) throw new Error('此 IP 已不在当前工程的文件集中');
-            return { xpr: session.xpr, members, focus };
-        });
-        if (snapshot?.xpr) ipPanels.open(snapshot);
+            ipPanels.open({ xpr: session.xpr, members, focus });
+        } catch (error) { window.showErrorMessage(error.message); }
     }
 
     async function ipCatalog(node) {
-        const result = await projectAction('IP Catalog', node?.xpr, session => addIp(session, 'create'));
-        if (result?.xpr) ipPanels.open(result);
+        try { openCatalog((await projectFor(node?.xpr)).xpr); }
+        catch (error) { window.showErrorMessage(error.message); }
     }
 
     async function readBlock(session, target) {
         const before = await hash(target.file);
+        const projectStamp = await hash(session.xpr);
         const { rows } = await session.run('bd_read', bd.read(target.file), { target, guard: before, readOnly: true });
-        if (await hash(target.file) !== before) throw new Error('Block Design 在读取期间发生变化，请重试');
-        return { model: bd.snapshot(rows), stamp: before };
+        if (await hash(target.file) !== before || await hash(session.xpr) !== projectStamp) throw new Error('Block Design 或工程在读取期间发生变化，请重试');
+        return rememberBlock(target, { model: bd.snapshot(rows), stamp: before, projectStamp });
+    }
+
+    const blockKey = target => [catalogKey(target.xpr), target.file, target.fileset].join('\0');
+    function rememberBlock(target, state) {
+        const entry = { ...state, expires: Date.now() + 120000 };
+        store(blockCache, blockKey(target), entry, 8);
+        return entry;
+    }
+
+    async function previewBlock(target) {
+        const session = await projectFor(target.xpr);
+        if (!member(session.project, target.file, target.fileset)) throw new Error('此 Block Design 已不在当前工程的文件集中');
+        const saved = await readAssetText(target.file).catch(() => undefined);
+        if (!saved) return;
+        const cached = blockCache.get(blockKey(target));
+        if (cached?.stamp === saved.stamp && cached.expires > Date.now() && cached.projectStamp === await hash(target.xpr)) return cached;
+        const model = await Promise.resolve().then(() => savedBlock(saved.text)).catch(() => undefined);
+        if (model) return { model, stamp: saved.stamp, preview: true };
     }
 
     // Block Design 动作使用面板当前快照，实际 Tcl 对象仍由 Vivado 精确解析。
@@ -291,13 +380,13 @@ function activateAssetCommands(context, { vscode, findProjectXpr, incrementalAct
         const guard = state.stamp;
         const update = async (name, body) => {
             const { rows } = await session.run(name, [...body, ...bd.inspect()], { target, guard, quiet: true });
-            return { model: bd.snapshot(rows), stamp: await hash(filename) };
+            return rememberBlock(target, { model: bd.snapshot(rows), stamp: await hash(filename), projectStamp: await hash(target.xpr) });
         };
         if (action === 'refresh') return readBlock(session, target);
         if (action === 'add-cell') {
             const type = (await pick(choices([['ip', '从 Catalog 添加 IP'], ['module', '添加 RTL 模块引用'], ['hier', '创建层级块']]), '添加模块'))?.value;
             if (!type) return;
-            const reference = type === 'ip' ? await definition(session, true)
+            const reference = type === 'ip' ? await definition(session)
                 : type === 'module' ? await nameInput('工程中已有的 Verilog / SystemVerilog / VHDL 模块名') : undefined;
             if (type !== 'hier' && !reference) return;
             const name = await nameInput('实例名', type === 'ip' ? reference.split(':')[2].replace(/[^\w]/gu, '_') + '_0'
@@ -329,7 +418,8 @@ function activateAssetCommands(context, { vscode, findProjectXpr, incrementalAct
             const item = selection.endpoint || selection.cell;
             const query = selection.endpoint ? bd.portParameters(filename, item) : bd.parameters(filename, item.id);
             const { rows } = await session.run('bd_read_config', query, { target, guard, readOnly: true });
-            const parameters = parametersOf(rows);
+            let parameters = parametersOf(rows);
+            if (selection.cell?.vlnv) parameters = (await describeIp({ vlnv: selection.cell.vlnv, parameters })).parameters;
             if (!parameters.length) throw new Error('Vivado 没有为此对象提供 CONFIG 参数');
             const changes = await parameterChanges(parameters, '配置 ' + item.id);
             if (changes?.length)
@@ -381,41 +471,44 @@ function activateAssetCommands(context, { vscode, findProjectXpr, incrementalAct
         }
     }
 
-    const panels = openBlockDesignPanels(context, vscode, (target, state, action, selection) =>
-        projectAction('Block Design', target.xpr, session => blockAction(session, target, state, action, selection)));
+    const panels = openBlockDesignPanels(context, vscode, (target, state, action, selection, active) => {
+        if (action === 'preview') return previewBlock(target);
+        if (action === 'refresh') return queueAction('Block Design', target.xpr, session => readBlock(session, target), active);
+        return queueAction('Block Design', target.xpr, session => blockAction(session, target, state, action, selection));
+    });
 
     async function blockManager(node) {
-        return projectAction('Block Design', node?.xpr, async session => {
+        try {
+            const session = await projectFor(node?.xpr);
             const members = assets(session.project, BD_EXTENSION);
-            let target;
-            if (node?.file) {
-                target = members.find(item => item.fileset === node.fileset && samePath(item.file, node.file));
-                if (!target) throw new Error('此 Block Design 已不在当前工程的文件集中');
-            } else {
-                const selected = await pick([{ label: '新建 Block Design', action: 'create' },
-                    { label: '引用已有 Block Design', action: 'import' }, ...members], 'Block Design · ' + path.basename(session.xpr));
-                if (!selected) return;
+            const selected = node?.file ? members.find(item => item.fileset === node.fileset && samePath(item.file, node.file))
+                : await window.showQuickPick([{ label: '新建 Block Design', action: 'create' },
+                    { label: '引用已有 Block Design', action: 'import' }, ...members], { title: 'Block Design · ' + path.basename(session.xpr), matchOnDetail: true });
+            if (!selected) {
+                if (node?.file) throw new Error('此 Block Design 已不在当前工程的文件集中');
+                return;
+            }
+            if (!selected.action) { panels.open({ ...selected, xpr: session.xpr }); return; }
+            return queueAction('Block Design', session.xpr, async session => {
                 if (selected.action === 'create') {
                     const name = await nameInput('Block Design 名称', 'design_1');
                     if (!name) return;
                     const result = await session.run('bd_create', [...bd.create(name), ...bd.inspect()]);
                     const created = rowsOf(result.rows, 'created')[0]?.[0];
-                    target = assets(parseXpr(session.xpr), BD_EXTENSION).find(item => created && samePath(item.file, created));
+                    const target = assets(parseXpr(session.xpr), BD_EXTENSION).find(item => created && samePath(item.file, created));
                     if (!target) throw new Error('Vivado 未将新建的 Block Design 加入工程');
-                    panels.open({ ...target, xpr: session.xpr }, { model: bd.snapshot(result.rows), stamp: await hash(target.file) });
-                    return;
-                } else if (selected.action === 'import') {
+                    const entry = { ...target, xpr: session.xpr };
+                    panels.open(entry, rememberBlock(entry, { model: bd.snapshot(result.rows), stamp: await hash(target.file), projectStamp: await hash(session.xpr) }));
+                } else {
                     const file = (await files({ filters: { 'Vivado Block Design': ['bd'] }, openLabel: '选择 Block Design' }))?.[0]?.fsPath;
                     if (!file) return;
                     await session.run('bd_add_file', bd.importSource(file));
-                    target = assets(parseXpr(session.xpr), BD_EXTENSION).find(item => samePath(item.file, file));
+                    const target = assets(parseXpr(session.xpr), BD_EXTENSION).find(item => samePath(item.file, file));
                     if (!target) throw new Error('Vivado 未将所选 Block Design 加入工程');
-                } else {
-                    target = selected;
+                    panels.open({ ...target, xpr: session.xpr });
                 }
-            }
-            panels.open({ ...target, xpr: session.xpr }, await readBlock(session, target));
-        });
+            });
+        } catch (error) { window.showErrorMessage(error.message); }
     }
 
     context.subscriptions.push(

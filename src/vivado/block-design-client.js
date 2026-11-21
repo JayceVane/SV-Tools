@@ -7,7 +7,7 @@
     const isInterface = item => item.kind.startsWith('interface_');
     const pinKey = (item, id = item.id) => (isInterface(item) ? 'interface:' : 'signal:') + id;
     const views = new Map();
-    let model, revision, level = '', selected, scope, busy = false, request = 0;
+    let model, revision, level = '', selected, scope, busy = false, preview = false, request = 0;
     let wireMode = false, wireStart, objectMode = 'net', hasLayout = false, expandedInterfaces = false, locateAfterLayout;
 
     function node(tag, text, className) {
@@ -34,14 +34,14 @@
     });
 
     function mutate(action, target = {}) {
-        if (busy || !model) return;
+        if (busy || action !== 'refresh' && (!model || preview)) return;
         report('');
         vscode.postMessage({ action, revision, ...target });
     }
     function button(label, action, target) {
         const item = node('button', label);
         item.type = 'button';
-        item.disabled = busy;
+        item.disabled = busy || preview;
         item.onclick = () => mutate(action, target);
         return item;
     }
@@ -267,9 +267,9 @@
     }
 
     function drawControls() {
-        for (const control of document.querySelectorAll('[data-action]')) control.disabled = busy || !model;
+        for (const control of document.querySelectorAll('[data-action]')) control.disabled = busy || control.dataset.action !== 'refresh' && (!model || preview);
         for (const id of ['zoom-in', 'zoom-out', 'zoom-reset', 'zoom-fit']) $(id).disabled = !hasLayout;
-        $('wire-mode').disabled = busy || !scope?.endpoints.length;
+        $('wire-mode').disabled = busy || preview || !scope?.endpoints.length;
         $('interface-members').disabled = !scope?.endpoints.some(index => model.endpoints[index].interfaceId);
         $('interface-members').setAttribute('aria-pressed', String(expandedInterfaces));
         $('level-up').disabled = !level;
@@ -349,6 +349,7 @@
             saveView();
             const previous = itemOf(selected);
             model = data.model;
+            preview = data.preview;
             revision = data.revision;
             if (previous) {
                 const index = collection(selected.kind).findIndex(item => item.id === previous.id && item.kind === previous.kind);
@@ -398,5 +399,6 @@
             drawSelection();
         } else if (data.type === 'status') report(data.message);
     });
+    drawControls();
     vscode.postMessage({ action: 'ready' });
 })();

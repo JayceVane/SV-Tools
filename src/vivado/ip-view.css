@@ -44,6 +44,10 @@ main { display: grid; grid-template-columns: minmax(185px, 245px) minmax(0, 1fr)
 .parameter:last-child { border-bottom: 0; }
 .parameter.edited { border-inline-start-color: var(--vscode-editorGutter-modifiedBackground, var(--vscode-focusBorder)); }
 .parameter code { padding-top: 5px; overflow-wrap: anywhere; font-family: var(--vscode-editor-font-family); }
+.parameter-caption { display: grid; gap: 3px; padding-block: 4px; overflow-wrap: anywhere; }
+.parameter-caption > span { font-weight: 600; }
+.parameter-caption code { padding-top: 0; }
+.parameter-group h4 { margin: 0; padding: 6px 12px; font-size: .95em; color: var(--vscode-descriptionForeground); border-bottom: 1px solid var(--vscode-panel-border); }
 .parameter-value { display: grid; align-content: center; min-height: 28px; gap: 3px; overflow-wrap: anywhere; }
 .empty { padding: 10px 6px; }
 #ip-message { flex: 1 1 240px; max-height: 90px; overflow: auto; }

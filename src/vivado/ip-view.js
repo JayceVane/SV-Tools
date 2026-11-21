@@ -55,15 +55,22 @@ const PROJECT_COMMANDS = new Set(['create', 'import', 'repositories', 'report', 
 const sameMember = (left, right) => left.fileset === right.fileset && samePath(left.file, right.file);
 
 function resolveEdits(edits, info) {
-    if (info.locked || !Array.isArray(edits) || edits.length > info.parameters.length) return;
+    if (info.locked || info.preview || !Array.isArray(edits) || edits.length > info.parameters.length) return;
     const available = new Map(info.parameters.map(parameter => [parameter.key, parameter]));
     const changes = [];
+    const dependencies = [];
     for (const edit of edits) {
         const parameter = available.get(edit?.key);
-        if (!parameter || typeof edit.value !== 'string' || edit.value.length > 65536 || edit.value.includes('\0')) return;
+        if (!parameter || parameter.readOnly || typeof edit.value !== 'string' || edit.value.length > 65536 || edit.value.includes('\0')) return;
         available.delete(edit.key);
-        if (edit.value !== parameter.value) changes.push({ key: parameter.key, before: parameter.value, value: edit.value });
+        if (edit.value !== parameter.value) {
+            changes.push({ key: parameter.key, before: parameter.value, value: edit.value });
+            if (parameter.dependency) dependencies.push(...parameter.dependency);
+        }
     }
+    const values = new Map(info.parameters.map(parameter => [parameter.key, parameter.value]));
+    for (const change of changes) values.set(change.key, change.value);
+    if (dependencies.some(([key, allowed]) => !allowed.includes(values.get(key)))) return;
     return changes;
 }
 
@@ -81,11 +88,13 @@ function openIpPanels(context, vscode, invoke) {
         const panel = vscode.window.createWebviewPanel('svtoolsIpManager', 'IP 管理 · ' + path.basename(xpr, '.xpr'),
             vscode.ViewColumn.Active, { enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [resources] });
         const details = new Map();
-        let records = [], selected, nextId = 0, revision = 0, nextDetail = 0, ready = false, busy = false, disposed = false, status = '';
+        const sources = new WeakMap();
+        let records = [], selected, nextId = 0, revision = 0, nextDetail = 0, loadVersion = 0;
+        let ready = false, busy = false, loading = false, disposed = false, status = '';
 
         const post = message => { if (ready && !disposed) void panel.webview.postMessage(message); };
         function publish() {
-            post({ type: 'snapshot', revision: ++revision, project: xpr, busy, status, selected: selected?.id,
+            post({ type: 'snapshot', revision: ++revision, project: xpr, busy, loading, status, selected: selected?.id,
                 members: records.map(({ id, label, description, detail }) => ({ id, label, description, detail })),
                 info: details.get(selected?.id) });
         }
@@ -99,12 +108,53 @@ function openIpPanels(context, vscode, invoke) {
             selected = (preferred && records.find(item => sameMember(item, preferred))) || records[0];
         }
 
+        function remember(target, info) {
+            if (sources.get(details.get(target.id)) === info) return;
+            const detail = { ...info, version: ++nextDetail };
+            sources.set(detail, info);
+            details.set(target.id, detail);
+        }
+
+        async function loadSelected() {
+            const version = ++loadVersion, target = selected;
+            const active = () => !disposed && version === loadVersion && !busy;
+            if (!target || busy || disposed) return;
+            loading = true;
+            status = '正在向 Vivado 核对参数…';
+            publish();
+            try {
+                if (!details.has(target.id)) {
+                    const saved = await invoke(xpr, 'preview', target);
+                    if (active() && saved?.info) {
+                        remember(target, saved.info);
+                        publish();
+                    }
+                }
+                if (!active()) return;
+                const result = await invoke(xpr, 'load', target, undefined, undefined, active);
+                if (!active()) return;
+                if (!result?.info) throw new Error(result?.error || '参数读取已取消');
+                remember(target, result.info);
+                status = '';
+            } catch (error) {
+                if (active()) {
+                    const known = details.get(target.id);
+                    if (known && !known.preview) remember(target, { ...known, preview: true, actions: [] });
+                    status = error.message;
+                }
+            } finally {
+                if (active()) { loading = false; publish(); }
+            }
+        }
+
         async function perform(action, payload) {
             if (busy) return;
             const target = selected;
             const info = details.get(target?.id);
+            ++loadVersion;
             busy = true;
-            status = action === 'load' ? '正在读取 Vivado IP 参数…' : 'Vivado 正在处理…';
+            loading = false;
+            status = 'Vivado 正在处理…';
             post({ type: 'activity', busy, status });
             try {
                 const result = await invoke(xpr, action, target, info, payload);
@@ -112,7 +162,7 @@ function openIpPanels(context, vscode, invoke) {
                 if (result?.members) replace(result.members, result.focus);
                 if (result?.info) {
                     const owner = records.find(item => result.focus ? sameMember(item, result.focus) : item.id === target?.id);
-                    if (owner) details.set(owner.id, { ...result.info, version: ++nextDetail });
+                    if (owner) remember(owner, result.info);
                 }
             } catch (error) {
                 status = error.message;
@@ -120,15 +170,15 @@ function openIpPanels(context, vscode, invoke) {
                 busy = false;
                 publish();
             }
-            if (!disposed && selected && !details.has(selected.id) && action !== 'load' && selected.id !== target?.id) {
-                await perform('load');
+            if (!disposed && selected && !details.has(selected.id)) {
+                await loadSelected();
             }
         }
         function show(next, focus) {
             replace(next, focus);
             panel.reveal();
             publish();
-            if (ready && selected && !details.has(selected.id)) void perform('load');
+            if (ready && !busy) void loadSelected();
         }
 
         replace(members, focus);
@@ -140,7 +190,7 @@ function openIpPanels(context, vscode, invoke) {
             if (message.action === 'ready') {
                 ready = true;
                 publish();
-                if (selected && !details.has(selected.id)) await perform('load');
+                await loadSelected();
                 return;
             }
             if (busy || message.revision !== revision) return;
@@ -150,15 +200,16 @@ function openIpPanels(context, vscode, invoke) {
                 selected = member;
                 status = '';
                 publish();
-                if (!details.has(member.id)) await perform('load');
+                await loadSelected();
                 return;
             }
             if (PROJECT_COMMANDS.has(message.action)) {
+                if (message.action === 'create') { await invoke(xpr, 'create'); return; }
                 await perform(message.action);
                 return;
             }
             const info = details.get(selected?.id);
-            if (!info || selected.id !== message.id || info.version !== message.version) return;
+            if (!info || info.preview || loading || selected.id !== message.id || info.version !== message.version) return;
             if (message.action === 'apply') {
                 const changes = resolveEdits(message.edits, info);
                 if (changes?.length) await perform('apply', changes);

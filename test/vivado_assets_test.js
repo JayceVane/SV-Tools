@@ -15,6 +15,8 @@ const bd = require('../src/vivado/block-design');
 const { resolveSelection } = require('../src/vivado/block-design-view');
 const { layoutSchematic } = require('../src/vivado/block-design-layout');
 const { resolveEdits } = require('../src/vivado/ip-view');
+const { savedBlock, savedIp } = require('../src/vivado/asset-preview');
+const { createIpMetadata } = require('../src/vivado/ip-metadata');
 const { parseXpr, samePath } = require('../src/vivado/xpr');
 
 test('资产动作拒绝无效名称、任意生成目标、异类端点和只读元数据修改', () => {
@@ -40,8 +42,60 @@ test('资产动作拒绝无效名称、任意生成目标、异类端点和只�
     const edits = [{ key: 'CONFIG.WIDTH', before: 'forged', value: '8' }, { key: 'CONFIG.MODE', value: 'a' }];
     assert.deepEqual(resolveEdits(edits, params), [{ key: 'CONFIG.WIDTH', before: '4', value: '8' }]);
     assert.equal(resolveEdits(edits, { ...params, locked: true }), undefined);
+    assert.equal(resolveEdits(edits, { ...params, preview: true }), undefined);
     assert.equal(resolveEdits([edits[0], edits[0]], params), undefined);
     assert.equal(resolveEdits([{ key: 'CONFIG.FORGED', value: '8' }], params), undefined);
+});
+
+test('磁盘预览读取 XCI 保存值和 BD 层级连接，保留端口方向证据的边界', () => {
+    const xml = `<s:design xmlns:s="urn:ipxact"><s:componentInstances><s:componentInstance>
+        <s:instanceName>counter</s:instanceName><s:componentRef s:vendor="xilinx.com" s:library="ip" s:name="counter" s:version="1.0"/>
+        <s:configurableElementValues><s:configurableElementValue s:referenceId="PARAM_VALUE.Width">12</s:configurableElementValue>
+        <s:configurableElementValue s:referenceId="MODELPARAM_VALUE.Width">24</s:configurableElementValue>
+        <s:configurableElementValue s:referenceId="PARAM_VALUE.Empty"/></s:configurableElementValues>
+        </s:componentInstance></s:componentInstances></s:design>`;
+    const preview = savedIp(xml, 'counter.xci');
+    assert.equal(preview.vlnv, 'xilinx.com:ip:counter:1.0');
+    assert.deepEqual(preview.parameters.map(({ key, value }) => [key, value]), [['CONFIG.Width', '12'], ['CONFIG.Empty', '']]);
+    assert.equal(resolveEdits([{ key: 'CONFIG.Width', value: '6' }], preview), undefined);
+    const json = { ip_inst: { xci_name: 'fifo', component_reference: 'xilinx.com:ip:fifo:1.2',
+        parameters: { component_parameters: { Width: [{ value: '8' }] } } } };
+    assert.equal(savedIp(JSON.stringify(json), 'fifo.xci').parameters[0].value, '8');
+    const bdFile = { design: { design_info: { name: 'example' }, ports: { output: { direction: 'O', left: '7', right: '0' } },
+        components: { sub: { components: { fifo: { vlnv: 'xilinx.com:ip:fifo:1.2' } } } }, nets: { link: { ports: ['sub/Q', 'output'] } } } };
+    const graph = savedBlock(JSON.stringify(bdFile));
+    assert.deepEqual(graph.cells.map(cell => [cell.id, cell.type]), [['/sub', 'hier'], ['/sub/fifo', 'ip']]);
+    assert.deepEqual(graph.nets[0].endpoints, ['/sub/Q', '/output']);
+    assert.equal(graph.endpoints.find(endpoint => endpoint.id === '/sub/Q').direction, '');
+    assert.equal(graph.endpoints.find(endpoint => endpoint.id === '/output').right, '0');
+});
+
+test('IP 包提供显示名、选项和 XGUI 分组，校验使用修改后的依赖值', async t => {
+    const temp = await fs.realpath(os.tmpdir());
+    const root = await fs.mkdtemp(path.join(temp, 'svtools-ip-metadata-'));
+    t.after(async () => { if (path.dirname(root) === temp) await fs.rm(root, { recursive: true, force: true }); });
+    await fs.mkdir(path.join(root, 'xgui'));
+    const component = path.join(root, 'component.xml');
+    await fs.writeFile(component, `<component><vendor>xilinx.com</vendor><library>ip</library><name>axi_gpio</name><version>2.0</version>
+        <parameters><parameter><name>C_GPIO2_WIDTH</name><displayName>GPIO Width</displayName><value format="long" minimum="1" maximum="32">32</value></parameter>
+        <parameter><name>C_IS_DUAL</name><value choiceRef="boolean">0</value></parameter></parameters>
+        <choices><choice><name>boolean</name><enumeration text="Off">0</enumeration><enumeration text="On">1</enumeration></choice></choices>
+        <fileSets><fileSet><name>xilinx_xpgui_view_fileset</name><file><name>xgui/core.tcl</name></file></fileSet></fileSets></component>`);
+    await fs.writeFile(path.join(root, 'xgui', 'core.tcl'), `set page [ipgui::add_page $root -name Default]
+set_property display_name "IP Configuration" $page
+set group [ipgui::add_group $root -name "GPIO 2" -parent $page]
+set panel [ipgui::add_panel $root -name panel -parent $group]
+set width [ipgui::add_param $root -name C_GPIO2_WIDTH -parent $panel]
+set_property tooltip "Set the GPIO port width" $width
+error "Arbitrary Tcl must not be run"`);
+    const [width, dual] = ['CONFIG.C_GPIO2_WIDTH', 'CONFIG.C_IS_DUAL'];
+    const details = await createIpMetadata()({ vlnv: 'xilinx.com:ip:axi_gpio:2.0', parameters:
+        [[width, '32'], [dual, '0'], ['CONFIG.GPIO2_BOARD_INTERFACE', 'Custom']].map(([key, value]) => ({ key, value, choices: [] })) }, component);
+    const [first, second] = details.parameters;
+    assert.deepEqual([first.label, first.help, first.group, first.min, first.max], ['GPIO Width', 'Set the GPIO port width', 'IP Configuration / GPIO 2', '1', '32']);
+    assert.deepEqual(second.optionLabels, [['0', 'Off'], ['1', 'On']]);
+    assert.equal(resolveEdits([{ key: width, value: '12' }], details), undefined);
+    assert.equal(resolveEdits([{ key: width, value: '12' }, { key: dual, value: '1' }], details).length, 2);
 });
 
 test('Block Design 正交布局保留信号扇出、独立接口、边界端口和层级', async () => {

@@ -1,6 +1,7 @@
 'use strict';
 
 const { randomBytes } = require('node:crypto');
+const path = require('node:path');
 const { samePath } = require('./xpr');
 const { layoutSchematic, parentOf, isInterface } = require('./block-design-layout');
 
@@ -100,31 +101,54 @@ function openBlockDesignPanels(context, vscode, invoke) {
     function open(target, state) {
         const existing = [...panels].find(entry => samePath(entry.target.xpr, target.xpr) && samePath(entry.target.file, target.file));
         if (existing) {
-            existing.replace(state);
             existing.panel.reveal();
+            if (state?.model) existing.replace(state);
+            else void existing.reload(false);
             return;
         }
         const resources = vscode.Uri.joinPath(context.extensionUri, 'src', 'vivado');
-        const panel = vscode.window.createWebviewPanel('svtoolsBlockDesign', 'BD · ' + state.model.name, vscode.ViewColumn.Active,
+        const panel = vscode.window.createWebviewPanel('svtoolsBlockDesign', 'BD · ' + (state?.model.name || path.basename(target.file, '.bd')), vscode.ViewColumn.Active,
             { enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [resources] });
-        let revision = 0, busy = false, closed = false;
+        let revision = 0, busy = false, closed = false, ready = false;
         const layouts = new Map();
-        const post = message => { if (!closed) void panel.webview.postMessage(message); };
+        const post = message => { if (!closed && ready) void panel.webview.postMessage(message); };
         const replace = (next, message) => {
             state = next;
             layouts.clear();
-            post({ type: 'snapshot', revision: ++revision, model: state.model, file: target.file, message });
+            post({ type: 'snapshot', revision: ++revision, model: state.model, preview: state.preview === true, file: target.file, message });
         };
-        const entry = { panel, target, replace };
+        async function reload(force) {
+            if (busy || closed || !ready) return;
+            busy = true;
+            post({ type: 'busy', busy: true });
+            try {
+                const first = !force && await invoke(target, state, 'preview');
+                if (first?.model && first !== state) replace(first, first.preview ? '已保存的结构预览 · 正在由 Vivado 核对' : undefined);
+                if (force || !first?.model || first.preview) {
+                    const next = await invoke(target, state, 'refresh', {}, () => !closed);
+                    if (!next?.model) throw new Error(next?.error || 'Vivado 读取已取消');
+                    replace(next);
+                }
+            } catch (error) {
+                post({ type: 'status', message: (state?.preview ? '已保存的结构预览 · ' : '') + error.message });
+            } finally {
+                busy = false;
+                post({ type: 'busy', busy: false });
+            }
+        }
+        const entry = { panel, target, replace, reload };
         panels.add(entry);
         panel.onDidDispose(() => { closed = true; panels.delete(entry); });
         panel.webview.onDidReceiveMessage(async message => {
             if (closed || !message) return;
             if (message.action === 'ready') {
-                replace(state);
+                ready = true;
+                if (state?.model) replace(state);
+                else await reload(false);
                 return;
             }
-            if (message.action === 'layout' && message.revision === revision) {
+            if (message.action === 'refresh') { await reload(true); return; }
+            if (message.action === 'layout' && state?.model && message.revision === revision) {
                 const { level, request, expandedInterfaces } = message;
                 if (!Number.isSafeInteger(request) || level !== '' && !state.model.cells.some(cell => cell.type === 'hier' && cell.id === level)) return;
                 const version = revision;
@@ -145,7 +169,7 @@ function openBlockDesignPanels(context, vscode, invoke) {
                 }
                 return;
             }
-            if (busy || message.revision !== revision) return;
+            if (busy || !state?.model || state.preview || message.revision !== revision) return;
             const selection = resolveSelection(state.model, message);
             if (!selection) return;
             busy = true;
