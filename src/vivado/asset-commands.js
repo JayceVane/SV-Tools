@@ -470,7 +470,8 @@ function activateAssetCommands(context, { vscode, findProjectXpr, incrementalAct
         } else if (action === 'address-map') {
             const hex = value => /^0x[0-9a-f]{1,16}$/iu.test(String(value).replace(/[_\s]/gu, ''));
             const spaces = (state.model.spaces || []).filter(space => space.owner.kind === 'port' ||
-                space.owner.kind === 'pin' && space.owner.mode === 'Master');
+                space.owner.kind === 'pin' && space.owner.mode === 'Master' ||
+                !space.owner.kind && space.segments.some(segment => /^0x/iu.test(segment.offset || '')));
             if (!spaces.length) throw new Error('当前 Block Design 没有可用的主地址空间');
             const slave = (state.model.spaces || []).flatMap(space => space.segments.map(segment => ({ ...segment, space: space.id })))
                 .find(segment => segment.id === selection.segment);

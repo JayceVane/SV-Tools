@@ -51,9 +51,10 @@ function html(webview, vscode, resources) {
 }
 
 function openSummaryPanels(context, vscode, { load, openPath, log = () => {} }) {
-    let entry = null;
+    let entry = null, currentXpr = null;
     return {
         open(xpr) {
+            currentXpr = xpr;
             if (entry) { entry.panel.reveal(); entry.refresh(); return; }
             const resources = vscode.Uri.joinPath(context.extensionUri, 'src', 'vivado');
             const panel = vscode.window.createWebviewPanel('svtoolsVivadoSummary', 'Vivado · 工程概览', vscode.ViewColumn.Active,
@@ -70,7 +71,7 @@ function openSummaryPanels(context, vscode, { load, openPath, log = () => {} }) 
                 if (closed || loading) return schedule();
                 loading = true;
                 try {
-                    const data = await load(xpr);
+                    const data = await load(currentXpr);
                     if (closed) return;
                     if (data?.error) post({ type: 'error', message: data.error });
                     else if (data?.busy) post({ type: 'error', message: 'Vivado 正在执行其他任务，已在完成后继续刷新。', busy: true });
@@ -88,13 +89,13 @@ function openSummaryPanels(context, vscode, { load, openPath, log = () => {} }) 
                 if (message.action === 'refresh') { void refresh(); return; }
                 if (message.action === 'auto') { auto = message.enabled !== false; schedule(); return; }
                 if (message.action === 'openLog' && typeof message.path === 'string') { void openPath(message.path); return; }
-                if (message.action === 'openFolder') { void openPath(path.dirname(xpr)); }
+                if (message.action === 'openFolder') { void openPath(path.dirname(currentXpr)); }
             });
             panel.onDidChangeViewState(() => { if (panel.visible) void refresh(); else clearTimeout(timer); });
             panel.onDidDispose(() => { closed = true; clearTimeout(timer); entry = null; });
             panel.webview.html = html(panel.webview, vscode, resources);
             entry = { panel, refresh };
-            log('[vivado] 打开工程概览：' + xpr);
+            log('[vivado] 打开工程概览：' + currentXpr);
         }
     };
 }

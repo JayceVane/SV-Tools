@@ -264,7 +264,9 @@
     const spaceSlug = id => spaceParent(id).split('/').filter(Boolean).join('_');
     const segmentLabel = segment => segment.name || segment.id.slice(segment.id.lastIndexOf('/') + 1);
     const isExternal = space => space.owner.kind === 'port';
-    const isMasterSpace = space => isExternal(space) || (space.owner.kind === 'pin' && space.owner.mode === 'Master');
+    // Vivado 偶尔解析不到空间宿主；已有偏移的段仍按主地址空间展示，避免地址被隐藏。
+    const isMasterSpace = space => isExternal(space) || (space.owner.kind === 'pin' && space.owner.mode === 'Master')
+        || (!space.owner.kind && space.segments.some(segment => hexNumber(segment.offset) !== undefined));
     const isSlaveSpace = space => space.owner.kind === 'pin' && space.owner.mode === 'Slave';
     function slaveOf(name, spaces) {
         for (const space of spaces) {
