@@ -115,9 +115,12 @@
         const pages = state.form?.pages || [];
         const elements = pages.map(page => {
             const section = node('div', undefined, 'page');
-            section.append(node('h2', page.title));
+            // 只有一组且与页面同名时不再重复标题。
+            const shared = page.groups.every(group => group.title === page.title || group.title === '常规');
+            if (!shared) section.append(node('h2', page.title));
             for (const group of page.groups) {
-                const item = node('button', group.title + ' (' + group.rows.length + ')', 'group-link');
+                const label = shared ? page.title : group.title;
+                const item = node('button', label + ' (' + group.rows.length + ')', 'group-link');
                 item.type = 'button';
                 item.onclick = () => {
                     activeGroup = group.id;

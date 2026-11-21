@@ -41,13 +41,13 @@ test('表单模型按页面与分组合并，缺分组参数归入“其他参�
         { key: 'CONFIG.E', group: 'Other Page' }
     ], [{ group: 'IP Configuration / GPIO', texts: ['说明'] }]);
     assert.equal(form.total, 5);
-    assert.deepEqual(form.pages.map(page => page.title), ['IP Configuration', '其他参数', 'Other Page']);
+    assert.deepEqual(form.pages.map(page => page.title), ['IP Configuration', 'Other Page', '其他参数']);
     const gpio = form.pages[0].groups[0];
     assert.equal(gpio.rows.length, 2);
     assert.deepEqual(gpio.notes, ['说明']);
     assert.equal(form.pages[0].groups[1].title, 'GPIO 2');
-    assert.equal(form.pages[1].groups[0].title, '其他参数');
-    assert.equal(form.pages[2].groups[0].title, '常规');
+    assert.equal(form.pages[1].groups[0].title, '常规');
+    assert.equal(form.pages[2].groups[0].title, '其他参数');
 });
 
 function harness() {

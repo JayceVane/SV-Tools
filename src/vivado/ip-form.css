@@ -22,6 +22,7 @@ input:not([type=checkbox]), select, textarea {
     border: 1px solid var(--vscode-input-border, var(--frame));
     background: var(--vscode-input-background); color: var(--vscode-input-foreground);
 }
+input:disabled, select:disabled, textarea:disabled { opacity: .62; cursor: not-allowed; }
 input[type=checkbox] { width: 16px; height: 16px; margin: 4px 0; accent-color: var(--vscode-button-background); }
 textarea { min-height: 64px; resize: vertical; }
 .titlebar, footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 14px; padding: 9px 13px; }

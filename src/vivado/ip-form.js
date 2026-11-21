@@ -50,7 +50,10 @@ function buildForm(parameters, notes = []) {
             group.notes = texts;
         }
     }
-    return { pages: [...pages.values()].map(entry => ({ id: entry.id, title: entry.title, groups: [...entry.groups.values()] })), total };
+    // 兜底分组排在最后，避免无 XGUI 信息的参数抢在 IP Configuration 之前。
+    const list = [...pages.values()].map(entry => ({ id: entry.id, title: entry.title, groups: [...entry.groups.values()] }));
+    list.sort((left, right) => Number(left.title === FALLBACK) - Number(right.title === FALLBACK));
+    return { pages: list, total };
 }
 
 module.exports = { buildForm, FALLBACK };
