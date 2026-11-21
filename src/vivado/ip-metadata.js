@@ -71,7 +71,8 @@ function annotate(parameters, { fields, layout, vlnv }) {
 
 function createIpMetadata(resolveBinDir) {
     const cache = new Map();
-    return async function describe(info, component) {
+    // runtimeLayout 由调用方在 Vivado 中执行 XGUI 得到，优先于静态解析。
+    return async function describe(info, component, runtimeLayout) {
         const file = component || installedPackage(resolveBinDir?.(), info.vlnv);
         if (!file || !path.isAbsolute(file)) return info;
         try {
@@ -92,7 +93,7 @@ function createIpMetadata(resolveBinDir) {
                 cache.set(file, entry);
             }
             if (entry.metadata.vlnv !== info.vlnv) return info;
-            if (entry.gui) {
+            if (entry.gui && !runtimeLayout) {
                 const stat = await fs.stat(entry.gui).catch(() => undefined);
                 if (stat && (entry.guiMtime !== stat.mtimeMs || entry.guiSize !== stat.size)) {
                     entry.layout = await readAssetText(entry.gui, 2 * 1024 * 1024).then(result => parseLayout(result.text))
@@ -101,7 +102,7 @@ function createIpMetadata(resolveBinDir) {
                     entry.guiSize = stat.size;
                 }
             }
-            const layout = entry.layout || { params: new Map(), notes: new Map() };
+            const layout = runtimeLayout || entry.layout || { params: new Map(), notes: new Map() };
             const notes = [...(layout.notes || new Map())].map(([group, texts]) => ({ group, texts: [...texts] }));
             return { ...info, parameters: annotate(info.parameters, { ...entry.metadata, layout }), notes };
         } catch { return info; }

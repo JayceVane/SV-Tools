@@ -1,6 +1,7 @@
 'use strict';
 
 const fs = require('node:fs/promises');
+const os = require('node:os');
 const path = require('node:path');
 const { createHash } = require('node:crypto');
 const { cancelledError } = require('../toolchains/job');
@@ -13,6 +14,7 @@ const { openCatalogPanels } = require('./ip-catalog-view');
 const { readAssetText, savedBlock, savedIp } = require('./asset-preview');
 const { createIpMetadata } = require('./ip-metadata');
 const { createBlockDesignCache, digest } = require('./block-design-cache');
+const ipGui = require('./ip-gui');
 const ip = require('./ip');
 const bd = require('./block-design');
 
@@ -83,7 +85,7 @@ function activateAssetCommands(context, { vscode, findProjectXpr, incrementalAct
                     }
                     await refresh();
                 }
-                return { rows, directory };
+                return { rows, directory, stdout: result.stdout || '' };
             }
             try { return await callback({ project, xpr, run }); }
             catch (error) { if (error.code !== 'TOOL_CANCELLED') throw error; }
@@ -197,7 +199,9 @@ function activateAssetCommands(context, { vscode, findProjectXpr, incrementalAct
         // Vivado 在只读工程中把所有 IP 标成锁定，查询实际状态需要正常打开工程。
         const { rows } = await session.run('ip_properties', ip.info(target.file), { target, readOnly: true, needsWritableProject: true });
         if (await hash(target.file) !== stamp || await hash(session.xpr) !== projectStamp) throw new Error('IP 或工程已在读取期间变化，请重新读取');
-        const info = await describeIp({ ...ipDetails(rows), stamp }, rowsOf(rows, 'definition_xml')[0]?.[0]);
+        const details = ipDetails(rows);
+        const layout = await runtimeLayout(session, details.vlnv);
+        const info = await describeIp({ ...details, stamp }, rowsOf(rows, 'definition_xml')[0]?.[0], layout);
         return rememberIp(session, target, info, projectStamp);
     }
 
@@ -205,7 +209,9 @@ function activateAssetCommands(context, { vscode, findProjectXpr, incrementalAct
         if (action === 'load') return { info: await readIp(session, target) };
         if (action === 'apply') {
             const { rows } = await session.run('ip_configure', ip.configure(target.file, changes, { readBack: true }), { target, guard: info.stamp, quiet: true });
-            const next = await describeIp({ ...ipDetails(rows), stamp: await hash(target.file) }, rowsOf(rows, 'definition_xml')[0]?.[0]);
+            const details = ipDetails(rows);
+            const next = await describeIp({ ...details, stamp: await hash(target.file) },
+                rowsOf(rows, 'definition_xml')[0]?.[0], await runtimeLayout(session, details.vlnv));
             return { info: rememberIp(session, target, next, await hash(session.xpr)), message: 'Vivado 已应用参数。' };
         }
         if (action === 'generate') {
@@ -436,9 +442,34 @@ function activateAssetCommands(context, { vscode, findProjectXpr, incrementalAct
         return parametersOf(rows);
     }
 
-    async function describeCell(target, parameters) {
+    // ---- 复杂 IP 的界面结构：让 Vivado 在子解释器里执行 XGUI，回收 ipgui::add_* 调用 ----
+    const guiLayouts = new Map();
+    async function runtimeLayout(session, vlnv) {
+        const cached = guiLayouts.get(vlnv);
+        const file = cached?.file || await ipGui.guiFile(resolveBinDir(), vlnv);
+        if (!file) return undefined;
+        const stat = await fs.stat(file).catch(() => undefined);
+        if (!stat) return undefined;
+        if (cached && cached.mtime === stat.mtimeMs) return cached.layout;
+        const scriptPath = path.join(os.tmpdir(), 'svtools-xgui-' + digest([vlnv, String(stat.mtimeMs)]).slice(0, 16) + '.tcl');
+        try {
+            await fs.writeFile(scriptPath, ipGui.dumpScript(file), 'utf8');
+            const result = await session.run('ip_gui_dump', ipGui.sessionLines(scriptPath), { readOnly: true, quiet: true });
+            if (!result.ok || !/SVGUI_ROW\t/u.test(result.stdout || '')) return undefined;
+            const layout = ipGui.parse(result.stdout);
+            if (!layout.params.size) return undefined;
+            guiLayouts.delete(vlnv);
+            guiLayouts.set(vlnv, { file, mtime: stat.mtimeMs, layout });
+            if (guiLayouts.size > 48) guiLayouts.delete(guiLayouts.keys().next().value);
+            return layout;
+        } catch { return undefined; }
+        finally { await fs.rm(scriptPath, { force: true }).catch(() => undefined); }
+    }
+
+    async function describeCell(session, target, parameters) {
         if (!target.vlnv) return { parameters, notes: [] };
-        const described = await describeIp({ vlnv: target.vlnv, parameters });
+        const layout = await runtimeLayout(session, target.vlnv);
+        const described = await describeIp({ vlnv: target.vlnv, parameters }, undefined, layout);
         return { parameters: described.parameters, notes: described.notes || [] };
     }
 
@@ -449,7 +480,7 @@ function activateAssetCommands(context, { vscode, findProjectXpr, incrementalAct
             const read = () => queueAction('IP 定制', target.xpr, async session => {
                 // 记录读取时的文件戳：应用时据此发现对话框打开期间的外部修改。
                 target.guard = await hash(target.file);
-                return { name: target.id, vlnv: target.vlnv || '', ...await describeCell(target, await readCellParameters(session, target)),
+                return { name: target.id, vlnv: target.vlnv || '', ...await describeCell(session, target, await readCellParameters(session, target)),
                     locked: false, preview: false };
             });
             let result = await read();
@@ -476,7 +507,7 @@ function activateAssetCommands(context, { vscode, findProjectXpr, incrementalAct
                 });
                 panels.update(target, entry);
                 return {
-                    info: { name: target.id, vlnv: target.vlnv || '', ...await describeCell(target, parametersOf(rows)),
+                    info: { name: target.id, vlnv: target.vlnv || '', ...await describeCell(session, target, parametersOf(rows)),
                         locked: false, preview: false },
                     message: '已应用 ' + changes.length + ' 项修改'
                 };
