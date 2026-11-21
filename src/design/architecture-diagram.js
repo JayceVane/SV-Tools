@@ -1,6 +1,7 @@
 'use strict';
 
 const { escape, groupPorts, portDescription } = require('./architecture-details');
+const { terminalCaption, terminalWidth, terminalSymbol } = require('../circuit/symbol-library');
 const textWidth = value => [...value].reduce((width, character) => width + (character.charCodeAt(0) > 255 ? 13 : 8), 0);
 const shorten = (value, length = 34) => value.length > length ? value.slice(0, length - 1) + '…' : value;
 const pinKey = ({ card, port }) => JSON.stringify([card, port]);
@@ -124,8 +125,25 @@ async function layoutDiagram(page, mode) {
     const { cards, edges } = diagramTopology(page, mode);
     if (!cards.length) return { width: 0, height: 0, cards, edges };
     const detailed = mode === 'detailed';
-    const pinIds = new Map();
+    const pinIds = new Map(), boundaryPins = new Map();
     const children = cards.map(card => {
+        if (card.kind === 'boundary') {
+            const node = card.nodes[0], direction = node.direction;
+            const width = node.ports[0]?.width;
+            const label = node.name + (width > 1 ? ` [${width}]` : '');
+            const side = direction === 'output' ? 'WEST' : 'EAST';
+            card.title = terminalCaption(label).text;
+            card.width = terminalWidth(label);
+            card.height = 26;
+            card.terminal = terminalSymbol(card.width, card.height, side, direction);
+            const port = { id: `${card.id}-terminal`, x: side === 'EAST' ? card.width : 0, y: card.height / 2,
+                width: 0, height: 0, layoutOptions: { 'elk.port.side': side } };
+            boundaryPins.set(card.id, port.id);
+            const layoutOptions = { 'elk.portConstraints': 'FIXED_POS' };
+            if (direction === 'input' || direction === 'output')
+                layoutOptions['elk.layered.layering.layerConstraint'] = direction === 'input' ? 'FIRST' : 'LAST';
+            return { id: card.id, width: card.width, height: card.height, ports: [port], layoutOptions };
+        }
         card.title = shorten(card.title);
         const names = card.nodes.map(node => shorten(node.name));
         card.width = Math.max(card.kind === 'instance' ? 125 : 73, 24 + Math.max(textWidth(card.title), ...names.map(textWidth)));
@@ -138,10 +156,7 @@ async function layoutDiagram(page, mode) {
             });
             return { id: card.id, width: card.width, height: card.height, ports, layoutOptions: { 'elk.portConstraints': 'FIXED_POS' } };
         }
-        const direction = card.kind === 'boundary' ? card.nodes[0].direction : null;
-        return { id: card.id, width: card.width, height: card.height, layoutOptions: direction === 'input'
-            ? { 'org.eclipse.elk.layered.layering.layerConstraint': 'FIRST' }
-            : direction === 'output' ? { 'org.eclipse.elk.layered.layering.layerConstraint': 'LAST' } : undefined };
+        return { id: card.id, width: card.width, height: card.height };
     });
     if (!elk) {
         let Elk;
@@ -152,13 +167,12 @@ async function layoutDiagram(page, mode) {
         }
         elk = new Elk();
     }
-    // Lay out linked boundaries from verified sources and sinks. Inout remains unconstrained.
+    const anchor = (card, port) => boundaryPins.get(card) || pinIds.get(pinKey({ card, port })) || card;
     const result = await elk.layout({ id: 'diagram', layoutOptions: { 'elk.algorithm': 'layered', 'elk.direction': 'RIGHT',
         'elk.edgeRouting': 'ORTHOGONAL', 'elk.spacing.nodeNode': '23', 'elk.layered.spacing.nodeNodeBetweenLayers': detailed ? '53' : '68',
         'elk.layered.spacing.edgeNodeBetweenLayers': '12', 'elk.layered.cycleBreaking.strategy': 'GREEDY',
         'elk.layered.considerModelOrder.strategy': 'NODES_AND_EDGES', 'elk.padding': '[top=22,left=24,bottom=22,right=24]' }, children,
-    edges: edges.map(edge => ({ id: edge.id, sources: [pinIds.get(pinKey({ card: edge.from, port: edge.fromPort })) || edge.from],
-        targets: [pinIds.get(pinKey({ card: edge.to, port: edge.toPort })) || edge.to],
+    edges: edges.map(edge => ({ id: edge.id, sources: [anchor(edge.from, edge.fromPort)], targets: [anchor(edge.to, edge.toPort)],
         labels: detailed && edge.label ? [{ id: edge.id + '-label', text: edge.label, width: textWidth(edge.label) + 8, height: 17 }] : [] })) });
     const placed = new Map(result.children.map(card => [card.id, card]));
     const routed = new Map((result.edges || []).map(edge => [edge.id, edge]));
@@ -189,6 +203,10 @@ function renderDiagram(diagram, page, interactive) {
     }).join('');
     const cardMarkup = diagram.cards.map(card => {
         const translate = `transform="translate(${card.x},${card.y})"`;
+        if (card.terminal) {
+            const node = card.nodes[0], { points, labelX, centerY, anchor } = card.terminal;
+            return `<g class="diagram-card boundary" ${translate}${action('node', node.id, node.name)}><title>${escape(node.name)}</title><polygon class="boundary-symbol" points="${points}"/><text class="boundary-caption" x="${labelX}" y="${centerY + 4}" text-anchor="${anchor}">${escape(card.title)}</text></g>`;
+        }
         const frame = `<rect class="card-frame" width="${card.width}" height="${card.height}" rx="7"/>`;
         if (card.kind !== 'instance') {
             const node = card.nodes[0];

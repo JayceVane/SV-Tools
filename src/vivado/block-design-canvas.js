@@ -40,12 +40,10 @@
 
     function terminal(node) {
         const pin = node.ports[0];
-        const east = pin.side === 'EAST', { width, height } = node, y = height / 2;
-        const tag = east ? `M0 3H${width - 13}L${width} ${y}L${width - 13} ${height - 3}H0Z`
-            : `M${width} 3H13L0 ${y}L13 ${height - 3}H${width}Z`;
+        const { points, labelX, centerY, anchor } = node.terminal;
         const group = action('endpoint', pin.index, pin.name, 'bd-terminal ' + pin.kind, node);
-        group.append(shape('path', { class: 'bd-terminal-outline', d: tag }),
-            shape('text', { x: east ? 8 : 15, y: y + 4 }, short(pin.label, 42)));
+        group.append(shape('polygon', { class: 'bd-terminal-outline', points }),
+            shape('text', { class: 'bd-terminal-caption', x: labelX, y: centerY + 4, 'text-anchor': anchor }, node.caption));
         return group;
     }
 

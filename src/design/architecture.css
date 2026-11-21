@@ -56,6 +56,7 @@ button:focus-visible, a:focus-visible, .diagram-scroll:focus-visible { outline: 
 .architecture-svg .schematic-pin text { font-size: 11px; }
 .schematic-pin circle { fill: var(--panel); stroke: var(--muted); stroke-width: 1.3; }
 .card-frame { fill: var(--panel); stroke: var(--divider); stroke-width: 1.2; }
+.boundary-symbol { fill: color-mix(in srgb, var(--muted) 12%, var(--panel)); stroke: var(--muted); stroke-width: 1.2; }
 .diagram-card.instance .card-frame { fill: color-mix(in srgb, var(--up) 9%, var(--panel)); }
 .diagram-card.junction .card-frame { stroke-dasharray: 4 3; }
 .node-entry rect { fill: var(--panel); stroke: var(--divider); }
@@ -65,7 +66,7 @@ button:focus-visible, a:focus-visible, .diagram-scroll:focus-visible { outline: 
 .edge-hit { stroke: transparent; stroke-width: 15; }
 .neutral .edge-line { stroke-dasharray: 4 3; stroke: var(--weak); }
 .architecture-svg [role=button], .architecture-svg a { cursor: pointer; outline: none; }
-.architecture-svg [role=button]:hover > rect, .architecture-svg [role=button]:focus-visible > rect { stroke: var(--focus); stroke-width: 2; }
+.architecture-svg [role=button]:hover > :is(rect, .boundary-symbol), .architecture-svg [role=button]:focus-visible > :is(rect, .boundary-symbol) { stroke: var(--focus); stroke-width: 2; }
 .architecture-svg [role=button]:hover .edge-line, .architecture-svg [role=button]:focus-visible .edge-line { stroke: var(--focus); stroke-width: 3; }
 .architecture-svg [data-state=dimmed] { opacity: .26; }
 .architecture-svg [data-state=dimmed]:is(:hover, :focus-visible) { opacity: 1; }
@@ -73,7 +74,7 @@ button:focus-visible, a:focus-visible, .diagram-scroll:focus-visible { outline: 
 .architecture-svg [data-state=upstream] { --active: var(--up); }
 .architecture-svg [data-state=downstream] { --active: var(--down); }
 .architecture-svg [data-state=related], .architecture-svg [data-state=both] { --active: var(--weak); }
-.architecture-svg [data-state]:not([data-state=normal], [data-state=dimmed]) > rect { stroke: var(--active); stroke-width: 2.6; }
+.architecture-svg [data-state]:not([data-state=normal], [data-state=dimmed]) > :is(rect, .boundary-symbol) { stroke: var(--active); stroke-width: 2.6; }
 .architecture-svg [data-state]:not([data-state=normal], [data-state=dimmed]) .edge-line { stroke: var(--active); stroke-width: 3; }
 .named-connections, .page-diagnostics { margin: 10px 0; }
 summary { cursor: pointer; color: var(--muted); }
@@ -105,6 +106,7 @@ dd { margin-inline-start: 0; overflow-wrap: anywhere; }
 .module-pin-group.shared ul { display: flex; flex-wrap: wrap; gap: 5px 8px; }
 .module-pin { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 0 6px; padding: 3px 5px;
     border: 1px solid transparent; border-radius: 4px; color: var(--ink); max-width: 100%; text-align: inherit; }
+.module-pin code { background: transparent; padding: 0; }
 .module-pin-group.output .module-pin { justify-content: flex-end; }
 .module-pin-group.shared .module-pin { border-color: var(--divider); }
 .module-pin[aria-pressed=true], .module-pin:hover:is(button, a) { background: color-mix(in srgb, var(--up) 12%, var(--panel)); border-color: var(--focus); }

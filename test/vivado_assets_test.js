@@ -68,8 +68,14 @@ test('Block Design 正交布局保留信号扇出、独立接口、边界端口�
     assert.equal(source.ports.find(port => port.label === 'S_AXI').side, 'WEST');
     assert(!source.ports.some(port => port.label === 'axi_awready'));
     assert(source.ports.some(port => port.label === 'irq'));
-    assert(top.nodes.find(node => node.ports.some(port => port.name === '/config')).x < source.x);
-    assert(top.nodes.find(node => node.ports.some(port => port.name === '/irq_o')).x > source.x);
+    const config = top.nodes.find(node => node.ports[0]?.name === '/config');
+    const interrupt = top.nodes.find(node => node.ports[0]?.name === '/irq_o');
+    assert(config.x < source.x && config.terminal.labelX < config.terminal.left);
+    assert(interrupt.x > source.x && interrupt.terminal.labelX > interrupt.terminal.right);
+    assert.equal(config.ports[0].x, config.terminal.right);
+    assert.equal(interrupt.x + interrupt.ports[0].x, interrupt.x + interrupt.terminal.left);
+    const [externalWire] = top.edges.find(edge => model.nets[edge.net].id === '/interrupt').sections;
+    assert.deepEqual(externalWire.endPoint, { x: interrupt.x + interrupt.terminal.left, y: interrupt.y + interrupt.terminal.centerY });
     assert.equal(top.nodes.filter(node => node.kind === 'fork').length, 1);
     assert.equal(top.edges.filter(edge => edge.kind === 'bus').length, 3);
     assert.equal(top.edges.filter(edge => edge.kind === 'interface').length, 1);

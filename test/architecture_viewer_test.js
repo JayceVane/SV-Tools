@@ -45,6 +45,14 @@ test('报文汇聚简图保留独立实例、标签网络和架构握手证据�
     assert.equal(detailed.cards.find(card => card.nodes.some(node => node.name === 'u_lane0')).nodes.length, 1);
     assert.equal(detailed.cards.some(card => card.nodes.some(node => node.name === 'clk')), true);
     assert.ok(detailed.edges.length > overview.edges.length);
+    const detailedLayout = await layoutDiagram(top, 'detailed');
+    const clock = detailedLayout.cards.find(card => card.nodes[0]?.name === 'clk');
+    assert(clock.terminal.labelX < clock.terminal.left);
+    const clockEdges = detailedLayout.edges.filter(edge => edge.from === clock.id);
+    assert(clockEdges.length > 1);
+    for (const edge of clockEdges) {
+        assert.deepEqual(edge.sections[0].startPoint, { x: clock.x + clock.terminal.right, y: clock.y + clock.terminal.centerY });
+    }
     const svg = renderDiagram(await layoutDiagram(top, top.auto), top, true);
     assert.match(svg, /data-node="instance:u_fifo"/u);
     assert.match(svg, /data-edge=.+?arbitrated/u);
@@ -60,6 +68,7 @@ test('报文汇聚简图保留独立实例、标签网络和架构握手证据�
     const forced = await exportArchitecture(loaded, 'html', { out: 'architecture-detailed.html', modes: { [top.id]: 'detailed' } });
     const forcedHtml = await fs.readFile(forced, 'utf8');
     assert.ok(pinCount(forcedHtml) > pinCount(html));
+    assert.match(forcedHtml, /<polygon class="boundary-symbol"[^>]*\/><text class="boundary-caption"[^>]*>clk<\/text>/u);
     const anchors = new Set([...forcedHtml.matchAll(/\sid="([^"]+)"/gu)].map(([, id]) => id));
     const missing = [...forcedHtml.matchAll(/\shref="#([^"]+)"/gu)].map(([, id]) => id).filter(id => !anchors.has(id));
     assert.deepEqual(missing, [], '完整连线导出的图内跳转必须有目标');

@@ -86,6 +86,7 @@ main { min-height: 0; flex: 1; display: flex; }
 .cellLabel { fill: var(--fg); font-size: 13px; pointer-events: none; }
 .cellMode { fill: var(--muted); font-size: 12px; pointer-events: none; }
 .pinLabel, .portWidth { fill: var(--muted); font-size: 12px; pointer-events: none; }
+.terminalCaption { pointer-events: visiblePainted; }
 .clockMark, .gateCurve { fill: none; stroke: var(--cellAccent); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
 .selectionOutline, .searchCorners { fill: none; stroke-width: 1.5; pointer-events: none; vector-effect: non-scaling-stroke; visibility: hidden; }
 .selectionOutline { stroke: var(--diagramActive); }

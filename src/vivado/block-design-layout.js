@@ -2,6 +2,7 @@
 
 const { elkNode, placeBoundaryColumns } = require('../circuit/projection');
 const { layoutProjection } = require('../circuit/layout');
+const { terminalCaption, terminalWidth, terminalSymbol } = require('../circuit/symbol-library');
 
 const parentOf = id => id.slice(0, id.lastIndexOf('/'));
 const shortName = id => id.slice(id.lastIndexOf('/') + 1);
@@ -15,7 +16,8 @@ function direction(endpoint) {
     switch (endpoint.direction.toLowerCase()) {
         case 'i': case 'input': case 'slave': return 'input';
         case 'o': case 'output': case 'master': return 'output';
-        default: return 'shared';
+        case 'io': case 'inout': return 'inout';
+        default: return 'unknown';
     }
 }
 
@@ -54,12 +56,13 @@ function block(cell, index, pins) {
         width, height, ports: sides.flat() };
 }
 
-function boundaryNode(pin) {
-    const width = Math.max(70, widthOf(shorten(pin.label, 42)) + 32), height = 26;
+function boundaryNode(pin, declared) {
+    const width = terminalWidth(pin.label), height = 26;
     pin.x = pin.side === 'EAST' ? width : 0;
     pin.y = height / 2;
     return { id: 'boundary-' + pin.index, kind: 'boundary', boundary: true,
-        width, height, ports: [pin] };
+        width, height, ports: [pin], caption: terminalCaption(pin.label).text,
+        terminal: terminalSymbol(width, height, pin.side, declared) };
 }
 
 function fork(index) {
@@ -83,7 +86,7 @@ function schematicProjection(model, level, expandedInterfaces) {
         if (!boundary && (!endpoint.cell || parentOf(endpoint.cell) !== level)) return;
         const pin = schematicPin(endpoint, index, boundary);
         visiblePins.set(endpointKey(endpoint), pin);
-        if (boundary) nodes.push(boundaryNode(pin));
+        if (boundary) nodes.push(boundaryNode(pin, direction(endpoint)));
         else {
             if (!byCell.has(endpoint.cell)) byCell.set(endpoint.cell, []);
             byCell.get(endpoint.cell).push(pin);

@@ -37,13 +37,23 @@ test('符号几何不修改输入，锚点、绘制边界与门形使用同一�
     assert.equal(symbols.geometry(node).kind, 'nand');
 });
 
-test('单比特接口标签收紧为32px，总线40px仍容纳独立位宽，标签长度决定宽度', () => {
-    for (const kind of ['input', 'output', 'inout']) {
-        const scalar = symbols.prepareNode({ kind, label: 'i_data', ports: [{ direction: 'output', bits: ['n:2'] }] });
-        const bus = symbols.prepareNode({ kind, label: 'i_data', ports: [{ direction: 'output', bits: Array(32).fill('n:2') }] });
+test('外部端口的接线点贴合固定大小符号，长名称和位宽显示在另一侧', () => {
+    for (const kind of ['input', 'output', 'inout', 'unknown']) {
+        const direction = kind === 'input' ? 'output' : kind === 'output' ? 'input' : kind;
+        const scalar = symbols.prepareNode({ kind, terminal: true, label: 'i_data', ports: [{ direction, bits: ['n:2'] }] });
+        const bus = symbols.prepareNode({ kind, terminal: true, label: '配置输出_' + 'M'.repeat(60), ports: [{ direction, bits: Array(32).fill('n:2') }] });
         assert.equal(scalar.height, 32); assert.equal(bus.height, 40);
-        assert.ok(scalar.width <= 80); assert.ok(bus.width >= '32 bit'.length * 7.3 + 28);
-        assert.equal(scalar.ports[0].y, scalar.height / 2);
+        assert.ok(scalar.width < bus.width);
+        for (const node of [scalar, bus]) {
+            const mark = symbols.geometry(node).terminal, fromLeft = kind === 'input';
+            assert.equal(mark.right - mark.left, 20);
+            assert.equal(node.ports[0].x, fromLeft ? mark.right : mark.left);
+            assert.equal(node.ports[0].y, mark.centerY);
+            assert.ok(fromLeft ? mark.labelX < mark.left : mark.labelX > mark.right);
+        }
+        const caption = symbols.terminalCaption(bus.label, symbols.geometry(bus).terminal.labelWidth);
+        assert.match(caption.text, /^配置输出_.*…$/u);
+        assert.ok(caption.width <= symbols.geometry(bus).terminal.labelWidth);
     }
 });
 

@@ -99,6 +99,7 @@ td, th { text-align: left; vertical-align: top; padding: 3px; border-bottom: 1px
 .bd-terminal.bus, .bd-pin.bus, .bd-net.bus { --net-color: var(--bus); --net-width: 1.9; }
 .bd-net.control { --net-width: 1; }
 .bd-pin-label, .bd-terminal text { font-size: 12px; }
+.bd-schematic .bd-terminal-caption { pointer-events: visiblePainted; }
 .bd-terminal-outline { fill: color-mix(in srgb, var(--net-color) 10%, var(--drawing-bg)); stroke: var(--net-color); }
 .bd-hit { fill: transparent; }
 .bd-pin-tip { fill: var(--net-color); }
