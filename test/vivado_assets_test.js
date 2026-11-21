@@ -12,7 +12,8 @@ const { tclQuote } = require('../src/vivado/tclgen');
 const { script, readRows, rowsOf, parametersOf, literal, removeFromProject } = require('../src/vivado/asset-task');
 const ip = require('../src/vivado/ip');
 const bd = require('../src/vivado/block-design');
-const { resolveSelection } = require('../src/vivado/block-design-view');
+const { resolveSelection, createSchematicLayouts } = require('../src/vivado/block-design-view');
+const { digest } = require('../src/vivado/block-design-cache');
 const { layoutSchematic } = require('../src/vivado/block-design-layout');
 const { resolveEdits } = require('../src/vivado/ip-view');
 const { savedBlock, savedIp } = require('../src/vivado/asset-preview');
@@ -45,6 +46,28 @@ test('资产动作拒绝无效名称、任意生成目标、异类端点和只�
     assert.equal(resolveEdits(edits, { ...params, preview: true }), undefined);
     assert.equal(resolveEdits([edits[0], edits[0]], params), undefined);
     assert.equal(resolveEdits([{ key: 'CONFIG.FORGED', value: '8' }], params), undefined);
+});
+
+test('Block Design 布局在宿主重启后复用坐标，结构、层级和接口展开状态分别匹配', async t => {
+    const temp = await fs.realpath(os.tmpdir());
+    const folder = await fs.mkdtemp(path.join(temp, 'svtools-bd-cache-'));
+    t.after(async () => { if (path.dirname(folder) === temp) await fs.rm(folder, { recursive: true, force: true }); });
+    const source = { name: 'demo', cells: [{ id: '/sub', type: 'hier' }] };
+    let calls = 0;
+    const engine = async (model, level, { expandedInterfaces }) => ({ width: ++calls, name: model.name, level, expandedInterfaces });
+    const first = createSchematicLayouts(folder, engine);
+    const id = digest(source);
+    const [one, duplicate] = await Promise.all([first.resolve(id, source, '', false), first.resolve(id, source, '', false)]);
+    assert.equal(calls, 1);
+    assert.deepEqual(one, duplicate);
+    const reopened = createSchematicLayouts(folder, engine);
+    assert.deepEqual(await reopened.get(id, '', false), one);
+    assert.deepEqual(await reopened.resolve(id, source, '', false), one);
+    assert.equal(calls, 1);
+    await reopened.resolve(id, source, '/sub', false);
+    await reopened.resolve(id, source, '', true);
+    const changed = { ...source, cells: [] };
+    assert.equal(await reopened.resolve(digest(changed), changed, '', false).then(item => item.width), 4);
 });
 
 test('磁盘预览读取 XCI 保存值和 BD 层级连接，保留端口方向证据的边界', () => {

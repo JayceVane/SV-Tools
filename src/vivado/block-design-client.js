@@ -274,13 +274,31 @@
         $('interface-members').setAttribute('aria-pressed', String(expandedInterfaces));
         $('level-up').disabled = !level;
     }
-    function requestLayout() {
+    function renderLayout(layout, error) {
+        hasLayout = Boolean(layout?.width);
+        $('canvas-message').hidden = hasLayout;
+        if (hasLayout) {
+            const view = views.get(viewKey());
+            canvas.draw(layout, model, level, view);
+            mark();
+            if (locateAfterLayout) canvas.focus(locateAfterLayout);
+            else if (selected && view?.autoFit !== false) canvas.focus(selected);
+            locateAfterLayout = undefined;
+        } else {
+            canvas.clear();
+            $('canvas-message').textContent = error || '此层级为空。可添加模块或外部端口。';
+        }
+        drawControls();
+    }
+    function requestLayout(saved) {
+        ++request;
+        if (saved) { renderLayout(saved); return; }
         canvas.clear();
         hasLayout = false;
         $('canvas-message').hidden = false;
         $('canvas-message').textContent = '正在布置原理图…';
         drawControls();
-        vscode.postMessage({ action: 'layout', revision, level, request: ++request, expandedInterfaces });
+        vscode.postMessage({ action: 'layout', revision, level, request, expandedInterfaces });
     }
     function saveView() {
         const state = canvas.state();
@@ -291,14 +309,14 @@
         expandedInterfaces = expanded;
         requestLayout();
     }
-    function drawLevel() {
+    function drawLevel(saved) {
         scope = buildScope();
         $('level').value = level;
         $('counts').textContent = `${scope.cells.length} 个模块 · ${scope.nets.length} 条连接`;
         showWireHint();
         drawSelection();
         drawObjects();
-        requestLayout();
+        requestLayout(saved);
     }
     function changeLevel(next) {
         if (!model || next === level) return;
@@ -375,22 +393,9 @@
                 return row;
             }));
             report(data.message);
-            drawLevel();
+            drawLevel(!level && !expandedInterfaces ? data.rootLayout : undefined);
         } else if (data.type === 'layout' && data.revision === revision && data.request === request && data.level === level) {
-            const layout = data.layout;
-            hasLayout = Boolean(layout?.width);
-            $('canvas-message').hidden = hasLayout;
-            if (hasLayout) {
-                const view = views.get(viewKey());
-                canvas.draw(layout, model, level, view);
-                mark();
-                if (locateAfterLayout) canvas.focus(locateAfterLayout);
-                else if (selected && view?.autoFit !== false) canvas.focus(selected);
-                locateAfterLayout = undefined;
-            } else {
-                $('canvas-message').textContent = data.error || '此层级为空。可添加模块或外部端口。';
-            }
-            drawControls();
+            renderLayout(data.layout, data.error);
         } else if (data.type === 'busy') {
             busy = data.busy;
             if (busy) report('Vivado 正在处理…');

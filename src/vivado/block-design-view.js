@@ -4,6 +4,7 @@ const { randomBytes } = require('node:crypto');
 const path = require('node:path');
 const { samePath } = require('./xpr');
 const { layoutSchematic, parentOf, isInterface } = require('./block-design-layout');
+const { createBlockDesignCache, digest } = require('./block-design-cache');
 
 function html(webview, vscode, resources) {
     const nonce = randomBytes(24).toString('base64');
@@ -95,8 +96,30 @@ function resolveSelection(model, message) {
     }
 }
 
+function createSchematicLayouts(directory, layout = layoutSchematic) {
+    const cache = createBlockDesignCache(directory, 'layout', 24), pending = new Map();
+    const keyFor = (modelId, level, expanded) => digest([modelId, level, expanded]);
+    return {
+        get: (modelId, level, expanded) => cache.get(keyFor(modelId, level, expanded)),
+        async resolve(modelId, model, level, expanded) {
+            const key = keyFor(modelId, level, expanded), saved = await cache.get(key);
+            if (saved) return saved;
+            if (!pending.has(key)) {
+                const task = Promise.resolve().then(async () => {
+                    const result = await layout(model, level, { expandedInterfaces: expanded });
+                    await cache.set(key, result);
+                    return result;
+                }).finally(() => pending.delete(key));
+                pending.set(key, task);
+            }
+            return pending.get(key);
+        }
+    };
+}
+
 function openBlockDesignPanels(context, vscode, invoke) {
     const panels = new Set();
+    const layouts = createSchematicLayouts(context.storageUri?.fsPath);
     context.subscriptions.push({ dispose() { for (const entry of panels) entry.panel.dispose(); } });
     function open(target, state) {
         const existing = [...panels].find(entry => samePath(entry.target.xpr, target.xpr) && samePath(entry.target.file, target.file));
@@ -109,31 +132,33 @@ function openBlockDesignPanels(context, vscode, invoke) {
         const resources = vscode.Uri.joinPath(context.extensionUri, 'src', 'vivado');
         const panel = vscode.window.createWebviewPanel('svtoolsBlockDesign', 'BD · ' + (state?.model.name || path.basename(target.file, '.bd')), vscode.ViewColumn.Active,
             { enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [resources] });
-        let revision = 0, busy = false, closed = false, ready = false;
-        const layouts = new Map();
+        let revision = 0, busy = false, closed = false, ready = false, modelId;
         const post = message => { if (!closed && ready) void panel.webview.postMessage(message); };
-        const replace = (next, message) => {
+        const replace = async (next, message) => {
             state = next;
-            layouts.clear();
-            post({ type: 'snapshot', revision: ++revision, model: state.model, preview: state.preview === true, file: target.file, message });
+            modelId = digest(state.model);
+            const version = ++revision, rootLayout = await layouts.get(modelId, '', false);
+            if (version === revision) post({ type: 'snapshot', revision, model: state.model, preview: state.preview === true, file: target.file, message, rootLayout });
         };
         async function reload(force) {
             if (busy || closed || !ready) return;
             busy = true;
-            post({ type: 'busy', busy: true });
+            let native = false;
             try {
                 const first = !force && await invoke(target, state, 'preview');
-                if (first?.model && first !== state) replace(first, first.preview ? '已保存的结构预览 · 正在由 Vivado 核对' : undefined);
-                if (force || !first?.model || first.preview) {
+                native = !first?.model || first.preview;
+                if (native) post({ type: 'busy', busy: true });
+                if (first?.model && first !== state) await replace(first, first.preview ? '已保存的结构预览 · 正在由 Vivado 核对' : undefined);
+                if (native) {
                     const next = await invoke(target, state, 'refresh', {}, () => !closed);
                     if (!next?.model) throw new Error(next?.error || 'Vivado 读取已取消');
-                    replace(next);
+                    await replace(next);
                 }
             } catch (error) {
                 post({ type: 'status', message: (state?.preview ? '已保存的结构预览 · ' : '') + error.message });
             } finally {
                 busy = false;
-                post({ type: 'busy', busy: false });
+                if (native) post({ type: 'busy', busy: false });
             }
         }
         const entry = { panel, target, replace, reload };
@@ -143,7 +168,7 @@ function openBlockDesignPanels(context, vscode, invoke) {
             if (closed || !message) return;
             if (message.action === 'ready') {
                 ready = true;
-                if (state?.model) replace(state);
+                if (state?.model) await replace(state);
                 else await reload(false);
                 return;
             }
@@ -153,19 +178,11 @@ function openBlockDesignPanels(context, vscode, invoke) {
                 if (!Number.isSafeInteger(request) || level !== '' && !state.model.cells.some(cell => cell.type === 'hier' && cell.id === level)) return;
                 const version = revision;
                 const result = { revision: version, level, request };
-                const key = level + '\0' + (expandedInterfaces === true);
                 try {
-                    if (!layouts.has(key)) {
-                        if (layouts.size >= 8) layouts.delete(layouts.keys().next().value);
-                        layouts.set(key, layoutSchematic(state.model, level, { expandedInterfaces: expandedInterfaces === true }));
-                    }
-                    const layout = await layouts.get(key);
+                    const layout = await layouts.resolve(modelId, state.model, level, expandedInterfaces === true);
                     if (version === revision) post({ type: 'layout', ...result, layout });
                 } catch (error) {
-                    if (version === revision) {
-                        layouts.delete(key);
-                        post({ type: 'layout', ...result, error: error.message });
-                    }
+                    if (version === revision) post({ type: 'layout', ...result, error: error.message });
                 }
                 return;
             }
@@ -177,7 +194,7 @@ function openBlockDesignPanels(context, vscode, invoke) {
             try {
                 const result = await invoke(target, state, message.action, selection);
                 if (result?.close) panel.dispose();
-                else if (result?.model) replace(result, result.message || (message.action === 'refresh' ? undefined : 'Vivado 已保存操作结果'));
+                else if (result?.model) await replace(result, result.message || 'Vivado 已保存操作结果');
                 else if (result?.message || result?.error) post({ type: 'status', message: result.message || result.error });
             } catch (error) {
                 post({ type: 'status', message: error.message });
@@ -191,4 +208,4 @@ function openBlockDesignPanels(context, vscode, invoke) {
     return { open };
 }
 
-module.exports = { openBlockDesignPanels, resolveSelection };
+module.exports = { openBlockDesignPanels, resolveSelection, createSchematicLayouts };

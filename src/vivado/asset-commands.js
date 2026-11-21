@@ -11,6 +11,7 @@ const { openIpPanels } = require('./ip-view');
 const { openCatalogPanels } = require('./ip-catalog-view');
 const { readAssetText, savedBlock, savedIp } = require('./asset-preview');
 const { createIpMetadata } = require('./ip-metadata');
+const { createBlockDesignCache, digest } = require('./block-design-cache');
 const ip = require('./ip');
 const bd = require('./block-design');
 
@@ -32,7 +33,8 @@ const IP_LANGUAGES = ['verilog', 'systemverilog', 'vhdl'];
 function activateAssetCommands(context, { vscode, findProjectXpr, incrementalAction, runIncrementalTcl, pickerToken, refresh, resolveBinDir }) {
     const cacheName = 'svtools.vivado.ipCatalog.v2';
     const describeIp = createIpMetadata(resolveBinDir);
-    const catalogCache = new Map(context.workspaceState?.get(cacheName, []) || []), blockCache = new Map(), ipCache = new Map();
+    const catalogCache = new Map(context.workspaceState?.get(cacheName, []) || []), ipCache = new Map();
+    const blockCache = createBlockDesignCache(context.storageUri?.fsPath, 'model', 8);
     let reads = Promise.resolve();
     const window = vscode.window;
     let lastHdlEditor = window.activeTextEditor;
@@ -353,23 +355,41 @@ function activateAssetCommands(context, { vscode, findProjectXpr, incrementalAct
         const projectStamp = await hash(session.xpr);
         const { rows } = await session.run('bd_read', bd.read(target.file), { target, guard: before, readOnly: true });
         if (await hash(target.file) !== before || await hash(session.xpr) !== projectStamp) throw new Error('Block Design 或工程在读取期间发生变化，请重试');
-        return rememberBlock(target, { model: bd.snapshot(rows), stamp: before, projectStamp });
+        return rememberBlock(target, session.project, { model: bd.snapshot(rows), stamp: before, projectStamp });
     }
 
-    const blockKey = target => [catalogKey(target.xpr), target.file, target.fileset].join('\0');
-    function rememberBlock(target, state) {
-        const entry = { ...state, expires: Date.now() + 120000 };
-        store(blockCache, blockKey(target), entry, 8);
+    const blockKey = target => digest([catalogKey(target.xpr), target.file, target.fileset]);
+    async function blockDependencies(project, target, model) {
+        const hasRtl = model.cells.some(cell => cell.type === 'module');
+        const types = hasRtl ? /\.(?:bd|xcix?|v|sv|vh|svh|vhdl?|vhdp)$/iu : /\.(?:bd|xcix?)$/iu;
+        const files = [...new Set(project.sets.filter(set => set.type === 'DesignSrcs' || set.name === target.fileset)
+            .flatMap(set => set.files.filter(file => types.test(file) && !samePath(file, target.file))))].sort();
+        const stamps = [];
+        for (let start = 0; start < files.length; start += 32) {
+            const batch = await Promise.all(files.slice(start, start + 32).map(async file => {
+                try {
+                    const { size, mtimeMs, ctimeMs } = await fs.stat(file);
+                    return [file, size, mtimeMs, ctimeMs];
+                } catch (error) { return [file, error.code || 'unavailable']; }
+            }));
+            stamps.push(...batch);
+        }
+        return digest(stamps);
+    }
+    async function rememberBlock(target, project, state) {
+        const entry = { ...state, dependencies: await blockDependencies(project, target, state.model) };
+        await blockCache.set(blockKey(target), entry);
         return entry;
     }
 
     async function previewBlock(target) {
         const session = await projectFor(target.xpr);
         if (!member(session.project, target.file, target.fileset)) throw new Error('此 Block Design 已不在当前工程的文件集中');
+        const cached = await blockCache.get(blockKey(target));
+        if (cached && cached.stamp === await hash(target.file) && cached.projectStamp === await hash(target.xpr) &&
+            cached.dependencies === await blockDependencies(session.project, target, cached.model)) return cached;
         const saved = await readAssetText(target.file).catch(() => undefined);
         if (!saved) return;
-        const cached = blockCache.get(blockKey(target));
-        if (cached?.stamp === saved.stamp && cached.expires > Date.now() && cached.projectStamp === await hash(target.xpr)) return cached;
         const model = await Promise.resolve().then(() => savedBlock(saved.text)).catch(() => undefined);
         if (model) return { model, stamp: saved.stamp, preview: true };
     }
@@ -380,9 +400,8 @@ function activateAssetCommands(context, { vscode, findProjectXpr, incrementalAct
         const guard = state.stamp;
         const update = async (name, body) => {
             const { rows } = await session.run(name, [...body, ...bd.inspect()], { target, guard, quiet: true });
-            return rememberBlock(target, { model: bd.snapshot(rows), stamp: await hash(filename), projectStamp: await hash(target.xpr) });
+            return rememberBlock(target, parseXpr(target.xpr), { model: bd.snapshot(rows), stamp: await hash(filename), projectStamp: await hash(target.xpr) });
         };
-        if (action === 'refresh') return readBlock(session, target);
         if (action === 'add-cell') {
             const type = (await pick(choices([['ip', '从 Catalog 添加 IP'], ['module', '添加 RTL 模块引用'], ['hier', '创建层级块']]), '添加模块'))?.value;
             if (!type) return;
@@ -498,7 +517,7 @@ function activateAssetCommands(context, { vscode, findProjectXpr, incrementalAct
                     const target = assets(parseXpr(session.xpr), BD_EXTENSION).find(item => created && samePath(item.file, created));
                     if (!target) throw new Error('Vivado 未将新建的 Block Design 加入工程');
                     const entry = { ...target, xpr: session.xpr };
-                    panels.open(entry, rememberBlock(entry, { model: bd.snapshot(result.rows), stamp: await hash(target.file), projectStamp: await hash(session.xpr) }));
+                    panels.open(entry, await rememberBlock(entry, parseXpr(session.xpr), { model: bd.snapshot(result.rows), stamp: await hash(target.file), projectStamp: await hash(session.xpr) }));
                 } else {
                     const file = (await files({ filters: { 'Vivado Block Design': ['bd'] }, openLabel: '选择 Block Design' }))?.[0]?.fsPath;
                     if (!file) return;
