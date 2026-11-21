@@ -150,3 +150,65 @@ test('依赖不满足的参数禁用并提示来源', () => {
     assert.equal(note.hidden, false);
     assert.match(note.textContent, /C_IS_DUAL/);
 });
+
+function fakeHost() {
+    const posted = [], listeners = [], disposals = [];
+    const panel = {
+        webview: {
+            html: '', cspSource: 'vscode-resource:',
+            asWebviewUri: uri => ({ toString: () => 'file:///' + uri.fsPath.replace(/\\/gu, '/') }),
+            onDidReceiveMessage(callback) { listeners.push(callback); return { dispose() {} }; },
+            postMessage(message) { posted.push(message); }
+        },
+        reveal() {},
+        onDidDispose(callback) { disposals.push(callback); return { dispose() {} }; },
+        dispose() { for (const callback of disposals) callback(); }
+    };
+    const vscode = {
+        Uri: { joinPath: (base, ...parts) => ({ fsPath: [base.fsPath, ...parts].join('/') }) },
+        ViewColumn: { Active: -1 },
+        window: { createWebviewPanel: () => panel }
+    };
+    const context = { extensionUri: { fsPath: 'C:/ext' }, subscriptions: [] };
+    return { panel, posted, listeners, vscode, context };
+}
+
+test('对话框宿主：读取、应用与错误状态都经消息往返', async () => {
+    const { openIpFormPanels } = require('../src/vivado/ip-form-view');
+    const ui = fakeHost();
+    const calls = [];
+    let parameters = info.parameters;
+    const open = openIpFormPanels(ui.context, ui.vscode, {
+        async load(key) {
+            calls.push(['load', key]);
+            return { ...info, parameters, notes: [] };
+        },
+        async apply(key, edits) {
+            calls.push(['apply', key, edits]);
+            parameters = parameters.map(parameter => {
+                const edit = edits.find(item => item.key === parameter.key);
+                return edit ? { ...parameter, value: edit.value } : parameter;
+            });
+            return { info: { ...info, parameters }, message: '已应用 1 项修改' };
+        }
+    });
+    open({ key: 'k1', title: 'IP 定制', subtitle: 'xilinx.com:ip:axi_gpio:2.0' });
+    assert.equal(ui.listeners.length, 1);
+    ui.listeners[0]({ action: 'ready' });
+    await new Promise(resolve => setTimeout(resolve, 10));
+    assert.deepEqual(calls[0], ['load', 'k1']);
+    const first = ui.posted.at(-1);
+    assert.equal(first.type, 'form');
+    assert.equal(first.form.pages.length, 1);
+    assert.equal(first.form.pages[0].groups.length, 2);
+    assert.equal(first.info.name, 'gpio_0');
+    ui.listeners[0]({ action: 'apply', revision: first.revision, edits: [{ key: 'CONFIG.C_IS_DUAL', value: 'true' }] });
+    await new Promise(resolve => setTimeout(resolve, 10));
+    assert.equal(calls.at(-1)[0], 'apply');
+    assert.equal(calls.at(-1)[2][0].key, 'CONFIG.C_IS_DUAL');
+    const applied = ui.posted.filter(message => message.type === 'applied');
+    assert.equal(applied.length, 1);
+    assert.equal(ui.posted.at(-1).info.parameters[0].value, 'true');
+    assert.equal(ui.posted.at(-1).status, '已应用 1 项修改');
+    ui.listeners[0]({ action: 'close' });
+});
