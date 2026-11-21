@@ -7,7 +7,8 @@ const { cancelledError } = require('../toolchains/job');
 const { parseXpr, samePath } = require('./xpr');
 const { script, sessionScript, readRows, rowsOf, parametersOf, removeFromProject } = require('./asset-task');
 const { openBlockDesignPanels } = require('./block-design-view');
-const { openIpPanels } = require('./ip-view');
+const { openIpPanels, resolveEdits } = require('./ip-view');
+const { openIpFormPanels } = require('./ip-form-view');
 const { openCatalogPanels } = require('./ip-catalog-view');
 const { readAssetText, savedBlock, savedIp } = require('./asset-preview');
 const { createIpMetadata } = require('./ip-metadata');
@@ -118,16 +119,6 @@ function activateAssetCommands(context, { vscode, findProjectXpr, incrementalAct
         store(catalogCache, key, result, 3);
         await context.workspaceState?.update(cacheName, [...catalogCache]);
         return result;
-    }
-
-    async function definition(session) {
-        let catalog = await cachedCatalog(session.xpr);
-        if (!catalog || catalog.expires < Date.now()) catalog = await loadCatalog(session);
-        const items = catalog.items.filter(item => item.ipi).map(item => ({ ...item, description: item.value }));
-        if (!items.length) throw new Error('当前器件和仓库没有可用的 Block Design IP 定义');
-        return (await pick(items, `IP Catalog · ${catalog.part} · Vivado ${catalog.version}`, {
-            placeHolder: '按名称、厂商或 VLNV 搜索，选择精确版本'
-        }))?.value;
     }
 
     async function parameterChanges(parameters, title) {
@@ -312,6 +303,48 @@ function activateAssetCommands(context, { vscode, findProjectXpr, incrementalAct
         }
     });
 
+    // Block Design 专用目录：选定 IP 后创建实例并打开定制对话框。
+    let bdCatalogTarget = null;
+    const openBdCatalogImpl = openCatalogPanels(context, vscode, {
+        cached: async xpr => { await projectFor(xpr); return cachedCatalog(xpr); },
+        async refresh(xpr, active) {
+            const result = await queueAction('Block Design IP Catalog', xpr, loadCatalog, active);
+            if (!result?.items) throw new Error(result?.error || 'IP 目录读取已取消');
+            return result;
+        },
+        async create(xpr, vlnv) { return addBlockIp(xpr, vlnv); },
+        title: 'IP Catalog · Block Design',
+        action: '添加到 Block Design',
+        windowTitle: 'Block Design IP Catalog'
+    });
+    function openBdCatalog(xpr) { openBdCatalogImpl(xpr); }
+
+    /** 在原理图中创建 IP 实例，随后打开与 Vivado Re-customize IP 等价的定制对话框。 */
+    async function addBlockIp(xpr, vlnv) {
+        const target = bdCatalogTarget;
+        if (!target || !samePath(target.xpr, xpr)) throw new Error('Block Design 已切换，请从当前设计重新打开 IP Catalog');
+        const name = await nameInput('实例名', vlnv.split(':')[2].replace(/[^\w]/gu, '_') + '_0');
+        if (!name) return '已取消';
+        const result = await queueAction('添加 IP', xpr, async session => {
+            const guard = await hash(target.file);
+            const { rows } = await session.run('bd_add_cell', [...bd.addCell(target.file, { type: 'ip', reference: vlnv, name }), ...bd.inspect()],
+                { target, guard, quiet: true });
+            return rememberBlock(target, parseXpr(xpr), {
+                model: bd.snapshot(rows), stamp: await hash(target.file), projectStamp: await hash(xpr)
+            });
+        });
+        if (!result || result.status === 'failed') throw new Error(result?.error || '添加 IP 已取消');
+        if (!result.model) return '已取消';
+        panels.update(target, result);
+        const cell = result.model.cells.find(item => item.id === name || item.id.endsWith('/' + name));
+        if (cell) {
+            const key = formKey(target, 'cell', cell.id);
+            formTargets.set(key, { ...target, id: cell.id, vlnv });
+            formPanels.open({ key, title: 'IP 定制 · ' + cell.id, subtitle: vlnv });
+        }
+        return '已添加 ' + name + (cell ? '，可在定制对话框调整参数' : '');
+    }
+
     const ipPanels = openIpPanels(context, vscode, async (xpr, action, target, info, changes, active) => {
         if (action === 'create') return openCatalog(xpr);
         if (action === 'preview') {
@@ -394,6 +427,65 @@ function activateAssetCommands(context, { vscode, findProjectXpr, incrementalAct
         if (model) return { model, stamp: saved.stamp, preview: true };
     }
 
+    // ---- IP 定制对话框：读取单元格参数、应用修改并回推原理图 ----
+    const formTargets = new Map();
+    const formKey = (target, kind, id) => [target.xpr, target.file, kind, id].join('\0');
+
+    async function readCellParameters(session, target) {
+        const { rows } = await session.run('bd_read_config', bd.parameters(target.file, target.id), { target, readOnly: true, quiet: true });
+        return parametersOf(rows);
+    }
+
+    async function describeCell(target, parameters) {
+        if (!target.vlnv) return { parameters, notes: [] };
+        const described = await describeIp({ vlnv: target.vlnv, parameters });
+        return { parameters: described.parameters, notes: described.notes || [] };
+    }
+
+    const formPanels = openIpFormPanels(context, vscode, {
+        async load(key) {
+            const target = formTargets.get(key);
+            if (!target) return { error: 'IP 配置目标已失效，请重新打开' };
+            const read = () => queueAction('IP 定制', target.xpr, async session => {
+                // 记录读取时的文件戳：应用时据此发现对话框打开期间的外部修改。
+                target.guard = await hash(target.file);
+                return { name: target.id, vlnv: target.vlnv || '', ...await describeCell(target, await readCellParameters(session, target)),
+                    locked: false, preview: false };
+            });
+            let result = await read();
+            // 原理图刚提交的动作可能仍占用队列；稍后重试一次，避免对话框首次打开就失败。
+            if (result?.status === 'skipped') { await new Promise(resolve => setTimeout(resolve, 800)); result = await read(); }
+            if (!result || result.status === 'failed' || result.status === 'skipped') return { error: result?.error || '参数读取已取消' };
+            return result;
+        },
+        async apply(key, edits) {
+            const target = formTargets.get(key);
+            if (!target) return { error: 'IP 配置目标已失效，请重新打开' };
+            const result = await queueAction('应用 IP 参数', target.xpr, async session => {
+                const changes = resolveEdits(edits, { parameters: await readCellParameters(session, target) });
+                if (!changes) throw new Error('参数已变化或不满足依赖，请重新读取后再试');
+                if (!changes.length) return { message: '没有需要应用的修改' };
+                const { rows } = await session.run('bd_set_config', [
+                    ...bd.configure(target.file, target.id, changes),
+                    ...bd.parameters(target.file, target.id),
+                    ...bd.inspect()
+                ], { target, guard: target.guard, quiet: true });
+                target.guard = await hash(target.file);
+                const entry = await rememberBlock(target, parseXpr(target.xpr), {
+                    model: bd.snapshot(rows), stamp: await hash(target.file), projectStamp: await hash(target.xpr)
+                });
+                panels.update(target, entry);
+                return {
+                    info: { name: target.id, vlnv: target.vlnv || '', ...await describeCell(target, parametersOf(rows)),
+                        locked: false, preview: false },
+                    message: '已应用 ' + changes.length + ' 项修改'
+                };
+            });
+            if (!result || result.status === 'failed') return { error: result?.error || '应用已取消' };
+            return result;
+        }
+    });
+
     // Block Design 动作使用面板当前快照，实际 Tcl 对象仍由 Vivado 精确解析。
     async function blockAction(session, target, state, action, selection) {
         const filename = target.file;
@@ -405,11 +497,15 @@ function activateAssetCommands(context, { vscode, findProjectXpr, incrementalAct
         if (action === 'add-cell') {
             const type = (await pick(choices([['ip', '从 Catalog 添加 IP'], ['module', '添加 RTL 模块引用'], ['hier', '创建层级块']]), '添加模块'))?.value;
             if (!type) return;
-            const reference = type === 'ip' ? await definition(session)
-                : type === 'module' ? await nameInput('工程中已有的 Verilog / SystemVerilog / VHDL 模块名') : undefined;
+            if (type === 'ip') {
+                // 目录面板负责选择；选定后创建实例并直接打开定制对话框。
+                bdCatalogTarget = target;
+                openBdCatalog(target.xpr);
+                return { message: '已打开 IP Catalog：选择 IP 后会创建实例并打开定制对话框' };
+            }
+            const reference = type === 'module' ? await nameInput('工程中已有的 Verilog / SystemVerilog / VHDL 模块名') : undefined;
             if (type !== 'hier' && !reference) return;
-            const name = await nameInput('实例名', type === 'ip' ? reference.split(':')[2].replace(/[^\w]/gu, '_') + '_0'
-                : type === 'module' ? reference + '_0' : 'group_0');
+            const name = await nameInput('实例名', type === 'module' ? reference + '_0' : 'group_0');
             if (name) return update('bd_add_cell', bd.addCell(filename, { type, reference, name, parent: selection?.cell?.id }));
         } else if (action === 'add-port') {
             const kind = (await pick(choices([['signal', '普通信号'], ['interface', '协议接口']]), '外部端口类别'))?.value;
@@ -433,6 +529,12 @@ function activateAssetCommands(context, { vscode, findProjectXpr, incrementalAct
             const width = type === 'data' ? await input('端口位宽', { value: '1', validateInput: value =>
                 /^[1-9]\d*$/u.test(value) && Number.isSafeInteger(Number(value)) ? undefined : '请输入正整数' }) : '1';
             if (width) return update('bd_add_port', bd.addPort(filename, { name, direction, type, width: Number(width) }));
+        } else if (action === 'config' && selection?.cell?.vlnv) {
+            // IP 实例与 Vivado 的 Re-customize IP 一致：在独立对话框里按 XGUI 分组编辑。
+            const key = formKey(target, 'cell', selection.cell.id);
+            formTargets.set(key, { ...target, id: selection.cell.id, vlnv: selection.cell.vlnv });
+            formPanels.open({ key, title: 'IP 定制 · ' + selection.cell.id, subtitle: selection.cell.vlnv });
+            return { message: '已打开 IP 定制对话框' };
         } else if (action === 'config' || action === 'config-port') {
             const item = selection.endpoint || selection.cell;
             const query = selection.endpoint ? bd.portParameters(filename, item) : bd.parameters(filename, item.id);
@@ -463,8 +565,10 @@ function activateAssetCommands(context, { vscode, findProjectXpr, incrementalAct
         } else if (action === 'remove') {
             const kind = selection.cell ? 'cell' : selection.net ? 'net' : 'endpoint';
             const item = selection[kind];
-            if (await confirm(`删除 ${item.id}？Vivado 会更新与它相关的连接。`, '删除'))
+            if (await confirm(`删除 ${item.id}？Vivado 会更新与它相关的连接。`, '删除')) {
+                formTargets.delete(formKey(target, 'cell', item.id));
                 return update('bd_remove', bd.remove(filename, kind, item));
+            }
         } else if (action === 'address-edit') {
             return update('bd_address_set', bd.setAddress(filename, selection.segment, { offset: selection.offset, range: selection.range }));
         } else if (action === 'address-map') {

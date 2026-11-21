@@ -240,7 +240,12 @@ function openBlockDesignPanels(context, vscode, invoke) {
         });
         panel.webview.html = html(panel.webview, vscode, resources);
     }
-    return { open };
+    /** 外部动作（IP 定制对话框等）更新模型后回推给已打开的原理图面板。 */
+    function update(target, state) {
+        const found = [...panels].find(item => samePath(item.target.xpr, target.xpr) && samePath(item.target.file, target.file));
+        if (found && state?.model) void found.replace(state);
+    }
+    return { open, update };
 }
 
 module.exports = { openBlockDesignPanels, resolveSelection, createSchematicLayouts };

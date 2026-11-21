@@ -4,6 +4,7 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const { walkXml } = require('./xpr');
 const { attribute, localName, readAssetText } = require('./asset-preview');
+const { parseLayout } = require('./xgui');
 
 const children = (node, name) => node?.children.filter(child => child.name === name) || [];
 const child = (node, name) => children(node, name)[0];
@@ -40,42 +41,6 @@ function parseComponent(xml, file) {
 }
 
 // 只提取文字定义，Tcl 的条件和回调留给 Vivado 执行。
-function guiLayout(source) {
-    const objects = new Map(), fields = new Map();
-    const word = /\$\{[\w.:-]+\}|"(?:\\.|[^"\\])*"|\{[^{}]*\}|[^\s\[\]"]+/gu;
-    const literal = token => {
-        const content = token?.replace(/^(?:"([\s\S]*)"|\{([\s\S]*)\})$/u, (_, quoted, braced) => quoted ?? braced);
-        return content && !/[$\[\]{}]/u.test(content) ? content.trim() : '';
-    };
-    const ref = token => /^\$(?:\{([\w.:-]+)\}|([\w.:-]+))$/u.exec(token || '')?.slice(1).find(Boolean);
-    for (const raw of source.replace(/\\\r?\n\s*/gu, ' ').split(/\r?\n/u)) {
-        const line = raw.trim();
-        const add = /^(?:set\s+([\w.:-]+)\s+\[\s*)?ipgui::add_(page|group|panel|table|param)\s+(.+)$/u.exec(line);
-        if (add) {
-            const [, name, type, args] = add, words = args.match(word) || [];
-            const option = key => { const i = words.indexOf('-' + key); return i >= 0 ? words[i + 1] : undefined; };
-            const key = literal(option('name'));
-            if (!key) continue;
-            const parent = objects.get(ref(option('parent')));
-            const entry = { key, type, parent, widget: literal(option('widget')) };
-            if (name) objects.set(name, entry);
-            if (type === 'param' && !fields.has(key)) fields.set(key, entry);
-            continue;
-        }
-        if (!line.startsWith('set_property ')) continue;
-        const [, property, wordValue, variable, extra] = line.match(word) || [];
-        if (extra || !['display_name', 'tooltip'].includes(property)) continue;
-        const entry = objects.get(ref(variable)), caption = literal(wordValue);
-        if (entry && caption) entry[property] = caption;
-    }
-    return new Map([...fields].map(([key, entry]) => {
-        const parents = [];
-        for (let item = entry.parent, depth = 0; item && depth++ < 12; item = item.parent) {
-            if (item.type === 'page' || item.type === 'group' || item.display_name) parents.unshift(item.display_name || item.key);
-        }
-        return [key, { label: entry.display_name, help: entry.tooltip, group: parents.join(' / '), widget: entry.widget }];
-    }));
-}
 
 function installedPackage(bin, vlnv) {
     const [vendor, , name, version] = vlnv.split(':');
@@ -84,9 +49,10 @@ function installedPackage(bin, vlnv) {
 }
 
 function annotate(parameters, { fields, layout, vlnv }) {
+    const uiFields = layout instanceof Map ? layout : layout?.params || new Map();
     const options = new Map();
     for (const parameter of parameters) {
-        const key = parameter.key.slice(7), definition = fields.get(key), ui = layout.get(key);
+        const key = parameter.key.slice(7), definition = fields.get(key), ui = uiFields.get(key);
         const dependency = vlnv === 'xilinx.com:ip:axi_gpio:2.0' && key === 'C_GPIO2_WIDTH'
             ? [['CONFIG.C_IS_DUAL', ['1', 'true']], ['CONFIG.GPIO2_BOARD_INTERFACE', ['Custom']]] : undefined;
         if (definition || ui) options.set(parameter.key, {
@@ -95,7 +61,7 @@ function annotate(parameters, { fields, layout, vlnv }) {
         });
     }
     const keys = new Set(parameters.map(parameter => parameter.key));
-    const order = new Map([...layout.keys()].map((key, index) => ['CONFIG.' + key, index]));
+    const order = new Map([...uiFields.keys()].map((key, index) => ['CONFIG.' + key, index]));
     return parameters.map(parameter => {
         const data = options.get(parameter.key);
         if (!data) return parameter;
@@ -129,12 +95,15 @@ function createIpMetadata(resolveBinDir) {
             if (entry.gui) {
                 const stat = await fs.stat(entry.gui).catch(() => undefined);
                 if (stat && (entry.guiMtime !== stat.mtimeMs || entry.guiSize !== stat.size)) {
-                    entry.layout = await readAssetText(entry.gui, 2 * 1024 * 1024).then(result => guiLayout(result.text)).catch(() => new Map());
+                    entry.layout = await readAssetText(entry.gui, 2 * 1024 * 1024).then(result => parseLayout(result.text))
+                        .catch(() => ({ params: new Map(), notes: new Map() }));
                     entry.guiMtime = stat.mtimeMs;
                     entry.guiSize = stat.size;
                 }
             }
-            return { ...info, parameters: annotate(info.parameters, { ...entry.metadata, layout: entry.layout || new Map() }) };
+            const layout = entry.layout || { params: new Map(), notes: new Map() };
+            const notes = [...(layout.notes || new Map())].map(([group, texts]) => ({ group, texts: [...texts] }));
+            return { ...info, parameters: annotate(info.parameters, { ...entry.metadata, layout }), notes };
         } catch { return info; }
     };
 }
