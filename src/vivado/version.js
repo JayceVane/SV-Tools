@@ -9,6 +9,7 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const os = require('node:os');
 const { spawn } = require('node:child_process');
+const { batchInvocation } = require('../toolchains/process');
 
 const PROJECT_CACHE = new Map();
 const TOOL_CACHE = new Map();
@@ -41,11 +42,11 @@ function readToolVersion(binDir) {
     return new Promise(resolve => {
         const executable = path.join(binDir, process.platform === 'win32' ? 'vivado.bat' : 'vivado');
         const options = { windowsHide: true, cwd: os.tmpdir(), stdio: ['ignore', 'pipe', 'pipe'] };
-        const command = process.platform === 'win32'
-            ? spawn(process.env.ComSpec || 'cmd.exe',
-                ['/d', '/v:off', '/s', '/c', '"' + executable + '" -version'],
-                { ...options, windowsVerbatimArguments: true })
-            : spawn(executable, ['-version'], options);
+        const args = ['-version'];
+        const batch = process.platform === 'win32' ? batchInvocation(executable, args, process.env, options.cwd) : null;
+        const command = batch
+            ? spawn(process.env.ComSpec || 'cmd.exe', batch.args, { ...options, env: batch.env, windowsVerbatimArguments: true })
+            : spawn(executable, args, options);
         let output = '', settled = false;
         const finish = value => { if (settled) return; settled = true; clearTimeout(timer); resolve(value); };
         const timer = setTimeout(() => { try { command.kill(); } catch { /* 进程已退出 */ } finish(undefined); }, 30000);

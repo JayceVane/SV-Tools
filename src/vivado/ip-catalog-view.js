@@ -28,15 +28,15 @@ function catalogHtml(webview, vscode, resources, labels = {}) {
 function openCatalogPanels(context, vscode, { cached, refresh, create, title = 'IP Catalog', action = '创建 IP', windowTitle }) {
     const panels = new Set();
     context.subscriptions.push({ dispose() { for (const item of panels) item.panel.dispose(); } });
-    return function open(xpr) {
-        const existing = [...panels].find(item => samePath(item.xpr, xpr));
+    return function open(xpr, { key = '', destination = '', create: createForPanel = vlnv => create(xpr, vlnv) } = {}) {
+        const existing = [...panels].find(item => item.key === key && samePath(item.xpr, xpr));
         if (existing) { existing.panel.reveal(); return; }
-        const panel = vscode.window.createWebviewPanel('svtoolsIpCatalog', (windowTitle || title) + ' · ' + path.basename(xpr, '.xpr'), vscode.ViewColumn.Active,
+        const panel = vscode.window.createWebviewPanel('svtoolsIpCatalog', (windowTitle || title) + ' · ' + (destination || path.basename(xpr, '.xpr')), vscode.ViewColumn.Active,
             { enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [vscode.Uri.joinPath(context.extensionUri, 'src', 'vivado')] });
-        const entry = { xpr, panel };
+        const entry = { xpr, key, panel };
         panels.add(entry);
         let data, busy = false, closed = false, status = '';
-        const publish = () => { if (!closed) void panel.webview.postMessage({ type: 'catalog', data, xpr, busy, status }); };
+        const publish = () => { if (!closed) void panel.webview.postMessage({ type: 'catalog', data, xpr, destination, busy, status }); };
         async function load(force) {
             if (busy) return;
             busy = true;
@@ -60,7 +60,7 @@ function openCatalogPanels(context, vscode, { cached, refresh, create, title = '
                 busy = true;
                 status = '正在创建 IP…';
                 publish();
-                try { status = await create(xpr, item.value) || ''; }
+                try { status = await createForPanel(item.value) || ''; }
                 catch (error) { status = error.message; }
                 finally { busy = false; publish(); }
             }

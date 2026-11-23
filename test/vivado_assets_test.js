@@ -8,6 +8,7 @@ const path = require('node:path');
 const { createToolTaskManager } = require('../src/toolchains/job');
 const { runVivadoBatchTask } = require('../src/vivado/batch');
 const { buildBatchArgs, findVivadoBinDir } = require('../src/vivado/toolchain');
+const { createVivadoSessions } = require('../src/vivado/session');
 const { tclQuote } = require('../src/vivado/tclgen');
 const { script, sessionScript, readRows, rowsOf, parametersOf, literal, removeFromProject } = require('../src/vivado/asset-task');
 const ip = require('../src/vivado/ip');
@@ -328,6 +329,36 @@ test('真实 Vivado 管理 IP 与 Block Design', { skip: !realBin && '需 SVTOOL
     const host = axiModel.endpoints.find(item => item.id === '/S_AXI');
     const interconnect = axiModel.nets.find(net => net.kind === 'interface_net' && net.endpoints.includes(gpio.id));
     assert(interconnect && host);
+    const mapped = axiModel.spaces.flatMap(space => space.segments).find(segment => segment.offset);
+    assert.ok(mapped, 'AXI 地址段已映射');
+    const sessions = createVivadoSessions();
+    async function runSession(name, body) {
+        const directory = path.join(root, name);
+        await fs.mkdir(directory);
+        const scriptPath = path.join(directory, 'session.tcl');
+        await fs.writeFile(scriptPath, sessionScript(body));
+        const output = await sessions.run({ binDir: realBin, xpr: other, directory, scriptPath, name, watch: [axi], timeoutMs: 60000 });
+        return { ...output, rows: output.ok ? await readRows(directory) : [] };
+    }
+    try {
+        const baseline = await runSession('address_baseline', bd.setAddress(axi, mapped.id, { offset: '0x40000000', range: '0x10000' }));
+        assert.equal(baseline.ok, true, baseline.stdout);
+        const disk = await fs.readFile(axi, 'utf8');
+        const rejected = await runSession('address_rejected', bd.setAddress(axi, mapped.id, { offset: '0x100000000', range: '0x8000' }));
+        assert.equal(rejected.ok, false);
+        assert.match(rejected.stdout, /aperture/u);
+        assert.equal(await fs.readFile(axi, 'utf8'), disk);
+        const later = await runSession('address_unrelated_edit', [
+            ...bd.addCell(axi, { type: 'hier', name: 'scope' }),
+            ...sameDesign(bd.addCell(axi, { type: 'ip', name: 'value', reference: constant, parent: '/scope' })),
+            ...bd.inspect()
+        ]);
+        assert.equal(later.ok, true, later.stdout);
+        const saved = bd.snapshot(later.rows);
+        assert(saved.cells.some(cell => cell.id === '/scope/value' && cell.vlnv === constant));
+        const segment = saved.spaces.flatMap(space => space.segments).find(item => item.id === mapped.id);
+        assert.equal(BigInt(segment.range), 0x10000n, '随后保存其他修改不能带上失败的范围变更');
+    } finally { await sessions.dispose(); }
     const rebuild = (await launch('断开、复连 AXI 接口并引出 GPIO 端口', [
         ...bd.disconnect(axi, interconnect, host), ...bd.connect(axi, gpio, host).slice(2),
         ...bd.externalize(axi, { kind: 'interface_pin', id: '/gpio/GPIO' }).slice(2)

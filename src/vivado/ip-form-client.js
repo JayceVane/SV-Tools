@@ -34,9 +34,9 @@
         return item;
     };
     const parameters = () => new Map((state.info?.parameters || []).map(parameter => [parameter.key, parameter]));
-    const values = () => {
+    const values = (fields = parameters()) => {
         const map = new Map();
-        for (const [key, parameter] of parameters()) map.set(key, draft.has(key) ? draft.get(key) : parameter.value);
+        for (const [key, parameter] of fields) map.set(key, draft.has(key) ? draft.get(key) : parameter.value);
         return map;
     };
     const available = (parameter, current) => Boolean(parameter) && !parameter.readOnly && !parameter.disabled &&
@@ -50,9 +50,9 @@
         (parameter.key + ' ' + (parameter.label || '') + ' ' + (parameter.help || '') + ' ' + (current.get(parameter.key) ?? ''))
             .toLowerCase().includes(query);
     const editedValues = () => {
-        const current = values(), result = [];
+        const fields = parameters(), current = values(fields), result = [];
         for (const [key, value] of draft) {
-            const parameter = parameters().get(key);
+            const parameter = fields.get(key);
             if (!parameter || value === parameter.value || !available(parameter, current)) continue;
             result.push({ key, value });
         }
@@ -145,7 +145,7 @@
         if (!editable) note.textContent = noteFor(parameter);
         controls.append(field, original, note);
         row.append(caption, controls);
-        rowViews.set(parameter.key, { row, field, note, original, parameter, pagePath, groupPath });
+        rowViews.set(parameter.key, { row, field, note, original, pagePath, groupPath });
         return row;
     }
 
@@ -204,27 +204,29 @@
         const info = state.info, edits = editedValues();
         $('changed').textContent = edits.length ? edits.length + ' 项待应用' : '';
         $('apply').disabled = !edits.length || state.busy || !info || info.locked || info.preview;
+        $('refresh').disabled = state.busy;
         $('revert').disabled = !draft.size || state.busy;
     }
 
     // 只改隐藏/禁用/提示，不动已经渲染的控件，输入焦点保持不变。
     function applyVisibility() {
-        const current = values(), hidden = hiddenSets();
+        const fields = parameters(), current = values(fields), hidden = hiddenSets();
         const query = $('search').value.trim().toLowerCase();
         let visible = 0;
         for (const [path, view] of pageViews) view.element.hidden = hidden.pages.has(path);
         for (const [path, view] of groupViews) view.element.hidden = hidden.groups.has(path);
         for (const [key, view] of rowViews) {
+            const parameter = fields.get(key);
             const pageHidden = hidden.pages.has(view.pagePath);
             const groupHidden = pageHidden || hidden.groups.has(view.groupPath);
             const hide = groupHidden || hidden.params.has(key.slice(7).toLowerCase()) ||
-                !matches(view.parameter, current, query);
+                !matches(parameter, current, query);
             view.row.hidden = hide;
             if (!hide) visible += 1;
-            const editable = editableFor(view.parameter, current);
+            const editable = editableFor(parameter, current);
             view.field.disabled = !editable;
             view.note.hidden = editable;
-            view.note.textContent = editable ? '' : noteFor(view.parameter);
+            view.note.textContent = editable ? '' : noteFor(parameter);
             view.original.hidden = !draft.has(key);
             view.row.classList.toggle('edited', draft.has(key));
         }
@@ -247,7 +249,8 @@
     }
 
     $('search').oninput = applyVisibility;
-    $('revert').onclick = () => { draft.clear(); render(); };
+    $('revert').onclick = () => { draft.clear(); render(); scheduleEvaluate(); };
+    $('refresh').onclick = () => vscode.postMessage({ action: 'refresh' });
     $('apply').onclick = () => {
         const edits = editedValues();
         if (!edits.length) return;
@@ -255,7 +258,12 @@
     };
     $('close').onclick = () => vscode.postMessage({ action: 'close' });
     window.addEventListener('message', ({ data }) => {
-        if (data?.type === 'applied') { draft.clear(); return; }
+        if (data?.type === 'resetDraft') {
+            draft.clear();
+            clearTimeout(evaluateTimer);
+            ++evaluateSeq;
+            return;
+        }
         if (data?.type === 'state') {
             if (data.seq && data.seq < evaluateSeq) return;
             const off = new Set((data.disabled || []).map(name => String(name).toLowerCase()));
@@ -266,6 +274,7 @@
             if (state.info) state.info.hidden = data.hidden || { pages: [], groups: [], params: [] };
             applyVisibility();
             renderTree();
+            renderToolbar();
             return;
         }
         if (data?.type !== 'form') return;

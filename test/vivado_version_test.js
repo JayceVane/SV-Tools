@@ -5,7 +5,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
-const { parseProjectVersion, projectVersion, same } = require('../src/vivado/version');
+const { parseProjectVersion, projectVersion, vivadoVersion, same } = require('../src/vivado/version');
 
 test('从 XPR 头部注释解析创建工具版本', () => {
     assert.equal(parseProjectVersion('<?xml version="1.0"?>\n<!-- Product Version: Vivado v2022.1.2 (64-bit) -->'), '2022.1.2');
@@ -50,4 +50,53 @@ test('版本核验失败时不启动 Vivado 会话', async () => {
     } finally {
         await sessions.dispose();
     }
+});
+
+test('Windows 安装路径含空格时仍能探测 Vivado 版本', { skip: process.platform !== 'win32' }, async t => {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'svtools Vivado & Tools-'));
+    t.after(() => fs.rm(directory, { recursive: true, force: true }));
+    await fs.writeFile(path.join(directory, 'vivado.bat'), '@echo off\r\nif "%~1"=="-version" echo Vivado v2022.1.2\r\n');
+    assert.equal(await vivadoVersion(directory), '2022.1.2');
+});
+
+test('外部文件变化会重开工程，失败的写入会丢弃已加载状态', async t => {
+    const { createVivadoSessions, VivadoSession } = require('../src/vivado/session');
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'svtools-session-'));
+    const xpr = path.join(directory, 'demo.xpr'), xci = path.join(directory, 'value.xci');
+    await fs.writeFile(xpr, 'project');
+    await fs.writeFile(xci, 'initial');
+    let starts = 0, opens = 0, closes = 0;
+    t.mock.method(VivadoSession.prototype, 'start', function () { starts++; this.child = { exitCode: null }; });
+    t.mock.method(VivadoSession.prototype, 'exec', async function (lines) {
+        const command = lines.join('\n');
+        if (command.includes('open_project')) {
+            opens++;
+            assert.equal(command.includes('close_project; '), this.xpr === xpr);
+        }
+        if (command.includes('external-during-read.tcl')) await fs.writeFile(xci, 'updated again by another process');
+        return { code: command.includes('failed.tcl') ? 1 : 0, output: '', message: '' };
+    });
+    t.mock.method(VivadoSession.prototype, 'close', async function () { closes++; this.child = null; this.xpr = null; });
+    const sessions = createVivadoSessions({ idleMs: 0 });
+    t.after(async () => { await sessions.dispose(); await fs.rm(directory, { recursive: true, force: true }); });
+    const run = (scriptPath = 'read.tcl', readOnly = true) => sessions.run({
+        binDir: directory, xpr, directory, scriptPath, readOnly, watch: [xci]
+    });
+    await run();
+    await run();
+    assert.equal(opens, 1);
+    await fs.writeFile(xci, 'external save');
+    await run();
+    assert.equal(opens, 2);
+    assert.equal(starts, 1, '文件变更只重载工程，复用工具进程');
+    await run('external-during-read.tcl');
+    await run();
+    assert.equal(opens, 3, '读取期间的外部写入在下次读取时重载');
+    assert.equal((await run('failed.tcl')).ok, false);
+    assert.equal(closes, 0, '失败的读取保留会话');
+    assert.equal((await run('failed.tcl', false)).ok, false);
+    assert.equal(closes, 1);
+    await run();
+    assert.equal(starts, 2);
+    assert.equal(opens, 4);
 });

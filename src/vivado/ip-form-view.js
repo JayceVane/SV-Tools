@@ -28,7 +28,7 @@ function html(webview, vscode, resources) {
     <link rel="stylesheet" href="${uri('ip-form.css')}"></head><body>
     <header class="titlebar">
         <div class="title"><h1 id="name">IP 配置</h1><p id="subtitle"></p></div>
-        <div class="tools"><span id="changed" class="changed"></span><button id="revert">撤销修改</button></div>
+        <div class="tools"><span id="changed" class="changed"></span><button id="refresh" title="重新读取参数并清除草稿">重新读取</button><button id="revert">撤销修改</button></div>
     </header>
     <main>
         <nav class="tree" aria-label="参数页面">
@@ -50,13 +50,13 @@ function openIpFormPanels(context, vscode, { load, apply, evaluate }) {
     context.subscriptions.push({ dispose() { for (const entry of panels) entry.panel.dispose(); } });
     return function open({ key, title = 'IP 配置', subtitle = '' }) {
         const existing = [...panels].find(entry => entry.key === key);
-        if (existing) { existing.panel.reveal(); void existing.reload(); return; }
+        if (existing) { existing.panel.reveal(); return; }
         const resources = vscode.Uri.joinPath(context.extensionUri, 'src', 'vivado');
         const panel = vscode.window.createWebviewPanel('svtoolsIpForm', title, vscode.ViewColumn.Active,
             { enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [resources] });
         let revision = 0, busy = false, closed = false, ready = false, info = null, status = '';
         let pendingEvaluation = null, evaluating = false;
-        const entry = { key, panel, reload };
+        const entry = { key, panel };
         // 连续修改只保留最后一次待求值，避免逐键回问 Vivado。
         async function runEvaluations() {
             if (evaluating || !evaluate) return;
@@ -85,6 +85,7 @@ function openIpFormPanels(context, vscode, { load, apply, evaluate }) {
                 if (closed) return;
                 if (!next || next.error) throw new Error(next?.error || '参数读取失败');
                 info = next; status = '';
+                post({ type: 'resetDraft' });
             } catch (error) { status = error.message; }
             finally { busy = false; publish(); }
         }
@@ -99,12 +100,12 @@ function openIpFormPanels(context, vscode, { load, apply, evaluate }) {
             if (message.action === 'ready') { ready = true; await reload(); return; }
             if (message.action === 'refresh') { await reload(); return; }
             if (message.action === 'close') { panel.dispose(); return; }
-            if (message.action === 'apply') {
+            if (message.action === 'apply' && info && message.revision === revision) {
                 busy = true; status = 'Vivado 正在应用参数…'; publish();
                 try {
-                    const result = await apply(key, message.edits);
+                    const result = await apply(key, message.edits, info);
                     if (result?.error) status = result.error;
-                    else { info = result?.info || info; status = result?.message || '参数已应用'; post({ type: 'applied' }); }
+                    else { info = result?.info || info; status = result?.message || '参数已应用'; post({ type: 'resetDraft' }); }
                 } catch (error) { status = error.message; }
                 finally { busy = false; publish(); }
             }

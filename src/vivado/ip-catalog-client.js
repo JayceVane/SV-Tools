@@ -57,7 +57,8 @@
         if (data.type !== 'catalog') return;
         busy = data.busy;
         $('refresh').disabled = busy;
-        text('project', data.data ? `${data.data.part} · Vivado ${data.data.version}` : data.xpr);
+        const tool = data.data ? `${data.data.part} · Vivado ${data.data.version}` : data.xpr;
+        text('project', data.destination ? data.destination + ' · ' + tool : tool);
         $('project').title = data.xpr;
         text('status', data.status);
         const next = data.data?.items || [];

@@ -137,19 +137,15 @@ class VivadoSession {
         });
     }
 
-    /** 打开工程；重复调用同一工程直接复用已加载状态。 */
-    async openProject(xpr, stamp) {
-        if (this.xpr === xpr && this.alive) return;
-        if (this.xpr && this.xpr !== xpr) {
-            await this.exec(['catch {close_project -quiet}', 'set ::svtools_rc 0', 'set ::svtools_msg ""']).catch(() => {});
-            this.xpr = null;
-        }
+    /** 调用方在工程切换或磁盘版本变化时重新打开，包括原路径上的工程。 */
+    async openProject(xpr, { timeoutMs, signal }) {
+        const open = 'open_project ' + brace(xpr);
         const result = await this.exec([
-            'set ::svtools_rc [catch {open_project ' + brace(xpr) + '} ::svtools_msg]'
-        ]);
+            'set ::svtools_rc [catch {' + (this.xpr ? 'close_project; ' : '') + open + '} ::svtools_msg]'
+        ], { timeoutMs, signal });
         if (result.code !== 0) throw new Error('无法打开 Vivado 工程：' + (result.message || '未知错误'));
         this.xpr = xpr;
-        this.stamps = new Map(stamp ? [[xpr, stamp]] : []);
+        this.stamps.clear();
     }
 
     touch() {
@@ -164,10 +160,10 @@ class VivadoSession {
         if (!this.alive) return;
         this.doomed = true;
         const child = this.child;
-        try { child.stdin.write('catch {close_project -quiet}\nexit\n'); } catch (error) { /* 已退出 */ }
         await new Promise(resolve => {
             const timer = setTimeout(() => { this.kill(); resolve(); }, CLOSE_GRACE_MS);
             child.once('close', () => { clearTimeout(timer); resolve(); });
+            try { child.stdin.write('catch {close_project -quiet}\nexit\n'); } catch (error) { /* 已退出 */ }
         });
         this.child = null; this.xpr = null;
         this.log('[vivado] 会话关闭：' + reason);
@@ -182,7 +178,7 @@ class VivadoSession {
 }
 
 async function stampOf(file) {
-    try { const stat = await fs.stat(file); return stat.size + ':' + stat.mtimeMs; }
+    try { const stat = await fs.stat(file); return stat.size + ':' + stat.mtimeMs + ':' + stat.ctimeMs; }
     catch (error) { return 'missing'; }
 }
 
@@ -204,16 +200,11 @@ function createVivadoSessions({ log = () => {}, idleMs = DEFAULT_IDLE_MS, platfo
         return session;
     }
 
-    /** 外部改动会使命存工程状态过期；比对上次动作后的文件戳。 */
-    async function stale(current, files) {
-        for (const file of files || []) {
-            const saved = current.stamps.get(file);
-            if (saved !== undefined && saved !== await stampOf(file)) return true;
-        }
-        return false;
+    async function readStamps(files) {
+        return Promise.all(files.map(async file => [file, await stampOf(file)]));
     }
 
-    async function run({ binDir, xpr, task, directory, scriptPath, name, timeoutMs = 0, watch = [], onOutput }) {
+    async function run({ binDir, xpr, task, directory, scriptPath, name, timeoutMs = 0, watch = [], readOnly = false, onOutput }) {
         const signal = task?.signal;
         const work = async () => {
             if (signal?.aborted) throw Object.assign(new Error('Vivado 操作已取消'), { code: 'TOOL_CANCELLED' });
@@ -224,13 +215,14 @@ function createVivadoSessions({ log = () => {}, idleMs = DEFAULT_IDLE_MS, platfo
                     issues: [], stdout: '', logPath: null };
             }
             const current = await ensure(binDir, xpr);
-            const xprStamp = await stampOf(xpr);
-            if (current.xpr !== xpr || await stale(current, [xpr, ...watch])) {
-                await current.openProject(xpr, xprStamp);
-            }
+            const files = [...new Set([xpr, ...watch])];
+            const before = await readStamps(files);
             const started = Date.now();
             let result;
             try {
+                if (current.xpr !== xpr || before.some(([file, stamp]) => current.stamps.has(file) && current.stamps.get(file) !== stamp)) {
+                    await current.openProject(xpr, { timeoutMs, signal });
+                }
                 result = await current.exec([
                     'cd ' + brace(directory),
                     'set ::svtools_rc [catch {source -notrace -encoding utf-8 ' + brace(scriptPath) + '} ::svtools_msg]'
@@ -240,17 +232,22 @@ function createVivadoSessions({ log = () => {}, idleMs = DEFAULT_IDLE_MS, platfo
                 if (error.code === 'TOOL_CANCELLED') return { ok: false, status: 'cancelled', code: null, exitCode: null,
                     ms: Date.now() - started, error: error.message, issues: [], stdout: '', logPath: null };
                 throw error;
-            } finally {
-                current.touch();
             }
             const logPath = path.join(directory, String(name || 'action').replace(/[^a-z0-9_.-]/gi, '_') + '.session.log');
             await fs.writeFile(logPath, result.output, 'utf8').catch(() => {});
             onOutput?.(result.output);
-            for (const file of [xpr, ...watch]) current.stamps.set(file, await stampOf(file));
-            current.stamps.set(xpr, await stampOf(xpr));
             const issues = result.output.split(/\r?\n/).flatMap(line => extractVivadoIssues(line))
                 .map(issue => ({ level: issue.level, text: issue.text }));
             const ok = result.code === 0;
+            if (!ok && !readOnly) {
+                // Tcl 失败前可能已修改内存中的设计，下一次保存不能带上这些更改。
+                session = null;
+                await current.close('动作失败，丢弃未保存的更改');
+            } else {
+                // 读取期间的外部保存不能成为当前会话的新基准。
+                for (const [file, stamp] of readOnly ? before : await readStamps(files)) current.stamps.set(file, stamp);
+                current.touch();
+            }
             return {
                 ok, status: ok ? 'success' : 'failed', code: ok ? 0 : -1, exitCode: result.code,
                 ms: Date.now() - started, error: ok ? null : (result.message || issues.filter(i => i.level === 'ERROR').map(i => i.text).join('\n') || 'Vivado 执行失败'),

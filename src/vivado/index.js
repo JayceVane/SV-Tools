@@ -85,14 +85,13 @@ function activateVivado(context, deps) {
     }
 
     let versionPrompt = { key: '', until: 0 };
-    /** 读取工程与工具版本；一致或无法判断时返回 null。 */
+    /** 工程版本已知时，只有匹配的工具可打开工程。 */
     async function versionMismatch(xpr, binDir) {
         let project;
         try { project = await versionCheck.projectVersion(xpr); }
         catch (error) { log('[vivado] 读取工程版本失败：' + error.message); return null; }
         if (!project) return null;
         const tool = await versionCheck.vivadoVersion(binDir).catch(() => undefined);
-        if (!tool) { log('[vivado] 无法读取工具版本，跳过版本核验'); return null; }
         if (versionCheck.same(project, tool)) return null;
         return { project, tool };
     }
@@ -114,12 +113,12 @@ function activateVivado(context, deps) {
         const promptText = project
             ? (tool
                 ? '工程由 Vivado ' + project + ' 创建，当前配置的是 Vivado ' + tool + '。请输入 Vivado ' + project + ' 的安装目录（也接受 bin 目录或 vivado.bat 全路径），校验通过后写入 svtools.vivado.path。'
-                : '未找到可用的 Vivado。工程由 Vivado ' + project + ' 创建，请输入 Vivado ' + project + ' 的安装目录（也接受 bin 目录或 vivado.bat 全路径），校验通过后写入 svtools.vivado.path。')
+                : '无法确认当前 Vivado 的版本。工程由 Vivado ' + project + ' 创建，请输入 Vivado ' + project + ' 的安装目录（也接受 bin 目录或 vivado.bat 全路径），校验通过后写入 svtools.vivado.path。')
             : '未找到可用的 Vivado，请输入安装目录（也接受 bin 目录或 vivado.bat 全路径），校验通过后写入 svtools.vivado.path。';
         const placeholder = '例如 D:\\Xilinx\\Vivado\\' + (project || '2022.1');
         for (;;) {
             const entered = await vscode.window.showInputBox({
-                title: project ? 'Vivado 版本不匹配' : '选择 Vivado 安装目录',
+                title: project ? (tool ? 'Vivado 版本不匹配' : '核验 Vivado 版本') : '选择 Vivado 安装目录',
                 prompt: promptText,
                 placeHolder: placeholder,
                 value,
@@ -159,9 +158,9 @@ function activateVivado(context, deps) {
         }
         if (!project) return { ok: true, binDir };
         const tool = await versionCheck.vivadoVersion(binDir).catch(() => undefined);
-        if (!tool) { log('[vivado] 无法读取工具版本，跳过版本核验'); return { ok: true, binDir }; }
         if (versionCheck.same(project, tool)) return { ok: true, binDir };
-        log('[vivado] 版本不匹配：工程 ' + project + '，工具 ' + tool);
+        log(tool ? '[vivado] 版本不匹配：工程 ' + project + '，工具 ' + tool
+            : '[vivado] 无法读取工具版本，工程需要 Vivado ' + project);
         const fixed = await promptVivadoPath(project, tool);
         return fixed ? { ok: true, binDir: fixed } : { ok: false, binDir: null };
     }
@@ -281,9 +280,12 @@ function activateVivado(context, deps) {
             vscode.window.showWarningMessage('工程文件集或成员已变化，已取消操作，请重新执行命令。'); return false;
         };
         if (!await valid()) return { code: null, status: 'cancelled', error: 'project-changed' };
-        return runScript({ anchor: xpr, name, body: scriptBody, sessionBody: options.sessionBody, watch: options.watch, async validate() {
-            if (incrementalCancelled || !await sameEditorProject(xpr) || !await valid()) throw cancelledError('工程已切换或操作已取消');
-        } }, { editorAction: true, ...options });
+        return runScript({
+            anchor: xpr, name, body: scriptBody, sessionBody: options.sessionBody, watch: options.watch, readOnly: options.readOnly,
+            async validate() {
+                if (incrementalCancelled || !await sameEditorProject(xpr) || !await valid()) throw cancelledError('工程已切换或操作已取消');
+            }
+        }, { editorAction: true, ...options });
     }
 
     async function addCurrentToProject() {
@@ -567,7 +569,8 @@ function activateVivado(context, deps) {
                 await fs.promises.writeFile(sessionPath, sessionBody, { encoding: 'utf8', flag: 'wx' });
                 log('[vivado] 使用常驻会话：' + sessionPath);
                 return await sessions.run({ binDir, xpr: input.anchor, task: job, directory: path.dirname(scriptPath),
-                    scriptPath: sessionPath, name: input.name, timeoutMs, watch: input.watch || [], onOutput: output.append });
+                    scriptPath: sessionPath, name: input.name, timeoutMs, watch: input.watch || [],
+                    readOnly: input.readOnly, onOutput: output.append });
             } catch (error) {
                 if (error.code === 'TOOL_CANCELLED' || job.signal.aborted) throw error;
                 log('[vivado] 常驻会话不可用，回退批处理：' + error.message);
@@ -855,7 +858,7 @@ function activateVivado(context, deps) {
         const controller = new AbortController();
         try {
             const result = await sessions.run({ binDir, xpr: current, task: { signal: controller.signal }, directory,
-                scriptPath, name: 'project_summary', timeoutMs: 120000 });
+                scriptPath, name: 'project_summary', timeoutMs: 120000, readOnly: true });
             if (!result.ok) return { error: result.error || '读取工程状态失败' };
             const parsed = summary.parse(await readRows(directory));
             return { ...parsed, xpr: current, paths: summary.runPaths(parsed, current) };

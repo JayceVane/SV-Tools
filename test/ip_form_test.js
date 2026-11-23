@@ -136,7 +136,7 @@ test('定制表单渲染控件并在应用时提交修改', () => {
     assert.equal(applied.revision, 3);
     assert.deepEqual(JSON.parse(JSON.stringify(applied.edits)),
         [{ key: 'CONFIG.C_IS_DUAL', value: 'true' }, { key: 'CONFIG.C_DATA_WIDTH', value: '16' }]);
-    ui.listeners.message({ data: { type: 'applied' } });
+    ui.listeners.message({ data: { type: 'resetDraft' } });
     ui.listeners.message({ data: { type: 'form', revision: 4, info: { ...info, parameters: [
         { ...info.parameters[0], value: 'true' }, info.parameters[1], { ...info.parameters[2], value: '16' }
     ] }, form, busy: false, status: '已应用 2 项修改' } });
@@ -192,10 +192,10 @@ test('对话框宿主：读取、应用与错误状态都经消息往返', async
     const open = openIpFormPanels(ui.context, ui.vscode, {
         async load(key) {
             calls.push(['load', key]);
-            return { ...info, parameters, notes: [] };
+            return { ...info, stamp: 'loaded-file', parameters, notes: [] };
         },
-        async apply(key, edits) {
-            calls.push(['apply', key, edits]);
+        async apply(key, edits, snapshot) {
+            calls.push(['apply', key, edits, snapshot]);
             parameters = parameters.map(parameter => {
                 const edit = edits.find(item => item.key === parameter.key);
                 return edit ? { ...parameter, value: edit.value } : parameter;
@@ -213,15 +213,40 @@ test('对话框宿主：读取、应用与错误状态都经消息往返', async
     assert.equal(first.form.pages.length, 1);
     assert.equal(first.form.pages[0].groups.length, 2);
     assert.equal(first.info.name, 'gpio_0');
+    open({ key: 'k1' });
+    await ui.listeners[0]({ action: 'apply', revision: first.revision - 1, edits: [] });
+    assert.equal(calls.length, 1, '再次打开保留草稿与快照，过期消息不能提交');
     ui.listeners[0]({ action: 'apply', revision: first.revision, edits: [{ key: 'CONFIG.C_IS_DUAL', value: 'true' }] });
     await new Promise(resolve => setTimeout(resolve, 10));
     assert.equal(calls.at(-1)[0], 'apply');
     assert.equal(calls.at(-1)[2][0].key, 'CONFIG.C_IS_DUAL');
-    const applied = ui.posted.filter(message => message.type === 'applied');
-    assert.equal(applied.length, 1);
+    assert.equal(calls.at(-1)[3].stamp, 'loaded-file');
+    assert.deepEqual(calls.at(-1)[3], first.info);
+    assert.equal(ui.posted.filter(message => message.type === 'resetDraft').length, 2);
     assert.equal(ui.posted.at(-1).info.parameters[0].value, 'true');
     assert.equal(ui.posted.at(-1).status, '已应用 1 项修改');
     ui.listeners[0]({ action: 'close' });
+});
+
+test('Block Design Catalog 按文件与子层级绑定创建操作', async () => {
+    const { openCatalogPanels } = require('../src/vivado/ip-catalog-view');
+    const first = fakeHost(), second = fakeHost();
+    const panels = [first.panel, second.panel];
+    first.vscode.window.createWebviewPanel = () => panels.shift();
+    const value = 'xilinx.com:ip:xlconstant:1.1', calls = [];
+    const open = openCatalogPanels(first.context, first.vscode, {
+        cached: async () => ({ items: [{ value }], expires: Infinity })
+    });
+    const xpr = 'D:/demo/demo.xpr';
+    open(xpr, { key: 'first', destination: 'fabric · /control', create: vlnv => calls.push(['/control', vlnv]) });
+    open(xpr, { key: 'second', destination: 'fabric · /data', create: vlnv => calls.push(['/data', vlnv]) });
+    await first.listeners[0]({ action: 'ready' });
+    await second.listeners[0]({ action: 'ready' });
+    await first.listeners[0]({ action: 'create', vlnv: value });
+    await second.listeners[0]({ action: 'create', vlnv: value });
+    assert.deepEqual(calls, [['/control', value], ['/data', value]]);
+    assert.equal(first.posted.at(-1).destination, 'fabric · /control');
+    assert.equal(second.posted.at(-1).destination, 'fabric · /data');
 });
 
 test('Vivado 判定禁用的参数置灰，数值参数带范围', () => {
@@ -325,7 +350,7 @@ test('求值结果只打补丁：控件节点不变、焦点保留', () => {
     ];
     ui.listeners.message({ data: { type: 'form', revision: 1,
         info: { ...info, parameters, hidden: { pages: [], groups: [], params: [] } },
-        form: buildForm(parameters, []), busy: false, status: '' } });
+        form: structuredClone(buildForm(parameters, [])), busy: false, status: '' } });
     const field = ui.rows()[1].children[1].children[0];
     field.focused = true;
     ui.listeners.message({ data: { type: 'state', seq: 1, disabled: ['B'],
