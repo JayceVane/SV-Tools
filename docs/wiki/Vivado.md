@@ -67,7 +67,7 @@ IP 管理与 Block Design 的读写默认复用一个常驻 Tcl 会话：启动�
 
 点击「连线」后依次选择两个同层级的同类端点。检查器可搜索模块、端口和线网，也提供断开、参数配置、引出端口与地址映射。可以添加目录 IP、工程 RTL 模块引用和层级块，并新增普通信号端口或协议接口。「添加模块 → 从 Catalog 添加 IP」会打开 Block Design 专用 IP Catalog；选定 IP 并命名后创建实例，随后自动打开定制对话框。
 
-IP 实例的「配置参数」会打开与 Vivado「Re-customize IP」同构的配置对话框：左侧按 IP 自带 XGUI 的页面与分组导航，右侧按参数类型显示复选框、下拉框、十六进制或文本输入，并显示 Vivado 的提示文字与静态说明。修改先以草稿保留，「应用」时一次提交，由 Vivado 校验并回读；依赖不满足的参数会置灰并标注来源。
+IP 实例的「配置参数」会打开与 Vivado「Re-customize IP」同构的配置对话框：左侧按 IP 自带 XGUI 的页面与分组导航，右侧按参数类型显示复选框、下拉框、十六进制或文本输入，并显示 Vivado 的提示文字与静态说明。修改先以草稿保留，「应用」时一次提交，由 Vivado 校验并回读；依赖不满足的参数会置灰并标注来源。打开或操作工程前会核对 `.xpr` 头部记录的 Vivado 版本与 `svtools.vivado.path` 指向的 `vivado -version`；两者不一致会弹出提示并引导打开设置，避免 Vivado 自动升级或改写工程。
 
 复杂 IP（FIFO Generator、AXI Interconnect、AXI BRAM Controller 等）的界面由 helper proc、循环和字符串生成，静态读取只能拿到部分参数。这类 IP 会请 Vivado 在独立子解释器中执行 IP 自带的 XGUI Tcl，用桩函数回收 ipgui::add_* 调用后还原页面、分组、控件与提示；子解释器在结束后销毁，不会影响工程会话。首次读取某 IP 时多花约百毫秒，结构结果按 XGUI 文件时间戳缓存。
 

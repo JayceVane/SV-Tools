@@ -23,6 +23,7 @@ const { createSimulationEnginePicker } = require('../toolchains/simulation-engin
 const { runVivadoBatchTask } = require('./batch');
 const { prepareVivadoScript } = require('./script-task');
 const { createVivadoSessions } = require('./session');
+const versionCheck = require('./version');
 const { sessionScript, readRows } = require('./asset-task');
 const summary = require('./summary');
 const { openSummaryPanels } = require('./summary-view');
@@ -55,7 +56,7 @@ function activateVivado(context, deps) {
     const retainedRuns = () => vscode.workspace.getConfiguration('svtools.tasks').get('retainedRuns', 5);
     const output = createBufferedOutput(out), tasks = createToolTaskManager({ retention: { keep: retainedRuns }, onChange(job) { projectTree?.setRunning(job.finished ? null : job.state); } });
     const sessionIdleMs = () => Math.max(1, vscode.workspace.getConfiguration('svtools.vivado').get('sessionIdleMinutes', 10)) * 60000;
-    const sessions = createVivadoSessions({ log, idleMs: sessionIdleMs() });
+    const sessions = createVivadoSessions({ log, idleMs: sessionIdleMs(), verify: verifyVivadoVersion });
     const projectSelection = deps?.projectSelection || createProjectSelection({ workspace: vscode.workspace, state: context.workspaceState });
 
     let running = null;      // { job, scriptPath }，准备阶段也可停止。
@@ -81,6 +82,31 @@ function activateVivado(context, deps) {
         const cfg = vscode.workspace.getConfiguration('svtools.vivado');
         binDirCache = findVivadoBinDir(cfg.get('path'), process.env, null, process.platform);
         return binDirCache;
+    }
+
+    let versionPrompt = { key: '', until: 0 };
+    /**
+     * 打开工程前核对 .xpr 的创建版本与配置路径的 vivado 版本。
+     * 不一致时阻止操作并引导用户修改 svtools.vivado.path，避免 Vivado 自动升级工程。
+     */
+    async function verifyVivadoVersion(xpr, binDir) {
+        let project;
+        try { project = await versionCheck.projectVersion(xpr); }
+        catch (error) { log('[vivado] 读取工程版本失败：' + error.message); return true; }
+        if (!project) return true;
+        const tool = await versionCheck.vivadoVersion(binDir).catch(() => undefined);
+        if (!tool) { log('[vivado] 无法读取工具版本，跳过版本核验'); return true; }
+        if (versionCheck.same(project, tool)) return true;
+        log('[vivado] 版本不匹配：工程 ' + project + '，工具 ' + tool);
+        const key = project + '|' + tool;
+        if (versionPrompt.key === key && versionPrompt.until > Date.now()) return false;
+        versionPrompt = { key, until: Date.now() + 30000 };
+        const pick = await vscode.window.showErrorMessage(
+            '工程由 Vivado ' + project + ' 创建，当前配置的 Vivado 是 ' + tool + '。'
+            + '版本不一致时打开工程可能触发升级并改写工程；请先把 svtools.vivado.path 指向 Vivado '
+            + project + ' 的安装目录，再重试。', '打开设置');
+        if (pick) await vscode.commands.executeCommand('workbench.action.openSettings', 'svtools.vivado.path');
+        return false;
     }
 
     // ---------------- Vivado 工程探测（决定标签页按钮显隐） ----------------
@@ -481,6 +507,11 @@ function activateVivado(context, deps) {
         }
         // 批处理会独占工程；先释放常驻会话，避免两个 Vivado 进程同时持有同一工程。
         await sessions.closeAll();
+        if (input && input.anchor && !(await verifyVivadoVersion(input.anchor, binDir))) {
+            return { ok: false, status: 'failed', code: null, exitCode: null, ms: 0,
+                error: 'Vivado 版本与工程不匹配', message: 'Vivado 版本与工程不匹配',
+                issues: [], stdout: '', logPath: null };
+        }
         return batch();
     }
 

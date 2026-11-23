@@ -190,7 +190,7 @@ async function stampOf(file) {
  * 单实例会话：同一时间只服务一个工程，动作串行执行。
  * @param {{log?:Function, idleMs?:number, platform?:string}} [options]
  */
-function createVivadoSessions({ log = () => {}, idleMs = DEFAULT_IDLE_MS, platform = process.platform } = {}) {
+function createVivadoSessions({ log = () => {}, idleMs = DEFAULT_IDLE_MS, platform = process.platform, verify } = {}) {
     let session = null, queue = Promise.resolve();
     const executable = binDir => path.join(binDir, platform === 'win32' ? 'vivado.bat' : 'vivado');
 
@@ -217,6 +217,12 @@ function createVivadoSessions({ log = () => {}, idleMs = DEFAULT_IDLE_MS, platfo
         const signal = task?.signal;
         const work = async () => {
             if (signal?.aborted) throw Object.assign(new Error('Vivado 操作已取消'), { code: 'TOOL_CANCELLED' });
+            // 打开工程前核对版本；不匹配时不启动 Vivado，避免工程被自动升级。
+            if (verify && xpr && !(await verify(xpr, binDir))) {
+                return { ok: false, status: 'failed', code: null, exitCode: null, ms: 0,
+                    error: 'Vivado 版本与工程不匹配', message: 'Vivado 版本与工程不匹配',
+                    issues: [], stdout: '', logPath: null };
+            }
             const current = await ensure(binDir, xpr);
             const xprStamp = await stampOf(xpr);
             if (current.xpr !== xpr || await stale(current, [xpr, ...watch])) {
