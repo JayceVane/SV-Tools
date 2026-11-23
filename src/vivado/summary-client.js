@@ -2,6 +2,10 @@
 'use strict';
 (() => {
     const vscode = acquireVsCodeApi(), $ = id => document.getElementById(id);
+    const strings = JSON.parse($('summary-strings').textContent);
+    const phrase = (key, ...values) => strings[key].replace(/\{(\d+)\}/gu, (_, index) => values[index]);
+    const countText = new Intl.NumberFormat(strings.locale, { maximumFractionDigits: 2 });
+    const powerText = new Intl.NumberFormat(strings.locale, { minimumFractionDigits: 3, maximumFractionDigits: 6 });
     let signature, auto = vscode.getState()?.auto !== false;
 
     function node(tag, text, className) {
@@ -18,15 +22,15 @@
     const numberText = value => Number.isFinite(value) ? value.toFixed(Math.abs(value) >= 1000 ? 0 : 3) : '—';
 
     function statusOf(run) {
-        if (!run) return ['idle', '无当前运行'];
+        if (!run) return ['idle', strings.none];
         const status = run.status || '';
-        if (/fail|error/i.test(status)) return ['bad', '失败'];
-        if (/cancel|abort|stopped/i.test(status)) return ['bad', '已停止'];
-        if (/queued/i.test(status)) return ['busy', '排队中'];
-        if (/running|in progress/i.test(status) || /running/i.test(run.progress)) return ['busy', '运行中'];
-        if (/complete|finished/i.test(status)) return ['ok', '已完成'];
-        if (/not started/i.test(status)) return ['idle', '未开始'];
-        return ['idle', status && status !== 'Unknown' ? status : '状态未知'];
+        if (/fail|error/i.test(status)) return ['bad', strings.failed];
+        if (/cancel|abort|stopped/i.test(status)) return ['bad', strings.stopped];
+        if (/queued/i.test(status)) return ['busy', strings.queued];
+        if (/running|in progress/i.test(status) || /running/i.test(run.progress)) return ['busy', strings.active];
+        if (/complete|finished/i.test(status)) return ['ok', strings.complete];
+        if (/not started/i.test(status)) return ['idle', strings.notStarted];
+        return ['idle', status && status !== 'Unknown' ? status : strings.unknown];
     }
 
     function statusBadge(run) {
@@ -37,7 +41,7 @@
     }
 
     function staleBadge() {
-        return node('span', '待重跑', 'chip warn');
+        return node('span', strings.stale, 'chip warn');
     }
 
     function progressMeter(run) {
@@ -47,21 +51,21 @@
             const bar = node('progress', undefined, 'bar ' + statusOf(run)[0]);
             bar.max = 100;
             bar.value = value;
-            bar.setAttribute('aria-label', '运行进度');
+            bar.setAttribute('aria-label', strings.progress);
             result.append(bar, node('span', value + '%', 'percentage'));
         } else {
-            result.append(node('span', statusOf(run)[0] === 'busy' ? '等待进度' : run?.progress || '—', 'muted'));
+            result.append(node('span', statusOf(run)[0] === 'busy' ? strings.waiting : run?.progress || '—', 'muted'));
         }
         return result;
     }
 
     function drawProject(project) {
-        $('project').textContent = project.name || '工程概览';
+        $('project').textContent = project.name || strings.title;
         const directory = $('directory');
         directory.textContent = directory.title = project.directory || '';
         directory.hidden = !project.directory;
-        const facts = [['器件', project.part], ['顶层模块', project.top]];
-        if (project.board) facts.push(['板卡', project.board]);
+        const facts = [[strings.part, project.part], [strings.top, project.top]];
+        if (project.board) facts.push([strings.board, project.board]);
         $('meta').replaceChildren(...facts.map(([label, value]) => {
             const item = node('div', undefined, 'fact');
             item.append(node('dt', label), node('dd', value || '—'));
@@ -75,7 +79,7 @@
     }
 
     function drawCards(synthesis, implementation) {
-        const stages = [['综合', synthesis], ['布局布线', implementation]];
+        const stages = [[strings.synthesis, synthesis], [strings.implementation, implementation]];
         $('cards').replaceChildren(...stages.map(([label, run]) => {
             const card = node('article', undefined, 'card ' + statusOf(run)[0]);
             const head = node('header', undefined, 'card-heading');
@@ -95,7 +99,7 @@
     function runAction(run, kind, label) {
         const action = node('button', label, 'link-button');
         action.type = 'button';
-        action.setAttribute('aria-label', '打开 ' + run.id + ' 的' + label);
+        action.setAttribute('aria-label', phrase('openArtifact', label, run.id));
         action.onclick = () => vscode.postMessage({ action: 'openRun', run: run.id, kind });
         return action;
     }
@@ -106,7 +110,7 @@
             const identity = node('th');
             identity.scope = 'row';
             identity.append(node('span', run.id, 'run-name'));
-            const detail = [run.implementation ? '布局布线' : '综合', primary.includes(run.id) ? '当前运行' : '', run.strategy].filter(Boolean);
+            const detail = [run.implementation ? strings.implementation : strings.synthesis, primary.includes(run.id) ? strings.current : '', run.strategy].filter(Boolean);
             identity.append(node('span', detail.join(' · '), 'run-detail'));
             const state = node('td', undefined, 'run-state');
             state.append(statusBadge(run));
@@ -117,39 +121,38 @@
             if (run.elapsed) progress.append(node('span', run.elapsed, 'run-detail'));
             const actions = node('td', undefined, 'run-actions');
             const output = paths && Object.hasOwn(paths, run.id) ? paths[run.id] : null;
-            if (output?.log) actions.append(runAction(run, 'log', '日志'));
-            if (output?.directory) actions.append(runAction(run, 'directory', '目录'));
+            if (output?.log) actions.append(runAction(run, 'log', strings.log));
+            if (output?.directory) actions.append(runAction(run, 'directory', strings.directory));
             if (!actions.children.length) actions.textContent = '—';
             row.append(identity, state, progress, actions);
             return row;
         }));
-        $('run-count').textContent = runs.length ? runs.length + ' 项' : '';
+        $('run-count').textContent = runs.length ? phrase('runCount', runs.length) : '';
         $('run-table').hidden = !runs.length;
         $('runs-empty').hidden = Boolean(runs.length);
     }
 
     function drawTiming(run) {
         const { wns, tns, whs, ths } = run?.timing || {};
-        const items = [['WNS', wns, 'ns'], ['TNS', tns, 'ns'], ['WHS', whs, 'ns'], ['THS', ths, 'ns'], ['总功耗', run?.power, 'W']];
+        const items = [['WNS', wns], ['TNS', tns], ['WHS', whs], ['THS', ths]];
         const hasResults = items.some(([, value]) => Number.isFinite(value));
-        $('timing-source').textContent = hasResults ? run.id + (run.needsRefresh ? ' · 待重跑' : '') : '';
+        $('timing-source').textContent = hasResults ? [run.id, run.needsRefresh && strings.stale].filter(Boolean).join(' · ') : '';
         if (!hasResults) {
-            $('timing').replaceChildren(node('p', '当前运行暂无时序与功耗结果。', 'empty'));
+            $('timing').replaceChildren(node('p', strings.emptyTiming, 'empty'));
             return;
         }
         const metrics = node('dl', undefined, 'metrics');
-        for (const [label, value, unit] of items) {
+        for (const [label, value] of items) {
             const item = node('div', undefined, 'metric');
             const display = numberText(value);
-            item.append(node('dt', label), node('dd', display === '—' ? display : display + ' ' + unit,
-                unit === 'ns' && value < 0 ? 'negative' : ''));
+            item.append(node('dt', label), node('dd', display === '—' ? display : display + ' ns', value < 0 ? 'negative' : ''));
             metrics.append(item);
         }
         $('timing').replaceChildren(metrics);
     }
 
     function drawMessages(messages = {}) {
-        const items = [['错误', messages.errors || 0, 'negative'], ['警告', messages.warnings || 0, 'warning']];
+        const items = [[strings.errors, messages.errors || 0, 'negative'], [strings.warnings, messages.warnings || 0, 'warning']];
         $('messages').replaceChildren(...items.map(([label, count, kind]) => {
             const item = node('div');
             item.append(node('dt', label), node('dd', String(count), count ? kind : ''));
@@ -157,11 +160,105 @@
         }));
     }
 
+    function reportSource(kind, result) {
+        const source = node('div', undefined, 'report-source');
+        source.append(node('span', [result.run, strings.phases[result.phase], result.stale && strings.stale].filter(Boolean).join(' · ')));
+        if (result.file) {
+            const button = node('button', strings.report, 'link-button');
+            button.type = 'button';
+            button.setAttribute('aria-label', phrase('reportFor', strings[kind]));
+            button.onclick = () => vscode.postMessage({ action: 'openReport', kind });
+            source.append(button);
+        }
+        return source;
+    }
+
+    function utilizationView(resources) {
+        const list = node('dl', undefined, 'resource-list');
+        for (const { resource, used, available } of resources) {
+            const name = strings.resources[resource] || resource;
+            const value = available > 0 ? used / available * 100 : null;
+            const item = node('div', undefined, 'resource-item');
+            const counts = node('dd', countText.format(used) + ' / ' + countText.format(available), 'numbers');
+            counts.title = phrase('used', countText.format(used), countText.format(available));
+            item.append(node('dt', name), counts);
+            const meter = node('div', undefined, 'resource-meter');
+            if (value !== null) {
+                const bar = node('progress', undefined, 'bar');
+                bar.max = 100;
+                bar.value = Math.min(100, value);
+                bar.setAttribute('aria-label', name);
+                const percent = value > 0 && value < 0.01 ? '<0.01%' : countText.format(value) + '%';
+                meter.append(bar, node('span', percent, 'percentage'));
+            }
+            item.append(meter);
+            list.append(item);
+        }
+        return list;
+    }
+
+    function powerView(data) {
+        const values = node('dl', undefined, 'power-values');
+        const fields = [['totalPower', data.total], ['dynamic', data.dynamic], ['static', data.static]];
+        for (const [key, value] of fields) {
+            if (!Number.isFinite(value)) continue;
+            const item = node('div', undefined, key === 'totalPower' ? 'metric-key' : '');
+            item.append(node('dt', strings[key]), node('dd', powerText.format(value) + ' W', 'numbers'));
+            values.append(item);
+        }
+        if (data.confidence) {
+            const item = node('div');
+            item.append(node('dt', strings.confidence), node('dd', strings.confidenceLevels[data.confidence.toLowerCase()] || data.confidence));
+            values.append(item);
+        }
+        return values;
+    }
+
+    function drcView({ total, counts, rules }) {
+        const body = node('div', undefined, 'drc-results');
+        const heading = node('div', undefined, 'drc-count');
+        const severity = counts.errors || counts.criticalWarnings ? 'negative' : total ? 'warning' : 'positive';
+        heading.append(node('strong', countText.format(total), 'drc-total ' + severity), node('span', strings.violations, 'muted'));
+        body.append(heading);
+        if (!total) {
+            body.append(node('p', strings.noViolations, 'muted'));
+            return body;
+        }
+        const severities = node('dl', undefined, 'drc-severities');
+        for (const key of Object.keys(strings.severities)) {
+            if (!counts[key] && (key === 'advisories' || key === 'other')) continue;
+            const item = node('div');
+            item.append(node('dt', strings.severities[key]), node('dd', countText.format(counts[key] || 0), 'numbers'));
+            severities.append(item);
+        }
+        body.append(severities);
+        if (rules.length) {
+            const list = node('ul', undefined, 'drc-rules');
+            for (const { rule, level, count } of rules) {
+                const item = node('li');
+                item.append(node('code', rule), node('span', strings.severities[level], 'muted'), node('strong', countText.format(count), 'numbers'));
+                list.append(item);
+            }
+            body.append(list);
+        }
+        return body;
+    }
+
+    function drawAnalysis(analysis) {
+        const cards = [['utilization', 'noUtilization', utilizationView], ['power', 'noPower', powerView], ['drc', 'noDrc', drcView]];
+        for (const [kind, empty, renderCard] of cards) {
+            const result = analysis?.results?.[kind];
+            $(kind).replaceChildren(...(result ? [reportSource(kind, result), renderCard(result.data)] : [node('p', strings[empty], 'empty')]));
+        }
+        $('generate').hidden = !analysis?.generation;
+    }
+
     function status(text, kind = '', busy = false) {
         const notice = $('status');
         if (notice.textContent !== text) notice.textContent = text;
         notice.className = kind;
         $('refresh').disabled = busy;
+        $('generate').disabled = busy;
     }
 
     function render(next, at) {
@@ -173,12 +270,13 @@
             const implementation = currentRun(runs, next.currentRuns?.implementation, true);
             drawProject(next.project || {});
             drawCards(synthesis, implementation);
+            drawAnalysis(next.analysis);
             drawTiming(implementation || synthesis);
             drawMessages(next.messages);
             drawRuns(runs, next.paths, [synthesis?.id, implementation?.id]);
         }
         $('content').hidden = false;
-        $('updated').textContent = '更新于 ' + new Date(at).toLocaleTimeString('zh-CN', { hour12: false });
+        $('updated').textContent = phrase('updated', new Date(at).toLocaleTimeString(strings.locale, { hour12: false }));
         status('');
     }
 
@@ -189,20 +287,22 @@
         vscode.postMessage({ action: 'auto', enabled: auto });
     };
     $('refresh').onclick = () => vscode.postMessage({ action: 'refresh' });
+    $('generate').onclick = () => vscode.postMessage({ action: 'generate' });
     $('folder').onclick = () => vscode.postMessage({ action: 'openFolder' });
     window.addEventListener('message', ({ data: message }) => {
         if (message?.type === 'summary') render(message.data, message.at);
-        else if (message?.type === 'loading') status('正在刷新…', '', true);
+        else if (message?.type === 'loading') status(strings.refreshing, '', true);
+        else if (message?.type === 'generating') status(strings.generating, '', true);
         else if (message?.type === 'error') status(message.message, message.busy ? 'warning' : 'negative');
         else if (message?.type === 'reset') {
             signature = undefined;
-            $('project').textContent = '工程概览';
+            $('project').textContent = strings.title;
             $('directory').hidden = true;
             $('content').hidden = true;
             $('updated').textContent = '';
-            status('正在读取工程状态…', '', true);
+            status(strings.loading, '', true);
         }
     });
-    status('正在读取工程状态…', '', true);
+    status(strings.loading, '', true);
     vscode.postMessage({ action: 'ready', auto });
 })();

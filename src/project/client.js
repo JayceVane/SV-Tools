@@ -2,6 +2,7 @@
 'use strict';
 (() => {
     const vscode = acquireVsCodeApi(), saved = vscode.getState() || {}, tree = document.getElementById('tree'), menu = document.getElementById('menu');
+    const english = document.documentElement?.lang === 'en';
     let snapshot = { nodes: [], revision: 0 }, state = saved, focusId, menuAnchor;
     const send = (action, extra = {}) => vscode.postMessage({ action, revision: snapshot.revision, ...extra });
     const currentState = () => state[snapshot.project?.id] || (state[snapshot.project?.id] = { expanded: (snapshot.nodes || []).filter(node => !node.collapsedByDefault).map(node => node.id), projection: 'files' });
@@ -107,7 +108,7 @@
             local.traceId = snapshot.traceId;
             remember();
         }
-        text('projectName', project?.name || '选择或创建工程');
+        text('projectName', project?.name || (english ? 'Select or create a project' : '选择或创建工程'));
         text('projectLocation', project?.location);
         document.getElementById('projectLocation').hidden = !project?.location;
         document.getElementById('choose').title = project?.path || '';

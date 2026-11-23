@@ -24,9 +24,11 @@ const { runVivadoBatchTask } = require('./batch');
 const { prepareVivadoScript } = require('./script-task');
 const { createVivadoSessions } = require('./session');
 const versionCheck = require('./version');
-const { sessionScript, readRows } = require('./asset-task');
+const { script: assetScript, sessionScript, readRows, rowsOf } = require('./asset-task');
 const summary = require('./summary');
+const { createSummaryReports, analysisCommands } = require('./summary-reports');
 const { openSummaryPanels } = require('./summary-view');
+const { summaryStrings } = require('./summary-strings');
 const { scanWorkspaceSources } = require('../workspace/sources');
 const fs = require('fs');
 const os = require('os');
@@ -827,6 +829,8 @@ function activateVivado(context, deps) {
     }
 
     // 工程概览：复用常驻会话读取 run 状态；面板轮询期间不启动任何构建。
+    const overviewText = summaryStrings(vscode.env?.language);
+    const reports = createSummaryReports(context.workspaceState);
     let summaryFolder = null;
     async function summaryDirectory() {
         if (!summaryFolder) {
@@ -841,19 +845,19 @@ function activateVivado(context, deps) {
             const uri = vscode.Uri.file(file);
             const info = await fs.promises.stat(file);
             if (info.isDirectory()) {
-                if (!await vscode.env.openExternal(uri)) throw new Error('系统未能打开目录');
+                if (!await vscode.env.openExternal(uri)) throw new Error(overviewText.folderFailed);
             } else await vscode.window.showTextDocument(uri, { preview: false });
         }
-        catch (error) { vscode.window.showErrorMessage('无法打开 ' + file + '：' + error.message); }
+        catch (error) { vscode.window.showErrorMessage(overviewText.openFailed + ' ' + file + '\n' + error.message); }
     }
     async function loadSummary(xpr) {
         if (running) return { busy: true };
         const current = xpr || await refreshProjectContext();
-        if (!current) return { error: '未找到 Vivado 工程（.xpr），请先选择或创建工程' };
+        if (!current) return { error: overviewText.noProject };
         let binDir = resolveBinDir();
         const versionGate = await ensureVivadoVersion(current);
         if (!versionGate.ok) {
-            return { error: binDir ? 'Vivado 版本与工程不匹配，已取消读取' : '未找到 Vivado（vivado.bat），请设置 svtools.vivado.path' };
+            return { error: binDir ? overviewText.versionError : overviewText.noTool };
         }
         binDir = versionGate.binDir;
         const directory = await summaryDirectory();
@@ -863,25 +867,43 @@ function activateVivado(context, deps) {
         try {
             const result = await sessions.run({ binDir, xpr: current, task: { signal: controller.signal }, directory,
                 scriptPath, name: 'project_summary', timeoutMs: 120000, readOnly: true });
-            if (!result.ok) return { error: result.error || '读取工程状态失败' };
+            if (!result.ok) return { error: result.error || overviewText.readFailed };
             const parsed = summary.parse(await readRows(directory));
             const paths = await Promise.all(Object.entries(summary.runPaths(parsed, current)).map(async ([id, { directory, log }]) => {
                 const [dirInfo, logInfo] = await Promise.all([directory, log].map(file => fs.promises.stat(file).catch(() => null)));
                 return [id, { directory: dirInfo?.isDirectory() ? directory : null, log: logInfo?.isFile() ? log : null }];
             }));
-            return { ...parsed, xpr: current, paths: Object.fromEntries(paths) };
+            const artifacts = Object.fromEntries(paths);
+            return { ...parsed, xpr: current, paths: artifacts, analysis: await reports.read(parsed, artifacts) };
         } catch (error) {
             return { error: error.message };
         }
     }
-    const summaryPanels = openSummaryPanels(context, vscode, { load: loadSummary, openPath: openSummaryPath, log });
+    async function generateSummaryReports(xpr, request) {
+        const result = await runScript({
+            anchor: xpr, name: 'project_analysis.tcl', body: assetScript(xpr, analysisCommands(request), { readOnly: true }),
+            async validate() {
+                const project = await findProjectXpr();
+                if (!project || !samePath(project, xpr)) throw new Error(overviewText.switched);
+                if (!await reports.isCurrent(request)) throw new Error(overviewText.checkpointChanged);
+            }
+        }, { quiet: true, panel: true });
+        if (result?.code !== 0 || !result.logPath) return { error: result?.error || overviewText.generationFailed };
+        const directory = path.dirname(result.logPath);
+        await reports.remember(request, directory);
+        const errors = rowsOf(await readRows(directory), 'analysis_error');
+        if (errors.length) return { error: overviewText.partial + '\n' + errors.map(([kind, error]) => overviewText[kind] + ' · ' + error).join('\n') };
+    }
+    const summaryPanels = openSummaryPanels(context, vscode, {
+        load: loadSummary, generate: generateSummaryReports, openPath: openSummaryPath, log
+    });
     context.subscriptions.push(vscode.commands.registerCommand('svtools.vivado.summary', async node => {
         try {
             const xpr = await refreshProjectContext();
-            if (!xpr) { vscode.window.showErrorMessage('未找到 Vivado 工程（.xpr），请先选择或创建工程'); return; }
-            if (node?.nodeData?.xpr && !samePath(xpr, node.nodeData.xpr)) throw new Error('工程已切换，请从当前工程重新打开');
+            if (!xpr) { vscode.window.showErrorMessage(overviewText.noProject); return; }
+            if (node?.nodeData?.xpr && !samePath(xpr, node.nodeData.xpr)) throw new Error(overviewText.switched);
             summaryPanels.open(xpr);
-        } catch (error) { vscode.window.showErrorMessage('打开工程概览失败：' + error.message); }
+        } catch (error) { vscode.window.showErrorMessage(overviewText.overviewFailed + '\n' + error.message); }
     }));
 
     require('./asset-commands').activateAssetCommands(context, {

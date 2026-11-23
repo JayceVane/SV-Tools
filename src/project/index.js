@@ -28,6 +28,10 @@ const RUN_ACTIONS = [
     { id: 'reportTiming', label: '时序报告', icon: 'report', group: 'reports' }
 ];
 const TOOL_ACTIONS = [SUMMARY_ACTION, ...RUN_ACTIONS, ...[BD_ACTION, CATALOG_ACTION].map(action => ({ ...action, group: 'assets' }))];
+const ENGLISH_TOOL_LABELS = {
+    projectSummary: 'Project Overview', synthesize: 'Synthesize', implement: 'Implement', bitstream: 'Bitstream',
+    stop: 'Stop', reportSynth: 'Synthesis Report', reportImplUtil: 'Utilization Report', reportTiming: 'Timing Report'
+};
 /**
  * 单一侧边栏；页面只传节点令牌和允许的动作，文件路径与工程身份由宿主持有。
  * @param {object} context 扩展上下文。
@@ -35,6 +39,8 @@ const TOOL_ACTIONS = [SUMMARY_ACTION, ...RUN_ACTIONS, ...[BD_ACTION, CATALOG_ACT
  * @returns {object} 刷新、显式追踪及销毁。
  */
 function activateProjectView(context, { vscode, projects, vivado, designReview }) {
+    const english = !/^zh\b/i.test(vscode.env?.language || 'zh-CN');
+    const tools = english ? TOOL_ACTIONS.map(action => ({ ...action, label: ENGLISH_TOOL_LABELS[action.id] || action.label })) : TOOL_ACTIONS;
     let view, project, nodes = [], revision = 0, refreshGeneration = 0, disposed = false, message, busy = false, timer, selectionTimer;
     let progress=null, progressLinks=new Map(), progressTimer;
     const nodeIndex = new Map(), projections = new Map(), expandedState = context.workspaceState.get('svtools.project.views', {});
@@ -94,7 +100,7 @@ function activateProjectView(context, { vscode, projects, vivado, designReview }
         }
         void view.webview.postMessage({ type: 'snapshot', revision, project: projectLabel, nodes, projection, progress,
             tracing: !!currentFlow, traceId: currentFlow?.traceId, traceRoot: currentFlow ? `${currentFlow.contextKind === 'simulation' ? '仿真' : '设计'}追踪根：${currentFlow.top}${currentFlow.rootFallback ? '（所选模块）' : ''}` : '', pinned: currentFlow?.pinned, busy, message,
-            actions: actionList().filter(action => !action.group), toolActions: project?.kind === 'vivado' ? TOOL_ACTIONS : [], issues: currentFlow?.issues ||
+            actions: actionList().filter(action => !action.group), toolActions: project?.kind === 'vivado' ? tools : [], issues: currentFlow?.issues ||
                 (projection === 'instances' ? ['源码引用预览；执行信号追踪后显示静态RTL连接中可确定的实例层级'] : []) });
     }
     async function refresh() {

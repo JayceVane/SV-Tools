@@ -7,9 +7,10 @@ const same = (actual, expected) => assert.deepEqual(JSON.parse(JSON.stringify(ac
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
+const { summaryStrings } = require('../src/vivado/summary-strings');
 
 /** 只替换 DOM 与消息边界，运行真实的 summary-client.js。 */
-function harness() {
+function harness(language = 'zh-cn') {
     const nodes = new Map(), messages = [], listeners = {};
     class Element {
         constructor(tag = 'div') {
@@ -31,6 +32,7 @@ function harness() {
         addEventListener() {}
     };
     const window = { addEventListener(name, callback) { listeners[name] = callback; } };
+    document.getElementById('summary-strings').textContent = JSON.stringify(summaryStrings(language));
     let state;
     const context = { document, window, acquireVsCodeApi: () => ({
         postMessage: message => messages.push(message),
@@ -110,6 +112,39 @@ test('工程概览前端在读取失败时保留上次内容并提示原因', ()
     same(ui.messages.at(-1), { action: 'refresh' });
 });
 
+test('中英文资源、功耗和 DRC 显示测量值、阶段，缺报告不会显示零违规', () => {
+    const results = {
+        utilization: { run: 'impl_1', phase: 'placed', file: 'place.rpt', data: [{ resource: 'ff', used: 7, available: 100 }] },
+        power: { run: 'impl_1', data: { total: 0.105, dynamic: 0.001, static: 0.104, confidence: 'Medium' } },
+        drc: { run: 'impl_1', phase: 'routed', file: 'route.rpt', data: { total: 2, counts: { criticalWarnings: 2 },
+            rules: [{ rule: 'NSTD-1', level: 'criticalWarnings', count: 2 }] } }
+    };
+    const allText = item => [item.textContent, ...item.children.map(allText)].join(' ');
+    for (const [language, register, confidence, phase, critical] of [
+        ['zh-cn', /触发器/u, /置信度\s+中/u, /布局后/u, /严重警告/u],
+        ['en-us', /Flip-flops/u, /Confidence\s+Medium/u, /Post-placement/u, /Critical warnings/u]
+    ]) {
+        const ui = harness(language);
+        const send = analysis => ui.listeners.message({ data: { type: 'summary', at: 100, data: { ...sample, analysis } } });
+        send({ results: {}, generation: null });
+        assert.doesNotMatch(allText(ui.nodes.get('drc')), /\b0\b/u);
+        assert.equal(ui.nodes.get('generate').hidden, true);
+        send({ results, generation: { run: 'impl_1' } });
+        const utilization = ui.nodes.get('utilization');
+        assert.match(allText(utilization), register);
+        assert.match(allText(utilization), phase);
+        assert.match(allText(utilization), /7 \/ 100.*7%/u);
+        assert.match(allText(ui.nodes.get('power')), /0\.105 W.*0\.001 W.*0\.104 W/u);
+        assert.match(allText(ui.nodes.get('power')), confidence);
+        assert.match(allText(ui.nodes.get('drc')), critical);
+        assert.match(allText(ui.nodes.get('drc')), /NSTD-1/u);
+        ui.nodes.get('generate').onclick();
+        same(ui.messages.at(-1), { action: 'generate' });
+        utilization.children[0].children[1].onclick();
+        same(ui.messages.at(-1), { action: 'openReport', kind: 'utilization' });
+    }
+});
+
 test('概览切换工程时丢弃在途结果，产物只打开新工程快照里的条目', async () => {
     const { openSummaryPanels } = require('../src/vivado/summary-view');
     const old = path.resolve('bin/old.xpr'), current = path.resolve('bin/new.xpr');
@@ -139,6 +174,7 @@ test('概览切换工程时丢弃在途结果，产物只打开新工程快照�
     assert.deepEqual(requests, [old, current]);
     assert.deepEqual(posted.map(message => message.type), ['reset', 'summary']);
     assert.equal(posted[1].data.project.name, 'demo');
+    assert.match(panel.webview.html, /lang="en".*DRC Violations/su);
     receive({ action: 'openRun', kind: 'log', run: 'unlisted', path: 'arbitrary.log' });
     receive({ action: 'openRun', kind: 'log', run: 'impl_1', path: 'arbitrary.log' });
     assert.deepEqual(opened, [sample.paths.impl_1.log]);

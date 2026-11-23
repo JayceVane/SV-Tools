@@ -21,6 +21,7 @@ const { savedBlock, savedIp } = require('../src/vivado/asset-preview');
 const { createIpMetadata } = require('../src/vivado/ip-metadata');
 const { parseXpr, samePath } = require('../src/vivado/xpr');
 const summary = require('../src/vivado/summary');
+const { createSummaryReports, analysisCommands } = require('../src/vivado/summary-reports');
 
 test('资产动作拒绝无效名称、任意生成目标、异类端点和只读元数据修改', () => {
     assert.throws(() => ip.create({ vlnv: 'xilinx.com:ip:xlconstant:1.1', name: 'new; exit' }), /名称/u);
@@ -101,6 +102,70 @@ test('常驻会话脚本不重开工程，工程概览解析run状态与消息',
     const paths = summary.runPaths(data, path.join('C:', 'work', 'demo.xpr'));
     assert.equal(paths.synth_1.log.endsWith(path.join('demo.runs', 'synth_1', 'runme.log')), true);
     assert.equal(paths.impl_1.log, path.resolve('bin/custom-impl/runme.log'));
+});
+
+test('概览按实际阶段汇总资源、功耗、DRC，缺报告时回退且使用检查点指纹生成', async t => {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'svtools-overview-'));
+    t.after(() => fs.rm(directory, { recursive: true, force: true }));
+    const implementation = path.join(directory, 'impl_1'), synthesis = path.join(directory, 'synth_1');
+    const tasks = path.join(directory, 'tasks');
+    await Promise.all([implementation, synthesis, tasks].map(item => fs.mkdir(item)));
+    let savedReports;
+    const workspaceState = {
+        get: (_, fallback) => savedReports || fallback,
+        async update(_, value) { savedReports = structuredClone(value); }
+    };
+    let read = createSummaryReports(workspaceState);
+    const snapshot = {
+        currentRuns: { synthesis: 'synth_1', implementation: 'impl_1' },
+        runs: [{ id: 'synth_1', power: null, status: 'synth_design Complete!' },
+            { id: 'impl_1', power: 0.123, status: 'route_design Complete!', needsRefresh: true }]
+    };
+    const paths = { synth_1: { directory: synthesis }, impl_1: { directory: implementation } };
+    const resource = count => '| Site Type | Used | Fixed | Prohibited | Available | Util% |\n' +
+        '| CLB LUTs* | ' + count + ' | 0 | 0 | 5,000 | -- |\n| Block RAM Tile | 1.5 | 0 | 0 | 200 | -- |\n';
+    await Promise.all([
+        fs.writeFile(path.join(synthesis, 'top_utilization_synth.rpt'), resource(250)),
+        fs.writeFile(path.join(implementation, 'top_routed.dcp'), 'routed'),
+        fs.writeFile(path.join(implementation, 'top_drc_opted.rpt'), 'Violations found: 0\n'),
+        fs.writeFile(path.join(implementation, 'top_methodology_drc_routed.rpt'), 'Violations found: 0\n')
+    ]);
+    let { results, generation } = await read.read(snapshot, paths);
+    assert.equal(results.utilization.run, 'synth_1');
+    assert.equal(results.power.data.total, 0.123);
+    assert.equal(results.drc.data.total, 0);
+    assert.equal(results.drc.phase, 'opted');
+    assert.deepEqual(generation.kinds, ['utilization', 'power']);
+    assert.equal(await read.isCurrent(generation), true);
+    assert.match(analysisCommands(generation).join('\n'), /open_run.*\n.*report_utilization.*\n.*report_power/u);
+    assert.doesNotMatch(analysisCommands(generation).join('\n'), /launch_runs|report_drc/u);
+
+    await Promise.all([
+        fs.writeFile(path.join(tasks, 'summary_power.rpt'), '| Total On-Chip Power (W) | 0.105 |\n| Dynamic (W) | 0.001 |\n' +
+            '| Device Static (W) | 0.104 |\n| Confidence Level | Medium |\n'),
+        fs.writeFile(path.join(implementation, 'top_utilization_placed.rpt'), resource(325)),
+        fs.writeFile(path.join(implementation, 'top_drc_routed.rpt'), 'Violations found: 3\n+---+\n| Rule | Severity | Description | Violations |\n' +
+            '+---+\n| NSTD-1 | Critical Warning | I/O | 2 |\n| P-1 | Warning | Ports | 1 |\n+---+\n')
+    ]);
+    const request = generation;
+    await read.remember(request, tasks);
+    read = createSummaryReports(workspaceState);
+    ({ results, generation } = await read.read(snapshot, paths));
+    assert.equal(generation, null);
+    assert.equal(results.utilization.stale, true);
+    assert.equal(results.utilization.phase, 'placed');
+    assert.deepEqual(results.utilization.data, [
+        { resource: 'lut', used: 325, available: 5000 }, { resource: 'bram', used: 1.5, available: 200 }
+    ]);
+    assert.deepEqual(results.power.data, { total: 0.105, dynamic: 0.001, static: 0.104, confidence: 'Medium' });
+    assert.equal(results.drc.phase, 'routed');
+    assert.equal(results.drc.data.total, 3);
+    assert.equal(results.drc.data.counts.criticalWarnings, 2);
+    await fs.writeFile(path.join(implementation, 'top_routed.dcp'), 'new routed checkpoint');
+    assert.equal(await read.isCurrent(request), false);
+    ({ results, generation } = await read.read(snapshot, paths));
+    assert.equal(results.power.data.total, 0.123);
+    assert.deepEqual(generation.kinds, ['power']);
 });
 
 test('Block Design 布局在宿主重启后复用坐标，结构、层级和接口展开状态分别匹配', async t => {

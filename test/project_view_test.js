@@ -6,7 +6,7 @@ const { projectTree } = require('../src/project/tree-model');
 const { parseXprText } = require('../src/vivado/xpr');
 const noop = () => ({ dispose() {
     } });
-async function host(t) {
+async function host(t, language = 'zh-cn') {
     const commands = new Map(), calls = [], sent = [], errors = [], subscriptions = [];
     let provider, receive, traceMode = 'selection';
     let project = { id: 'p1', name: 'local', kind: 'svtools', path: path.resolve('bin/local.json'), root: path.resolve('bin'), sets: [{ name: 'sources', type: 'DesignSrcs', top: 'top', files: [path.resolve('bin/top.sv')] }], key: '1', includeDirs: [], defines: [] };
@@ -21,7 +21,7 @@ async function host(t) {
         }, add: async () => {
         }, update: async () => {
         } };
-    const vscode = { Uri: { file: fsPath => ({ fsPath, scheme: 'file' }), joinPath: (base, ...parts) => ({ fsPath: path.join(base.fsPath, ...parts) }) }, window: { registerWebviewViewProvider(id, value) {
+    const vscode = { env: { language }, Uri: { file: fsPath => ({ fsPath, scheme: 'file' }), joinPath: (base, ...parts) => ({ fsPath: path.join(base.fsPath, ...parts) }) }, window: { registerWebviewViewProvider(id, value) {
                 assert.equal(id, 'svtools.vivado.projectTree');
                 provider = value;
                 return noop();
@@ -144,6 +144,14 @@ test('Vivado 流程提供构建、报告和资产入口并校验快照世代', a
     await h.message({action:'command',revision:h.sent.at(-1).revision,command:'synthesize'});
     assert.equal(h.calls.length,count);
     assert.match(h.errors.at(-1),/允许列表/);
+});
+test('Vivado 流程和工程概览入口跟随英文界面', async t => {
+    const h = await host(t, 'en-us');
+    h.setProject({ ...h.api.getSnapshot().project, kind: 'vivado', path: path.resolve('bin/top.xpr') });
+    await h.api.refresh();
+    const actions = h.sent.at(-1).toolActions;
+    assert.equal(actions.find(action => action.id === 'projectSummary').label, 'Project Overview');
+    assert.equal(actions.find(action => action.id === 'reportImplUtil').label, 'Utilization Report');
 });
 test('文件视图聚合角色，实例视图区分同文件多实例，信号不会成为树节点', () => {
     const file = path.resolve('bin/leaf.sv'), project = { root: path.dirname(file), sets: [{ name: 'sources', files: [file] }] }, nodes = [{ id: 'a', parentId: null, moduleName: 'leaf', label: 'u_a : leaf', source: { path: file }, names: ['u_a'], roles: ['internal', 'output'], details: [], declaration: { name: 'r_data', indices: [0] } }, { id: 'b', parentId: null, moduleName: 'leaf', label: 'u_b : leaf', source: { path: file }, names: ['u_b'], roles: ['input'], details: [] }];
