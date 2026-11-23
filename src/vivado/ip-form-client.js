@@ -3,6 +3,26 @@
 (() => {
     const vscode = acquireVsCodeApi(), $ = id => document.getElementById(id);
     let state = { info: null, form: null, busy: true, status: '' }, draft = new Map(), activeGroup = '';
+    let evaluateSeq = 0, evaluateTimer = null;
+
+    const hiddenSets = () => {
+        const hidden = state.info?.hidden || {};
+        return {
+            pages: new Set((hidden.pages || []).map(item => String(item).toLowerCase())),
+            groups: new Set((hidden.groups || []).map(item => String(item).toLowerCase())),
+            params: new Set((hidden.params || []).map(item => String(item).toLowerCase()))
+        };
+    };
+    // 修改后按草稿值回问 Vivado，刷新禁用与隐藏状态（防抖，只保留最后一次）。
+    function scheduleEvaluate() {
+        if (!state.info) return;
+        clearTimeout(evaluateTimer);
+        const seq = ++evaluateSeq;
+        evaluateTimer = setTimeout(() => {
+            const values = [...parameters()].map(([key, parameter]) => [key, draft.has(key) ? draft.get(key) : parameter.value]);
+            vscode.postMessage({ action: 'evaluate', revision: state.revision, seq, values });
+        }, 280);
+    }
 
     const node = (tag, text, className) => {
         const item = document.createElement(tag);
@@ -53,6 +73,7 @@
             if (next === parameter.value) draft.delete(parameter.key);
             else draft.set(parameter.key, next);
             render();
+            scheduleEvaluate();
         };
         if (kind === 'check') {
             field = node('input');
@@ -122,13 +143,14 @@
     }
 
     function renderTree() {
-        const pages = state.form?.pages || [];
+        const hidden = hiddenSets();
+        const pages = (state.form?.pages || []).filter(page => !hidden.pages.has(String(page.path || page.title).toLowerCase()));
         const elements = pages.map(page => {
             const section = node('div', undefined, 'page');
             // 只有一组且与页面同名时不再重复标题。
             const shared = page.groups.every(group => group.title === page.title || group.title === '常规');
             if (!shared) section.append(node('h2', page.title));
-            for (const group of page.groups) {
+            for (const group of page.groups.filter(item => !hidden.groups.has(String(item.path || '').toLowerCase()))) {
                 const label = shared ? page.title : group.title;
                 const item = node('button', label + ' (' + group.rows.length + ')', 'group-link');
                 item.type = 'button';
@@ -147,11 +169,14 @@
 
     function renderForm() {
         const query = $('search').value.trim().toLowerCase();
-        const current = values();
+        const current = values(), hidden = hiddenSets();
         const sections = [];
         for (const page of state.form?.pages || []) {
+            if (hidden.pages.has(String(page.path || page.title).toLowerCase())) continue;
             for (const group of page.groups) {
+                if (hidden.groups.has(String(group.path || '').toLowerCase())) continue;
                 const rows = group.rows.filter(parameter => {
+                    if (hidden.params.has(parameter.key.slice(7).toLowerCase())) return false;
                     const value = current.get(parameter.key) ?? '';
                     return !query || (parameter.key + ' ' + (parameter.label || '') + ' ' + (parameter.help || '') + ' ' + value).toLowerCase().includes(query);
                 });
@@ -192,6 +217,17 @@
     $('close').onclick = () => vscode.postMessage({ action: 'close' });
     window.addEventListener('message', ({ data }) => {
         if (data?.type === 'applied') { draft.clear(); return; }
+        if (data?.type === 'state') {
+            if (data.seq && data.seq < evaluateSeq) return;
+            const off = new Set((data.disabled || []).map(name => String(name).toLowerCase()));
+            for (const parameter of state.info?.parameters || []) {
+                const name = parameter.key.startsWith('CONFIG.') ? parameter.key.slice(7).toLowerCase() : '';
+                parameter.disabled = off.has(name) ? true : undefined;
+            }
+            if (state.info) state.info.hidden = data.hidden || { pages: [], groups: [], params: [] };
+            render();
+            return;
+        }
         if (data?.type !== 'form') return;
         state = data;
         render();

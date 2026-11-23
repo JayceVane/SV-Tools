@@ -175,12 +175,14 @@ error "Arbitrary Tcl must not be run"`);
     const runtime = {
         params: new Map([['C_GPIO2_WIDTH', { label: 'GPIO Width', help: 'Set the GPIO port width', group: 'IP Configuration / GPIO 2', widget: 'textEdit' }]]),
         notes: new Map([['IP Configuration / GPIO 2', ['运行时说明']]]),
-        enabled: new Map([['C_GPIO2_WIDTH', false]])
+        enabled: new Map([['C_GPIO2_WIDTH', false]]),
+        hidden: { pages: new Set(['AXI 页面']), groups: new Set(), params: new Set(['C_GPIO2_WIDTH']) }
     };
     const live = await createIpMetadata()({ vlnv: 'xilinx.com:ip:axi_gpio:2.0', parameters:
         [[width, '32'], [dual, '0']].map(([key, value]) => ({ key, value, choices: [] })) }, component, runtime);
     assert.equal(live.parameters[0].disabled, true);
     assert.deepEqual(live.parameters[1].choices, ['0', '1']);
+    assert.deepEqual(live.hidden, { pages: ['AXI 页面'], groups: [], params: ['C_GPIO2_WIDTH'] });
     assert.deepEqual(live.notes, [{ group: 'IP Configuration / GPIO 2', texts: ['[0x0,0xFFFF]', '运行时说明'] }]);
     assert.equal(resolveEdits([{ key: width, value: '12' }], details), undefined);
     assert.equal(resolveEdits([{ key: width, value: '12' }, { key: dual, value: '1' }], details).length, 2);

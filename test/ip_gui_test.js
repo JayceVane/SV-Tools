@@ -34,6 +34,31 @@ test('dumpScript 内嵌目标文件与参数值，sessionLines 在子解释器�
     assert.ok(lines.some(line => line.includes('interp delete ::svtools_gui')));
 });
 
+test('visible false 的页面/分组/参数进入隐藏集合', () => {
+    const stdout = [
+        'SVGUI_ROW\tpage#1\tpage\t\tAXI 页面\t\t\t\t\t\tfalse',
+        'SVGUI_ROW\tgroup#2\tgroup\tpage#1\tGPIO\t\t\t\t\t\tfalse',
+        'SVGUI_ROW\tparam#3\tparam\tgroup#2\tC_SECRET\t\t\t\t\t\tfalse',
+        'SVGUI_ROW\tpage#4\tpage\t\t常用\t\t\t\t\t\t'
+    ].join('\n');
+    const layout = parse(stdout);
+    assert.deepEqual([...layout.hidden.pages], ['axi 页面']);
+    assert.deepEqual([...layout.hidden.groups], ['axi 页面 / gpio']);
+    assert.deepEqual([...layout.hidden.params], ['c_secret']);
+});
+
+test('页面仍有可用参数时不隐藏', () => {
+    const stdout = [
+        'SVGUI_ROW\tpage#1\tpage\t\t高级选项\t\t\t\t\t\tfalse',
+        'SVGUI_ROW\tparam#2\tparam\tpage#1\tC_STRATEGY\tcomboBox\t\t\t\t',
+        'SVGUI_ROW\tpage#3\tpage\t\t旧页面\t\t\t\t\t\tfalse',
+        'SVGUI_ROW\tparam#4\tparam\tpage#3\tC_OLD\t\t\t\t\t\tfalse'
+    ].join('\n');
+    const layout = parse(stdout);
+    assert.deepEqual([...layout.hidden.pages], ['旧页面']);
+    assert.equal(layout.hidden.pages.has('高级选项'), false);
+});
+
 test('额外参数页（其他参数）保留在原位置并被解析', () => {
     const stdout = [
         'SVGUI_ROW\tpage#1\tpage\t\tTop\t\t\t\t',

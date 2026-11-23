@@ -131,8 +131,12 @@ function createIpMetadata(resolveBinDir) {
             const staticLayout = entry.layout || { params: new Map(), notes: new Map() };
             const layout = runtimeLayout || staticLayout;
             // 运行时布局优先；静态解析补充被 Tcl 命令替换吞掉的静态说明（如 "[0x0,0xFFFF]"）。
-            const notes = [...mergeNotes(staticLayout.notes, runtimeLayout?.notes)] .map(([group, texts]) => ({ group, texts: [...texts] }));
-            return { ...info, parameters: annotate(info.parameters, { ...entry.metadata, layout }), notes };
+            const notes = [...mergeNotes(staticLayout.notes, runtimeLayout?.notes)].map(([group, texts]) => ({ group, texts: [...texts] }));
+            const hidden = runtimeLayout?.hidden ? {
+                pages: [...runtimeLayout.hidden.pages], groups: [...runtimeLayout.hidden.groups],
+                params: [...runtimeLayout.hidden.params]
+            } : { pages: [], groups: [], params: [] };
+            return { ...info, parameters: annotate(info.parameters, { ...entry.metadata, layout }), notes, hidden };
         } catch { return info; }
     };
 }

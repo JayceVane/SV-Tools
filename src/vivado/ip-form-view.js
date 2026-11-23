@@ -45,7 +45,7 @@ function html(webview, vscode, resources) {
     <script nonce="${nonce}" src="${uri('ip-form-client.js')}"></script></body></html>`;
 }
 
-function openIpFormPanels(context, vscode, { load, apply }) {
+function openIpFormPanels(context, vscode, { load, apply, evaluate }) {
     const panels = new Set();
     context.subscriptions.push({ dispose() { for (const entry of panels) entry.panel.dispose(); } });
     return function open({ key, title = 'IP 定制', subtitle = '' }) {
@@ -55,7 +55,25 @@ function openIpFormPanels(context, vscode, { load, apply }) {
         const panel = vscode.window.createWebviewPanel('svtoolsIpForm', title, vscode.ViewColumn.Active,
             { enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [resources] });
         let revision = 0, busy = false, closed = false, ready = false, info = null, status = '';
+        let pendingEvaluation = null, evaluating = false;
         const entry = { key, panel, reload };
+        // 连续修改只保留最后一次待求值，避免逐键回问 Vivado。
+        async function runEvaluations() {
+            if (evaluating || !evaluate) return;
+            evaluating = true;
+            try {
+                while (pendingEvaluation) {
+                    const { seq, values } = pendingEvaluation;
+                    pendingEvaluation = null;
+                    try {
+                        const result = await evaluate(key, values);
+                        if (closed || result?.error) continue;
+                        post({ type: 'state', seq, disabled: result.disabled || [],
+                            hidden: result.hidden || { pages: [], groups: [], params: [] } });
+                    } catch { /* 单次求值失败时保留上一次状态 */ }
+                }
+            } finally { evaluating = false; }
+        }
         const post = message => { if (ready && !closed) void panel.webview.postMessage(message); };
         const publish = () => post({ type: 'form', revision: ++revision, info,
             form: info ? buildForm(info.parameters, info.notes) : null, busy, status });
@@ -71,7 +89,13 @@ function openIpFormPanels(context, vscode, { load, apply }) {
             finally { busy = false; publish(); }
         }
         panel.webview.onDidReceiveMessage(async message => {
-            if (closed || !message || busy) return;
+            if (closed || !message) return;
+            if (message.action === 'evaluate' && evaluate) {
+                pendingEvaluation = { seq: message.seq || 0, values: message.values || [] };
+                void runEvaluations();
+                return;
+            }
+            if (busy) return;
             if (message.action === 'ready') { ready = true; await reload(); return; }
             if (message.action === 'refresh') { await reload(); return; }
             if (message.action === 'close') { panel.dispose(); return; }

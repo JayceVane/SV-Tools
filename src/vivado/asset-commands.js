@@ -57,7 +57,7 @@ function activateAssetCommands(context, { vscode, findProjectXpr, incrementalAct
         return { xpr, project: parseXpr(xpr) };
     }
 
-    function projectAction(label, expectedXpr, callback) {
+    function projectAction(label, expectedXpr, callback, quiet = false) {
         return incrementalAction(label, async () => {
             const { xpr, project } = await projectFor(expectedXpr);
 
@@ -89,11 +89,11 @@ function activateAssetCommands(context, { vscode, findProjectXpr, incrementalAct
             }
             try { return await callback({ project, xpr, run }); }
             catch (error) { if (error.code !== 'TOOL_CANCELLED') throw error; }
-        });
+        }, { quiet });
     }
 
-    function queueAction(label, xpr, callback, active = () => true) {
-        const request = reads.then(() => active() ? projectAction(label, xpr, callback) : undefined);
+    function queueAction(label, xpr, callback, active = () => true, quiet = false) {
+        const request = reads.then(() => active() ? projectAction(label, xpr, callback, quiet) : undefined);
         reads = request.catch(() => {});
         return request;
     }
@@ -484,10 +484,32 @@ function activateAssetCommands(context, { vscode, findProjectXpr, incrementalAct
     }
 
     async function describeCell(session, target, parameters) {
-        if (!target.vlnv) return { parameters, notes: [] };
+        if (!target.vlnv) return { parameters, notes: [], hidden: { pages: [], groups: [], params: [] } };
         const layout = await runtimeLayout(session, target.vlnv, layoutValues(parameters));
         const described = await describeIp({ vlnv: target.vlnv, parameters }, undefined, layout);
-        return { parameters: described.parameters, notes: described.notes || [] };
+        return { parameters: described.parameters, notes: described.notes || [],
+            hidden: described.hidden || { pages: [], groups: [], params: [] } };
+    }
+
+    /** 按草稿参数值重新执行 IP 的依赖过程，返回禁用与隐藏结果；静默失败不打断编辑。 */
+    async function evaluateForm(key, values) {
+        const target = formTargets.get(key);
+        if (!target) return { error: 'IP 配置目标已失效，请重新打开' };
+        const mapped = {};
+        for (const [name, value] of values || []) if (name.startsWith('CONFIG.')) mapped[name.slice(7)] = value;
+        const result = await queueAction('IP 依赖求值', target.xpr, async session => {
+            const layout = await runtimeLayout(session, target.vlnv, mapped);
+            if (!layout) return { disabled: [], hidden: { pages: [], groups: [], params: [] } };
+            return {
+                disabled: [...layout.enabled].filter(([, on]) => on === false).map(([name]) => name),
+                hidden: layout.hidden ? { pages: [...layout.hidden.pages], groups: [...layout.hidden.groups],
+                    params: [...layout.hidden.params] } : { pages: [], groups: [], params: [] }
+            };
+        }, () => true, true);
+        if (!result) return { error: '求值已跳过' };
+        // 跳过（Vivado 占用中）时保留上一次状态，不能把禁用列表清空。
+        if (result.status === 'failed' || result.status === 'skipped') return { error: result.error || '求值已取消' };
+        return result;
     }
 
     const formPanels = openIpFormPanels(context, vscode, {
@@ -531,7 +553,8 @@ function activateAssetCommands(context, { vscode, findProjectXpr, incrementalAct
             });
             if (!result || result.status === 'failed') return { error: result?.error || '应用已取消' };
             return result;
-        }
+        },
+        evaluate: evaluateForm
     });
 
     // Block Design 动作使用面板当前快照，实际 Tcl 对象仍由 Vivado 精确解析。

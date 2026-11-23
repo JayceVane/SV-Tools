@@ -95,6 +95,32 @@ proc ::sv::value_of {name} {
     return ""
 }
 
+# 页面/分组/表格的 spec 既可用位置参数也可用 -name；映射到真实节点才能记录 visible。
+proc ::sv::arg_name {args} {
+    set name ""
+    set skip 0
+    foreach item $args {
+        if {$skip} { set skip 0; continue }
+        if {$item eq "-name" || $item eq "-of"} { set skip 1; continue }
+        if {[string index $item 0] ne "-" && $name eq ""} { set name $item }
+    }
+    return $name
+}
+
+proc ::sv::find_node {type args} {
+    set name [::sv::arg_name {*}$args]
+    if {$name eq ""} { return "" }
+    set lower [string tolower $name]
+    foreach token $::sv::order {
+        if {![dict exists $::sv::nodes $token]} { continue }
+        lassign [dict get $::sv::nodes $token] t parent n widget text
+        if {$t ne $type} { continue }
+        if {[string tolower $n] eq $lower} { return $token }
+        if {[string tolower [::sv::getprop display_name $token]] eq $lower} { return $token }
+    }
+    return ""
+}
+
 # get_paramspec/get_guiparamspec 既用 -name 也用位置参数；返回对应参数节点，便于 tooltip 落到正确参数。
 proc ::sv::spec {args} {
     set name ""
@@ -143,7 +169,8 @@ proc ::sv::dump {} {
     foreach token $::sv::order {
         lassign [dict get $::sv::nodes $token] type parent name widget text
         lappend lines [list $token $type $parent $name $widget \
-            [::sv::getprop tooltip $token] [::sv::getprop display_name $token] $text [::sv::getprop enabled $token]]
+            [::sv::getprop tooltip $token] [::sv::getprop display_name $token] $text \
+            [::sv::getprop enabled $token] [::sv::getprop visible $token]]
     }
     return $lines
 }
@@ -214,12 +241,24 @@ namespace eval ::ipgui {
     proc get_paramspec {args} { return [::sv::spec {*}$args] }
     proc get_guiparamspec {args} { return [::sv::spec {*}$args] }
     proc get_modelparamspec {args} { return [::sv::spec {*}$args] }
-    proc get_groupspec {args} { return [::sv::token spec] }
-    proc get_pagespec {args} { return [::sv::token spec] }
+    proc get_groupspec {args} {
+        set token [::sv::find_node group {*}$args]
+        if {$token ne ""} { return $token }
+        return [::sv::token spec]
+    }
+    proc get_pagespec {args} {
+        set token [::sv::find_node page {*}$args]
+        if {$token ne ""} { return $token }
+        return [::sv::token spec]
+    }
     proc get_textspec {args} { return [::sv::token spec] }
     proc get_canvasspec {args} { return [::sv::token spec] }
     proc get_imagespec {args} { return [::sv::token spec] }
-    proc get_tablespec {args} { return [::sv::token spec] }
+    proc get_tablespec {args} {
+        set token [::sv::find_node table {*}$args]
+        if {$token ne ""} { return $token }
+        return [::sv::token spec]
+    }
     proc get_coredir {} { return $::sv::dir }
     proc update_params {args} { return "" }
     proc find_file {args} { return "" }
@@ -244,17 +283,26 @@ if {$::sv::entry eq ""} {
     foreach hook {setToolTips setDisplayNames} {
         if {[llength [info commands $hook]]} { catch {uplevel #0 [list $hook $view]} }
     }
-    # 用当前参数值执行 update_PARAM_VALUE.* 与 update_gui_for_PARAM_VALUE.*，回收 enabled 状态。
-    foreach pattern {update_PARAM_VALUE.* update_gui_for_PARAM_VALUE.*} {
-        foreach procname [info procs $pattern] {
-            set call [list $procname]
-            foreach formal [info args $procname] { lappend call [::sv::formal_token $formal] }
-            catch {uplevel #0 $call}
-        }
+    # 用当前参数值执行 update_PARAM_VALUE.*，回收 enabled 状态。
+    foreach procname [info procs update_PARAM_VALUE.*] {
+        set call [list $procname]
+        foreach formal [info args $procname] { lappend call [::sv::formal_token $formal] }
+        catch {uplevel #0 $call}
+    }
+    # update_gui_for_* 会改可见性；被 update_PARAM_VALUE 判定为禁用的参数不参与，
+    # 否则非当前模式的页面会被错误地重新显示。
+    foreach procname [info procs update_gui_for_PARAM_VALUE.*] {
+        set target ""
+        regexp {update_gui_for_PARAM_VALUE\.(.+)$} $procname -> target
+        set token [::sv::find_param $target]
+        if {$token ne "" && [::sv::getprop enabled $token] eq "false"} { continue }
+        set call [list $procname]
+        foreach formal [info args $procname] { lappend call [::sv::formal_token $formal] }
+        catch {uplevel #0 $call}
     }
     foreach line [::sv::dump] {
-        lassign $line token type parent name widget tooltip display text enabled
-        puts "SVGUI_ROW\t$token\t$type\t$parent\t[::sv::esc $name]\t[::sv::esc $widget]\t[::sv::esc $tooltip]\t[::sv::esc $display]\t[::sv::esc $text]\t$enabled"
+        lassign $line token type parent name widget tooltip display text enabled visible
+        puts "SVGUI_ROW\t$token\t$type\t$parent\t[::sv::esc $name]\t[::sv::esc $widget]\t[::sv::esc $tooltip]\t[::sv::esc $display]\t[::sv::esc $text]\t$enabled\t$visible"
     }
     puts "SVGUI_MISSING: [lsort [dict keys $::sv::missing]]"
 }
@@ -291,11 +339,12 @@ function parse(stdout) {
     const nodes = new Map(), order = [];
     for (const line of String(stdout || '').split(/\r?\n/u)) {
         if (!line.startsWith('SVGUI_ROW\t')) continue;
-        const [, token, type, parent, name, widget, tooltip, display, text, enabled] = line.split('\t');
+        const [, token, type, parent, name, widget, tooltip, display, text, enabled, visible] = line.split('\t');
         if (!token) continue;
         nodes.set(token, { type, parent, name: decode(name), widget: decode(widget),
             tooltip: decode(tooltip), display: decode(display), text: decode(text),
-            enabled: enabled === 'false' ? false : enabled === 'true' ? true : undefined });
+            enabled: enabled === 'false' ? false : enabled === 'true' ? true : undefined,
+            visible: visible === 'false' ? false : visible === 'true' ? true : undefined });
         order.push(token);
     }
     const pathOf = token => {
@@ -309,9 +358,12 @@ function parse(stdout) {
         return parts.join(' / ');
     };
     const params = new Map(), notes = new Map(), enabled = new Map();
+    const paths = new Map(order.map(token => [token, pathOf(token).toLowerCase()]));
+    const paramStates = [];
     for (const token of order) {
         const node = nodes.get(token);
         if (node.type === 'param') {
+            paramStates.push({ path: pathOf(node.parent).toLowerCase(), enabled: node.enabled, visible: node.visible });
             if (!node.name || params.has(node.name)) continue;
             params.set(node.name, { label: node.display, help: node.tooltip, group: pathOf(node.parent), widget: node.widget });
             if (node.enabled !== undefined) enabled.set(node.name, node.enabled);
@@ -321,7 +373,25 @@ function parse(stdout) {
             if (!notes.get(group).includes(node.text)) notes.get(group).push(node.text);
         }
     }
-    return { params, notes, enabled };
+    // XGUI 用 visible false 隐藏当前模式无关的页面、分组或参数。页面/分组只有在其中
+    // 已没有可用参数时才真正隐藏，避免因依赖过程执行顺序把仍有控件的分组吞掉。
+    const available = path => paramStates.some(state =>
+        (state.path === path || state.path.startsWith(path + ' / ')) &&
+        state.enabled !== false && state.visible !== false);
+    const hidden = { pages: new Set(), groups: new Set(), params: new Set() };
+    for (const token of order) {
+        const node = nodes.get(token);
+        if (node.visible !== false) continue;
+        const path = paths.get(token) || '';
+        if (node.type === 'param') {
+            if (node.name) hidden.params.add(node.name.toLowerCase());
+        } else if (node.type === 'page') {
+            if (!available(path)) hidden.pages.add(path);
+        } else if (['group', 'panel', 'table'].includes(node.type)) {
+            if (!available(path)) hidden.groups.add(path);
+        }
+    }
+    return { params, notes, enabled, hidden };
 }
 
 /** 读取安装目录下某个 VLNV 的 XGUI 文件，供会话执行。 */

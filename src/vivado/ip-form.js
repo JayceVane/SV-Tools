@@ -33,11 +33,13 @@ function buildForm(parameters, notes = []) {
         const path = String(parameter.group || '').split(' / ').map(part => part.trim()).filter(Boolean);
         const page = path.length ? path[0] : FALLBACK;
         const group = path.length > 1 ? path.slice(1).join(' / ') : (path.length === 1 ? '常规' : FALLBACK);
-        if (!pages.has(page)) pages.set(page, { id: 'p' + pages.size, title: page, groups: new Map() });
+        if (!pages.has(page)) pages.set(page, { id: 'p' + pages.size, title: page, path: page, groups: new Map() });
         const pageEntry = pages.get(page), groupKey = page + '\u0000' + group;
         let groupEntry = pageEntry.groups.get(groupKey);
         if (!groupEntry) {
-            groupEntry = { id: pageEntry.id + ':' + pageEntry.groups.size, title: group, notes: [], rows: [] };
+            // path 与 XGUI 的分组路径一致，供可见性过滤使用。
+            groupEntry = { id: pageEntry.id + ':' + pageEntry.groups.size, title: group,
+                path: String(parameter.group || FALLBACK), notes: [], rows: [] };
             pageEntry.groups.set(groupKey, groupEntry);
         }
         groupEntry.rows.push(parameter);
@@ -51,7 +53,8 @@ function buildForm(parameters, notes = []) {
         }
     }
     // 兜底分组排在最后，避免无 XGUI 信息的参数抢在 IP Configuration 之前。
-    const list = [...pages.values()].map(entry => ({ id: entry.id, title: entry.title, groups: [...entry.groups.values()] }));
+    const list = [...pages.values()].map(entry => ({ id: entry.id, title: entry.title, path: entry.path,
+        groups: [...entry.groups.values()] }));
     list.sort((left, right) => Number(left.title === FALLBACK) - Number(right.title === FALLBACK));
     return { pages: list, total };
 }

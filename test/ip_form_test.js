@@ -77,11 +77,14 @@ function harness() {
     };
     const window = { addEventListener(name, callback) { listeners[name] = callback; } };
     let saved = null;
-    const context = { document, window, acquireVsCodeApi: () => ({
-        postMessage: message => messages.push(message),
-        getState: () => saved,
-        setState: value => { saved = value; }
-    }) };
+    const context = { document, window,
+        setTimeout: (callback, ms) => setTimeout(callback, ms),
+        clearTimeout: handle => clearTimeout(handle),
+        acquireVsCodeApi: () => ({
+            postMessage: message => messages.push(message),
+            getState: () => saved,
+            setState: value => { saved = value; }
+        }) };
     vm.runInNewContext(fs.readFileSync(path.join(__dirname, '..', 'src', 'vivado', 'ip-form-client.js'), 'utf8'), context);
     return { nodes, messages, listeners };
 }
@@ -232,4 +235,76 @@ test('Vivado 判定禁用的参数置灰，数值参数带范围', () => {
     assert.equal(note.hidden, false);
     assert.match(note.textContent, /Vivado 按当前参数值禁用/u);
     assert.equal(ui.nodes.get('apply').disabled, true);
+});
+
+test('修改参数后防抖回问 Vivado，并用结果刷新禁用与隐藏', async () => {
+    const ui = harness();
+    const parameters = [
+        { key: 'CONFIG.C_IS_DUAL', value: 'false', choices: ['false', 'true'], label: '双通道', group: 'Page' },
+        { key: 'CONFIG.C_GPIO2_WIDTH', value: '32', choices: [], label: 'GPIO2 位宽', group: 'Page' }
+    ];
+    ui.listeners.message({ data: { type: 'form', revision: 2, info: { ...info, parameters, hidden: { pages: [], groups: [], params: [] } },
+        form: buildForm(parameters, []), busy: false, status: '' } });
+    const rows = () => ui.nodes.get('form').children.flatMap(section => section.children.filter(child => child.className === 'row'));
+    const dual = rows()[0].children[1].children[0];
+    dual.checked = true;
+    dual.onchange();
+    const before = ui.messages.length;
+    await new Promise(resolve => setTimeout(resolve, 360));
+    const evaluation = ui.messages.slice(before).find(message => message.action === 'evaluate');
+    assert.ok(evaluation, '应发出 evaluate 消息');
+    assert.equal(evaluation.seq, 1);
+    assert.deepEqual(JSON.parse(JSON.stringify(evaluation.values)),
+        [['CONFIG.C_IS_DUAL', 'true'], ['CONFIG.C_GPIO2_WIDTH', '32']]);
+    ui.listeners.message({ data: { type: 'state', seq: evaluation.seq,
+        disabled: ['C_GPIO2_WIDTH'], hidden: { pages: [], groups: [], params: [] } } });
+    const second = rows()[1].children[1].children[0];
+    assert.equal(second.disabled, true);
+    ui.listeners.message({ data: { type: 'state', seq: evaluation.seq + 1, disabled: [],
+        hidden: { pages: [], groups: [], params: ['c_gpio2_width'] } } });
+    assert.equal(rows().length, 1, '隐藏参数应从表单移除');
+});
+
+test('对话框宿主：依赖求值结果以 state 消息回推', async () => {
+    const { openIpFormPanels } = require('../src/vivado/ip-form-view');
+    const ui = fakeHost();
+    const calls = [];
+    const open = openIpFormPanels(ui.context, ui.vscode, {
+        async load() { return { ...info, parameters: info.parameters, notes: [] }; },
+        async apply() { return { info, message: 'ok' }; },
+        async evaluate(key, values) {
+            calls.push([key, values]);
+            return { disabled: ['C_GPIO2_WIDTH'], hidden: { pages: ['AXI'], groups: [], params: [] } };
+        }
+    });
+    open({ key: 'k2' });
+    ui.listeners[0]({ action: 'ready' });
+    await new Promise(resolve => setTimeout(resolve, 10));
+    ui.listeners[0]({ action: 'evaluate', seq: 7, values: [['CONFIG.C_IS_DUAL', 'true']] });
+    await new Promise(resolve => setTimeout(resolve, 20));
+    assert.deepEqual(JSON.parse(JSON.stringify(calls)), [['k2', [['CONFIG.C_IS_DUAL', 'true']]]]);
+    const state = ui.posted.filter(message => message.type === 'state').at(-1);
+    assert.equal(state.seq, 7);
+    assert.deepEqual(JSON.parse(JSON.stringify(state.disabled)), ['C_GPIO2_WIDTH']);
+    assert.deepEqual(JSON.parse(JSON.stringify(state.hidden)), { pages: ['AXI'], groups: [], params: [] });
+});
+
+test('隐藏的页面与分组同时从树和表单移除', () => {
+    const ui = harness();
+    const parameters = [
+        { key: 'CONFIG.A', value: '1', choices: [], label: 'A', group: '常用 / 基本' },
+        { key: 'CONFIG.B', value: '2', choices: [], label: 'B', group: 'AXI / 通道' }
+    ];
+    ui.listeners.message({ data: { type: 'form', revision: 1,
+        info: { ...info, parameters, hidden: { pages: ['axi'], groups: [], params: [] } },
+        form: buildForm(parameters, []), busy: false, status: '' } });
+    const treeText = ui.nodes.get('pages').children.map(item => item.textContent || '').join('|');
+    assert.equal(treeText.includes('AXI'), false);
+    const rows = ui.nodes.get('form').children.flatMap(section => section.children.filter(child => child.className === 'row'));
+    assert.equal(rows.length, 1);
+    ui.listeners.message({ data: { type: 'form', revision: 1,
+        info: { ...info, parameters, hidden: { pages: [], groups: ['axi / 通道'], params: [] } },
+        form: buildForm(parameters, []), busy: false, status: '' } });
+    const after = ui.nodes.get('form').children.flatMap(section => section.children.filter(child => child.className === 'row'));
+    assert.equal(after.length, 1);
 });

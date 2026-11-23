@@ -131,9 +131,10 @@ function activateVivado(context, deps) {
     let incrementalOperation = null, incrementalCancelled = false, incrementalPicker = null;
 
     /** 编辑器增量入口先占用选择/准备阶段，避免并发命令互相覆盖或重复提交。 */
-    async function incrementalAction(label, action) {
+    async function incrementalAction(label, action, { quiet = false } = {}) {
         if (running || incrementalOperation || projectTree?.isBusy()) {
-            vscode.window.showWarningMessage('Vivado 正在处理任务，请等待完成或先停止。');
+            // 静默模式用于依赖求值等后台动作，避免频繁打断用户。
+            if (!quiet) vscode.window.showWarningMessage('Vivado 正在处理任务，请等待完成或先停止。');
             return { code: null, status: 'skipped', error: 'busy' };
         }
         incrementalOperation = label; incrementalCancelled = false;
