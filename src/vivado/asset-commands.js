@@ -349,7 +349,7 @@ function activateAssetCommands(context, { vscode, findProjectXpr, incrementalAct
         if (cell) {
             const key = formKey(target, 'cell', cell.id);
             formTargets.set(key, { ...target, id: cell.id, vlnv });
-            formPanels.open({ key, title: 'IP 定制 · ' + cell.id, subtitle: vlnv });
+            openForm({ key, title: 'IP 定制 · ' + cell.id, subtitle: vlnv });
         }
         return '已添加 ' + name + (cell ? '，可在定制对话框调整参数' : '');
     }
@@ -361,7 +361,7 @@ function activateAssetCommands(context, { vscode, findProjectXpr, incrementalAct
             const key = formKey(target, 'ip', target.file);
             formTargets.set(key, { ...target, xpr, kind: 'ip', vlnv: info?.vlnv || '' });
             const name = info?.name || String(target.label || '').replace(/\.xcix?$/iu, '') || 'IP';
-            formPanels.open({ key, title: 'IP 定制 · ' + name, subtitle: info?.vlnv || '' });
+            openForm({ key, title: 'IP 定制 · ' + name, subtitle: info?.vlnv || '' });
             return { message: '已打开 IP 定制对话框' };
         }
         if (action === 'preview') {
@@ -522,7 +522,7 @@ function activateAssetCommands(context, { vscode, findProjectXpr, incrementalAct
         return result;
     }
 
-    const formPanels = openIpFormPanels(context, vscode, {
+    const openForm = openIpFormPanels(context, vscode, {
         async load(key) {
             const target = formTargets.get(key);
             if (!target) return { error: 'IP 配置目标已失效，请重新打开' };
@@ -638,7 +638,7 @@ function activateAssetCommands(context, { vscode, findProjectXpr, incrementalAct
             // IP 实例与 Vivado 的 Re-customize IP 一致：在独立对话框里按 XGUI 分组编辑。
             const key = formKey(target, 'cell', selection.cell.id);
             formTargets.set(key, { ...target, id: selection.cell.id, vlnv: selection.cell.vlnv });
-            formPanels.open({ key, title: 'IP 定制 · ' + selection.cell.id, subtitle: selection.cell.vlnv });
+            openForm({ key, title: 'IP 定制 · ' + selection.cell.id, subtitle: selection.cell.vlnv });
             return { message: '已打开 IP 定制对话框' };
         } else if (action === 'config' || action === 'config-port') {
             const item = selection.endpoint || selection.cell;

@@ -34,20 +34,11 @@ function managerHtml(webview, vscode, resources) {
                 </header>
                 <div id="ip-operations" class="toolbar"></div>
                 <p id="ip-upgrade" class="muted" hidden></p>
-                <div class="parameter-toolbar">
-                    <label for="parameter-search">配置参数</label>
-                    <input type="search" id="parameter-search" placeholder="搜索参数名或当前值">
-                </div>
-                <nav id="parameter-groups" class="groups" aria-label="参数分类"></nav>
-                <div id="ip-parameters"></div>
+                <p class="muted">参数在独立的定制对话框中按 Vivado 的分组编辑；点「重新定制 IP…」或在左侧双击 IP 打开。</p>
             </div>
         </section>
     </main>
-    <footer>
-        <p id="ip-message" role="status" aria-live="polite"></p>
-        <div class="toolbar"><span id="ip-changes"></span><button id="ip-revert">撤销修改</button>
-        <button id="ip-apply" class="primary">应用参数</button></div>
-    </footer>
+    <footer><p id="ip-message" role="status" aria-live="polite"></p></footer>
     <script nonce="${nonce}" src="${uri('ip-client.js')}"></script></body></html>`;
 }
 
@@ -222,11 +213,6 @@ function openIpPanels(context, vscode, invoke) {
             }
             const info = details.get(selected?.id);
             if (!info || info.preview || loading || selected.id !== message.id || info.version !== message.version) return;
-            if (message.action === 'apply') {
-                const changes = resolveEdits(message.edits, info);
-                if (changes?.length) await perform('apply', changes);
-                return;
-            }
             if (info.actions.some(item => item.id === message.action)) await perform(message.action);
         });
         panel.webview.html = managerHtml(panel.webview, vscode, resources);
