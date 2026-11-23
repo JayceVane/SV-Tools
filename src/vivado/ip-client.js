@@ -39,7 +39,7 @@
         return edits;
     }
     const parameterValue = (parameter, edits) => edits.get(parameter.key) ?? parameter.value;
-    const available = (parameter, values) => parameter && !parameter.readOnly &&
+    const available = (parameter, values) => parameter && !parameter.readOnly && !parameter.disabled &&
         !parameter.dependency?.some(([key, allowed]) => !allowed.includes(values.get(key)));
     function updateButtons() {
         const edits = draft(), count = edits.size;

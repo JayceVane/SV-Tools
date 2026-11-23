@@ -200,7 +200,7 @@ function activateAssetCommands(context, { vscode, findProjectXpr, incrementalAct
         const { rows } = await session.run('ip_properties', ip.info(target.file), { target, readOnly: true, needsWritableProject: true });
         if (await hash(target.file) !== stamp || await hash(session.xpr) !== projectStamp) throw new Error('IP 或工程已在读取期间变化，请重新读取');
         const details = ipDetails(rows);
-        const layout = await runtimeLayout(session, details.vlnv);
+        const layout = await runtimeLayout(session, details.vlnv, layoutValues(details.parameters));
         const info = await describeIp({ ...details, stamp }, rowsOf(rows, 'definition_xml')[0]?.[0], layout);
         return rememberIp(session, target, info, projectStamp);
     }
@@ -211,7 +211,8 @@ function activateAssetCommands(context, { vscode, findProjectXpr, incrementalAct
             const { rows } = await session.run('ip_configure', ip.configure(target.file, changes, { readBack: true }), { target, guard: info.stamp, quiet: true });
             const details = ipDetails(rows);
             const next = await describeIp({ ...details, stamp: await hash(target.file) },
-                rowsOf(rows, 'definition_xml')[0]?.[0], await runtimeLayout(session, details.vlnv));
+                rowsOf(rows, 'definition_xml')[0]?.[0],
+                await runtimeLayout(session, details.vlnv, layoutValues(details.parameters)));
             return { info: rememberIp(session, target, next, await hash(session.xpr)), message: 'Vivado 已应用参数。' };
         }
         if (action === 'generate') {
@@ -444,23 +445,39 @@ function activateAssetCommands(context, { vscode, findProjectXpr, incrementalAct
 
     // ---- 复杂 IP 的界面结构：让 Vivado 在子解释器里执行 XGUI，回收 ipgui::add_* 调用 ----
     const guiLayouts = new Map();
-    async function runtimeLayout(session, vlnv) {
-        const cached = guiLayouts.get(vlnv);
-        const file = cached?.file || await ipGui.guiFile(resolveBinDir(), vlnv);
+    const guiFiles = new Map();
+
+    /** 参数当前值，供 update_PARAM_VALUE.* 求值；板卡接口缺省值由 Tcl 侧补 Custom。 */
+    function layoutValues(parameters) {
+        const values = {};
+        for (const parameter of parameters || []) {
+            if (!parameter?.key?.startsWith('CONFIG.')) continue;
+            const name = parameter.key.slice(7);
+            if (name === 'Component_Name') continue;
+            values[name] = parameter.value;
+        }
+        return values;
+    }
+
+    async function runtimeLayout(session, vlnv, values = {}) {
+        const file = guiFiles.get(vlnv) || await ipGui.guiFile(resolveBinDir(), vlnv);
         if (!file) return undefined;
+        guiFiles.set(vlnv, file);
         const stat = await fs.stat(file).catch(() => undefined);
         if (!stat) return undefined;
-        if (cached && cached.mtime === stat.mtimeMs) return cached.layout;
-        const scriptPath = path.join(os.tmpdir(), 'svtools-xgui-' + digest([vlnv, String(stat.mtimeMs)]).slice(0, 16) + '.tcl');
+        const canonical = JSON.stringify(Object.keys(values).sort().map(name => [name, values[name]]));
+        const key = vlnv + '@' + stat.mtimeMs + '@' + digest([canonical]).slice(0, 16);
+        if (guiLayouts.has(key)) return guiLayouts.get(key);
+        const scriptPath = path.join(os.tmpdir(), 'svtools-xgui-' + digest([key]).slice(0, 16) + '.tcl');
         try {
-            await fs.writeFile(scriptPath, ipGui.dumpScript(file), 'utf8');
+            await fs.writeFile(scriptPath, ipGui.dumpScript(file, values), 'utf8');
             const result = await session.run('ip_gui_dump', ipGui.sessionLines(scriptPath), { readOnly: true, quiet: true });
             if (!result.ok || !/SVGUI_ROW\t/u.test(result.stdout || '')) return undefined;
             const layout = ipGui.parse(result.stdout);
             if (!layout.params.size) return undefined;
-            guiLayouts.delete(vlnv);
-            guiLayouts.set(vlnv, { file, mtime: stat.mtimeMs, layout });
-            if (guiLayouts.size > 48) guiLayouts.delete(guiLayouts.keys().next().value);
+            guiLayouts.delete(key);
+            guiLayouts.set(key, layout);
+            if (guiLayouts.size > 64) guiLayouts.delete(guiLayouts.keys().next().value);
             return layout;
         } catch { return undefined; }
         finally { await fs.rm(scriptPath, { force: true }).catch(() => undefined); }
@@ -468,7 +485,7 @@ function activateAssetCommands(context, { vscode, findProjectXpr, incrementalAct
 
     async function describeCell(session, target, parameters) {
         if (!target.vlnv) return { parameters, notes: [] };
-        const layout = await runtimeLayout(session, target.vlnv);
+        const layout = await runtimeLayout(session, target.vlnv, layoutValues(parameters));
         const described = await describeIp({ vlnv: target.vlnv, parameters }, undefined, layout);
         return { parameters: described.parameters, notes: described.notes || [] };
     }

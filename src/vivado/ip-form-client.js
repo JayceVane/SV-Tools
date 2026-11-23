@@ -16,7 +16,7 @@
         for (const [key, parameter] of parameters()) map.set(key, draft.has(key) ? draft.get(key) : parameter.value);
         return map;
     };
-    const available = (parameter, current) => Boolean(parameter) && !parameter.readOnly &&
+    const available = (parameter, current) => Boolean(parameter) && !parameter.readOnly && !parameter.disabled &&
         !parameter.dependency?.some(([key, allowed]) => !allowed.includes(current.get(key)));
     const editedValues = () => {
         const current = values(), result = [];
@@ -31,13 +31,15 @@
         const options = [...new Set([parameter.value, ...(parameter.choices || [])])].filter(item => item !== '');
         return options.length === 2 && options.every(item => /^(0|1|true|false)$/iu.test(item));
     };
+    const hasRange = parameter => parameter.format === 'long' &&
+        (parameter.min !== undefined || parameter.max !== undefined);
     const widgetOf = parameter => {
         const widget = String(parameter.widget || '').toLowerCase();
         if (widget.includes('checkbox') || isBoolean(parameter)) return 'check';
         if ((parameter.choices || []).length) return 'combo';
         if (String(parameter.value || '').includes('\n')) return 'multiline';
         if (widget.includes('hex')) return 'hex';
-        if (/^-?\d+$/u.test(String(parameter.value))) return 'number';
+        if (hasRange(parameter) || /^-?\d+$/u.test(String(parameter.value))) return 'number';
         return 'text';
     };
 
@@ -73,7 +75,11 @@
             const multiline = kind === 'multiline' || String(value || '').length > 60;
             field = node(multiline ? 'textarea' : 'input');
             if (!multiline) {
-                field.type = 'text';
+                field.type = kind === 'number' && hasRange(parameter) ? 'number' : 'text';
+                if (kind === 'number' && hasRange(parameter)) {
+                    if (parameter.min !== undefined && parameter.min !== '') field.min = parameter.min;
+                    if (parameter.max !== undefined && parameter.max !== '') field.max = parameter.max;
+                }
                 if (kind === 'number' || kind === 'hex') field.inputMode = kind === 'hex' ? 'text' : 'decimal';
             }
             field.spellcheck = false;
@@ -104,8 +110,12 @@
         }
         const note = node('small', undefined, 'condition');
         const editable = available(parameter, current);
-        note.hidden = editable || !parameter.dependency?.length;
-        if (!editable) note.textContent = parameter.readOnly ? '只读参数' : '由 ' + parameter.dependency.map(([key]) => key.slice(7)).join('、') + ' 控制';
+        note.hidden = editable;
+        if (!editable) {
+            note.textContent = parameter.readOnly ? '只读参数'
+                : parameter.dependency?.length ? '由 ' + parameter.dependency.map(([key]) => key.slice(7)).join('、') + ' 控制'
+                    : 'Vivado 按当前参数值禁用，应用后刷新';
+        }
         controls.append(note);
         row.append(caption, controls);
         return row;

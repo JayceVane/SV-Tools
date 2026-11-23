@@ -161,6 +161,7 @@ set group [ipgui::add_group $root -name "GPIO 2" -parent $page]
 set panel [ipgui::add_panel $root -name panel -parent $group]
 set width [ipgui::add_param $root -name C_GPIO2_WIDTH -parent $panel]
 set_property tooltip "Set the GPIO port width" $width
+ipgui::add_static_text $root -parent $panel -name hint -text "[0x0,0xFFFF]"
 error "Arbitrary Tcl must not be run"`);
     const [width, dual] = ['CONFIG.C_GPIO2_WIDTH', 'CONFIG.C_IS_DUAL'];
     const details = await createIpMetadata()({ vlnv: 'xilinx.com:ip:axi_gpio:2.0', parameters:
@@ -168,6 +169,19 @@ error "Arbitrary Tcl must not be run"`);
     const [first, second] = details.parameters;
     assert.deepEqual([first.label, first.help, first.group, first.min, first.max], ['GPIO Width', 'Set the GPIO port width', 'IP Configuration / GPIO 2', '1', '32']);
     assert.deepEqual(second.optionLabels, [['0', 'Off'], ['1', 'On']]);
+    // Vivado 不返回 choices 时用 component.xml 的枚举补齐，供下拉框使用。
+    assert.deepEqual(second.choices, ['0', '1']);
+    assert.deepEqual(details.notes, [{ group: 'IP Configuration / GPIO 2', texts: ['[0x0,0xFFFF]'] }]);
+    const runtime = {
+        params: new Map([['C_GPIO2_WIDTH', { label: 'GPIO Width', help: 'Set the GPIO port width', group: 'IP Configuration / GPIO 2', widget: 'textEdit' }]]),
+        notes: new Map([['IP Configuration / GPIO 2', ['运行时说明']]]),
+        enabled: new Map([['C_GPIO2_WIDTH', false]])
+    };
+    const live = await createIpMetadata()({ vlnv: 'xilinx.com:ip:axi_gpio:2.0', parameters:
+        [[width, '32'], [dual, '0']].map(([key, value]) => ({ key, value, choices: [] })) }, component, runtime);
+    assert.equal(live.parameters[0].disabled, true);
+    assert.deepEqual(live.parameters[1].choices, ['0', '1']);
+    assert.deepEqual(live.notes, [{ group: 'IP Configuration / GPIO 2', texts: ['[0x0,0xFFFF]', '运行时说明'] }]);
     assert.equal(resolveEdits([{ key: width, value: '12' }], details), undefined);
     assert.equal(resolveEdits([{ key: width, value: '12' }, { key: dual, value: '1' }], details).length, 2);
 });

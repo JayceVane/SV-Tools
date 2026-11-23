@@ -212,3 +212,24 @@ test('对话框宿主：读取、应用与错误状态都经消息往返', async
     assert.equal(ui.posted.at(-1).status, '已应用 1 项修改');
     ui.listeners[0]({ action: 'close' });
 });
+
+test('Vivado 判定禁用的参数置灰，数值参数带范围', () => {
+    const ui = harness();
+    const parameters = [
+        { key: 'CONFIG.A', value: '8', choices: [], label: 'A', format: 'long', min: '1', max: '32', group: 'Page' },
+        { key: 'CONFIG.B', value: 'x', choices: [], label: 'B', disabled: true, group: 'Page' }
+    ];
+    ui.listeners.message({ data: { type: 'form', revision: 1, info: { ...info, parameters },
+        form: buildForm(parameters, []), busy: false, status: '' } });
+    const rows = ui.nodes.get('form').children.flatMap(section => section.children.filter(child => child.className === 'row'));
+    const ranged = rows[0].children[1].children[0];
+    assert.equal(ranged.type, 'number');
+    assert.equal(ranged.min, '1');
+    assert.equal(ranged.max, '32');
+    const disabled = rows[1].children[1].children[0];
+    assert.equal(disabled.disabled, true);
+    const note = rows[1].children[1].children[1];
+    assert.equal(note.hidden, false);
+    assert.match(note.textContent, /Vivado 按当前参数值禁用/u);
+    assert.equal(ui.nodes.get('apply').disabled, true);
+});

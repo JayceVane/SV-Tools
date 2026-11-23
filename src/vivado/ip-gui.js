@@ -16,7 +16,8 @@
  * limitations under the License.
  */
 // 复杂 IP 的界面结构由 helper proc、foreach 和字符串生成，静态正则读不全。
-// 这里让 Vivado 用桩函数执行 IP 自带的 XGUI Tcl，再回收 ipgui::add_* 的调用序列。
+// 这里让 Vivado 用桩函数执行 IP 自带的 XGUI Tcl，再回收 ipgui::add_* 的调用序列，
+// 并用当前参数值执行 update_PARAM_VALUE.*，得到与 Vivado 一致的可用/禁用状态。
 // 执行在独立子解释器内完成，覆盖的 load/package/set_property 不会影响会话本身。
 
 const { readFile, readdir } = require('node:fs/promises');
@@ -31,19 +32,66 @@ set ::sv::props [dict create]
 set ::sv::dir ""
 set ::sv::iproot ""
 set ::sv::missing [dict create]
+set ::sv::values [dict create]
 set ::sv::file {__FILE__}
+__VALUES__
 
 proc ::sv::token {type} {
     incr ::sv::seq
     return "\${type}#$::sv::seq"
 }
 
+proc ::sv::param_name {token} {
+    if {[dict exists $::sv::nodes $token]} {
+        lassign [dict get $::sv::nodes $token] type parent name widget text
+        return $name
+    }
+    return ""
+}
+
+# XGUI 的参数名是混合大小写（Input_Data_Width），update 过程用全大写形式（INPUT_DATA_WIDTH），按大小写不敏感匹配。
 proc ::sv::find_param {name} {
+    set lower [string tolower $name]
     foreach token $::sv::order {
         if {![dict exists $::sv::nodes $token]} { continue }
         lassign [dict get $::sv::nodes $token] type parent pname widget text
-        if {$type eq "param" && $pname eq $name} { return $token }
+        if {$type eq "param" && [string tolower $pname] eq $lower} { return $token }
     }
+    return ""
+}
+
+# update_PARAM_VALUE.* 的形参是 PARAM_VALUE.X 形式的变量名，映射到参数节点。
+proc ::sv::formal_token {formal} {
+    if {[string match PARAM_VALUE.* $formal]} {
+        set name [string range $formal 12 end]
+        set token [::sv::find_param $name]
+        if {$token ne ""} { return $token }
+        set token [::sv::token param]
+        dict set ::sv::nodes $token [list param "" $name "" ""]
+        lappend ::sv::order $token
+        return $token
+    }
+    return [::sv::token other]
+}
+
+# 属性重复赋值时取最后一次，字符串整体作为值保存，避免被拆成列表。
+proc ::sv::getprop {name target} {
+    if {[dict exists $::sv::props $target $name]} {
+        return [dict get $::sv::props $target $name]
+    }
+    return ""
+}
+
+# 缺省值：板卡接口参数在未使用板卡流程时取 Custom，其余留空；键名同样按大小写不敏感匹配。
+proc ::sv::value_of {name} {
+    if {$name ne ""} {
+        if {[dict exists $::sv::values $name]} { return [dict get $::sv::values $name] }
+        set lower [string tolower $name]
+        foreach key [dict keys $::sv::values] {
+            if {[string tolower $key] eq $lower} { return [dict get $::sv::values $key] }
+        }
+    }
+    if {[string match -nocase *_BOARD_INTERFACE $name]} { return "Custom" }
     return ""
 }
 
@@ -83,7 +131,7 @@ proc ::sv::add {type args} {
 }
 
 proc ::sv::prop {name value target} {
-    dict lappend ::sv::props $target $name $value
+    dict set ::sv::props $target $name $value
 }
 
 proc ::sv::esc {value} {
@@ -94,12 +142,8 @@ proc ::sv::dump {} {
     set lines {}
     foreach token $::sv::order {
         lassign [dict get $::sv::nodes $token] type parent name widget text
-        set props [expr {[dict exists $::sv::props $token] ? [dict get $::sv::props $token] : {}}]
-        set tooltip ""
-        set display ""
-        if {[dict exists $props tooltip]} { set tooltip [dict get $props tooltip] }
-        if {[dict exists $props display_name]} { set display [dict get $props display_name] }
-        lappend lines [list $token $type $parent $name $widget $tooltip $display $text]
+        lappend lines [list $token $type $parent $name $widget \
+            [::sv::getprop tooltip $token] [::sv::getprop display_name $token] $text [::sv::getprop enabled $token]]
     }
     return $lines
 }
@@ -120,9 +164,14 @@ proc ::package {args} {
     return ""
 }
 proc ::set_property {name value target} { ::sv::prop $name $value $target }
+proc ::get_property {name target} {
+    if {$name eq "value"} { return [::sv::value_of [::sv::param_name $target]] }
+    if {$name eq "enabled"} { return [::sv::getprop enabled $target] }
+    return ""
+}
+proc ::get_param_value {args} { return [::sv::value_of [lindex $args 0]] }
 proc ::add_board_tab {args} { return "" }
 proc ::get_project_property {args} { return "" }
-proc ::get_param_value {args} { return "" }
 proc ::unknown {args} { dict set ::sv::missing [lindex $args 0] 1; return "" }
 
 proc ::source_ipfile {file} {
@@ -195,17 +244,29 @@ if {$::sv::entry eq ""} {
     foreach hook {setToolTips setDisplayNames} {
         if {[llength [info commands $hook]]} { catch {uplevel #0 [list $hook $view]} }
     }
+    # 用当前参数值执行 update_PARAM_VALUE.* 与 update_gui_for_PARAM_VALUE.*，回收 enabled 状态。
+    foreach pattern {update_PARAM_VALUE.* update_gui_for_PARAM_VALUE.*} {
+        foreach procname [info procs $pattern] {
+            set call [list $procname]
+            foreach formal [info args $procname] { lappend call [::sv::formal_token $formal] }
+            catch {uplevel #0 $call}
+        }
+    }
     foreach line [::sv::dump] {
-        lassign $line token type parent name widget tooltip display text
-        puts "SVGUI_ROW\t$token\t$type\t$parent\t[::sv::esc $name]\t[::sv::esc $widget]\t[::sv::esc $tooltip]\t[::sv::esc $display]\t[::sv::esc $text]"
+        lassign $line token type parent name widget tooltip display text enabled
+        puts "SVGUI_ROW\t$token\t$type\t$parent\t[::sv::esc $name]\t[::sv::esc $widget]\t[::sv::esc $tooltip]\t[::sv::esc $display]\t[::sv::esc $text]\t$enabled"
     }
     puts "SVGUI_MISSING: [lsort [dict keys $::sv::missing]]"
 }
 `;
 
+const tclWord = text => '"' + String(text).replace(/[\\"$[\]]/gu, match => '\\' + match) + '"';
+
 /** 生成 dump 脚本正文：由调用方写入临时文件后交给 Vivado 执行。 */
-function dumpScript(file) {
-    return DUMP.replace('__FILE__', file.replaceAll('\\', '/'));
+function dumpScript(file, values = {}) {
+    const lines = Object.entries(values).map(([name, value]) =>
+        'dict set ::sv::values [list ' + tclWord(name) + '] [list ' + tclWord(value) + ']').join('\n');
+    return DUMP.replace('__VALUES__', lines).replace('__FILE__', file.replaceAll('\\', '/'));
 }
 
 /** 生成持久会话里的执行行：独立子解释器执行，避免覆盖命令泄漏到工程会话。 */
@@ -225,15 +286,16 @@ const decode = value => {
     catch { return String(value ?? ''); }
 };
 
-/** 解析 Tcl 回传的 SVGUI_ROW 行，得到与静态解析一致的 {params, notes}。 */
+/** 解析 Tcl 回传的 SVGUI_ROW 行，得到页面/分组、提示、静态说明与可用状态。 */
 function parse(stdout) {
     const nodes = new Map(), order = [];
     for (const line of String(stdout || '').split(/\r?\n/u)) {
         if (!line.startsWith('SVGUI_ROW\t')) continue;
-        const [, token, type, parent, name, widget, tooltip, display, text] = line.split('\t');
+        const [, token, type, parent, name, widget, tooltip, display, text, enabled] = line.split('\t');
         if (!token) continue;
         nodes.set(token, { type, parent, name: decode(name), widget: decode(widget),
-            tooltip: decode(tooltip), display: decode(display), text: decode(text) });
+            tooltip: decode(tooltip), display: decode(display), text: decode(text),
+            enabled: enabled === 'false' ? false : enabled === 'true' ? true : undefined });
         order.push(token);
     }
     const pathOf = token => {
@@ -246,19 +308,20 @@ function parse(stdout) {
         }
         return parts.join(' / ');
     };
-    const params = new Map(), notes = new Map();
+    const params = new Map(), notes = new Map(), enabled = new Map();
     for (const token of order) {
         const node = nodes.get(token);
         if (node.type === 'param') {
             if (!node.name || params.has(node.name)) continue;
             params.set(node.name, { label: node.display, help: node.tooltip, group: pathOf(node.parent), widget: node.widget });
+            if (node.enabled !== undefined) enabled.set(node.name, node.enabled);
         } else if (node.type === 'static' && node.text) {
             const group = pathOf(node.parent);
             if (!notes.has(group)) notes.set(group, []);
             if (!notes.get(group).includes(node.text)) notes.get(group).push(node.text);
         }
     }
-    return { params, notes };
+    return { params, notes, enabled };
 }
 
 /** 读取安装目录下某个 VLNV 的 XGUI 文件，供会话执行。 */
