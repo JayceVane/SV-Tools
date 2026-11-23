@@ -22,20 +22,23 @@
         const expanded = local.toolsExpanded !== false;
         document.getElementById('toggleTools').setAttribute('aria-expanded', String(expanded));
         document.getElementById('toolBody').hidden = !expanded;
-        const actions = document.getElementById('toolActions');
-        const assets = document.getElementById('assetActions');
-        actions.replaceChildren();
-        assets.replaceChildren();
+        const slots = new Map([
+            ['overview', document.getElementById('toolOverview')],
+            ['build', document.getElementById('toolActions')],
+            ['assets', document.getElementById('assetActions')]
+        ]);
+        for (const slot of slots.values()) slot.replaceChildren();
         if (!isVivado) return;
         for (const action of snapshot.toolActions || []) {
-            if (!['build', 'assets'].includes(action.group)) continue;
+            const slot = slots.get(action.group);
+            if (!slot) continue;
             const button = document.createElement('button'), label = document.createElement('span');
             button.type = 'button';
             button.dataset.command = action.id;
             label.textContent = action.label;
             button.append(icon(action.icon), label);
             button.addEventListener('click', () => send('command', { command: action.id }));
-            (action.group === 'assets' ? assets : actions).append(button);
+            slot.append(button);
         }
     }
     function renderProgress() {

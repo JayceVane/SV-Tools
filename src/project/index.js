@@ -15,7 +15,7 @@ const VIVADO_LABELS = ['设置综合顶层…', '设置仿真顶层…', '移入
 const IP_ACTION = { id: 'ipManager', label: 'IP 管理…', command: 'svtools.vivado.assets.ip' };
 const BD_ACTION = { id: 'blockDesign', label: 'Block Design', command: 'svtools.vivado.assets.bd', icon: 'blockDesign' };
 const CATALOG_ACTION = { id: 'ipCatalog', label: 'IP Catalog', command: 'svtools.vivado.assets.catalog', icon: 'catalog' };
-const SUMMARY_ACTION = { id: 'projectSummary', label: '工程概览…', command: 'svtools.vivado.summary' };
+const SUMMARY_ACTION = { id: 'projectSummary', label: '工程概览', command: 'svtools.vivado.summary', icon: 'report', group: 'overview' };
 const ASSET_ACTIONS = [IP_ACTION, BD_ACTION, CATALOG_ACTION, SUMMARY_ACTION];
 const REMOVE_VIVADO_FILE = { id: 'removeFile', label: '移出工程' };
 const RUN_ACTIONS = [
@@ -27,7 +27,7 @@ const RUN_ACTIONS = [
     { id: 'reportImplUtil', label: '资源报告', icon: 'report', group: 'reports' },
     { id: 'reportTiming', label: '时序报告', icon: 'report', group: 'reports' }
 ];
-const TOOL_ACTIONS = [...RUN_ACTIONS, ...[BD_ACTION, CATALOG_ACTION].map(action => ({ ...action, group: 'assets' }))];
+const TOOL_ACTIONS = [SUMMARY_ACTION, ...RUN_ACTIONS, ...[BD_ACTION, CATALOG_ACTION].map(action => ({ ...action, group: 'assets' }))];
 /**
  * 单一侧边栏；页面只传节点令牌和允许的动作，文件路径与工程身份由宿主持有。
  * @param {object} context 扩展上下文。

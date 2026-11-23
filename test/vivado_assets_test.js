@@ -84,7 +84,8 @@ test('常驻会话脚本不重开工程，工程概览解析run状态与消息',
     const data = summary.parse([
         ['project', 'demo', 'xc7a35tcsg324-1', 'C:/demo', 'top', ''],
         ['run', 'synth_1', 'Complete', '100%', 'Vivado Synthesis Defaults', '0', 'synth_design', '00:01:22', '', '', '', '', '0.5', '0'],
-        ['run', 'impl_1', 'Running', 'Running', 'Performance', '1', 'place_design', '00:00:31', '-0.123', '-1.2', '0.05', '0', '1.2', '1'],
+        ['run', 'impl_1', 'Running', 'Running', 'Performance', '1', 'place_design', '00:00:31', '-0.123', '-1.2', '0.05', '0', '1.2', '1', path.resolve('bin/custom-impl')],
+        ['current_runs', 'synth_1', 'impl_1'],
         ['messages', '2', '7']
     ]);
     assert.equal(data.project.name, 'demo');
@@ -93,11 +94,13 @@ test('常驻会话脚本不重开工程，工程概览解析run状态与消息',
     assert.equal(data.runs[1].timing.wns, -0.123);
     assert.equal(data.runs[1].needsRefresh, true);
     assert.equal(data.runs[1].implementation, true);
+    assert.deepEqual(data.currentRuns, { synthesis: 'synth_1', implementation: 'impl_1' });
     assert.equal(summary.isActive(data.runs[1]), true);
     assert.equal(summary.isActive(data.runs[0]), false);
     assert.deepEqual(data.messages, { errors: 2, warnings: 7 });
     const paths = summary.runPaths(data, path.join('C:', 'work', 'demo.xpr'));
-    assert.equal(paths.impl_1.log.endsWith(path.join('demo.runs', 'impl_1', 'runme.log')), true);
+    assert.equal(paths.synth_1.log.endsWith(path.join('demo.runs', 'synth_1', 'runme.log')), true);
+    assert.equal(paths.impl_1.log, path.resolve('bin/custom-impl/runme.log'));
 });
 
 test('Block Design 布局在宿主重启后复用坐标，结构、层级和接口展开状态分别匹配', async t => {

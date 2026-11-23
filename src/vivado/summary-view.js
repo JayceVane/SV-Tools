@@ -19,6 +19,7 @@
 
 const path = require('node:path');
 const { randomBytes } = require('node:crypto');
+const { samePath } = require('./xpr');
 
 const POLL_MS = 5000;
 
@@ -28,25 +29,35 @@ function html(webview, vscode, resources) {
     return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
     <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'nonce-${nonce}'; style-src ${webview.cspSource};">
     <link rel="stylesheet" href="${uri('summary.css')}"></head><body>
+    <div class="layout">
     <header class="titlebar">
-        <div class="title"><h1 id="project">Vivado 工程概览</h1><p id="meta"></p></div>
+        <div class="title"><h1 id="project">工程概览</h1><p id="directory" class="directory" hidden></p></div>
         <div class="tools">
             <label class="auto"><input id="auto" type="checkbox" checked> 自动刷新</label>
             <button id="refresh">刷新</button>
             <button id="folder">工程目录</button>
         </div>
     </header>
-    <main>
-        <section id="cards" class="cards" aria-label="综合与实现状态"></section>
-        <section class="panel"><h2>运行</h2>
-            <table class="runs"><thead><tr><th>Run</th><th>类型</th><th>状态</th><th>进度</th><th>当前步骤</th><th>耗时</th><th>策略</th><th></th></tr></thead>
-            <tbody id="runs"></tbody></table>
-            <p id="runs-empty" class="muted" hidden>当前工程还没有运行记录。</p>
+    <div class="snapshot-status"><p id="status" role="status" aria-live="polite">正在读取工程状态…</p><p id="updated"></p></div>
+    <main id="content" hidden>
+        <dl id="meta" class="facts" aria-label="工程信息"></dl>
+        <section id="cards" class="cards" aria-label="当前综合与布局布线"></section>
+        <div class="insights">
+            <section class="surface" aria-labelledby="timing-title">
+                <header class="section-heading"><h2 id="timing-title">时序与功耗</h2><p id="timing-source" class="muted"></p></header>
+                <div id="timing" class="timing"></div>
+            </section>
+            <section class="surface" aria-labelledby="messages-title">
+                <h2 id="messages-title">会话消息</h2><dl id="messages" class="messages"></dl>
+            </section>
+        </div>
+        <section class="surface run-section" aria-labelledby="runs-title">
+            <header class="section-heading"><h2 id="runs-title">运行记录</h2><p id="run-count" class="muted"></p></header>
+            <table id="run-table" class="runs"><thead><tr><th scope="col">运行</th><th scope="col">状态</th><th scope="col">进度 / 耗时</th><th scope="col">产物</th></tr></thead><tbody id="runs"></tbody></table>
+            <p id="runs-empty" class="empty" hidden>当前工程还没有运行记录。</p>
         </section>
-        <section class="panel"><h2>时序与功耗</h2><div id="timing" class="timing"></div></section>
-        <section class="panel"><h2>消息</h2><div id="messages" class="messages"></div></section>
     </main>
-    <p id="status" role="status" aria-live="polite"></p>
+    </div>
     <script nonce="${nonce}" src="${uri('summary-client.js')}"></script></body></html>`;
 }
 
@@ -54,47 +65,68 @@ function openSummaryPanels(context, vscode, { load, openPath, log = () => {} }) 
     let entry = null, currentXpr = null;
     return {
         open(xpr) {
+            if (entry) {
+                entry.select(xpr);
+                entry.panel.reveal();
+                return;
+            }
             currentXpr = xpr;
-            if (entry) { entry.panel.reveal(); entry.refresh(); return; }
             const resources = vscode.Uri.joinPath(context.extensionUri, 'src', 'vivado');
             const panel = vscode.window.createWebviewPanel('svtoolsVivadoSummary', 'Vivado · 工程概览', vscode.ViewColumn.Active,
                 { enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [resources] });
-            let closed = false, ready = false, auto = true, loading = false, timer = null;
+            let closed = false, ready = false, auto = true, loading = false, timer = null, latest = null;
             const post = message => { if (!closed && ready) void panel.webview.postMessage(message); };
             const schedule = () => {
                 clearTimeout(timer);
                 if (!auto || closed || !panel.visible) return;
                 timer = setTimeout(() => { void refresh(); }, POLL_MS);
             };
-            async function refresh() {
+            async function refresh(manual = false) {
                 clearTimeout(timer);
-                if (closed || loading) return schedule();
+                if (closed || !ready || loading) return;
                 loading = true;
+                const selected = currentXpr;
+                if (manual) post({ type: 'loading' });
                 try {
-                    const data = await load(currentXpr);
-                    if (closed) return;
+                    const data = await load(selected);
+                    if (closed || selected !== currentXpr) return;
                     if (data?.error) post({ type: 'error', message: data.error });
-                    else if (data?.busy) post({ type: 'error', message: 'Vivado 正在执行其他任务，已在完成后继续刷新。', busy: true });
-                    else if (data) post({ type: 'summary', data, at: Date.now() });
+                    else if (data?.busy) post({ type: 'error', message: 'Vivado 正在执行其他任务。', busy: true });
+                    else if (data) {
+                        latest = data;
+                        post({ type: 'summary', data, at: Date.now() });
+                    }
                 } catch (error) {
-                    if (!closed) post({ type: 'error', message: error.message });
+                    if (!closed && selected === currentXpr) post({ type: 'error', message: error.message });
                 } finally {
                     loading = false;
-                    schedule();
+                    if (!closed && selected !== currentXpr) void refresh();
+                    else schedule();
                 }
             }
             panel.webview.onDidReceiveMessage(message => {
                 if (closed || !message) return;
-                if (message.action === 'ready') { ready = true; void refresh(); return; }
-                if (message.action === 'refresh') { void refresh(); return; }
+                if (message.action === 'ready') { ready = true; auto = message.auto !== false; void refresh(); return; }
+                if (message.action === 'refresh') { void refresh(true); return; }
                 if (message.action === 'auto') { auto = message.enabled !== false; schedule(); return; }
-                if (message.action === 'openLog' && typeof message.path === 'string') { void openPath(message.path); return; }
-                if (message.action === 'openFolder') { void openPath(path.dirname(currentXpr)); }
+                if (message.action === 'openFolder') { void openPath(path.dirname(currentXpr)); return; }
+                if (message.action === 'openRun' && ['log', 'directory'].includes(message.kind) &&
+                    typeof message.run === 'string' && latest?.paths && Object.hasOwn(latest.paths, message.run)) {
+                    const file = latest.paths[message.run][message.kind];
+                    if (file) void openPath(file);
+                }
             });
-            panel.onDidChangeViewState(() => { if (panel.visible) void refresh(); else clearTimeout(timer); });
+            panel.onDidChangeViewState(() => { if (panel.visible && auto) void refresh(); else clearTimeout(timer); });
             panel.onDidDispose(() => { closed = true; clearTimeout(timer); entry = null; });
             panel.webview.html = html(panel.webview, vscode, resources);
-            entry = { panel, refresh };
+            entry = { panel, select(next) {
+                if (!samePath(next, currentXpr)) {
+                    currentXpr = next;
+                    latest = null;
+                    post({ type: 'reset' });
+                }
+                void refresh();
+            } };
             log('[vivado] 打开工程概览：' + currentXpr);
         }
     };

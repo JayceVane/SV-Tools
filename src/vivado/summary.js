@@ -24,13 +24,17 @@ const { rowsOf } = require('./asset-task');
 function query() {
     return [
         'sv_row project [sv_prop [current_project] NAME] [sv_prop [current_project] PART] ' +
-        '[sv_prop [current_project] DIRECTORY] [sv_prop [get_filesets -quiet sources_1] TOP] ' +
+        '[sv_prop [current_project] DIRECTORY] [sv_prop [current_fileset] TOP] ' +
         '[sv_prop [current_project] BOARD_PART]',
+        'set synth ""; set impl ""',
+        'catch { set synth [current_run -synthesis] }',
+        'catch { set impl [current_run -implementation] }',
+        'sv_row current_runs $synth $impl',
         'foreach run [get_runs -quiet] {',
         '    sv_row run $run [sv_prop $run STATUS] [sv_prop $run PROGRESS] [sv_prop $run STRATEGY] ' +
         '[sv_prop $run NEEDS_REFRESH] [sv_prop $run CURRENT_STEP] [sv_prop $run ELAPSED] ' +
         '[sv_prop $run STATS.WNS] [sv_prop $run STATS.TNS] [sv_prop $run STATS.WHS] [sv_prop $run STATS.THS] ' +
-        '[sv_prop $run STATS.TOTAL_POWER] [sv_prop $run IS_IMPLEMENTATION]',
+        '[sv_prop $run STATS.TOTAL_POWER] [sv_prop $run IS_IMPLEMENTATION] [sv_prop $run DIRECTORY]',
         '}',
         'sv_row messages [get_msg_config -severity ERROR -count] [get_msg_config -severity WARNING -count]'
     ];
@@ -46,15 +50,17 @@ const flag = value => ['1', 'true'].includes(String(value || '').toLowerCase());
 /** @param {Array<Array<string>>} rows @returns {{project:object,runs:object[],messages:object}} */
 function parse(rows) {
     const [name, part, directory, top, board] = rowsOf(rows, 'project')[0] || [];
-    const runs = rowsOf(rows, 'run').map(([id, status, progress, strategy, needsRefresh, step, elapsed, wns, tns, whs, ths, power, implementation]) => ({
+    const [synthesis, implementation] = rowsOf(rows, 'current_runs')[0] || [];
+    const runs = rowsOf(rows, 'run').map(([id, status, progress, strategy, needsRefresh, step, elapsed, wns, tns, whs, ths, power, impl, runDirectory]) => ({
         id, status: status || 'Unknown', progress: progress || '', strategy: strategy || '',
         needsRefresh: flag(needsRefresh), step: step || '', elapsed: elapsed || '',
         timing: { wns: numberOrNull(wns), tns: numberOrNull(tns), whs: numberOrNull(whs), ths: numberOrNull(ths) },
-        power: numberOrNull(power), implementation: flag(implementation)
+        power: numberOrNull(power), implementation: flag(impl), directory: runDirectory || ''
     }));
     const [errors, warnings] = rowsOf(rows, 'messages')[0] || [];
     return {
         project: { name: name || '', part: part || '', directory: directory || '', top: top || '', board: board || '' },
+        currentRuns: { synthesis, implementation },
         runs,
         messages: { errors: Number(errors || 0), warnings: Number(warnings || 0) }
     };
@@ -63,10 +69,10 @@ function parse(rows) {
 /** run 目录与日志路径，供面板打开日志；只拼接已验证的工程目录与 run 名。 */
 function runPaths(project, xpr) {
     const runsDirectory = path.join(project.directory || path.dirname(xpr), path.basename(xpr, path.extname(xpr)) + '.runs');
-    return Object.fromEntries((project.runs || []).map(run => [run.id, {
-        directory: path.join(runsDirectory, run.id),
-        log: path.join(runsDirectory, run.id, 'runme.log')
-    }]));
+    return Object.fromEntries((project.runs || []).map(run => {
+        const directory = path.isAbsolute(run.directory || '') ? path.normalize(run.directory) : path.join(runsDirectory, run.id);
+        return [run.id, { directory, log: path.join(directory, 'runme.log') }];
+    }));
 }
 
 const ACTIVE = /queued|running/i;

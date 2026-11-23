@@ -117,7 +117,13 @@ test('Vivado 流程提供构建、报告和资产入口并校验快照世代', a
     h.setProject({...local,id:'vivado',kind:'vivado',path:path.resolve('bin/top.xpr')});
     await h.api.refresh();
     let snapshot=h.sent.at(-1);
-    assert.equal(snapshot.toolActions.length,9);
+    assert.equal(snapshot.toolActions.length,10);
+    assert.equal(snapshot.toolActions[0].id,'projectSummary');
+    assert.equal(snapshot.actions.some(action=>action.id==='projectSummary'),false);
+    await h.message({action:'command',revision:snapshot.revision,command:'projectSummary'});
+    assert.equal(h.calls.at(-1)[0],'svtools.vivado.summary');
+    assert.equal(h.calls.at(-1)[1].nodeData.xpr,path.resolve('bin/top.xpr'));
+    snapshot=h.sent.at(-1);
     assert.deepEqual(snapshot.toolActions.filter(action=>action.group==='assets').map(action=>action.id),['blockDesign','ipCatalog']);
     await h.message({action:'command',revision:snapshot.revision,command:'ipCatalog'});
     assert.equal(h.calls.at(-1)[0],'svtools.vivado.assets.catalog');
@@ -132,6 +138,8 @@ test('Vivado 流程提供构建、报告和资产入口并校验快照世代', a
     await h.api.refresh();
     const count=h.calls.length;
     await h.message({action:'command',revision:snapshot.revision,command:'bitstream'});
+    assert.equal(h.calls.length,count);
+    await h.message({action:'command',revision:snapshot.revision,command:'projectSummary'});
     assert.equal(h.calls.length,count);
     await h.message({action:'command',revision:h.sent.at(-1).revision,command:'synthesize'});
     assert.equal(h.calls.length,count);

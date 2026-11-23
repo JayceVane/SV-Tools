@@ -837,9 +837,13 @@ function activateVivado(context, deps) {
         return summaryFolder;
     }
     async function openSummaryPath(file) {
-        try { await vscode.window.showTextDocument(vscode.Uri.file(file), { preview: false }); return; }
-        catch (error) { /* 目录或缺失文件交给系统打开 */ }
-        try { await vscode.env.openExternal(vscode.Uri.file(path.dirname(file))); }
+        try {
+            const uri = vscode.Uri.file(file);
+            const info = await fs.promises.stat(file);
+            if (info.isDirectory()) {
+                if (!await vscode.env.openExternal(uri)) throw new Error('系统未能打开目录');
+            } else await vscode.window.showTextDocument(uri, { preview: false });
+        }
         catch (error) { vscode.window.showErrorMessage('无法打开 ' + file + '：' + error.message); }
     }
     async function loadSummary(xpr) {
@@ -861,16 +865,21 @@ function activateVivado(context, deps) {
                 scriptPath, name: 'project_summary', timeoutMs: 120000, readOnly: true });
             if (!result.ok) return { error: result.error || '读取工程状态失败' };
             const parsed = summary.parse(await readRows(directory));
-            return { ...parsed, xpr: current, paths: summary.runPaths(parsed, current) };
+            const paths = await Promise.all(Object.entries(summary.runPaths(parsed, current)).map(async ([id, { directory, log }]) => {
+                const [dirInfo, logInfo] = await Promise.all([directory, log].map(file => fs.promises.stat(file).catch(() => null)));
+                return [id, { directory: dirInfo?.isDirectory() ? directory : null, log: logInfo?.isFile() ? log : null }];
+            }));
+            return { ...parsed, xpr: current, paths: Object.fromEntries(paths) };
         } catch (error) {
             return { error: error.message };
         }
     }
     const summaryPanels = openSummaryPanels(context, vscode, { load: loadSummary, openPath: openSummaryPath, log });
-    context.subscriptions.push(vscode.commands.registerCommand('svtools.vivado.summary', async () => {
+    context.subscriptions.push(vscode.commands.registerCommand('svtools.vivado.summary', async node => {
         try {
             const xpr = await refreshProjectContext();
             if (!xpr) { vscode.window.showErrorMessage('未找到 Vivado 工程（.xpr），请先选择或创建工程'); return; }
+            if (node?.nodeData?.xpr && !samePath(xpr, node.nodeData.xpr)) throw new Error('工程已切换，请从当前工程重新打开');
             summaryPanels.open(xpr);
         } catch (error) { vscode.window.showErrorMessage('打开工程概览失败：' + error.message); }
     }));

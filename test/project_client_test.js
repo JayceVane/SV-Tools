@@ -81,7 +81,7 @@ test('设计讲解允许先读预期，返回同一事件时不会混入上一�
 function client() {
     let document;
     const createElement = tag => { const element = new Element(tag); element.focus = () => { document.activeElement = element; }; return element; };
-    const elements = new Map(['progress','tree','menu','choose','projectName','projectLocation','projectKind','files','instances','add','ipManager','vivadoTools','tools','toggleTools','addVivado','toolBody','toolActions','assetActions','toolReports','diagnostics','refresh','actions','trace','traceRoot','pin','clear','message','issues'].map(id=>[id,createElement()]));
+    const elements = new Map(['progress','tree','menu','choose','projectName','projectLocation','projectKind','files','instances','add','ipManager','vivadoTools','tools','toggleTools','addVivado','toolBody','toolOverview','toolActions','assetActions','toolReports','diagnostics','refresh','actions','trace','traceRoot','pin','clear','message','issues'].map(id=>[id,createElement()]));
     elements.get('menu').hidden = true;
     for (const id of ['actions', 'toolReports']) { elements.get(id).setAttribute('aria-haspopup', 'menu'); elements.get(id).setAttribute('aria-expanded', 'false'); }
     const messages=[],events={},documentEvents={}; let saved;
@@ -149,12 +149,17 @@ test('真实页面脚本显示节点右侧标记、保留文本和工具提示�
 
 test('Vivado流程独立显示，构建和报告分组路由，切换自管理工程恢复添加入口',()=>{
     const c=client(),tools=[{id:'synthesize',label:'综合',icon:'synthesize',group:'build'},{id:'implement',label:'布局布线',icon:'implement',group:'build'},{id:'reportTiming',label:'时序报告',icon:'report',group:'reports'},
-        {id:'blockDesign',label:'Block Design',icon:'blockDesign',group:'assets'},{id:'ipCatalog',label:'IP Catalog',icon:'catalog',group:'assets'}];
+        {id:'blockDesign',label:'Block Design',icon:'blockDesign',group:'assets'},{id:'ipCatalog',label:'IP Catalog',icon:'catalog',group:'assets'},
+        {id:'projectSummary',label:'工程概览',icon:'report',group:'overview'}];
     c.receive({project:{id:'v',name:'top',kind:'vivado'},toolActions:tools});
     assert.equal(c.elements.get('add').hidden,true);
     assert.equal(c.elements.get('vivadoTools').hidden,false);
     assert.equal(c.elements.get('tools').hidden,false);
     assert.equal(c.elements.get('toolActions').children.length,2);
+    const overview=c.elements.get('toolOverview').children[0];
+    assert.equal(overview.dataset.command,'projectSummary');
+    overview.click();
+    assert.equal(c.messages.at(-1).command,'projectSummary');
     assert.equal(c.elements.get('ipManager').hidden,false);
     c.elements.get('ipManager').click();
     assert.equal(c.messages.at(-1).command,'ipManager');
@@ -175,6 +180,7 @@ test('Vivado流程独立显示，构建和报告分组路由，切换自管理�
     c.receive({project:{id:'local',name:'local',kind:'svtools'}});
     assert.equal(c.elements.get('add').hidden,false);
     assert.equal(c.elements.get('tools').hidden,true);
+    assert.equal(c.elements.get('toolOverview').children.length,0);
     assert.equal(c.elements.get('ipManager').hidden,true);
 });
 
