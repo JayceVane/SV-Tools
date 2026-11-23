@@ -22,6 +22,7 @@ const { createIpMetadata } = require('../src/vivado/ip-metadata');
 const { parseXpr, samePath } = require('../src/vivado/xpr');
 const summary = require('../src/vivado/summary');
 const { createSummaryReports, analysisCommands } = require('../src/vivado/summary-reports');
+const { createSummaryMessages } = require('../src/vivado/summary-messages');
 
 test('资产动作拒绝无效名称、任意生成目标、异类端点和只读元数据修改', () => {
     assert.throws(() => ip.create({ vlnv: 'xilinx.com:ip:xlconstant:1.1', name: 'new; exit' }), /名称/u);
@@ -77,7 +78,7 @@ test('地址编辑器按主地址空间分组，改址与映射只接受快照�
     assert.match(bd.setAddress('x.bd', '/S_AXI_0/SEG_bram_Mem0', { offset: '0x1000', range: '0x1000' }).join('\n'), /set_property range/);
 });
 
-test('常驻会话脚本不重开工程，工程概览解析run状态与消息', () => {
+test('常驻会话脚本不重开工程，工程概览解析运行状态', () => {
     const body = sessionScript(['sv_row design demo']);
     assert.match(body, /SVTOOLS_ASSETS_V1/);
     assert.match(body, /sv_row design demo/);
@@ -86,8 +87,7 @@ test('常驻会话脚本不重开工程，工程概览解析run状态与消息',
         ['project', 'demo', 'xc7a35tcsg324-1', 'C:/demo', 'top', ''],
         ['run', 'synth_1', 'Complete', '100%', 'Vivado Synthesis Defaults', '0', 'synth_design', '00:01:22', '', '', '', '', '0.5', '0'],
         ['run', 'impl_1', 'Running', 'Running', 'Performance', '1', 'place_design', '00:00:31', '-0.123', '-1.2', '0.05', '0', '1.2', '1', path.resolve('bin/custom-impl')],
-        ['current_runs', 'synth_1', 'impl_1'],
-        ['messages', '2', '7']
+        ['current_runs', 'synth_1', 'impl_1']
     ]);
     assert.equal(data.project.name, 'demo');
     assert.equal(data.project.part, 'xc7a35tcsg324-1');
@@ -98,10 +98,53 @@ test('常驻会话脚本不重开工程，工程概览解析run状态与消息',
     assert.deepEqual(data.currentRuns, { synthesis: 'synth_1', implementation: 'impl_1' });
     assert.equal(summary.isActive(data.runs[1]), true);
     assert.equal(summary.isActive(data.runs[0]), false);
-    assert.deepEqual(data.messages, { errors: 2, warnings: 7 });
     const paths = summary.runPaths(data, path.join('C:', 'work', 'demo.xpr'));
     assert.equal(paths.synth_1.log.endsWith(path.join('demo.runs', 'synth_1', 'runme.log')), true);
     assert.equal(paths.impl_1.log, path.resolve('bin/custom-impl/runme.log'));
+});
+
+test('工程概览保留自定义顶层运行，隐藏 IP 和模块子运行', () => {
+    const run = (id, source, parent, implementation) => ['run', id, 'Complete', '100%', '', '0', '', '', '', '', '', '', '',
+        implementation ? '1' : '0', '', source, parent, implementation ? '0' : '1'];
+    const data = summary.parse([
+        ['fileset', 'rtl', 'DesignSrcs'], ['fileset', 'clock_ip', 'BlockSrcs'],
+        run('rtl_synthesis', 'rtl', '', false), run('production', 'rtl', 'rtl_synthesis', true),
+        run('clock_factory', 'clock_ip', '', false), run('clock_implementation', 'clock_ip', 'clock_factory', true),
+        run('clock_implementation_with_main_srcset', 'rtl', 'clock_factory', true)
+    ]);
+    assert.deepEqual(data.runs.map(({ id }) => id), ['rtl_synthesis', 'production']);
+    assert.deepEqual(Object.keys(summary.runPaths(data, path.resolve('demo.xpr'))), ['rtl_synthesis', 'production']);
+});
+
+test('运行消息按日志统计级别，支持筛选分页、原始行号和日志更新', async t => {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'svtools-messages-'));
+    t.after(() => fs.rm(directory, { recursive: true, force: true }));
+    const synthLog = path.join(directory, 'synth.log'), implLog = path.join(directory, 'impl.log');
+    const paths = { synth_1: { log: synthLog }, impl_1: { log: implLog } };
+    const critical = ['Command: route_design', 'CRITICAL WARNING: [Timing 38-35] Timing verification failed.',
+        '  Generated clock is missing.', 'INFO: [Route 35-1] Info message.', 'STATUS: Complete'].join('\r\n');
+    await Promise.all([
+        fs.writeFile(synthLog, ['# synth_design -top demo', ...Array.from({ length: 52 }, (_, i) => `WARNING: [Synth 8-${i}] Sample ${i}`)].join('\n')),
+        fs.writeFile(implLog, critical)
+    ]);
+    const messages = createSummaryMessages();
+    const first = await messages.summarize(paths);
+    assert.equal(first.synth_1.counts.warnings, 52);
+    assert.deepEqual(first.impl_1.counts, { errors: 0, criticalWarnings: 1, warnings: 0, info: 1, status: 1 });
+    const secondPage = messages.page(paths, { run: 'synth_1', level: 'warnings', offset: 50 });
+    assert.equal(secondPage.total, 52);
+    assert.deepEqual(secondPage.items.map(item => item.line), [52, 53]);
+    assert.deepEqual(messages.page(paths, { run: 'impl_1', level: 'criticalWarnings', search: 'generated CLOCK' }).items, [{
+        run: 'impl_1', level: 'criticalWarnings', id: 'Timing 38-35', step: 'route_design', line: 2,
+        text: 'Timing verification failed.\nGenerated clock is missing.'
+    }]);
+    assert.deepEqual(messages.location(paths, 'impl_1', 2), { file: implLog, line: 2 });
+    assert.equal(messages.location(paths, 'impl_1', 6), undefined);
+    assert.equal(messages.location(paths, 'unknown', 1), undefined);
+    await fs.writeFile(implLog, critical.replace('verification failed', 'verification needs review'));
+    const refreshed = await messages.summarize(paths);
+    assert.notEqual(refreshed.impl_1.revision, first.impl_1.revision);
+    assert.equal(messages.page(paths, { search: 'needs review' }).total, 1);
 });
 
 test('概览按实际阶段汇总资源、功耗、DRC，缺报告时回退且使用检查点指纹生成', async t => {

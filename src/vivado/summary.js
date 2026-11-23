@@ -30,13 +30,14 @@ function query() {
         'catch { set synth [current_run -synthesis] }',
         'catch { set impl [current_run -implementation] }',
         'sv_row current_runs $synth $impl',
+        'foreach fileset [get_filesets -quiet] { sv_row fileset $fileset [sv_prop $fileset FILESET_TYPE] }',
         'foreach run [get_runs -quiet] {',
         '    sv_row run $run [sv_prop $run STATUS] [sv_prop $run PROGRESS] [sv_prop $run STRATEGY] ' +
         '[sv_prop $run NEEDS_REFRESH] [sv_prop $run CURRENT_STEP] [sv_prop $run ELAPSED] ' +
         '[sv_prop $run STATS.WNS] [sv_prop $run STATS.TNS] [sv_prop $run STATS.WHS] [sv_prop $run STATS.THS] ' +
-        '[sv_prop $run STATS.TOTAL_POWER] [sv_prop $run IS_IMPLEMENTATION] [sv_prop $run DIRECTORY]',
-        '}',
-        'sv_row messages [get_msg_config -severity ERROR -count] [get_msg_config -severity WARNING -count]'
+        '[sv_prop $run STATS.TOTAL_POWER] [sv_prop $run IS_IMPLEMENTATION] [sv_prop $run DIRECTORY] ' +
+        '[sv_prop $run SRCSET] [sv_prop $run PARENT] [sv_prop $run IS_SYNTHESIS]',
+        '}'
     ];
 }
 
@@ -47,22 +48,31 @@ const numberOrNull = value => {
 };
 const flag = value => ['1', 'true'].includes(String(value || '').toLowerCase());
 
-/** @param {Array<Array<string>>} rows @returns {{project:object,runs:object[],messages:object}} */
+/** @param {Array<Array<string>>} rows @returns {{project:object,currentRuns:object,runs:object[]}} */
 function parse(rows) {
     const [name, part, directory, top, board] = rowsOf(rows, 'project')[0] || [];
     const [synthesis, implementation] = rowsOf(rows, 'current_runs')[0] || [];
-    const runs = rowsOf(rows, 'run').map(([id, status, progress, strategy, needsRefresh, step, elapsed, wns, tns, whs, ths, power, impl, runDirectory]) => ({
+    const sources = new Map(rowsOf(rows, 'fileset'));
+    const candidates = rowsOf(rows, 'run').map(([id, status, progress, strategy, needsRefresh, step, elapsed, wns, tns, whs, ths, power,
+        impl, runDirectory, fileset, parent, synth]) => ({
         id, status: status || 'Unknown', progress: progress || '', strategy: strategy || '',
         needsRefresh: flag(needsRefresh), step: step || '', elapsed: elapsed || '',
         timing: { wns: numberOrNull(wns), tns: numberOrNull(tns), whs: numberOrNull(whs), ths: numberOrNull(ths) },
-        power: numberOrNull(power), implementation: flag(impl), directory: runDirectory || ''
+        power: numberOrNull(power), implementation: flag(impl), directory: runDirectory || '', fileset, parent, synth
     }));
-    const [errors, warnings] = rowsOf(rows, 'messages')[0] || [];
+    // IP and module out-of-context runs have a separate BlockSrcs fileset.
+    const projectRuns = candidates.filter(run => {
+        if (run.synth && !run.implementation && !flag(run.synth)) return false;
+        const type = sources.get(run.fileset);
+        return !type || type === 'DesignSrcs';
+    });
+    const projectIds = new Set(projectRuns.map(run => run.id));
+    const runs = projectRuns.filter(run => !run.parent || projectIds.has(run.parent))
+        .map(({ fileset, parent, synth, ...run }) => run);
     return {
         project: { name: name || '', part: part || '', directory: directory || '', top: top || '', board: board || '' },
         currentRuns: { synthesis, implementation },
-        runs,
-        messages: { errors: Number(errors || 0), warnings: Number(warnings || 0) }
+        runs
     };
 }
 

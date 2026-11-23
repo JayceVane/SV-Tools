@@ -27,6 +27,7 @@ const versionCheck = require('./version');
 const { script: assetScript, sessionScript, readRows, rowsOf } = require('./asset-task');
 const summary = require('./summary');
 const { createSummaryReports, analysisCommands } = require('./summary-reports');
+const { createSummaryMessages } = require('./summary-messages');
 const { openSummaryPanels } = require('./summary-view');
 const { summaryStrings } = require('./summary-strings');
 const { scanWorkspaceSources } = require('../workspace/sources');
@@ -831,6 +832,7 @@ function activateVivado(context, deps) {
     // 工程概览：复用常驻会话读取 run 状态；面板轮询期间不启动任何构建。
     const overviewText = summaryStrings(vscode.env?.language);
     const reports = createSummaryReports(context.workspaceState);
+    const runMessages = createSummaryMessages();
     let summaryFolder = null;
     async function summaryDirectory() {
         if (!summaryFolder) {
@@ -840,13 +842,16 @@ function activateVivado(context, deps) {
         }
         return summaryFolder;
     }
-    async function openSummaryPath(file) {
+    async function openSummaryPath(file, line) {
         try {
             const uri = vscode.Uri.file(file);
             const info = await fs.promises.stat(file);
             if (info.isDirectory()) {
                 if (!await vscode.env.openExternal(uri)) throw new Error(overviewText.folderFailed);
-            } else await vscode.window.showTextDocument(uri, { preview: false });
+            } else {
+                const selection = line ? new vscode.Range(line - 1, 0, line - 1, 0) : undefined;
+                await vscode.window.showTextDocument(uri, selection ? { preview: false, selection } : { preview: false });
+            }
         }
         catch (error) { vscode.window.showErrorMessage(overviewText.openFailed + ' ' + file + '\n' + error.message); }
     }
@@ -874,7 +879,8 @@ function activateVivado(context, deps) {
                 return [id, { directory: dirInfo?.isDirectory() ? directory : null, log: logInfo?.isFile() ? log : null }];
             }));
             const artifacts = Object.fromEntries(paths);
-            return { ...parsed, xpr: current, paths: artifacts, analysis: await reports.read(parsed, artifacts) };
+            const [analysis, messages] = await Promise.all([reports.read(parsed, artifacts), runMessages.summarize(artifacts)]);
+            return { ...parsed, xpr: current, paths: artifacts, analysis, runMessages: messages };
         } catch (error) {
             return { error: error.message };
         }
@@ -895,7 +901,7 @@ function activateVivado(context, deps) {
         if (errors.length) return { error: overviewText.partial + '\n' + errors.map(([kind, error]) => overviewText[kind] + ' · ' + error).join('\n') };
     }
     const summaryPanels = openSummaryPanels(context, vscode, {
-        load: loadSummary, generate: generateSummaryReports, openPath: openSummaryPath, log
+        load: loadSummary, generate: generateSummaryReports, openPath: openSummaryPath, runMessages, log
     });
     context.subscriptions.push(vscode.commands.registerCommand('svtools.vivado.summary', async node => {
         try {

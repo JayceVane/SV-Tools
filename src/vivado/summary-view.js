@@ -21,6 +21,7 @@ const path = require('node:path');
 const { randomBytes } = require('node:crypto');
 const { samePath } = require('./xpr');
 const { summaryStrings } = require('./summary-strings');
+const { LEVELS } = require('./summary-messages');
 
 const POLL_MS = 5000;
 
@@ -60,13 +61,21 @@ function html(webview, vscode, resources, strings) {
                 </article>
             </div>
         </section>
-        <section class="surface" aria-labelledby="messages-title">
-            <h2 id="messages-title">${strings.messages}</h2><dl id="messages" class="messages"></dl>
-        </section>
         <section class="surface run-section" aria-labelledby="runs-title">
-            <header class="section-heading"><h2 id="runs-title">${strings.runs}</h2><p id="run-count" class="muted"></p></header>
-            <table id="run-table" class="runs"><thead><tr><th scope="col">${strings.run}</th><th scope="col">${strings.status}</th><th scope="col">${strings.progressTime}</th><th scope="col">${strings.artifacts}</th></tr></thead><tbody id="runs"></tbody></table>
+            <header class="section-heading"><h2 id="runs-title">${strings.runs}</h2><div class="run-tools"><p id="run-count" class="muted"></p><button id="toggle-runs">${strings.expandRuns}</button></div></header>
+            <div id="runs" class="runs"></div>
             <p id="runs-empty" class="empty" hidden>${strings.emptyRuns}</p>
+        </section>
+        <section class="surface" aria-labelledby="messages-title">
+            <h2 id="messages-title" tabindex="-1">${strings.messages}</h2>
+            <div class="message-filters">
+                <label>${strings.run}<select id="message-run"></select></label>
+                <label>${strings.severity}<select id="message-level"></select></label>
+                <label>${strings.searchMessages}<input type="search" id="message-search" placeholder="${strings.searchHint}"></label>
+            </div>
+            <p id="message-status" class="muted" role="status" aria-live="polite"></p>
+            <ol id="messages" class="message-list"></ol>
+            <div id="message-pages" class="message-pages" hidden><button id="message-prev">${strings.previous}</button><button id="message-next">${strings.next}</button></div>
         </section>
     </main>
     </div>
@@ -74,7 +83,7 @@ function html(webview, vscode, resources, strings) {
     <script nonce="${nonce}" src="${uri('summary-client.js')}"></script></body></html>`;
 }
 
-function openSummaryPanels(context, vscode, { load, generate, openPath, log = () => {} }) {
+function openSummaryPanels(context, vscode, { load, generate, openPath, runMessages, log = () => {} }) {
     let entry = null, currentXpr = null;
     const strings = summaryStrings(vscode.env?.language);
     return {
@@ -139,6 +148,18 @@ function openSummaryPanels(context, vscode, { load, generate, openPath, log = ()
                 if (message.action === 'generate') { void generateReports(); return; }
                 if (message.action === 'auto') { auto = message.enabled !== false; schedule(); return; }
                 if (message.action === 'openFolder') { void openPath(path.dirname(currentXpr)); return; }
+                if (message.action === 'listMessages' && runMessages && latest?.paths && Number.isSafeInteger(message.request)) {
+                    const run = typeof message.run === 'string' && Object.hasOwn(latest.paths, message.run) ? message.run : '';
+                    const level = LEVELS.includes(message.level) ? message.level : '';
+                    post({ type: 'runMessages', request: message.request, ...runMessages.page(latest.paths,
+                        { run, level, search: message.search, offset: message.offset }) });
+                    return;
+                }
+                if (message.action === 'openMessage' && runMessages && latest?.paths && typeof message.run === 'string') {
+                    const location = runMessages.location(latest.paths, message.run, message.line);
+                    if (location) void openPath(location.file, location.line);
+                    return;
+                }
                 if (message.action === 'openReport' && ['utilization', 'timing', 'power', 'drc'].includes(message.kind)) {
                     const report = latest?.analysis?.results?.[message.kind];
                     const file = message.kind === 'utilization'

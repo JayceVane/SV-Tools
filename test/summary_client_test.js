@@ -19,9 +19,12 @@ function harness(language = 'zh-cn') {
             this.value = ''; this.checked = false; this.title = '';
         }
         append(...items) { for (const item of items) { this.children.push(item); item.parent = this; } }
+        get parentElement() { return this.parent; }
         replaceChildren(...items) { this.children = []; this.append(...items); }
         setAttribute(name, value) { this[name] = value; }
         addEventListener(name, callback) { this.listeners = { ...(this.listeners || {}), [name]: callback }; }
+        focus() { this.focused = true; }
+        scrollIntoView() { this.scrolled = true; }
     }
     const document = {
         createElement: tag => new Element(tag),
@@ -34,7 +37,7 @@ function harness(language = 'zh-cn') {
     const window = { addEventListener(name, callback) { listeners[name] = callback; } };
     document.getElementById('summary-strings').textContent = JSON.stringify(summaryStrings(language));
     let state;
-    const context = { document, window, acquireVsCodeApi: () => ({
+    const context = { document, window, setTimeout, clearTimeout, acquireVsCodeApi: () => ({
         postMessage: message => messages.push(message),
         getState: () => state,
         setState: value => { state = value; }
@@ -54,7 +57,10 @@ const sample = {
     ],
     analysis: { results: { timing: { run: 'impl_1', stale: true, data: { wns: -0.123, tns: -1.25, whs: 0.05, ths: 0,
         wpws: -0.04, tpws: -0.08, pulseFailing: 2, pulseTotal: 38 } } } },
-    messages: { errors: 2, warnings: 7 },
+    runMessages: {
+        synth_1: { counts: { warnings: 3, criticalWarnings: 0 } },
+        impl_1: { counts: { warnings: 1, criticalWarnings: 2 } }
+    },
     paths: { impl_1: { directory: 'C:/demo/demo.runs/impl_1', log: 'C:/demo/demo.runs/impl_1/runme.log' } }
 };
 
@@ -70,11 +76,16 @@ test('工程概览前端渲染运行状态、时序与日志入口', () => {
     assert.equal(ui.nodes.get('runs').children.length, 2);
     assert.equal(ui.nodes.get('runs-empty').hidden, true);
     const impl = ui.nodes.get('runs').children[1];
-    assert.equal(impl.children[0].children[0].textContent, 'impl_1');
-    assert.match(impl.children[0].children[1].textContent, /布局布线 · 当前运行/u);
-    assert.equal(impl.children[1].children[0].className, 'chip busy');
-    assert.equal(impl.children[1].children[1].textContent, '待重跑');
-    const log = impl.children[3].children[0];
+    assert.equal(impl.tagName, 'DETAILS');
+    assert.equal(impl.open, false);
+    const [title, body] = impl.children;
+    assert.equal(title.children[0].textContent, 'impl_1');
+    assert.equal(title.children[1].children[0].className, 'chip busy');
+    assert.equal(title.children[1].children[1].textContent, '待重跑');
+    assert.match(body.children[0].textContent, /布局布线 · 当前运行/u);
+    ui.nodes.get('toggle-runs').onclick();
+    assert.ok(ui.nodes.get('runs').children.every(run => run.open));
+    const log = body.children.at(-1).children[0];
     assert.equal(log.textContent, '日志');
     log.onclick();
     same(ui.messages.at(-1), { action: 'openRun', run: 'impl_1', kind: 'log' });
@@ -86,8 +97,28 @@ test('工程概览前端渲染运行状态、时序与日志入口', () => {
     assert.match(pulse.children[0].textContent, /Pulse Width/u);
     assert.equal(pulse.children[1].children[0].children[1].textContent, '-0.040 ns');
     assert.equal(pulse.children[1].children[2].children[1].textContent, '2 / 38');
-    assert.equal(ui.nodes.get('messages').children[0].children[1].textContent, '2');
     assert.match(ui.nodes.get('updated').textContent, /更新于/);
+});
+
+test('综合与实现告警卡片筛选各自运行的消息，支持定位日志原行', () => {
+    const ui = harness();
+    ui.listeners.message({ data: { type: 'summary', data: sample, at: 10 } });
+    const [synth, impl] = ui.nodes.get('cards').children;
+    assert.equal(synth.children.at(-1).children[0].textContent, '警告 · 3');
+    const critical = impl.children.at(-1).children[1];
+    assert.equal(critical.textContent, '严重警告 · 2');
+    critical.onclick();
+    const { request } = ui.messages.at(-1);
+    same(ui.messages.at(-1), { action: 'listMessages', run: 'impl_1', level: 'criticalWarnings', search: '', offset: 0, request });
+    assert.equal(ui.nodes.get('messages-title').focused, true);
+    ui.listeners.message({ data: { type: 'runMessages', request, available: true, offset: 0, size: 50, total: 2,
+        items: [{ id: 'Timing 38-35', level: 'criticalWarnings', run: 'impl_1', step: 'route_design', text: 'Timing constraint failed.', line: 98 }] } });
+    const [heading, content] = ui.nodes.get('messages').children[0].children;
+    assert.equal(heading.children[1].textContent, 'Timing 38-35');
+    assert.equal(heading.children[2].textContent, 'impl_1 · route_design');
+    assert.equal(content.textContent, 'Timing constraint failed.');
+    heading.children.at(-1).onclick();
+    same(ui.messages.at(-1), { action: 'openMessage', run: 'impl_1', line: 98 });
 });
 
 test('工程概览使用当前运行并保留轮询前的按钮焦点', () => {
@@ -155,26 +186,29 @@ test('中英文资源、功耗和 DRC 显示测量值、阶段，缺报告不会
     }
 });
 
-test('片上功耗可在明细与饼图之间切换，阈值数据仅显示在明细', () => {
+test('片上功耗显示分层堆叠条，阈值数据仅显示在明细', () => {
     const ui = harness('en');
     const data = { ...sample, analysis: { results: { power: { run: 'impl_1', data: {
-        total: 1, dynamic: 0.7, static: 0.3, components: [
+        total: 1.2, dynamic: 0.7, static: 0.3, components: [
+            { label: 'GTX', watts: 0.2, below: null },
             { label: 'Clocks', watts: 0.3, below: null }, { label: 'Signals', watts: 0.4, below: null },
-            { label: 'Static Power', watts: 0.3, below: null }, { label: 'PLL', watts: null, below: 0.001 }
+            { label: 'PL Static', watts: 0.3, below: null }, { label: 'PLL', watts: null, below: 0.001 }
         ]
     } } } } };
     ui.listeners.message({ data: { type: 'summary', data, at: 50 } });
     const [, content] = ui.nodes.get('power').children;
     const [, controls, display] = content.children;
-    assert.equal(display.children[0].children.at(-1).children[1].textContent, '<0.001 W');
-    controls.children[1].onclick();
     assert.equal(controls.children[1]['aria-pressed'], 'true');
-    assert.equal(ui.preferences().powerMode, 'pie');
-    const view = display.children[0];
-    assert.match(view.children[0].style.background, /^conic-gradient/u);
-    assert.deepEqual(view.children[1].children.map(row => row.children[2].textContent), ['0.300 W · 30%', '0.400 W · 40%', '0.300 W · 30%']);
+    const [total, dynamic, deviceStatic] = display.children;
+    assert.equal(total.children[1].className, 'power-stack');
+    assert.deepEqual(total.children[2].children.map(row => row.children[2].textContent), ['0.200 W · 16.67%', '0.700 W · 58.33%', '0.300 W · 25%']);
+    assert.deepEqual(dynamic.children[2].children.map(row => row.children[2].textContent), ['0.300 W · 42.86%', '0.400 W · 57.14%']);
+    assert.equal(deviceStatic.children[2].children[0].children[2].textContent, '0.300 W · 100%');
     controls.children[0].onclick();
+    assert.equal(display.children[0].children.at(-1).children[1].textContent, '<0.001 W');
     assert.equal(ui.preferences().powerMode, 'details');
+    controls.children[1].onclick();
+    assert.equal(ui.preferences().powerMode, 'distribution');
 });
 
 test('概览切换工程时丢弃在途结果，产物只打开新工程快照里的条目', async () => {

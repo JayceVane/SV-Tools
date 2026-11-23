@@ -7,8 +7,12 @@
     const countText = new Intl.NumberFormat(strings.locale, { maximumFractionDigits: 2 });
     const powerText = new Intl.NumberFormat(strings.locale, { minimumFractionDigits: 3, maximumFractionDigits: 6 });
     const preferences = vscode.getState() || {};
-    let signature, auto = preferences.auto !== false, powerMode = preferences.powerMode === 'pie' ? 'pie' : 'details';
+    let signature, auto = preferences.auto !== false, powerMode = preferences.powerMode === 'details' ? 'details' : 'distribution';
+    let messageRequest = 0, messagePage, messageTimer, runOptionsKey;
+    const expandedRuns = new Set();
     const remember = () => vscode.setState({ auto, powerMode });
+    const severityLabels = { errors: strings.errors, criticalWarnings: strings.criticalWarnings,
+        warnings: strings.warnings, info: strings.info, status: strings.messageStatus };
 
     function node(tag, text, className) {
         const item = document.createElement(tag);
@@ -80,7 +84,7 @@
         return group.find(run => run.id === id) || group.find(run => run.id === (implementation ? 'impl_1' : 'synth_1'));
     }
 
-    function drawCards(synthesis, implementation) {
+    function drawCards(synthesis, implementation, messages = {}) {
         const stages = [[strings.synthesis, synthesis], [strings.implementation, implementation]];
         $('cards').replaceChildren(...stages.map(([label, run]) => {
             const card = node('article', undefined, 'card ' + statusOf(run)[0]);
@@ -93,7 +97,19 @@
             if (run.needsRefresh) details.append(staleBadge());
             const meta = [run.step, run.elapsed].filter(Boolean).join(' · ');
             if (meta) details.append(node('span', meta, 'muted'));
-            card.append(details, progressMeter(run));
+            const counts = Object.hasOwn(messages, run.id) ? messages[run.id] : null;
+            const notices = node('div', undefined, 'run-notices');
+            for (const level of ['warnings', 'criticalWarnings']) {
+                const count = counts?.counts[level];
+                const text = Number.isFinite(count) ? (counts.countsPartial ? '≥' : '') + countText.format(count) : '—';
+                const button = node('button', severityLabels[level] + ' · ' + text, 'run-notice ' + (count ? level : 'muted'));
+                button.type = 'button';
+                button.disabled = !counts;
+                if (!counts) button.title = strings.noLogs;
+                button.onclick = () => showRunMessages(run.id, level);
+                notices.append(button);
+            }
+            card.append(details, progressMeter(run), notices);
             return card;
         }));
     }
@@ -107,31 +123,66 @@
     }
 
     function drawRuns(runs, paths, primary) {
-        $('runs').replaceChildren(...runs.map(run => {
-            const row = node('tr');
-            const identity = node('th');
-            identity.scope = 'row';
-            identity.append(node('span', run.id, 'run-name'));
-            const detail = [run.implementation ? strings.implementation : strings.synthesis, primary.includes(run.id) ? strings.current : '', run.strategy].filter(Boolean);
-            identity.append(node('span', detail.join(' · '), 'run-detail'));
-            const state = node('td', undefined, 'run-state');
+        const list = $('runs');
+        list.replaceChildren(...runs.map(run => {
+            const row = node('details', undefined, 'run-record');
+            row.dataset.run = run.id;
+            row.open = expandedRuns.has(run.id);
+            const title = node('summary', undefined, 'run-summary');
+            title.append(node('span', run.id, 'run-name'));
+            const state = node('span', undefined, 'run-state');
             state.append(statusBadge(run));
             if (run.needsRefresh) state.append(staleBadge());
-            if (run.step) state.append(node('span', run.step, 'run-detail'));
-            const progress = node('td', undefined, 'progress-cell');
-            progress.append(progressMeter(run));
-            if (run.elapsed) progress.append(node('span', run.elapsed, 'run-detail'));
-            const actions = node('td', undefined, 'run-actions');
+            title.append(state, progressMeter(run));
+            const body = node('div', undefined, 'run-record-body');
+            const detail = [run.implementation ? strings.implementation : strings.synthesis, primary.includes(run.id) ? strings.current : ''].filter(Boolean);
+            body.append(node('p', detail.join(' · '), 'run-detail'));
+            const facts = node('dl', undefined, 'run-facts');
+            for (const [label, value] of [[strings.step, run.step], [strings.elapsed, run.elapsed], [strings.strategy, run.strategy]]) {
+                if (!value) continue;
+                const fact = node('div');
+                fact.append(node('dt', label), node('dd', value));
+                facts.append(fact);
+            }
+            if (facts.children.length) body.append(facts);
+            const actions = node('div', undefined, 'run-actions');
             const output = paths && Object.hasOwn(paths, run.id) ? paths[run.id] : null;
             if (output?.log) actions.append(runAction(run, 'log', strings.log));
             if (output?.directory) actions.append(runAction(run, 'directory', strings.directory));
-            if (!actions.children.length) actions.textContent = '—';
-            row.append(identity, state, progress, actions);
+            if (output?.log) {
+                const button = node('button', strings.messages, 'link-button');
+                button.type = 'button';
+                button.onclick = () => showRunMessages(run.id, '');
+                actions.append(button);
+            }
+            if (actions.children.length) body.append(actions);
+            row.ontoggle = () => {
+                if (row.parentElement !== list) return;
+                if (row.open) expandedRuns.add(run.id);
+                else expandedRuns.delete(run.id);
+                updateRunsToggle();
+            };
+            row.append(title, body);
             return row;
         }));
         $('run-count').textContent = runs.length ? phrase('runCount', runs.length) : '';
-        $('run-table').hidden = !runs.length;
+        updateRunsToggle();
         $('runs-empty').hidden = Boolean(runs.length);
+    }
+
+    function updateRunsToggle() {
+        const rows = [...$('runs').children];
+        $('toggle-runs').hidden = !rows.length;
+        const open = rows.some(row => row.open);
+        $('toggle-runs').textContent = open ? strings.collapseRuns : strings.expandRuns;
+        $('toggle-runs').onclick = () => {
+            expandedRuns.clear();
+            for (const row of rows) {
+                row.open = !open;
+                if (row.open) expandedRuns.add(row.dataset.run);
+            }
+            updateRunsToggle();
+        };
     }
 
     function drawTiming(result) {
@@ -160,13 +211,60 @@
         $('timing').replaceChildren(...cards);
     }
 
-    function drawMessages(messages = {}) {
-        const items = [[strings.errors, messages.errors || 0, 'negative'], [strings.warnings, messages.warnings || 0, 'warning']];
-        $('messages').replaceChildren(...items.map(([label, count, kind]) => {
-            const item = node('div');
-            item.append(node('dt', label), node('dd', String(count), count ? kind : ''));
+    function option(label, value) {
+        const item = node('option', label);
+        item.value = value;
+        return item;
+    }
+
+    function syncMessageRuns(runs) {
+        const key = JSON.stringify(runs.map(run => run.id));
+        if (key === runOptionsKey) return;
+        runOptionsKey = key;
+        const control = $('message-run'), selected = control.value;
+        control.replaceChildren(option(strings.allRuns, ''), ...runs.map(run => option(run.id, run.id)));
+        control.value = runs.some(run => run.id === selected) ? selected : '';
+    }
+
+    function listMessages(offset = 0, loading = false) {
+        clearTimeout(messageTimer);
+        if (loading) $('message-status').textContent = strings.messagesLoading;
+        vscode.postMessage({ action: 'listMessages', request: ++messageRequest, run: $('message-run').value,
+            level: $('message-level').value, search: $('message-search').value, offset });
+    }
+
+    function showRunMessages(run, level) {
+        $('message-run').value = run;
+        $('message-level').value = level;
+        $('message-search').value = '';
+        listMessages(0, true);
+        const heading = $('messages-title');
+        heading.focus();
+        heading.scrollIntoView({ block: 'start' });
+    }
+
+    function drawMessages(page) {
+        if (page.offset && page.offset >= page.total) { listMessages(); return; }
+        messagePage = page;
+        $('messages').replaceChildren(...page.items.map(message => {
+            const item = node('li');
+            const heading = node('div', undefined, 'message-heading');
+            heading.append(node('span', severityLabels[message.level], 'severity ' + message.level));
+            if (message.id) heading.append(node('code', message.id));
+            heading.append(node('span', [message.run, message.step].filter(Boolean).join(' · '), 'muted'));
+            const button = node('button', phrase('logLine', message.line), 'link-button');
+            button.type = 'button';
+            button.onclick = () => vscode.postMessage({ action: 'openMessage', run: message.run, line: message.line });
+            heading.append(button);
+            item.append(heading, node('p', message.text, 'message-text'));
             return item;
         }));
+        const caption = !page.available ? strings.noLogs : !page.total ? strings.noMessages
+            : phrase('messageRange', countText.format(page.offset + 1), countText.format(page.offset + page.items.length), countText.format(page.total));
+        $('message-status').textContent = [caption, page.truncated && strings.truncatedMessages].filter(Boolean).join(' · ');
+        $('message-pages').hidden = !page.offset && page.items.length >= page.total;
+        $('message-prev').disabled = page.offset === 0;
+        $('message-next').disabled = page.offset + page.items.length >= page.total;
     }
 
     function reportSource(kind, result, stage) {
@@ -242,41 +340,53 @@
         '#b09472', '#b0aa62', '#ac78d0', '#588bc2', '#d9978a', '#83a98a'];
     const componentName = label => strings.componentNames[label.toLowerCase()] || label;
 
-    function powerSlices(data) {
-        const hasValues = items => items.filter(item => Number.isFinite(item.watts) && item.watts > 0);
-        const components = hasValues(data.components || []);
-        let slices = components.map(item => ({ label: componentName(item.label), watts: item.watts }));
-        if (!slices.length || (data.dynamic > 0 && data.static > 0 && components.every(item => /^static power$/iu.test(item.label)))) slices = hasValues([
-            { label: strings.dynamic, watts: data.dynamic }, { label: strings.static, watts: data.static }
-        ]);
-        if (!slices.length || !(data.total > 0)) return [];
-        const known = slices.reduce((total, item) => total + item.watts, 0);
-        if (data.total - known > 1e-9) slices.push({ label: strings.unallocated, watts: data.total - known, color: '#7c8794' });
-        return slices.map((item, index) => ({ ...item, color: item.color || powerColors[index % powerColors.length] }));
+    const positivePower = items => items.filter(item => Number.isFinite(item.watts) && item.watts > 0);
+
+    function powerGroups(data) {
+        if (!(data.total > 0)) return [];
+        const components = positivePower(data.components || []);
+        const staticComponent = item => /\bstatic\b/iu.test(item.label);
+        const dynamic = { label: strings.dynamic, watts: data.dynamic, color: '#559bdb' };
+        const staticPower = { label: strings.static, watts: data.static, color: '#40a68e' };
+        const totals = positivePower([dynamic, staticPower]);
+        const componentsFor = items => items.map(({ label, watts }) => ({ label: componentName(label), watts }));
+        if (!totals.length) return components.length ? [{ label: strings.components, total: data.total, items: componentsFor(components) }] : [];
+        const explicitOther = components.filter(item => /^GT(?:X|H|Y|M|P)\b/iu.test(item.label));
+        const remainder = data.total - (data.dynamic || 0) - (data.static || 0);
+        const outside = remainder > 0 && explicitOther.reduce((sum, item) => sum + item.watts, 0) <= remainder + 1e-9 ? explicitOther : [];
+        const groups = [{ label: strings.totalPower, total: data.total, items: [...componentsFor(outside), ...totals] }];
+        const dynamicParts = components.filter(item => !staticComponent(item) && !outside.includes(item) && !/^dynamic(?: power)?$/iu.test(item.label));
+        const staticParts = components.filter(item => staticComponent(item) && !/^(?:device )?static(?: power)?$/iu.test(item.label));
+        if (data.dynamic > 0 && dynamicParts.length) groups.push({ label: strings.dynamic, total: data.dynamic, items: componentsFor(dynamicParts) });
+        if (data.static > 0 && staticParts.length) groups.push({ label: strings.static, total: data.static, items: componentsFor(staticParts) });
+        return groups;
     }
 
-    function powerPie(slices, total) {
-        const body = node('div', undefined, 'power-chart');
-        const pie = node('div', undefined, 'power-pie');
-        pie.setAttribute('aria-hidden', 'true');
+    function powerBar({ label, total, items }) {
+        const body = node('div', undefined, 'power-breakdown');
+        const bar = node('div', undefined, 'power-stack');
+        bar.setAttribute('aria-hidden', 'true');
         const legend = node('ul', undefined, 'power-legend');
-        legend.setAttribute('aria-label', strings.components);
-        const sum = slices.reduce((amount, item) => amount + item.watts, 0);
-        let angle = 0;
-        const stops = slices.map(({ label, watts, color }, index) => {
-            const start = angle;
-            angle = index === slices.length - 1 ? 100 : angle + watts / sum * 100;
+        legend.setAttribute('aria-label', label);
+        const known = items.reduce((sum, item) => sum + item.watts, 0);
+        const segments = total - known > 1e-9 ? [...items, { label: strings.unallocated, watts: total - known, color: '#7c8794' }] : items;
+        for (const [index, entry] of segments.entries()) {
+            const { label, watts, color = powerColors[index % powerColors.length] } = entry;
+            const text = powerText.format(watts) + ' W · ' + percentText(watts / Math.max(known, total) * 100);
+            const segment = node('span');
+            segment.style.flexGrow = watts / Math.max(known, total) * 100;
+            segment.style.backgroundColor = color;
+            segment.title = label + ' · ' + text;
+            bar.append(segment);
             const item = node('li');
             const swatch = node('span', undefined, 'power-swatch');
             swatch.style.backgroundColor = color;
             swatch.setAttribute('aria-hidden', 'true');
-            item.append(swatch, node('span', label), node('span', powerText.format(watts) + ' W · ' + percentText(watts / sum * 100), 'numbers'));
+            item.append(swatch, node('span', label), node('span', text, 'numbers'));
             legend.append(item);
-            return color + ' ' + start + '% ' + angle + '%';
-        });
-        pie.style.background = 'conic-gradient(' + stops.join(', ') + ')';
-        body.append(pie, legend);
-        if (sum - total > 1e-9) body.append(node('p', strings.roundedShares, 'muted power-note'));
+        }
+        body.append(node('h4', label), bar, legend);
+        if (known - total > 1e-9) body.append(node('p', strings.roundedShares, 'muted power-note'));
         return body;
     }
 
@@ -307,26 +417,26 @@
             values.append(item);
         }
         content.append(values);
-        const slices = powerSlices(data), components = data.components || [];
-        if (!slices.length) {
+        const groups = powerGroups(data), components = data.components || [];
+        if (!groups.length) {
             if (components.length) content.append(powerComponents(components));
             return content;
         }
         const controls = node('div', undefined, 'power-controls');
         controls.setAttribute('role', 'group');
         controls.setAttribute('aria-label', strings.powerDisplay);
-        const detail = node('button', strings.powerDetails), chart = node('button', strings.pie);
+        const detail = node('button', strings.powerDetails), chart = node('button', strings.distribution);
         detail.type = chart.type = 'button';
         controls.append(detail, chart);
         const display = node('div');
         const update = () => {
             detail.setAttribute('aria-pressed', String(powerMode === 'details'));
-            chart.setAttribute('aria-pressed', String(powerMode === 'pie'));
-            if (powerMode === 'pie') display.replaceChildren(powerPie(slices, data.total));
+            chart.setAttribute('aria-pressed', String(powerMode === 'distribution'));
+            if (powerMode === 'distribution') display.replaceChildren(...groups.map(powerBar));
             else display.replaceChildren(...(components.length ? [powerComponents(components)] : []));
         };
         detail.onclick = () => { powerMode = 'details'; remember(); update(); };
-        chart.onclick = () => { powerMode = 'pie'; remember(); update(); };
+        chart.onclick = () => { powerMode = 'distribution'; remember(); update(); };
         update();
         content.append(controls, display);
         return content;
@@ -390,10 +500,11 @@
             const synthesis = currentRun(runs, next.currentRuns?.synthesis, false);
             const implementation = currentRun(runs, next.currentRuns?.implementation, true);
             drawProject(next.project || {});
-            drawCards(synthesis, implementation);
+            drawCards(synthesis, implementation, next.runMessages);
             drawAnalysis(next.analysis);
-            drawMessages(next.messages);
             drawRuns(runs, next.paths, [synthesis?.id, implementation?.id]);
+            syncMessageRuns(runs);
+            listMessages(messagePage?.offset || 0);
         }
         $('content').hidden = false;
         $('updated').textContent = phrase('updated', new Date(at).toLocaleTimeString(strings.locale, { hour12: false }));
@@ -409,13 +520,30 @@
     $('refresh').onclick = () => vscode.postMessage({ action: 'refresh' });
     $('generate').onclick = () => vscode.postMessage({ action: 'generate' });
     $('folder').onclick = () => vscode.postMessage({ action: 'openFolder' });
+    $('message-run').onchange = $('message-level').onchange = () => listMessages(0, true);
+    $('message-level').replaceChildren(option(strings.allSeverities, ''), ...Object.entries(severityLabels).map(([id, label]) => option(label, id)));
+    $('message-search').oninput = () => {
+        clearTimeout(messageTimer);
+        messageTimer = setTimeout(() => listMessages(0, true), 160);
+    };
+    $('message-prev').onclick = () => { if (messagePage) listMessages(Math.max(0, messagePage.offset - messagePage.size)); };
+    $('message-next').onclick = () => { if (messagePage) listMessages(messagePage.offset + messagePage.items.length); };
     window.addEventListener('message', ({ data: message }) => {
         if (message?.type === 'summary') render(message.data, message.at);
+        else if (message?.type === 'runMessages' && message.request === messageRequest) drawMessages(message);
         else if (message?.type === 'loading') status(strings.refreshing, '', true);
         else if (message?.type === 'generating') status(strings.generating, '', true);
         else if (message?.type === 'error') status(message.message, message.busy ? 'warning' : 'negative');
         else if (message?.type === 'reset') {
             signature = undefined;
+            clearTimeout(messageTimer);
+            messageRequest++;
+            messagePage = runOptionsKey = undefined;
+            expandedRuns.clear();
+            $('message-run').value = $('message-level').value = $('message-search').value = '';
+            $('messages').replaceChildren();
+            $('message-status').textContent = '';
+            $('message-pages').hidden = true;
             $('project').textContent = strings.title;
             $('directory').hidden = true;
             $('content').hidden = true;

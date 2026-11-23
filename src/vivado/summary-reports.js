@@ -66,7 +66,7 @@ function power(text) {
             if (watts === null && below === null) continue;
             const level = /^\s*\|(\s*)/u.exec(line)[1].length;
             indentation ??= level;
-            // 组件表靠缩进区分父项和子项，饼图只采用外层数据。
+            // 组件表靠缩进区分父项和子项，分布图只统计外层以免重复计入功耗。
             if (level === indentation) components.push({ label, watts, below });
         }
     }
