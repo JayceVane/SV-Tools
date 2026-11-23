@@ -66,8 +66,8 @@
             text('ip-locked', info.preview ? '已保存参数 · 预览' : '已锁定 · 只读');
             $('ip-upgrade').hidden = !info.upgrade;
             text('ip-upgrade', info.upgrade ? '可用升级 ' + info.upgrade : '');
-            const configure = button('重新定制 IP…', () => send('configure', target()), { ipAction: 'configure' });
-            configure.title = '在独立对话框中按 Vivado 的分组编辑参数';
+            const configure = button('配置…', () => send('configure', target()), { ipAction: 'configure' });
+            configure.title = '在独立对话框中按 Vivado 的分组配置参数';
             $('ip-operations').replaceChildren(configure, ...info.actions.map(action =>
                 button(action.label, () => send(action.id, target()), { ipAction: action.id })));
         } else {

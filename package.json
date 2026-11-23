@@ -670,6 +670,11 @@
           "when": "view == svtools.vivado.projectTree"
         },
         {
+          "command": "svtools.vivado.summary",
+          "group": "9_summary@1",
+          "when": "view == svtools.vivado.projectTree && svtools.vivado.hasProject"
+        },
+        {
           "command": "svtools.vivado.tree.stop",
           "group": "navigation@3",
           "when": "view == svtools.vivado.projectTree && svtools.vivado.busy"

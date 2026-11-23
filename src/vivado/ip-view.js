@@ -34,7 +34,7 @@ function managerHtml(webview, vscode, resources) {
                 </header>
                 <div id="ip-operations" class="toolbar"></div>
                 <p id="ip-upgrade" class="muted" hidden></p>
-                <p class="muted">参数在独立的定制对话框中按 Vivado 的分组编辑；点「重新定制 IP…」或在左侧双击 IP 打开。</p>
+                <p class="muted">参数在独立的配置对话框中按 Vivado 的分组编辑；点「配置…」或在左侧双击 IP 打开。</p>
             </div>
         </section>
     </main>

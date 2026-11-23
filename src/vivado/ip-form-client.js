@@ -237,9 +237,9 @@
     function render() {
         const info = state.info;
         document.body.setAttribute('aria-busy', String(state.busy));
-        $('name').textContent = info?.name || 'IP 定制';
+        $('name').textContent = info?.name || 'IP 配置';
         // 名称是这段配置实际作用的 IP 实例；副标题保留类型信息。
-        $('subtitle').textContent = [info?.name ? 'IP 定制' : '', info?.vlnv, info?.locked ? '已锁定 · 只读' : '',
+        $('subtitle').textContent = [info?.name ? 'IP 配置' : '', info?.vlnv, info?.locked ? '已锁定 · 只读' : '',
             info?.preview ? '预览' : ''].filter(Boolean).join(' · ');
         $('status').textContent = state.status || (state.busy ? '正在处理…' : '');
         renderToolbar();

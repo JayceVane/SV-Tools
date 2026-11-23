@@ -115,7 +115,7 @@ test('定制表单渲染控件并在应用时提交修改', () => {
     const rows = ui.rows();
     assert.equal(rows.length, 3);
     assert.equal(ui.nodes.get('name').textContent, 'gpio_0', '标题显示 IP 实例名');
-    assert.match(ui.nodes.get('subtitle').textContent, /IP 定制 · xilinx\.com:ip:axi_gpio:2\.0/u);
+    assert.match(ui.nodes.get('subtitle').textContent, /IP 配置 · xilinx\.com:ip:axi_gpio:2\.0/u);
     const dual = rows[0].children[1].children[0];
     assert.equal(dual.tagName, 'INPUT');
     assert.equal(dual.type, 'checkbox');
@@ -203,7 +203,7 @@ test('对话框宿主：读取、应用与错误状态都经消息往返', async
             return { info: { ...info, parameters }, message: '已应用 1 项修改' };
         }
     });
-    open({ key: 'k1', title: 'IP 定制', subtitle: 'xilinx.com:ip:axi_gpio:2.0' });
+    open({ key: 'k1', title: 'IP 配置', subtitle: 'xilinx.com:ip:axi_gpio:2.0' });
     assert.equal(ui.listeners.length, 1);
     ui.listeners[0]({ action: 'ready' });
     await new Promise(resolve => setTimeout(resolve, 10));
@@ -359,7 +359,7 @@ function fakeManager() {
     return { panel, posted, listeners, vscode, context: { extensionUri: { fsPath: 'C:/ext' }, subscriptions: [] } };
 }
 
-test('IP 管理面板：定制动作交给宿主并刷新状态', async () => {
+test('IP 管理面板：配置动作交给宿主并刷新状态', async () => {
     const { openIpPanels } = require('../src/vivado/ip-view');
     const ui = fakeManager();
     const calls = [];
@@ -367,7 +367,7 @@ test('IP 管理面板：定制动作交给宿主并刷新状态', async () => {
         calls.push([action, target?.id, info?.name]);
         if (action === 'load') return { info: { name: 'fifo_0', vlnv: 'xilinx.com:ip:fifo_generator:13.2',
             parameters: [], notes: [], hidden: { pages: [], groups: [], params: [] }, locked: false, preview: false, actions: [] } };
-        if (action === 'configure') return { message: '已打开 IP 定制对话框' };
+        if (action === 'configure') return { message: '已打开 IP 配置对话框' };
         return {};
     });
     panels.open({ xpr: 'D:/p.xpr', members: [{ id: 0, file: 'D:/ip/fifo_0.xci', fileset: 'sources_1',
@@ -380,5 +380,5 @@ test('IP 管理面板：定制动作交给宿主并刷新状态', async () => {
     listener({ action: 'configure', revision: snapshot.revision, id: snapshot.selected });
     await new Promise(resolve => setTimeout(resolve, 20));
     assert.ok(calls.some(([action, id]) => action === 'configure' && id === snapshot.selected));
-    assert.match(ui.posted.filter(message => message.type === 'snapshot').at(-1).status, /定制对话框/u);
+    assert.match(ui.posted.filter(message => message.type === 'snapshot').at(-1).status, /配置对话框/u);
 });

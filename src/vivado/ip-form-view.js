@@ -27,7 +27,7 @@ function html(webview, vscode, resources) {
     <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'nonce-${nonce}'; style-src ${webview.cspSource};">
     <link rel="stylesheet" href="${uri('ip-form.css')}"></head><body>
     <header class="titlebar">
-        <div class="title"><h1 id="name">IP 定制</h1><p id="subtitle"></p></div>
+        <div class="title"><h1 id="name">IP 配置</h1><p id="subtitle"></p></div>
         <div class="tools"><span id="changed" class="changed"></span><button id="revert">撤销修改</button></div>
     </header>
     <main>
@@ -48,7 +48,7 @@ function html(webview, vscode, resources) {
 function openIpFormPanels(context, vscode, { load, apply, evaluate }) {
     const panels = new Set();
     context.subscriptions.push({ dispose() { for (const entry of panels) entry.panel.dispose(); } });
-    return function open({ key, title = 'IP 定制', subtitle = '' }) {
+    return function open({ key, title = 'IP 配置', subtitle = '' }) {
         const existing = [...panels].find(entry => entry.key === key);
         if (existing) { existing.panel.reveal(); void existing.reload(); return; }
         const resources = vscode.Uri.joinPath(context.extensionUri, 'src', 'vivado');

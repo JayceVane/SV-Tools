@@ -349,7 +349,7 @@ function activateAssetCommands(context, { vscode, findProjectXpr, incrementalAct
         if (cell) {
             const key = formKey(target, 'cell', cell.id);
             formTargets.set(key, { ...target, id: cell.id, vlnv });
-            openForm({ key, title: 'IP 定制 · ' + cell.id, subtitle: vlnv });
+            openForm({ key, title: 'IP 配置 · ' + cell.id, subtitle: vlnv });
         }
         return '已添加 ' + name + (cell ? '，可在定制对话框调整参数' : '');
     }
@@ -361,8 +361,8 @@ function activateAssetCommands(context, { vscode, findProjectXpr, incrementalAct
             const key = formKey(target, 'ip', target.file);
             formTargets.set(key, { ...target, xpr, kind: 'ip', vlnv: info?.vlnv || '' });
             const name = info?.name || String(target.label || '').replace(/\.xcix?$/iu, '') || 'IP';
-            openForm({ key, title: 'IP 定制 · ' + name, subtitle: info?.vlnv || '' });
-            return { message: '已打开 IP 定制对话框' };
+            openForm({ key, title: 'IP 配置 · ' + name, subtitle: info?.vlnv || '' });
+            return { message: '已打开 IP 配置对话框' };
         }
         if (action === 'preview') {
             const session = await projectFor(xpr);
@@ -527,7 +527,7 @@ function activateAssetCommands(context, { vscode, findProjectXpr, incrementalAct
             const target = formTargets.get(key);
             if (!target) return { error: 'IP 配置目标已失效，请重新打开' };
             if (target.kind === 'ip') {
-                const read = () => queueAction('IP 定制', target.xpr, async session => {
+                const read = () => queueAction('IP 配置', target.xpr, async session => {
                     const info = await readIp(session, target, true);
                     target.vlnv = info.vlnv;
                     return { ...info, preview: false };
@@ -537,7 +537,7 @@ function activateAssetCommands(context, { vscode, findProjectXpr, incrementalAct
                 if (!result || result.status === 'failed' || result.status === 'skipped') return { error: result?.error || '参数读取已取消' };
                 return result;
             }
-            const read = () => queueAction('IP 定制', target.xpr, async session => {
+            const read = () => queueAction('IP 配置', target.xpr, async session => {
                 // 记录读取时的文件戳：应用时据此发现对话框打开期间的外部修改。
                 target.guard = await hash(target.file);
                 return { name: target.id, vlnv: target.vlnv || '', ...await describeCell(session, target, await readCellParameters(session, target)),
@@ -638,8 +638,8 @@ function activateAssetCommands(context, { vscode, findProjectXpr, incrementalAct
             // IP 实例与 Vivado 的 Re-customize IP 一致：在独立对话框里按 XGUI 分组编辑。
             const key = formKey(target, 'cell', selection.cell.id);
             formTargets.set(key, { ...target, id: selection.cell.id, vlnv: selection.cell.vlnv });
-            openForm({ key, title: 'IP 定制 · ' + selection.cell.id, subtitle: selection.cell.vlnv });
-            return { message: '已打开 IP 定制对话框' };
+            openForm({ key, title: 'IP 配置 · ' + selection.cell.id, subtitle: selection.cell.vlnv });
+            return { message: '已打开 IP 配置对话框' };
         } else if (action === 'config' || action === 'config-port') {
             const item = selection.endpoint || selection.cell;
             const query = selection.endpoint ? bd.portParameters(filename, item) : bd.parameters(filename, item.id);

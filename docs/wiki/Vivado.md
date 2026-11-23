@@ -67,11 +67,11 @@ IP 管理与 Block Design 的读写默认复用一个常驻 Tcl 会话：启动�
 
 点击「连线」后依次选择两个同层级的同类端点。检查器可搜索模块、端口和线网，也提供断开、参数配置、引出端口与地址映射。可以添加目录 IP、工程 RTL 模块引用和层级块，并新增普通信号端口或协议接口。「添加模块 → 从 Catalog 添加 IP」会打开 Block Design 专用 IP Catalog；选定 IP 并命名后创建实例，随后自动打开定制对话框。
 
-IP 实例的「配置参数」会打开与 Vivado「Re-customize IP」同构的定制对话框：左侧按 IP 自带 XGUI 的页面与分组导航，右侧按参数类型显示复选框、下拉框、十六进制或文本输入，并显示 Vivado 的提示文字与静态说明。修改先以草稿保留，「应用」时一次提交，由 Vivado 校验并回读；依赖不满足的参数会置灰并标注来源。
+IP 实例的「配置参数」会打开与 Vivado「Re-customize IP」同构的配置对话框：左侧按 IP 自带 XGUI 的页面与分组导航，右侧按参数类型显示复选框、下拉框、十六进制或文本输入，并显示 Vivado 的提示文字与静态说明。修改先以草稿保留，「应用」时一次提交，由 Vivado 校验并回读；依赖不满足的参数会置灰并标注来源。
 
 复杂 IP（FIFO Generator、AXI Interconnect、AXI BRAM Controller 等）的界面由 helper proc、循环和字符串生成，静态读取只能拿到部分参数。这类 IP 会请 Vivado 在独立子解释器中执行 IP 自带的 XGUI Tcl，用桩函数回收 ipgui::add_* 调用后还原页面、分组、控件与提示；子解释器在结束后销毁，不会影响工程会话。首次读取某 IP 时多花约百毫秒，结构结果按 XGUI 文件时间戳缓存。
 
-定制对话框里，参数枚举在 Vivado `list_property_value` 为空时改用 IP 包 `component.xml` 的枚举值，因此下拉框仍可正常使用；带 `minimum`/`maximum` 的整数参数显示为数字输入。可用/禁用状态由当前参数值执行 `update_PARAM_VALUE.*` 与 `update_gui_for_PARAM_VALUE.*` 得到：打开对话框、修改参数（防抖后按草稿值回问）和每次应用后都会刷新；被禁用的项会标注“Vivado 按当前参数值禁用，应用后刷新”。XGUI 用 `set_property visible false` 隐藏的页面、分组和参数也会同步隐藏，页面/分组只在其中已无可用参数时才隐藏，避免依赖过程执行顺序造成误隐藏。静态说明会与运行时结果合并，避免 Tcl 命令替换把 `[0x0,0xFFFF]` 这类文本吞掉。对话框标题显示当前 IP 实例名，应用提示也会带上该名称；添加或创建 IP 时会先询问实例名（默认 `<IP名>_0`）。禁用与隐藏状态只就地更新已有控件，不重绘表单，输入焦点不会丢失。IP 管理面板的「定制对话框…」或在列表里双击 IP，会打开同一套分组定制界面；应用后管理面板自动按 XCI 当前值刷新。
+配置对话框里，参数枚举在 Vivado `list_property_value` 为空时改用 IP 包 `component.xml` 的枚举值，因此下拉框仍可正常使用；带 `minimum`/`maximum` 的整数参数显示为数字输入。可用/禁用状态由当前参数值执行 `update_PARAM_VALUE.*` 与 `update_gui_for_PARAM_VALUE.*` 得到：打开对话框、修改参数（防抖后按草稿值回问）和每次应用后都会刷新；被禁用的项会标注“Vivado 按当前参数值禁用，应用后刷新”。XGUI 用 `set_property visible false` 隐藏的页面、分组和参数也会同步隐藏，页面/分组只在其中已无可用参数时才隐藏，避免依赖过程执行顺序造成误隐藏。静态说明会与运行时结果合并，避免 Tcl 命令替换把 `[0x0,0xFFFF]` 这类文本吞掉。对话框标题显示当前 IP 实例名，应用提示也会带上该名称；添加或创建 IP 时会先询问实例名（默认 `<IP名>_0`）。禁用与隐藏状态只就地更新已有控件，不重绘表单，输入焦点不会丢失。IP 管理面板的「配置…」或在列表里双击 IP，会打开同一套分组配置界面；应用后管理面板自动按 XCI 当前值刷新。
 
 编辑操作由 Vivado 写入 `.bd`。工具栏提供地址自动分配、校验并保存传播后的参数、产物生成、将 HDL wrapper 加入工程及导出可重建的 Tcl。板卡预设、专用 IP 配置向导和自动化布线仍可直接在 Vivado IP Integrator 中执行。[AMD IP Integrator 指南](https://docs.amd.com/r/2022.1-English/ug994-vivado-ip-subsystems)
 
