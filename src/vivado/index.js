@@ -85,27 +85,96 @@ function activateVivado(context, deps) {
     }
 
     let versionPrompt = { key: '', until: 0 };
-    /**
-     * 打开工程前核对 .xpr 的创建版本与配置路径的 vivado 版本。
-     * 不一致时阻止操作并引导用户修改 svtools.vivado.path，避免 Vivado 自动升级工程。
-     */
-    async function verifyVivadoVersion(xpr, binDir) {
+    /** 读取工程与工具版本；一致或无法判断时返回 null。 */
+    async function versionMismatch(xpr, binDir) {
         let project;
         try { project = await versionCheck.projectVersion(xpr); }
-        catch (error) { log('[vivado] 读取工程版本失败：' + error.message); return true; }
-        if (!project) return true;
+        catch (error) { log('[vivado] 读取工程版本失败：' + error.message); return null; }
+        if (!project) return null;
         const tool = await versionCheck.vivadoVersion(binDir).catch(() => undefined);
-        if (!tool) { log('[vivado] 无法读取工具版本，跳过版本核验'); return true; }
-        if (versionCheck.same(project, tool)) return true;
+        if (!tool) { log('[vivado] 无法读取工具版本，跳过版本核验'); return null; }
+        if (versionCheck.same(project, tool)) return null;
+        return { project, tool };
+    }
+
+    /**
+     * 顶部输入框直接填写匹配版本的 Vivado 路径；
+     * 校验通过后写入 svtools.vivado.path，并返回可用的 bin 目录。
+     */
+    async function promptVivadoPath(project, tool) {
+        const cfg = vscode.workspace.getConfiguration('svtools.vivado');
+        let value = String(cfg.get('path') || '');
+        const check = input => {
+            const text = String(input || '').trim().replace(/^["']|["']$/gu, '').trim();
+            if (!text) return { error: '请输入 Vivado 安装目录、bin 目录或 vivado.bat 路径' };
+            const dir = findVivadoBinDir(text, process.env, null, process.platform);
+            if (!dir) return { error: '该路径下没有 vivado.bat / vivado' };
+            return { dir };
+        };
+        const promptText = project
+            ? (tool
+                ? '工程由 Vivado ' + project + ' 创建，当前配置的是 Vivado ' + tool + '。请输入 Vivado ' + project + ' 的安装目录（也接受 bin 目录或 vivado.bat 全路径），校验通过后写入 svtools.vivado.path。'
+                : '未找到可用的 Vivado。工程由 Vivado ' + project + ' 创建，请输入 Vivado ' + project + ' 的安装目录（也接受 bin 目录或 vivado.bat 全路径），校验通过后写入 svtools.vivado.path。')
+            : '未找到可用的 Vivado，请输入安装目录（也接受 bin 目录或 vivado.bat 全路径），校验通过后写入 svtools.vivado.path。';
+        const placeholder = '例如 D:\\Xilinx\\Vivado\\' + (project || '2022.1');
+        for (;;) {
+            const entered = await vscode.window.showInputBox({
+                title: project ? 'Vivado 版本不匹配' : '选择 Vivado 安装目录',
+                prompt: promptText,
+                placeHolder: placeholder,
+                value,
+                ignoreFocusOut: true,
+                validateInput: input => check(input).error
+            });
+            if (entered === undefined) return null;
+            value = entered.trim().replace(/^["']|["']$/gu, '').trim();
+            const quick = check(value);
+            if (quick.error) { vscode.window.showErrorMessage(quick.error); continue; }
+            const version = await versionCheck.vivadoVersion(quick.dir).catch(() => undefined);
+            if (!version) { vscode.window.showErrorMessage('无法读取该路径的 Vivado 版本，请检查安装是否完整'); continue; }
+            if (project && !versionCheck.same(project, version)) {
+                vscode.window.showErrorMessage('该路径是 Vivado ' + version + '，需要 Vivado ' + project + '，请重新输入');
+                continue;
+            }
+            const target = vscode.workspace.workspaceFolders?.length
+                ? vscode.ConfigurationTarget.Workspace : vscode.ConfigurationTarget.Global;
+            await cfg.update('path', value, target);
+            binDirCache = null;
+            log('[vivado] 已更新 svtools.vivado.path：' + value + '（Vivado ' + version + '）');
+            return quick.dir;
+        }
+    }
+
+    /** 打开工程前的版本闸门：不匹配时用顶部输入框修复路径，返回本次可用的 binDir。 */
+    async function ensureVivadoVersion(xpr) {
+        let project;
+        try { project = xpr ? await versionCheck.projectVersion(xpr) : undefined; }
+        catch (error) { log('[vivado] 读取工程版本失败：' + error.message); project = undefined; }
+        const binDir = resolveBinDir();
+        if (!binDir) {
+            if (!xpr) return { ok: true, binDir };
+            log('[vivado] 未找到 Vivado，提示填写安装路径');
+            const fixed = await promptVivadoPath(project, null);
+            return fixed ? { ok: true, binDir: fixed } : { ok: false, binDir: null };
+        }
+        if (!project) return { ok: true, binDir };
+        const tool = await versionCheck.vivadoVersion(binDir).catch(() => undefined);
+        if (!tool) { log('[vivado] 无法读取工具版本，跳过版本核验'); return { ok: true, binDir }; }
+        if (versionCheck.same(project, tool)) return { ok: true, binDir };
         log('[vivado] 版本不匹配：工程 ' + project + '，工具 ' + tool);
-        const key = project + '|' + tool;
+        const fixed = await promptVivadoPath(project, tool);
+        return fixed ? { ok: true, binDir: fixed } : { ok: false, binDir: null };
+    }
+
+    /** 会话层兜底：正常入口已由 ensureVivadoVersion 处理，避免绕过闸门时静默执行。 */
+    async function verifyVivadoVersion(xpr, binDir) {
+        const mismatch = await versionMismatch(xpr, binDir);
+        if (!mismatch) return true;
+        const key = mismatch.project + '|' + mismatch.tool;
         if (versionPrompt.key === key && versionPrompt.until > Date.now()) return false;
         versionPrompt = { key, until: Date.now() + 30000 };
-        const pick = await vscode.window.showErrorMessage(
-            '工程由 Vivado ' + project + ' 创建，当前配置的 Vivado 是 ' + tool + '。'
-            + '版本不一致时打开工程可能触发升级并改写工程；请先把 svtools.vivado.path 指向 Vivado '
-            + project + ' 的安装目录，再重试。', '打开设置');
-        if (pick) await vscode.commands.executeCommand('workbench.action.openSettings', 'svtools.vivado.path');
+        const fixed = await promptVivadoPath(mismatch.project, mismatch.tool);
+        if (fixed) vscode.window.showInformationMessage('已更新 Vivado 路径，请重新执行刚才的操作');
         return false;
     }
 
@@ -507,11 +576,6 @@ function activateVivado(context, deps) {
         }
         // 批处理会独占工程；先释放常驻会话，避免两个 Vivado 进程同时持有同一工程。
         await sessions.closeAll();
-        if (input && input.anchor && !(await verifyVivadoVersion(input.anchor, binDir))) {
-            return { ok: false, status: 'failed', code: null, exitCode: null, ms: 0,
-                error: 'Vivado 版本与工程不匹配', message: 'Vivado 版本与工程不匹配',
-                issues: [], stdout: '', logPath: null };
-        }
         return batch();
     }
 
@@ -521,7 +585,14 @@ function activateVivado(context, deps) {
             vscode.window.showWarningMessage('Vivado 正在处理任务，请先等待或停止');
             return { code: null, error: 'busy' };
         }
-        const binDir = resolveBinDir();
+        let binDir = resolveBinDir();
+        const versionTarget = input && typeof input === 'object' ? input.anchor : undefined;
+        if (versionTarget) {
+            // 未配置或不匹配时在顶部输入框让用户填路径，成功后继续本次操作。
+            const check = await ensureVivadoVersion(versionTarget);
+            if (check.ok) binDir = check.binDir;
+            else if (binDir) return { code: null, status: 'cancelled', error: 'version-mismatch' };
+        }
         if (!binDir) {
             const pick = vscode.window.showErrorMessage(
                 '未找到 Vivado（vivado.bat）。请在设置 svtools.vivado.path 中指定安装目录', '打开设置');
@@ -772,8 +843,12 @@ function activateVivado(context, deps) {
         if (running) return { busy: true };
         const current = xpr || await refreshProjectContext();
         if (!current) return { error: '未找到 Vivado 工程（.xpr），请先选择或创建工程' };
-        const binDir = resolveBinDir();
-        if (!binDir) return { error: '未找到 Vivado（vivado.bat），请设置 svtools.vivado.path' };
+        let binDir = resolveBinDir();
+        const versionGate = await ensureVivadoVersion(current);
+        if (!versionGate.ok) {
+            return { error: binDir ? 'Vivado 版本与工程不匹配，已取消读取' : '未找到 Vivado（vivado.bat），请设置 svtools.vivado.path' };
+        }
+        binDir = versionGate.binDir;
         const directory = await summaryDirectory();
         const scriptPath = path.join(directory, 'project_summary.tcl');
         await fs.promises.writeFile(scriptPath, sessionScript(summary.query()), 'utf8');
