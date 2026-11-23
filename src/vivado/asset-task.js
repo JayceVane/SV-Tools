@@ -69,12 +69,16 @@ const helpers = [
     '}'
 ];
 
-function script(xpr, body, { readOnly = false } = {}) {
+function script(xpr, body, { readOnly = false, expectedVersion } = {}) {
     return [
         ...helpers,
         'if {[catch {',
         '    set sv_output [open ' + RESULT_FILE + ' w]',
         '    puts $sv_output SVTOOLS_ASSETS_V1',
+        ...(expectedVersion ? [
+            '    set expected ' + literal(expectedVersion),
+            '    if {![regexp {Vivado\\s+v?([0-9]+(\\.[0-9]+)+)} [version] _ actual] || $actual ne $expected} { error "Vivado project version $expected does not match the selected installation ([version -short])" }'
+        ] : []),
         '    open_project ' + (readOnly ? '-read_only ' : '') + filePath(xpr),
         ...body.map(line => '    ' + line),
         '    close_project',
@@ -148,12 +152,12 @@ function properties(changes, object) {
 }
 
 function requireName(value) {
-    if (!/^[A-Za-z_][A-Za-z0-9_]*$/u.test(value)) throw new Error('名称须以字母或下划线开头，可包含数字');
+    if (typeof value !== 'string' || !/^[A-Za-z_][A-Za-z0-9_]*$/u.test(value)) throw new Error('名称须以字母或下划线开头，可包含数字');
     return literal(value);
 }
 
 function requireVlnv(value) {
-    if (!/^[\w.-]+:[\w.-]+:[\w.-]+:[\w.-]+$/u.test(value)) throw new Error('无效的 Vivado IP VLNV');
+    if (typeof value !== 'string' || !/^[\w.-]+:[\w.-]+:[\w.-]+:[\w.-]+$/u.test(value)) throw new Error('无效的 Vivado IP VLNV');
     return literal(value);
 }
 

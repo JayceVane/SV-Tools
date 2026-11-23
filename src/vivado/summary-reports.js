@@ -131,6 +131,20 @@ function drc(text) {
 }
 
 const parsers = { utilization, timing, power, drc };
+
+async function readReport(kind, file, stat) {
+    const handle = await fs.open(file, 'r');
+    try {
+        const before = stat || await handle.stat();
+        if (!before.isFile()) return null;
+        const buffer = Buffer.alloc(Math.min(MAX_PREFIX, before.size));
+        const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+        if (fileStamp(await handle.stat()) !== fileStamp(before)) return null;
+        return parsers[kind](buffer.subarray(0, bytesRead).toString('utf8'));
+    } finally {
+        await handle.close();
+    }
+}
 const reportName = /^(?:.*_)?(utilization|timing_summary|power|drc)(?:_([a-z0-9-]+))?\.rpt$/iu;
 const stagePriority = { bitstream: 7, routed: 6, route: 6, physopt: 5, postroute: 5, placed: 4, place: 4, opt: 3, opted: 3, synth: 2 };
 const stageOf = phase => stagePriority[phase] || 0;
@@ -156,19 +170,12 @@ function createSummaryReports(workspaceState) {
         const stamp = fileStamp(stat);
         const previous = cache.get(file);
         if (previous?.stamp === stamp) return previous.value;
-        const handle = await fs.open(file, 'r').catch(() => null);
-        if (!handle) return null;
         try {
-            const buffer = Buffer.alloc(Math.min(MAX_PREFIX, stat.size));
-            const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
-            const value = parsers[kind](buffer.subarray(0, bytesRead).toString('utf8'));
-            if (fileStamp(await handle.stat()) !== stamp) return null;
+            const value = await readReport(kind, file, stat);
             keep(cache, file, { stamp, value }, 32);
             return value;
         } catch {
             return null;
-        } finally {
-            await handle.close();
         }
     }
 
@@ -267,4 +274,4 @@ function analysisCommands({ run, kinds }) {
     ];
 }
 
-module.exports = { createSummaryReports, analysisCommands };
+module.exports = { createSummaryReports, analysisCommands, readReport };

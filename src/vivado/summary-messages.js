@@ -9,6 +9,7 @@ const SEVERITY = /^\s*(ERROR|CRITICAL WARNING|WARNING|INFO|STATUS):\s*(.*)$/iu;
 const STEP = /^(?:Command:\s*|#\s*)(synth_design|opt_design|power_opt_design|place_design|phys_opt_design|route_design|write_bitstream)\b/iu;
 const MAX_BYTES = 64 * 1024 * 1024;
 const PAGE_SIZE = 50;
+const entryLimit = level => level === 'info' || level === 'status' ? 5000 : 20000;
 
 const stamp = stat => [stat.dev, stat.ino, stat.size, stat.mtimeMs, stat.ctimeMs].join(':');
 
@@ -16,8 +17,8 @@ async function readLog(file, size) {
     const counts = Object.fromEntries(LEVELS.map(level => [level, 0]));
     const entries = [];
     const countsPartial = size > MAX_BYTES;
-    let lineNumber = 0, step = '', previous, truncated = countsPartial;
-    if (!size) return { counts, entries, countsPartial, truncated, lineCount: 0 };
+    let lineNumber = 0, step = '', previous;
+    if (!size) return { counts, entries, countsPartial, lineCount: 0 };
     const stream = fs.createReadStream(file, { end: Math.min(size, MAX_BYTES) - 1, encoding: 'utf8' });
     const lines = createInterface({ input: stream, crlfDelay: Infinity });
     for await (const line of lines) {
@@ -27,8 +28,7 @@ async function readLog(file, size) {
             const level = LEVEL_BY_NAME[match[1].toUpperCase()];
             const [, id = '', text = match[2]] = /^(?:\[([^\]]+)\]\s*)?(.*)$/u.exec(match[2]) || [];
             counts[level]++;
-            const limit = level === 'info' || level === 'status' ? 5000 : 20000;
-            if (counts[level] > limit) { truncated = true; previous = null; continue; }
+            if (counts[level] > entryLimit(level)) { previous = null; continue; }
             previous = { level, id, text: text.slice(0, 4096), line: lineNumber, step };
             entries.push(previous);
             continue;
@@ -39,7 +39,7 @@ async function readLog(file, size) {
             previous.text = (previous.text + '\n' + line.trim()).slice(0, 4096);
         } else previous = null;
     }
-    return { counts, entries, countsPartial, truncated, lineCount: lineNumber };
+    return { counts, entries, countsPartial, lineCount: lineNumber };
 }
 
 function createSummaryMessages() {
@@ -77,7 +77,7 @@ function createSummaryMessages() {
             }
             return Object.fromEntries(summary);
         },
-        page(paths, { run, level, search, offset }) {
+        page(paths, { run, level, search, offset, limit = PAGE_SIZE }) {
             const query = typeof search === 'string' ? search.slice(0, 160).trim().toLowerCase() : '';
             const start = Number.isSafeInteger(offset) && offset > 0 ? offset : 0;
             const items = [];
@@ -87,14 +87,15 @@ function createSummaryMessages() {
                 const snapshot = logs.get(log);
                 if (!snapshot) continue;
                 available = true;
-                truncated ||= snapshot.truncated;
+                const levels = level ? [level] : LEVELS;
+                truncated ||= snapshot.countsPartial || levels.some(key => snapshot.counts[key] > entryLimit(key));
                 for (const entry of snapshot.entries) {
                     if (level && level !== entry.level) continue;
                     if (query && ![entry.id, entry.text, entry.step, id].join(' ').toLowerCase().includes(query)) continue;
-                    if (total++ >= start && items.length < PAGE_SIZE) items.push({ run: id, ...entry });
+                    if (total++ >= start && items.length < limit) items.push({ run: id, ...entry });
                 }
             }
-            return { items, total, available, truncated, offset: start, size: PAGE_SIZE };
+            return { items, total, available, truncated, offset: start, size: limit };
         },
         location(paths, run, line) {
             if (!Object.hasOwn(paths, run)) return undefined;

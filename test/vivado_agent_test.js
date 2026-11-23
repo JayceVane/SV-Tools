@@ -6,9 +6,10 @@ const path = require('node:path');
 const os = require('node:os');
 const tasks = require('../src/agent/tasks');
 const { status, report, run, createProject, addFiles, setTop } = require('../src/agent/vivado');
-const { argumentsFor } = require('../src/cli/main');
+const { argumentsFor, run: cli } = require('../src/cli/main');
 const { doctor } = require('../src/agent/operations');
 const { resolveContext } = require('../src/agent/context');
+const { command: assetCommand } = require('../src/agent/vivado-assets');
 
 async function fixture(t) {
     const workspace = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'svtools-vivado-agent-')));
@@ -20,6 +21,11 @@ async function fixture(t) {
 // 与真实2022.1.2输出同构：版本/器件/tops/runs、时序路径数值与null。
 const statusMarkers = 'SVTOOLS_JSON {"version":"2022.1.2","part":"xc7z100ffg900-2","tops":{"sources":"sfifo","sim":null},"runs":[{"name":"synth_1","status":"synth_design Complete!","progress":"100%"}]}\nSVTOOLS_DONE\n';
 const timingMarkers = 'SVTOOLS_JSON {"run":"impl_1","paths":[{"name":"a/C --> b/D","slack":0.123,"startpoint":"a/C","endpoint":"b/D","pathgroup":null,"logic":3}]}\nSVTOOLS_DONE\n';
+async function assetRows(directory, rows) {
+    await fs.writeFile(path.join(directory, 'assets.tsv'), ['SVTOOLS_ASSETS_V1',
+        ...rows.map(([kind, ...fields]) => [kind, ...fields.map(value => Buffer.from(value).toString('hex'))].join('\t')), 'END'].join('\n'));
+    return 'SVTOOLS_DONE\n';
+}
 async function completedRun({snapshot}) {
     const checkpoint=path.join(snapshot.root,'mock.dcp');await fs.writeFile(checkpoint,'isolated checkpoint');
     return 'SVTOOLS_RUN_STATUS synth_design Complete! 100%\nSVTOOLS_RUN_VERSION 2022.1.2\nSVTOOLS_CHECKPOINT '+checkpoint+'\nSVTOOLS_DONE\n';
@@ -60,6 +66,61 @@ test('资源报告按分层表解析为行摘要并给出文本字节预算', as
     assert(Array.isArray(output.data.summary));
     assert(output.data.summary[0].includes('top 自身'), JSON.stringify(output.data.summary));
     assert(output.data.textBytes > 0);
+});
+
+test('功耗报告返回同一检查点的组件阈值，命令失败时不返回零功耗', async t => {
+    const workspace = await fixture(t);
+    const input = { workspace, project: 'top.xpr', kind: 'power', run: 'production' };
+    const output = await report(input, { runner: async ({ script, runDirectory }) => {
+        assert.match(script, /open_project -read_only/u);
+        assert.match(script, /report_power -file/u);
+        await fs.writeFile(path.join(runDirectory, 'summary_power.rpt'), [
+            '| Total On-Chip Power (W) | 0.105 |', '| Dynamic (W) | 0.001 |', '| Device Static (W) | 0.104 |',
+            '| Confidence Level | Medium |', '1.1 On-Chip Components', '| Clocks | <0.001 |', '1.2 Power Supply Summary'
+        ].join('\n'));
+        return assetRows(runDirectory, []);
+    } });
+    assert.equal(output.data.run, 'production');
+    assert.equal(output.data.stale, null);
+    assert.deepEqual(output.data.power.components, [{ label: 'Clocks', watts: null, below: 0.001 }]);
+    assert(output.artifacts.some(item => item.kind === 'report' && item.path.endsWith('summary_power.rpt')));
+    await assert.rejects(report(input, { runner: ({ runDirectory }) =>
+        assetRows(runDirectory, [['analysis_error', 'power', 'checkpoint incomplete']]) }), { code: 'VIVADO_SCRIPT_FAILED' });
+});
+
+test('原工程消息按自定义顶层 run 筛选分页并保留日志位置', async t => {
+    const workspace = await fixture(t);
+    const input = { workspace, project: 'top.xpr', run: 'production', severity: 'critical-warning', limit: 1, query: 'timing' };
+    const runDir = path.join(workspace, 'top.runs', 'production');
+    await fs.mkdir(runDir, { recursive: true });
+    const log = path.join(runDir, 'runme.log');
+    await fs.writeFile(log, 'Command: route_design\nWARNING: [Route 35-1] Timing\nCRITICAL WARNING: [Timing 38-1] First\nCRITICAL WARNING: [Timing 38-2] Second\n');
+    const row = (id, source) => ['run', id, 'Complete!', '100%', '', '0', '', '', '', '', '', '', '', '1', '', source, '', '0'];
+    const runner = ({ runDirectory }) => assetRows(runDirectory, [
+        ['project', 'top', 'x', workspace, 'top', ''], ['current_runs', '', 'production'], ['fileset', 'rtl', 'DesignSrcs'],
+        ['fileset', 'child', 'BlockSrcs'], row('production', 'rtl'), row('production_child', 'child')
+    ]);
+    const { data } = await assetCommand('messages', undefined, input, { runner });
+    assert.equal(data.source, 'project');
+    assert.equal(data.counts.production.counts.criticalWarnings, 2);
+    assert.equal(data.nextOffset, 1);
+    assert.deepEqual(data.items.map(item => [item.run, item.id, item.file, item.line]), [['production', 'Timing 38-1', log, 3]]);
+    await assert.rejects(assetCommand('messages', undefined, { ...input, run: 'production_child' }, { runner }), { code: 'VIVADO_RUN_NOT_FOUND' });
+});
+
+test('资产 CLI 清单无需工具，项目成员与 BD 版本不匹配时不执行写入', async t => {
+    const workspace = await fixture(t);
+    const file = path.join(workspace, 'fabric.bd');
+    await fs.writeFile(file, '{}');
+    await fs.writeFile(path.join(workspace, 'top.xpr'),
+        '<Project><FileSets><FileSet Name="sources_1" Type="DesignSrcs"><File Path="fabric.bd"/><File Path="clock.xci"/></FileSet></FileSets></Project>');
+    const listed = await cli(['vivado', 'ip', 'list', '--workspace', workspace, '--project', 'top.xpr', '--query', 'clock']);
+    assert.equal(listed.output.operation, 'vivado.ip.list');
+    assert.deepEqual(listed.output.data.items, [{ name: 'clock', fileset: 'sources_1', file: path.join(workspace, 'clock.xci') }]);
+    const runner = () => assert.fail('无效请求启动了 Vivado');
+    await assert.rejects(assetCommand('ip', 'generate', { workspace, file: 'unrelated.xci' }, { runner }), { code: 'ASSET_NOT_FOUND' });
+    await assert.rejects(assetCommand('bd', 'edit', { workspace, file, expect: '0'.repeat(64),
+        spec: '{"action":"add-cell","type":"hier","name":"nested"}' }, { runner }), { code: 'CONTEXT_CHANGED' });
 });
 
 test('错误marker优先于结果，缺结果与非法输入明确失败', async t => {
@@ -178,10 +239,11 @@ test('XDC变化改变上下文revision，报告据此可判失效', async t => {
     assert.notEqual(second.context.revision, first.context.revision);
 });
 
-test('doctor能力清单包含工程生命周期命令', async t => {
+test('doctor能力清单包含工程生命周期、报告和资产命令', async t => {
     const workspace = await fixture(t);
     const output = await doctor({ workspace });
-    for (const name of ['project.create', 'project.add', 'project.set-top']) assert(output.data.capabilities.includes(name), name);
+    for (const name of ['project.create', 'project.add', 'project.set-top', 'vivado.messages', 'vivado.overview', 'vivado.report.power',
+        'vivado.ip.catalog', 'vivado.ip.configure', 'vivado.bd.inspect', 'vivado.bd.edit']) assert(output.data.capabilities.includes(name), name);
 });
 
 test('DRC脚本先执行report_drc再读取违规对象', () => {

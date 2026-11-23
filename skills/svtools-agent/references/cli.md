@@ -125,16 +125,17 @@ node src/cli/main.js task cancel <task-id> --workspace D:/project
 | `VCD_PARSE`、`WAVE_FORMAT_UNSUPPORTED` | VCD 语法/编码损坏，或波形格式不受支持 | 修复重新仿真，或改用 VCD/FST；不得截断后继续 |
 | `SERVICE_FAILED` | 未分类失败 | 读 `diagnostics` 与对应日志产物 |
 
-## Vivado（M2）
+## Vivado
 
 `--project` 指向 `.xpr`；`--vivado`（安装根目录、bin 目录或 vivado.bat）或 CLI 配置中的 `vivado` 指定安装位置。
 
 - `vivado status`：Vivado 版本、器件、sources/sim 两种 top、全部 run 的状态与进度。
-- `vivado report timing|utilization|drc [--run synth_1|impl_1] [--max-paths n]`：
-  - 默认 run：timing/drc 用 impl_1，utilization 用 synth_1；
+- `vivado report timing|utilization|drc|power [--run <id>] [--max-paths n]`：
+  - timing、DRC 和 power 默认使用 `impl_1`，utilization 默认使用 `synth_1`。以工程实际运行名覆盖默认值。
   - `timing`：`paths[]`（name/startpoint/endpoint/slack/pathgroup/logic），数值为 JSON number，不可测属性为 `null`；
   - `utilization`：`summary[]` 分层行摘要与 `textBytes`；
   - `drc`：先执行本次 DRC 再读取违规对象，`checked=1`，`violations[]`（name/rule/severity）；
+  - `power`：从选定运行的检查点执行 `report_power`，返回 `power`（总量 `total`、动态 `dynamic`、静态 `static`、`confidence` 和组件 `components[]`，单位 W）。组件只报告阈值时给出 `below`，原始报告路径随 `artifacts` 返回。`source` 区分 `project` 原工程和 `agent-build` 隔离构建。
   - 报告优先打开该次隔离构建，附带 `runInfo`（id、状态、完成时间、revision、实际工程与工具版本）、`stale`/`staleInputs` 和 `configurationChanged`。源码、约束、top、器件、宏、include、文件属性或运行策略变化会使记录过期；没有可验证记录时 `stale=null`，不会把旧记录升级为当前证据。
   - 工程无法打开、run 阶段未完成或工具执行失败时分别返回 `VIVADO_SCRIPT_FAILED`、`VIVADO_EXEC_FAILED`，不以空数据代替未执行。
 - `vivado run [--run synth_1|impl_1] [--jobs n]`：后台任务，用 `task status/logs/cancel` 管理。每轮从捕获的工程设置、源码、头文件与XDC建立独立副本并重新构建；实现run会先构建其综合依赖。只有明确完成且检查点通过校验时才写成功记录。运行前后复核原始输入，变化返回 `CONTEXT_CHANGED`；失败/取消不会继续引用上一次成功报告。
@@ -153,6 +154,43 @@ node src/cli/main.js task cancel <task-id> --workspace D:/project
 - `verification`：验证做到哪一步（`checks[]`、`acceptance`）。当前 `acceptance=false` 表示只有构建/检查，**不代表功能验证通过**。
 
 Agent 不得把 `execution.success` 当作 `inputs.complete`，也不得把任一轴当作 `verification.acceptance`。
+
+### 原工程概览与消息
+
+- `vivado overview` 返回当前综合/实现 run、顶层运行状态和 `runMessages`。现有报告按 `reports.utilization.synthesis/implementation`、`reports.timing/power/drc` 返回，并标注运行名、阶段和文件。时序数据包含报告中可取得的 Setup、Hold、Pulse Width 指标。缺失报告时该项缺省。查询使用原工程现有产物，报告的 `stale` 取自 Vivado 运行状态。
+- `vivado messages [--run <id>] [--severity error|critical-warning|warning|info|status] [--query <text>] [--offset n] [--limit n]` 读取原工程顶层 run 的 `runme.log`。每条含 `id`、`step`、`text`、`file` 和原日志 `line`。默认每页 50 条，可指定 1 至 200 条并用 `nextOffset` 续查。未选 run 时查询全部顶层 run。无日志时 `available=false`。超出索引预算时 `truncated=true`，只统计了文件前部时 `countsPartial=true`。
+
+### IP 与 Block Design
+
+这组命令的 `data.source` 为 `project`。路径可相对 `--workspace`，修改类命令作用于选中的原工程。已知 XPR 创建版本与 Vivado 安装不一致时，资产命令在打开工程前退出。
+
+| 命令 | 输入与结果 |
+| --- | --- |
+| `vivado ip catalog [--query <text>]` | 查询当前器件可用的 IP 定义，返回完整 VLNV、名称、描述和分类，可用 `--offset/--limit` 分页。 |
+| `vivado ip list [--query <text>]` / `vivado ip repositories` | 分别列出项目的 IP 文件和 IP 仓库。 |
+| `vivado ip inspect --file <xci/xcix>` | 查询运行时参数、候选值、锁定状态和目标。IP 包提供的参数标签与说明会一并返回。 |
+| `vivado ip create --name <name> --vlnv <vlnv>` / `vivado ip import --file <xci/xcix> [--copy]` | 分别实例化 IP 和加入现有 IP。导入默认引用原文件，`--copy` 复制到工程。 |
+| `vivado ip configure --file <xci/xcix> --spec <json/文件>` | JSON 数组形如 `[{"key":"CONFIG.CONST_WIDTH","before":"1","value":"4"}]`。Vivado 在写入前核对每项旧值，返回重读的真实参数。 |
+| `vivado ip generate/template/upgrade/synthesize --file <xci/xcix>` | 生成产物、例化模板、升级 IP 或执行 OOC 综合。`generate --target` 接受 `all/synthesis/simulation/instantiation_template/example_design/changelog`。`template --language` 接受 `verilog/vhdl`，文件路径由 `artifacts` 返回。 |
+| `vivado bd list` / `vivado bd inspect --file <bd>` | 列出工程里的 BD 文件，或读取指定 BD 的层级实例、端点、网络、地址空间与 `stamp`。 |
+| `vivado bd create --name <name>` / `vivado bd import --file <bd>` | 新建 BD 或引用现有 BD。 |
+| `vivado bd edit --file <bd> --expect <stamp> --spec <json/文件>` | 应用一次编辑，返回最新结构和 `stamp`。 |
+| `vivado bd validate/generate/wrapper/export --file <bd>` | 验证设计、生成输出、导入 HDL wrapper 或导出重建 Tcl。`validate` 需要 Vivado 可写会话来推导接口参数，验证命令不保存设计。 |
+
+`bd edit` 规格示例
+
+```json
+{"action":"add-cell","type":"ip","reference":"xilinx.com:ip:xlconstant:1.1","name":"fixed_value"}
+```
+
+其他动作使用 `bd inspect` 返回的实际 ID。
+
+- `add-cell` 的 `type` 可为 `ip/module/hier`，可用 `parent` 指定层级实例。普通端口用 `add-port`，字段为 `name/direction/width/type`，方向可为 `I/O/IO`，类型可为 `data/clk/rst`。接口端口用 `add-interface-port`，字段为 `name/mode/vlnv`。
+- `connect` 使用 `from/to` 端点对象，可用 `level` 指定层级。端点包含 `kind/id`，`kind` 为 `pin/port/interface_pin/interface_port`。`disconnect` 使用 `net/endpoint`，网络对象包含 `kind/id`。用 `externalize` 引出 `endpoint`。
+- `configure-cell` 使用 `id/changes`，`configure-port` 使用 `endpoint/changes`。配置项字段与 `ip configure` 一致。
+- `assign-addresses` 自动分配。用 `map-address` 指定 `space/segment/offset/range`，用 `set-address` 指定 `id/offset/range`。地址和范围采用 `0x` 前缀。
+
+命令报告退出失败时，先读诊断和最新资产状态。IP 的旧值变化或 BD 的 `stamp` 不匹配后，重新读取并按实际状态重新决策。
 
 工程写操作：
 

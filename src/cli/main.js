@@ -5,6 +5,7 @@ const services = require('../agent/operations');
 const workflow = require('../design/workflow');
 const tasks = require('../agent/tasks');
 const vivado = require('../agent/vivado');
+const vivadoAssets = require('../agent/vivado-assets');
 const { fail, failure } = require('../agent/protocol');
 
 const help=`SV Tools headless CLI (API 1)
@@ -16,8 +17,19 @@ const help=`SV Tools headless CLI (API 1)
   format --file <path> [--check|--write]
   lint [--file <path>] [--top <module>]
   vivado status
-  vivado report timing|utilization|drc [--run synth_1|impl_1]
+  vivado report timing|utilization|drc|power [--run <id>]
   vivado run [--run synth_1|impl_1] [--jobs <n>]
+  vivado overview
+  vivado messages [--run <id>] [--severity error|critical-warning|warning|info|status] [--query <text>]
+  vivado ip catalog|list [--query <text>]
+  vivado ip repositories
+  vivado ip create --name <n> --vlnv <vendor:library:name:version>
+  vivado ip inspect|import|configure|generate|template|upgrade|synthesize --file <xci|xcix>
+            [--copy] [--spec <json|file>] [--target <target>] [--language verilog|vhdl]
+  vivado bd list [--query <text>]
+  vivado bd create --name <n>
+  vivado bd inspect|import|edit|validate|generate|wrapper|export --file <bd>
+            [--expect <stamp> --spec <json|file>]
   design arch --top <module> [--engine struct|yosys] [--depth <n>] [--save <name>]
   struct parse [--file <hdl>]
   design lower [--file <hdl>] [--out <dir>]
@@ -69,6 +81,8 @@ function argumentsFor(argv) {
     const options=Object.fromEntries(strings.map(name=>[name,{type:'string'}]));
     for(const name of ['help','version','json','write','check','fold-ports','force']) options[name]={type:'boolean'};
     for(const name of ['note','body','topic','expect','engine','browser']) options[name]={type:'string'};
+    for(const name of ['severity','vlnv','target','language']) options[name]={type:'string'};
+    options.copy={type:'boolean'};
     for(const name of ['symbol','final']) options[name]={type:'boolean'};
     options.include={type:'string',multiple:true}; options.define={type:'string',multiple:true}; options.source={type:'string',multiple:true};
     options['bundle-name']={type:'string',multiple:true}; options.where={type:'string',multiple:true};
@@ -106,8 +120,12 @@ async function run(argv) {
         else if(command==='project' && action==='set-top' && !id) output=await vivado.setTop(input);
         else if(command==='format' && !action) output=await services.format(input);
         else if(command==='vivado' && action==='status' && !id) output=await vivado.status(input);
-        else if(command==='vivado' && action==='report' && ['timing','utilization','drc'].includes(id)) output=await vivado.report({...input,kind:id});
+        else if(command==='vivado' && action==='report' && ['timing','utilization','drc','power'].includes(id)) output=await vivado.report({...input,kind:id});
         else if(command==='vivado' && action==='run' && !id) output=await tasks.start({...input,operation:'vivado.run'});
+        else if(command==='vivado' && ['overview','messages','ip','bd'].includes(action)) {
+            operation='vivado.'+action+(id?'.'+id:'');
+            output=await vivadoAssets.command(action,id,input);
+        }
         else if(command==='note' && !id) output=await require('../design/note-service').command(action, input);
         else if(!id && (command==='struct' && action==='parse' || command==='design' && action==='lower')) output=await require('../design/struct').command(action, input);
         else if(command==='design' && action==='plan' && !id) output=await workflow.createPlan(input);

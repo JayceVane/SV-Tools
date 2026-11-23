@@ -63,7 +63,9 @@ const inspect = [
 const info = file => [...select(file), ...inspect];
 
 const configure = (file, changes, { readBack = false } = {}) => [
-    ...select(file), ...properties(changes, '$ip'), ...(readBack ? inspect : [])
+    ...select(file),
+    'if {[sv_prop $ip IS_LOCKED] in {1 true}} { error "IP is locked: $ip" }',
+    ...properties(changes, '$ip'), ...(readBack ? inspect : [])
 ];
 const TARGETS = ['all', 'synthesis', 'simulation', 'instantiation_template', 'example_design', 'changelog'];
 

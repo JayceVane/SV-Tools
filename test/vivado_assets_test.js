@@ -124,7 +124,8 @@ test('运行消息按日志统计级别，支持筛选分页、原始行号和�
     const critical = ['Command: route_design', 'CRITICAL WARNING: [Timing 38-35] Timing verification failed.',
         '  Generated clock is missing.', 'INFO: [Route 35-1] Info message.', 'STATUS: Complete'].join('\r\n');
     await Promise.all([
-        fs.writeFile(synthLog, ['# synth_design -top demo', ...Array.from({ length: 52 }, (_, i) => `WARNING: [Synth 8-${i}] Sample ${i}`)].join('\n')),
+        fs.writeFile(synthLog, ['# synth_design -top demo', ...Array.from({ length: 52 }, (_, i) => `WARNING: [Synth 8-${i}] Sample ${i}`),
+            'INFO: Tool output\n'.repeat(5001)].join('\n')),
         fs.writeFile(implLog, critical)
     ]);
     const messages = createSummaryMessages();
@@ -133,6 +134,8 @@ test('运行消息按日志统计级别，支持筛选分页、原始行号和�
     assert.deepEqual(first.impl_1.counts, { errors: 0, criticalWarnings: 1, warnings: 0, info: 1, status: 1 });
     const secondPage = messages.page(paths, { run: 'synth_1', level: 'warnings', offset: 50 });
     assert.equal(secondPage.total, 52);
+    assert.equal(secondPage.truncated, false);
+    assert.equal(messages.page(paths, { run: 'synth_1', level: 'info' }).truncated, true);
     assert.deepEqual(secondPage.items.map(item => item.line), [52, 53]);
     assert.deepEqual(messages.page(paths, { run: 'impl_1', level: 'criticalWarnings', search: 'generated CLOCK' }).items, [{
         run: 'impl_1', level: 'criticalWarnings', id: 'Timing 38-35', step: 'route_design', line: 2,

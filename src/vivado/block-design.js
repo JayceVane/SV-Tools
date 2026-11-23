@@ -203,11 +203,12 @@ function mapAddress(file, { space, segment, offset, range }) {
 }
 
 const assignAddresses = file => [...select(file), ...edit(['assign_bd_address'])];
-const validate = file => [...select(file), ...edit(['validate_bd_design'])];
+const check = file => [...select(file), 'validate_bd_design'];
+const validate = file => edit(check(file));
 const generate = file => [...validate(file), 'generate_target all $bd'];
 const wrapper = file => [...generate(file), 'make_wrapper -files $bd -top -import', 'update_compile_order -fileset [current_fileset]'];
 const exportTcl = file => [...select(file), 'write_bd_tcl [file join [pwd] block-design.tcl]', 'sv_row artifact block-design.tcl'];
 
 module.exports = { create, importSource, read, inspect, snapshot, isInterface, addCell, parameters, configure, connect, disconnect, remove,
     externalize, addPort, addInterfacePort, portParameters, configurePort, assignAddresses, setAddress, mapAddress, addressValue,
-    validate, generate, wrapper, exportTcl };
+    check, validate, generate, wrapper, exportTcl };

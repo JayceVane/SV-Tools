@@ -13,10 +13,14 @@ const { acquireWorkspaceLease } = require('../toolchains/workspace-lease');
 const { keyOf, inside } = require('../project/model');
 const { captureInputs, materialize, verifyCopies, checkpoints, fileIdentity, pruneCache, budgetOf } = require('./vivado-inputs');
 const tclgen = require('../vivado/tclgen');
+const assets = require('../vivado/asset-task');
+const { analysisCommands, readReport } = require('../vivado/summary-reports');
+const { projectVersion } = require('../vivado/version');
 
 const RUN_NAME = /^(?:synth|impl)_\d+$/;
+const REPORT_RUN_NAME = /^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$/;
 /** 报告类型到默认run：时序与DRC需要实现后的真实数据，资源报告综合后即可用。 */
-const REPORT_DEFAULT_RUN = { timing: 'impl_1', utilization: 'synth_1', drc: 'impl_1' };
+const REPORT_DEFAULT_RUN = { timing: 'impl_1', utilization: 'synth_1', drc: 'impl_1', power: 'impl_1' };
 
 async function locateVivado(options) {
     const bin = options.vivado ? normalizeVivadoDir(path.resolve(options.workspace, options.vivado)) : findVivadoBinDir('');
@@ -27,11 +31,11 @@ async function locateVivado(options) {
 }
 
 /** Vivado操作必须绑定明确的.xpr工程；工作区模式没有可推断的工程身份。 */
-async function vivadoTarget(input) {
+async function vivadoTarget(input, runName = RUN_NAME) {
     const resolved = await resolveContext(input), { options, context } = resolved;
     if (!context.project || context.project.kind !== 'vivado') fail('VIVADO_PROJECT_REQUIRED', 'Vivado操作要求--project指向.xpr工程', { project: options.project || null });
     const run = options.run || null;
-    if (run && !RUN_NAME.test(run)) fail('INVALID_ARGUMENT', 'run名称必须形如synth_1或impl_1');
+    if (run && !runName.test(run)) fail('INVALID_ARGUMENT', '无效的 Vivado run 名称', { run });
     return { ...resolved, xpr: context.project.path, run };
 }
 
@@ -116,6 +120,18 @@ function lifecycle(stdout, summary, logs = []) {
     const lines = String(stdout || '').split(/\r?\n/);
     if (!lines.some(line => line.startsWith('SVTOOLS_DONE'))) fail('VIVADO_SCRIPT_FAILED', (summary && summary.message) || 'Vivado脚本未正常结束', { markers: lines.filter(line => line.startsWith('SVTOOLS_')).slice(0, 5) });
     return lines;
+}
+
+async function executeAsset(options, xpr, body, { runner, readOnly = true } = {}) {
+    const script = assets.script(xpr, body, { readOnly, expectedVersion: await projectVersion(xpr) });
+    const output = await execute(options, script, { runner });
+    lifecycle(output.stdout, output.summary, output.logs);
+    const artifacts = artifactLogs(output.logs);
+    try {
+        return { rows: await assets.readRows(output.runDirectory), directory: output.runDirectory, artifacts };
+    } catch (error) {
+        fail('VIVADO_RESULT_INVALID', error.message, { artifacts });
+    }
 }
 /** batch运行器的stdout同时含marker集合与完整输出，同一marker会出现两次；按值去重保留首次顺序。 */
 function tagged(lines, prefix) { return [...new Set(lines.filter(line => line.startsWith(prefix)).map(line => line.slice(prefix.length).trim()).filter(Boolean))]; }
@@ -273,11 +289,23 @@ async function ensureInputsCurrent(resolved,run,captured) {
 }
 
 async function report(input, { runner } = {}) {
-    const resolved=await vivadoTarget(input), { options, context, xpr, run } = resolved;
+    const resolved=await vivadoTarget(input, REPORT_RUN_NAME), { options, context, xpr, run } = resolved;
     const kind = input.kind || 'timing';
-    if (!REPORT_DEFAULT_RUN[kind]) fail('INVALID_ARGUMENT', '报告类型必须为timing、utilization或drc');
+    if (!Object.hasOwn(REPORT_DEFAULT_RUN, kind)) fail('INVALID_ARGUMENT', '报告类型必须为timing、utilization、drc或power');
     const selected = run || REPORT_DEFAULT_RUN[kind];
     const binding=await runBinding(options,xpr,selected,()=>captureInputs(resolved,selected)), captured=binding.captured;
+    if (kind === 'power') {
+        const { rows, directory, artifacts } = await executeAsset(options, binding.project,
+            analysisCommands({ run: selected, kinds: [kind] }), { runner });
+        const issue = assets.rowsOf(rows, 'analysis_error')[0]?.[1];
+        if (issue) fail('VIVADO_SCRIPT_FAILED', issue, { artifacts });
+        const file = path.join(directory, 'summary_power.rpt');
+        const power = await readReport(kind, file).catch(() => null);
+        if (!power) fail('VIVADO_NO_RESULT', 'Vivado 未生成可解析的功耗摘要', { artifacts });
+        const current = captured ? await ensureInputsCurrent(resolved, selected, captured) : context;
+        const source = captured ? 'agent-build' : 'project';
+        return result('vivado.report', { kind, run: selected, source, power, ...binding.data }, current, [], [...artifacts, { kind: 'report', path: file }]);
+    }
     if (kind === 'utilization') {
         const { stdout, summary: utilSummary, logs } = await execute(options, tclgen.buildVivadoUtilizationScript({ xprPath: binding.project, run: selected }), { runner });
         ensureSucceeded(utilSummary, stdout, logs);
@@ -369,4 +397,5 @@ async function run(input, { signal, onContext, onArtifacts, runner } = {}) {
     }
 }
 
-module.exports = { status, report, run, createProject, addFiles, setTop, locateVivado, vivadoTarget, incrementalStatus, reuseSummary, readRunLog };
+module.exports = { status, report, run, createProject, addFiles, setTop, locateVivado, vivadoTarget, incrementalStatus, reuseSummary, readRunLog,
+    executeAsset };
