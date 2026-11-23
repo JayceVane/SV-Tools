@@ -337,3 +337,48 @@ test('求值结果只打补丁：控件节点不变、焦点保留', () => {
         hidden: { pages: [], groups: ['page'], params: [] } } });
     assert.equal(ui.rows()[1].hidden, true);
 });
+
+function fakeManager() {
+    const posted = [], listeners = [], disposals = [];
+    const panel = {
+        webview: {
+            html: '', cspSource: 'vscode-resource:',
+            asWebviewUri: uri => ({ toString: () => 'file:///' + uri.fsPath.replace(/\\/gu, '/') }),
+            onDidReceiveMessage(callback) { listeners.push(callback); return { dispose() {} }; },
+            postMessage(message) { posted.push(message); }
+        },
+        reveal() {},
+        onDidDispose(callback) { disposals.push(callback); return { dispose() {} }; },
+        dispose() { for (const callback of disposals) callback(); }
+    };
+    const vscode = {
+        Uri: { joinPath: (base, ...parts) => ({ fsPath: [base.fsPath, ...parts].join('/') }) },
+        ViewColumn: { Active: -1 },
+        window: { createWebviewPanel: () => panel }
+    };
+    return { panel, posted, listeners, vscode, context: { extensionUri: { fsPath: 'C:/ext' }, subscriptions: [] } };
+}
+
+test('IP 管理面板：定制动作交给宿主并刷新状态', async () => {
+    const { openIpPanels } = require('../src/vivado/ip-view');
+    const ui = fakeManager();
+    const calls = [];
+    const panels = openIpPanels(ui.context, ui.vscode, async (xpr, action, target, info) => {
+        calls.push([action, target?.id, info?.name]);
+        if (action === 'load') return { info: { name: 'fifo_0', vlnv: 'xilinx.com:ip:fifo_generator:13.2',
+            parameters: [], notes: [], hidden: { pages: [], groups: [], params: [] }, locked: false, preview: false, actions: [] } };
+        if (action === 'configure') return { message: '已打开 IP 定制对话框' };
+        return {};
+    });
+    panels.open({ xpr: 'D:/p.xpr', members: [{ id: 0, file: 'D:/ip/fifo_0.xci', fileset: 'sources_1',
+        label: 'fifo_0.xci', description: 'sources_1', detail: 'ip/fifo_0.xci' }] });
+    const listener = ui.listeners[0];
+    listener({ action: 'ready' });
+    await new Promise(resolve => setTimeout(resolve, 20));
+    const snapshot = ui.posted.filter(message => message.type === 'snapshot').at(-1);
+    assert.equal(snapshot.info.name, 'fifo_0');
+    listener({ action: 'configure', revision: snapshot.revision, id: snapshot.selected });
+    await new Promise(resolve => setTimeout(resolve, 20));
+    assert.ok(calls.some(([action, id]) => action === 'configure' && id === snapshot.selected));
+    assert.match(ui.posted.filter(message => message.type === 'snapshot').at(-1).status, /定制对话框/u);
+});

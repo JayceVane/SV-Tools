@@ -50,7 +50,7 @@
         $('ip-apply').disabled = state.busy || state.loading || !count || blocked || state.info.locked || state.info.preview;
         $('ip-revert').disabled = state.busy || !count;
         for (const control of document.querySelectorAll('[data-command], [data-member]')) control.disabled = state.busy;
-        for (const control of document.querySelectorAll('[data-ip-action]')) control.disabled = state.busy || state.loading;
+        for (const control of document.querySelectorAll('[data-ip-action]')) control.disabled = state.busy || state.loading || Boolean(state.info?.preview);
         for (const field of document.querySelectorAll('[data-parameter]')) {
             const parameter = parameters.get(field.dataset.parameter);
             if (!parameter) continue;
@@ -68,6 +68,7 @@
         const members = state.members.filter(item => `${item.label} ${item.description} ${item.detail}`.toLowerCase().includes(filter));
         const elements = members.map(item => {
             const row = button(undefined, () => send('select', { id: item.id }), { member: item.id });
+            row.ondblclick = () => send('configure', { id: item.id });
             row.className = 'member';
             row.setAttribute('aria-current', item.id === state.selected ? 'true' : 'false');
             row.title = item.detail;
@@ -193,7 +194,9 @@
             text('ip-locked', info.preview ? '已保存参数 · 预览' : '已锁定 · 只读');
             $('ip-upgrade').hidden = !info.upgrade;
             text('ip-upgrade', info.upgrade ? '可用升级 ' + info.upgrade : '');
-            $('ip-operations').replaceChildren(...info.actions.map(action =>
+            const configure = button('定制对话框…', () => send('configure'), { ipAction: 'configure' });
+            configure.title = '按 XGUI 分组编辑参数（与 Vivado Re-customize IP 一致）';
+            $('ip-operations').replaceChildren(configure, ...info.actions.map(action =>
                 button(action.label, () => send(action.id, target()), { ipAction: action.id })));
             renderParameters();
         } else {

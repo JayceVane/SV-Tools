@@ -356,6 +356,14 @@ function activateAssetCommands(context, { vscode, findProjectXpr, incrementalAct
 
     const ipPanels = openIpPanels(context, vscode, async (xpr, action, target, info, changes, active) => {
         if (action === 'create') return openCatalog(xpr);
+        if (action === 'configure') {
+            // 独立 IP 也走与 BD 单元格一致的分组定制对话框；名称取自 IP 实例。
+            const key = formKey(target, 'ip', target.file);
+            formTargets.set(key, { ...target, xpr, kind: 'ip', vlnv: info?.vlnv || '' });
+            const name = info?.name || String(target.label || '').replace(/\.xcix?$/iu, '') || 'IP';
+            formPanels.open({ key, title: 'IP 定制 · ' + name, subtitle: info?.vlnv || '' });
+            return { message: '已打开 IP 定制对话框' };
+        }
         if (action === 'preview') {
             const session = await projectFor(xpr);
             if (!target || !member(session.project, target.file, target.fileset) || path.extname(target.file).toLowerCase() !== '.xci') return;
@@ -518,6 +526,17 @@ function activateAssetCommands(context, { vscode, findProjectXpr, incrementalAct
         async load(key) {
             const target = formTargets.get(key);
             if (!target) return { error: 'IP 配置目标已失效，请重新打开' };
+            if (target.kind === 'ip') {
+                const read = () => queueAction('IP 定制', target.xpr, async session => {
+                    const info = await readIp(session, target, true);
+                    target.vlnv = info.vlnv;
+                    return { ...info, preview: false };
+                });
+                let result = await read();
+                if (result?.status === 'skipped') { await new Promise(resolve => setTimeout(resolve, 800)); result = await read(); }
+                if (!result || result.status === 'failed' || result.status === 'skipped') return { error: result?.error || '参数读取已取消' };
+                return result;
+            }
             const read = () => queueAction('IP 定制', target.xpr, async session => {
                 // 记录读取时的文件戳：应用时据此发现对话框打开期间的外部修改。
                 target.guard = await hash(target.file);
@@ -533,6 +552,19 @@ function activateAssetCommands(context, { vscode, findProjectXpr, incrementalAct
         async apply(key, edits) {
             const target = formTargets.get(key);
             if (!target) return { error: 'IP 配置目标已失效，请重新打开' };
+            if (target.kind === 'ip') {
+                const result = await queueAction('应用 IP 参数', target.xpr, async session => {
+                    const info = await readIp(session, target);
+                    const changes = resolveEdits(edits, info);
+                    if (!changes) throw new Error('参数已变化或不满足依赖，请重新读取后再试');
+                    if (!changes.length) return { message: '没有需要应用的修改' };
+                    const applied = await runIpAction(session, target, info, 'apply', changes);
+                    return { info: applied.info, message: '已应用 ' + changes.length + ' 项修改到 ' + applied.info.name };
+                });
+                if (!result || result.status === 'failed') return { error: result?.error || '应用已取消' };
+                if (result.info) ipPanels.refresh(target.xpr);
+                return result;
+            }
             const result = await queueAction('应用 IP 参数', target.xpr, async session => {
                 const changes = resolveEdits(edits, { parameters: await readCellParameters(session, target) });
                 if (!changes) throw new Error('参数已变化或不满足依赖，请重新读取后再试');

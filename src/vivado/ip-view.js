@@ -182,7 +182,7 @@ function openIpPanels(context, vscode, invoke) {
         }
 
         replace(members, focus);
-        const entry = { xpr, panel, show };
+        const entry = { xpr, panel, show, reload: () => void loadSelected() };
         panels.add(entry);
         panel.onDidDispose(() => { disposed = true; panels.delete(entry); });
         panel.webview.onDidReceiveMessage(async message => {
@@ -194,6 +194,18 @@ function openIpPanels(context, vscode, invoke) {
                 return;
             }
             if (busy || message.revision !== revision) return;
+            if (message.action === 'configure') {
+                const member = records.find(item => item.id === (message.id ?? selected?.id));
+                if (!member) return;
+                busy = true;
+                post({ type: 'activity', busy, status: '正在打开定制对话框…' });
+                try {
+                    const result = await invoke(xpr, 'configure', member, details.get(member.id));
+                    status = result?.message || result?.error || '';
+                } catch (error) { status = error.message; }
+                finally { busy = false; publish(); }
+                return;
+            }
             if (message.action === 'select') {
                 const member = records.find(item => item.id === message.id);
                 if (!member || selected === member) return;
@@ -219,7 +231,14 @@ function openIpPanels(context, vscode, invoke) {
         });
         panel.webview.html = managerHtml(panel.webview, vscode, resources);
     }
-    return { open };
+    return {
+        open,
+        // IP 定制对话框应用参数后，让管理面板重新按 XCI 的当前值刷新。
+        refresh(xpr) {
+            const found = [...panels].find(item => samePath(item.xpr, xpr));
+            found?.reload();
+        }
+    };
 }
 
 module.exports = { openIpPanels, resolveEdits };
