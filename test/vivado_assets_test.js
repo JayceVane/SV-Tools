@@ -360,3 +360,15 @@ test('真实 Vivado 管理 IP 与 Block Design', { skip: !realBin && '需 SVTOOL
     assert.match(await fs.readFile(path.join(exported.folder, 'block-design.tcl'), 'utf8'), /connect_bd_net/u);
     completed = true;
 });
+
+
+test('IP 读取兼容不支持 -exclude_bd_ips 的 Vivado', () => {
+    const body = ip.info('D:/work/demo/demo.srcs/sources_1/ip/fixed_value/fixed_value.xci');
+    assert.ok(body.some(line => line.includes('[sv_standalone_ips]')));
+    assert.ok(!body.some(line => /get_ips -quiet -exclude_bd_ips/u.test(line)));
+    const generated = sessionScript(body);
+    assert.match(generated, /proc sv_standalone_ips/u);
+    // 老版本没有该选项时退回按 BD 目录过滤。
+    assert.match(generated, /catch \{get_ips -quiet -exclude_bd_ips/u);
+    assert.match(generated, /sources_1 bd/u);
+});

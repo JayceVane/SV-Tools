@@ -41,14 +41,14 @@ function importSource(file, copy) {
 const select = file => [
     'set ipFile [sv_file ' + filePath(file) + ' [get_files -quiet -all [list *.xci *.xcix]]]',
     'set matching {}',
-    'foreach candidate [get_ips -quiet -exclude_bd_ips] {',
+    'foreach candidate [sv_standalone_ips] {',
     '    set source [sv_prop $candidate IP_FILE]',
     '    if {$source ne "" && [sv_same_path $source $ipFile]} { lappend matching $candidate }',
     '}',
     // 容器的 IP_FILE 可能指向内部 XCI；按文件对象和模块名取顶层 IP。
     'if {![llength $matching]} {',
     '    set name [file rootname [file tail $ipFile]]',
-    '    set matching [lsearch -all -inline -exact [get_ips -quiet -exclude_bd_ips -of_objects $ipFile] $name]',
+    '    set matching [lsearch -all -inline -exact [sv_standalone_ips -of_objects $ipFile] $name]',
     '}',
     'if {[llength $matching] != 1} { error "Standalone IP unavailable or ambiguous: $ipFile" }',
     'set ip [lindex $matching 0]'

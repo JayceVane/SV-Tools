@@ -46,6 +46,26 @@ const helpers = [
     '        catch { set choices [list_property_value $key $obj] }',
     '        sv_row parameter $key [sv_prop $obj $key] {*}$choices',
     '    }',
+    '}',
+    // Vivado 2022.1 的 get_ips 帮助列出了 -exclude_bd_ips，但实际调用会报未知选项；
+    // 先试选项，不支持时退回全量并按工程的 <name>.srcs/sources_1/bd 目录过滤。
+    'proc sv_standalone_ips {args} {',
+    '    if {![catch {get_ips -quiet -exclude_bd_ips {*}$args} ips]} { return $ips }',
+    '    set project [current_project]',
+    '    set root [file normalize [file join [get_property -quiet DIRECTORY $project] "[get_property -quiet NAME $project].srcs" sources_1 bd]]',
+    '    set ips {}',
+    '    foreach ip [get_ips -quiet {*}$args] {',
+    '        set file [sv_prop $ip IP_FILE]',
+    '        if {$file eq ""} { continue }',
+    '        set normalized [file normalize $file]',
+    '        set inside 0',
+    '        if {[string length $normalized] >= [string length $root]} {',
+    '            set head [string range $normalized 0 [expr {[string length $root] - 1}]]',
+    '            if {$::tcl_platform(platform) eq "windows"} { set inside [string equal -nocase $head $root] } else { set inside [string equal $head $root] }',
+    '        }',
+    '        if {!$inside} { lappend ips $ip }',
+    '    }',
+    '    return $ips',
     '}'
 ];
 
