@@ -119,30 +119,41 @@ test('概览按实际阶段汇总资源、功耗、DRC，缺报告时回退且�
     const snapshot = {
         currentRuns: { synthesis: 'synth_1', implementation: 'impl_1' },
         runs: [{ id: 'synth_1', power: null, status: 'synth_design Complete!' },
-            { id: 'impl_1', power: 0.123, status: 'route_design Complete!', needsRefresh: true }]
+            { id: 'impl_1', power: 0.123, status: 'route_design Complete!', needsRefresh: true,
+                implementation: true, timing: { wns: -0.15, tns: -2.4 } }]
     };
     const paths = { synth_1: { directory: synthesis }, impl_1: { directory: implementation } };
     const resource = count => '| Site Type | Used | Fixed | Prohibited | Available | Util% |\n' +
         '| CLB LUTs* | ' + count + ' | 0 | 0 | 5,000 | -- |\n| Block RAM Tile | 1.5 | 0 | 0 | 200 | -- |\n';
     await Promise.all([
         fs.writeFile(path.join(synthesis, 'top_utilization_synth.rpt'), resource(250)),
+        fs.writeFile(path.join(synthesis, 'top.dcp'), 'synthesized'),
         fs.writeFile(path.join(implementation, 'top_routed.dcp'), 'routed'),
         fs.writeFile(path.join(implementation, 'top_drc_opted.rpt'), 'Violations found: 0\n'),
         fs.writeFile(path.join(implementation, 'top_methodology_drc_routed.rpt'), 'Violations found: 0\n')
     ]);
     let { results, generation } = await read.read(snapshot, paths);
-    assert.equal(results.utilization.run, 'synth_1');
+    assert.equal(results.utilization.synthesis.run, 'synth_1');
+    assert.equal(results.utilization.implementation, undefined);
     assert.equal(results.power.data.total, 0.123);
+    assert.deepEqual(results.timing.data, { wns: -0.15, tns: -2.4 });
     assert.equal(results.drc.data.total, 0);
     assert.equal(results.drc.phase, 'opted');
-    assert.deepEqual(generation.kinds, ['utilization', 'power']);
+    assert.deepEqual(generation.kinds, ['utilization', 'timing', 'power']);
     assert.equal(await read.isCurrent(generation), true);
-    assert.match(analysisCommands(generation).join('\n'), /open_run.*\n.*report_utilization.*\n.*report_power/u);
+    assert.match(analysisCommands(generation).join('\n'), /open_run.*\n.*report_utilization.*\n.*report_timing_summary.*\n.*report_power/u);
     assert.doesNotMatch(analysisCommands(generation).join('\n'), /launch_runs|report_drc/u);
 
     await Promise.all([
         fs.writeFile(path.join(tasks, 'summary_power.rpt'), '| Total On-Chip Power (W) | 0.105 |\n| Dynamic (W) | 0.001 |\n' +
-            '| Device Static (W) | 0.104 |\n| Confidence Level | Medium |\n'),
+            '| Device Static (W) | 0.104 |\n| Confidence Level | Medium |\n\n1.1 On-Chip Components\n' +
+            '| On-Chip | Power (W) |\n| Clocks | 0.001 |\n| Slice Logic | <0.001 |\n|   Register | <0.001 |\n' +
+            '| Static Power | 0.104 |\n| Total | 0.105 |\n\n1.2 Power Supply Summary\n'),
+        fs.writeFile(path.join(tasks, 'summary_timing.rpt'), ['| Design Timing Summary', '',
+            ['WNS(ns)', 'TNS(ns)', 'TNS Failing Endpoints', 'TNS Total Endpoints', 'WHS(ns)', 'THS(ns)', 'THS Failing Endpoints',
+                'THS Total Endpoints', 'WPWS(ns)', 'TPWS(ns)', 'TPWS Failing Endpoints', 'TPWS Total Endpoints'].join('    '),
+            '-----    ------', ['-0.150', '-2.400', '3', '127', 'inf', '0.000', '0', '127', '-0.040', '-0.080', '2', '38'].join('    ')
+        ].join('\n')),
         fs.writeFile(path.join(implementation, 'top_utilization_placed.rpt'), resource(325)),
         fs.writeFile(path.join(implementation, 'top_drc_routed.rpt'), 'Violations found: 3\n+---+\n| Rule | Severity | Description | Violations |\n' +
             '+---+\n| NSTD-1 | Critical Warning | I/O | 2 |\n| P-1 | Warning | Ports | 1 |\n+---+\n')
@@ -152,20 +163,33 @@ test('概览按实际阶段汇总资源、功耗、DRC，缺报告时回退且�
     read = createSummaryReports(workspaceState);
     ({ results, generation } = await read.read(snapshot, paths));
     assert.equal(generation, null);
-    assert.equal(results.utilization.stale, true);
-    assert.equal(results.utilization.phase, 'placed');
-    assert.deepEqual(results.utilization.data, [
+    assert.equal(results.utilization.implementation.stale, true);
+    assert.equal(results.utilization.implementation.phase, 'placed');
+    assert.equal(results.utilization.synthesis.data[0].used, 250);
+    assert.deepEqual(results.utilization.implementation.data, [
         { resource: 'lut', used: 325, available: 5000 }, { resource: 'bram', used: 1.5, available: 200 }
     ]);
-    assert.deepEqual(results.power.data, { total: 0.105, dynamic: 0.001, static: 0.104, confidence: 'Medium' });
+    assert.deepEqual(results.power.data, { total: 0.105, dynamic: 0.001, static: 0.104, confidence: 'Medium',
+        components: [{ label: 'Clocks', watts: 0.001, below: null }, { label: 'Slice Logic', watts: null, below: 0.001 },
+            { label: 'Static Power', watts: 0.104, below: null }] });
+    assert.equal(results.timing.phase, 'routed');
+    assert.equal(results.timing.data.whs, null);
+    assert.equal(results.timing.data.setupFailing, 3);
+    assert.equal(results.timing.data.wpws, -0.04);
+    assert.equal(results.timing.data.pulseTotal, 38);
     assert.equal(results.drc.phase, 'routed');
     assert.equal(results.drc.data.total, 3);
     assert.equal(results.drc.data.counts.criticalWarnings, 2);
+    await fs.unlink(path.join(synthesis, 'top_utilization_synth.rpt'));
+    ({ results, generation } = await read.read(snapshot, paths));
+    assert.equal(results.utilization.synthesis, undefined);
+    assert.equal(generation.run, 'synth_1');
+    assert.deepEqual(generation.kinds, ['utilization']);
     await fs.writeFile(path.join(implementation, 'top_routed.dcp'), 'new routed checkpoint');
     assert.equal(await read.isCurrent(request), false);
     ({ results, generation } = await read.read(snapshot, paths));
     assert.equal(results.power.data.total, 0.123);
-    assert.deepEqual(generation.kinds, ['power']);
+    assert.deepEqual(generation.kinds, ['timing', 'power']);
 });
 
 test('Block Design 布局在宿主重启后复用坐标，结构、层级和接口展开状态分别匹配', async t => {

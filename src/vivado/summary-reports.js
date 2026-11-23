@@ -4,7 +4,7 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const { literal } = require('./asset-task');
 
-const REPORTS = ['utilization', 'power', 'drc'];
+const REPORTS = ['utilization', 'timing', 'power', 'drc'];
 const GENERATED_REPORTS_KEY = 'svtools.vivado.summaryReports';
 const MAX_PREFIX = 512 * 1024;
 const RESOURCE_NAMES = [
@@ -50,14 +50,52 @@ function utilization(text) {
 
 function power(text) {
     const values = {};
+    const components = [];
+    let inComponents = false, indentation;
     for (const line of text.split(/\r?\n/u)) {
+        if (/^\s*1\.1\s+On-Chip Components\s*$/iu.test(line)) inComponents = true;
+        if (inComponents && /^\s*1\.2\s/u.test(line)) inComponents = false;
         const [label, value] = columns(line);
         if (/^total on-chip power\s*\(w\)$/i.test(label)) values.total = number(value);
         else if (/^dynamic\s*\(w\)$/i.test(label)) values.dynamic = number(value);
         else if (/^device static\s*\(w\)$/i.test(label)) values.static = number(value);
         else if (/^confidence level$/i.test(label)) values.confidence = value;
+        else if (inComponents && label && !/^total$/iu.test(label)) {
+            const watts = number(value);
+            const below = value?.startsWith('<') ? number(value.slice(1)) : null;
+            if (watts === null && below === null) continue;
+            const level = /^\s*\|(\s*)/u.exec(line)[1].length;
+            indentation ??= level;
+            // 组件表靠缩进区分父项和子项，饼图只采用外层数据。
+            if (level === indentation) components.push({ label, watts, below });
+        }
     }
+    if (components.length) values.components = components;
     return values.total != null ? values : null;
+}
+
+function timing(text) {
+    const marker = /^\s*\|?\s*Design Timing Summary\s*\|?\s*$/imu.exec(text);
+    if (!marker) return null;
+    const lines = text.slice(marker.index + marker[0].length).split(/\r?\n/u).slice(0, 14);
+    const fields = Object.fromEntries(['wns', 'tns', 'whs', 'ths', 'wpws', 'tpws'].map(key => [key + '(ns)', key]));
+    Object.assign(fields, {
+        'tns failing endpoints': 'setupFailing', 'tns total endpoints': 'setupTotal',
+        'ths failing endpoints': 'holdFailing', 'ths total endpoints': 'holdTotal',
+        'tpws failing endpoints': 'pulseFailing', 'tpws total endpoints': 'pulseTotal'
+    });
+    let keys;
+    for (const line of lines) {
+        const cells = line.trim().startsWith('|') ? columns(line) : line.trim().split(/\s{2,}/u);
+        if (!keys) {
+            const names = cells.map(cell => fields[cell.toLowerCase()]);
+            if (names.includes('wns') && names.includes('tns')) keys = names;
+            continue;
+        }
+        if (cells.length !== keys.length || !cells.some(cell => number(cell) !== null)) continue;
+        return Object.fromEntries(keys.flatMap((key, index) => key ? [[key, number(cells[index])]] : []));
+    }
+    return null;
 }
 
 function drc(text) {
@@ -92,8 +130,8 @@ function drc(text) {
     return { total, counts, rules: rules.slice(0, 5) };
 }
 
-const parsers = { utilization, power, drc };
-const reportName = /^(?:.*_)?(utilization|power|drc)(?:_([a-z0-9-]+))?\.rpt$/iu;
+const parsers = { utilization, timing, power, drc };
+const reportName = /^(?:.*_)?(utilization|timing_summary|power|drc)(?:_([a-z0-9-]+))?\.rpt$/iu;
 const stagePriority = { bitstream: 7, routed: 6, route: 6, physopt: 5, postroute: 5, placed: 4, place: 4, opt: 3, opted: 3, synth: 2 };
 const stageOf = phase => stagePriority[phase] || 0;
 
@@ -148,7 +186,8 @@ function createSummaryReports(workspaceState) {
             }
             const match = reportName.exec(entry.name);
             if (!match || /(?:^|_)(?:methodology_drc|clock_utilization)(?:_|\.)/iu.test(entry.name)) continue;
-            candidates[match[1].toLowerCase()].push({ file, phase: match[2]?.toLowerCase() || '' });
+            const category = match[1].toLowerCase();
+            candidates[category === 'timing_summary' ? 'timing' : category].push({ file, phase: match[2]?.toLowerCase() || '' });
         }
         async function existing(items) {
             const checked = await Promise.all(items.map(async item => ({ ...item, stat: await fs.lstat(item.file).catch(() => null) })));
@@ -160,7 +199,7 @@ function createSummaryReports(workspaceState) {
         await Promise.all(REPORTS.map(async kind => {
             const extra = generated.get(identity)?.[kind];
             const known = await existing(candidates[kind]);
-            const additional = extra ? await existing([{ file: extra, phase: checkpoint.phase }]) : [];
+            const additional = extra ? await existing([{ file: extra, phase: checkpoint.phase || (run.implementation ? '' : 'synth') }]) : [];
             for (const candidate of [...known, ...additional]) {
                 const data = await parsedReport(kind, candidate.file, candidate.stat);
                 if (!data) continue;
@@ -173,22 +212,31 @@ function createSummaryReports(workspaceState) {
 
     return {
         async read(snapshot, paths) {
-            const current = [snapshot.currentRuns.implementation || 'impl_1', snapshot.currentRuns.synthesis || 'synth_1'];
-            const runs = current.map(id => snapshot.runs.find(run => run.id === id)).filter(Boolean);
-            const inspections = await Promise.all(runs.map(run => inspect(run,
-                Object.hasOwn(paths, run.id) ? paths[run.id].directory : undefined)));
-            const results = {};
-            for (const kind of REPORTS) {
-                const match = inspections.find(item => item.reports[kind])?.reports[kind];
-                if (match) results[kind] = match;
+            const current = snapshot.currentRuns;
+            const [implementation, synthesis] = await Promise.all([
+                [current.implementation || 'impl_1', true], [current.synthesis || 'synth_1', false]
+            ].map(([id, impl]) => {
+                const run = snapshot.runs.find(item => item.id === id && Boolean(item.implementation) === impl);
+                return run && inspect(run, Object.hasOwn(paths, run.id) ? paths[run.id].directory : undefined);
+            }));
+            const inspections = [implementation, synthesis].filter(Boolean);
+            const results = { utilization: { implementation: implementation?.reports.utilization, synthesis: synthesis?.reports.utilization } };
+            for (const kind of ['power', 'drc']) results[kind] = inspections.find(item => item.reports[kind])?.reports[kind];
+            for (const { run, reports } of inspections) {
+                results.timing = reports.timing;
+                if (!results.timing && Object.values(run.timing || {}).some(Number.isFinite)) {
+                    results.timing = { run: run.id, stale: run.needsRefresh, data: run.timing };
+                }
+                if (results.timing) break;
             }
             if (!results.power) {
-                const run = runs.find(item => Number.isFinite(item.power));
+                const run = inspections.find(item => Number.isFinite(item.run.power))?.run;
                 if (run) results.power = { run: run.id, stale: run.needsRefresh, data: { total: run.power } };
             }
-            const preferred = inspections.find(item => item.identity && /complete/i.test(item.run.status));
-            const kinds = preferred ? REPORTS.filter(kind => !preferred.reports[kind]) : [];
-            const generation = kinds.length ? { run: preferred.run.id, identity: preferred.identity, kinds } : null;
+            const eligible = inspections.filter(item => item.identity && /complete/i.test(item.run.status));
+            const generation = eligible.map((item, index) => ({ run: item.run.id, identity: item.identity,
+                kinds: (index === 0 ? REPORTS : ['utilization']).filter(kind => !item.reports[kind])
+            })).find(request => request.kinds.length) || null;
             return { results, generation };
         },
         async isCurrent(request) {
@@ -212,8 +260,10 @@ function createSummaryReports(workspaceState) {
 function analysisCommands({ run, kinds }) {
     return [
         'open_run ' + literal(run),
-        ...REPORTS.filter(kind => kinds.includes(kind)).map(kind =>
-            'if {[catch {report_' + kind + ' -file [file join [pwd] summary_' + kind + '.rpt]} message]} { sv_row analysis_error ' + kind + ' $message }')
+        ...REPORTS.filter(kind => kinds.includes(kind)).map(kind => {
+            const command = kind === 'timing' ? 'report_timing_summary' : 'report_' + kind;
+            return 'if {[catch {' + command + ' -file [file join [pwd] summary_' + kind + '.rpt]} message]} { sv_row analysis_error ' + kind + ' $message }';
+        })
     ];
 }
 

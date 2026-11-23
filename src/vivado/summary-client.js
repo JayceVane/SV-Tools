@@ -6,7 +6,9 @@
     const phrase = (key, ...values) => strings[key].replace(/\{(\d+)\}/gu, (_, index) => values[index]);
     const countText = new Intl.NumberFormat(strings.locale, { maximumFractionDigits: 2 });
     const powerText = new Intl.NumberFormat(strings.locale, { minimumFractionDigits: 3, maximumFractionDigits: 6 });
-    let signature, auto = vscode.getState()?.auto !== false;
+    const preferences = vscode.getState() || {};
+    let signature, auto = preferences.auto !== false, powerMode = preferences.powerMode === 'pie' ? 'pie' : 'details';
+    const remember = () => vscode.setState({ auto, powerMode });
 
     function node(tag, text, className) {
         const item = document.createElement(tag);
@@ -132,23 +134,30 @@
         $('runs-empty').hidden = Boolean(runs.length);
     }
 
-    function drawTiming(run) {
-        const { wns, tns, whs, ths } = run?.timing || {};
-        const items = [['WNS', wns], ['TNS', tns], ['WHS', whs], ['THS', ths]];
-        const hasResults = items.some(([, value]) => Number.isFinite(value));
-        $('timing-source').textContent = hasResults ? [run.id, run.needsRefresh && strings.stale].filter(Boolean).join(' · ') : '';
-        if (!hasResults) {
-            $('timing').replaceChildren(node('p', strings.emptyTiming, 'empty'));
-            return;
-        }
-        const metrics = node('dl', undefined, 'metrics');
-        for (const [label, value] of items) {
-            const item = node('div', undefined, 'metric');
-            const display = numberText(value);
-            item.append(node('dt', label), node('dd', display === '—' ? display : display + ' ns', value < 0 ? 'negative' : ''));
-            metrics.append(item);
-        }
-        $('timing').replaceChildren(metrics);
+    function drawTiming(result) {
+        const data = result?.data || {};
+        $('timing-source').replaceChildren(...(result ? [reportSource('timing', result)] : []));
+        const groups = [['setup', 'wns', 'tns'], ['hold', 'whs', 'ths'], ['pulse', 'wpws', 'tpws']];
+        const cards = groups.map(([group, worst, total]) => {
+            const card = node('div', undefined, 'timing-group');
+            const metrics = node('dl', undefined, 'metrics');
+            for (const key of [worst, total]) {
+                const value = data[key], item = node('div', undefined, 'metric');
+                item.append(node('dt', key.toUpperCase()), node('dd', Number.isFinite(value) ? numberText(value) + ' ns' : '—',
+                    value < 0 ? 'negative' : ''));
+                metrics.append(item);
+            }
+            const failing = data[group + 'Failing'], endpoints = data[group + 'Total'];
+            const endpointText = value => Number.isFinite(value) ? countText.format(value) : '—';
+            const counts = node('div', undefined, 'metric endpoints');
+            counts.append(node('dt', strings.endpoints), node('dd', endpointText(failing) + ' / ' + endpointText(endpoints),
+                failing > 0 ? 'negative' : ''));
+            metrics.append(counts);
+            card.append(node('h4', strings[group]), metrics);
+            return card;
+        });
+        if (!result) cards.unshift(node('p', strings.emptyTiming, 'timing-empty muted'));
+        $('timing').replaceChildren(...cards);
     }
 
     function drawMessages(messages = {}) {
@@ -160,45 +169,131 @@
         }));
     }
 
-    function reportSource(kind, result) {
+    function reportSource(kind, result, stage) {
         const source = node('div', undefined, 'report-source');
         source.append(node('span', [result.run, strings.phases[result.phase], result.stale && strings.stale].filter(Boolean).join(' · ')));
         if (result.file) {
             const button = node('button', strings.report, 'link-button');
             button.type = 'button';
-            button.setAttribute('aria-label', phrase('reportFor', strings[kind]));
-            button.onclick = () => vscode.postMessage({ action: 'openReport', kind });
+            button.setAttribute('aria-label', phrase('reportFor', stage ? strings[stage] + ' · ' + strings[kind] : strings[kind]));
+            button.onclick = () => vscode.postMessage(stage ? { action: 'openReport', kind, stage } : { action: 'openReport', kind });
             source.append(button);
         }
         return source;
     }
 
-    function utilizationView(resources) {
-        const list = node('dl', undefined, 'resource-list');
-        for (const { resource, used, available } of resources) {
-            const name = strings.resources[resource] || resource;
-            const value = available > 0 ? used / available * 100 : null;
-            const item = node('div', undefined, 'resource-item');
-            const counts = node('dd', countText.format(used) + ' / ' + countText.format(available), 'numbers');
-            counts.title = phrase('used', countText.format(used), countText.format(available));
-            item.append(node('dt', name), counts);
+    const percentText = value => value > 0 && value < 0.01 ? '<0.01%' : countText.format(value) + '%';
+
+    function resourceCell(resource, name, other) {
+        const cell = node('td');
+        if (!resource) { cell.textContent = '—'; return cell; }
+        const { used, available } = resource;
+        const counts = node('span', countText.format(used) + ' / ' + countText.format(available), 'numbers');
+        counts.title = phrase('used', countText.format(used), countText.format(available));
+        cell.append(counts);
+        if (other && other.available === available && other.used !== used) {
+            const delta = used - other.used;
+            const change = node('span', (delta > 0 ? '+' : '−') + countText.format(Math.abs(delta)), 'resource-delta numbers');
+            change.title = strings.delta;
+            cell.append(change);
+        }
+        if (available > 0) {
+            const value = used / available * 100;
+            const bar = node('progress', undefined, 'bar');
+            bar.max = 100;
+            bar.value = Math.max(0, Math.min(100, value));
+            bar.setAttribute('aria-label', name);
             const meter = node('div', undefined, 'resource-meter');
-            if (value !== null) {
-                const bar = node('progress', undefined, 'bar');
-                bar.max = 100;
-                bar.value = Math.min(100, value);
-                bar.setAttribute('aria-label', name);
-                const percent = value > 0 && value < 0.01 ? '<0.01%' : countText.format(value) + '%';
-                meter.append(bar, node('span', percent, 'percentage'));
-            }
-            item.append(meter);
+            meter.append(bar, node('span', percentText(value), 'percentage'));
+            cell.append(meter);
+        }
+        return cell;
+    }
+
+    function drawUtilization(data = {}) {
+        const table = node('table', undefined, 'utilization-comparison');
+        const thead = node('thead'), header = node('tr'), tbody = node('tbody');
+        const resourceColumn = node('th', strings.resource);
+        resourceColumn.scope = 'col';
+        header.append(resourceColumn);
+        for (const stage of ['synthesis', 'implementation']) {
+            const cell = node('th', strings[stage]);
+            cell.scope = 'col';
+            const result = data[stage];
+            cell.append(result ? reportSource('utilization', result, stage) : node('span', strings.noUtilization, 'missing-report'));
+            header.append(cell);
+        }
+        const synth = new Map((data.synthesis?.data || []).map(row => [row.resource, row]));
+        const impl = new Map((data.implementation?.data || []).map(row => [row.resource, row]));
+        for (const [key, name] of Object.entries(strings.resources)) {
+            if (!synth.has(key) && !impl.has(key)) continue;
+            const row = node('tr'), label = node('th', name);
+            label.scope = 'row';
+            row.append(label, resourceCell(synth.get(key), strings.synthesis + ' · ' + name),
+                resourceCell(impl.get(key), strings.implementation + ' · ' + name, synth.get(key)));
+            tbody.append(row);
+        }
+        thead.append(header);
+        table.append(thead, tbody);
+        $('utilization').replaceChildren(table);
+    }
+
+    const powerColors = ['#559bdb', '#40a68e', '#c88bc3', '#db9b56', '#7c90df', '#84ae5c', '#d47b76', '#59a9bb',
+        '#b09472', '#b0aa62', '#ac78d0', '#588bc2', '#d9978a', '#83a98a'];
+    const componentName = label => strings.componentNames[label.toLowerCase()] || label;
+
+    function powerSlices(data) {
+        const hasValues = items => items.filter(item => Number.isFinite(item.watts) && item.watts > 0);
+        const components = hasValues(data.components || []);
+        let slices = components.map(item => ({ label: componentName(item.label), watts: item.watts }));
+        if (!slices.length || (data.dynamic > 0 && data.static > 0 && components.every(item => /^static power$/iu.test(item.label)))) slices = hasValues([
+            { label: strings.dynamic, watts: data.dynamic }, { label: strings.static, watts: data.static }
+        ]);
+        if (!slices.length || !(data.total > 0)) return [];
+        const known = slices.reduce((total, item) => total + item.watts, 0);
+        if (data.total - known > 1e-9) slices.push({ label: strings.unallocated, watts: data.total - known, color: '#7c8794' });
+        return slices.map((item, index) => ({ ...item, color: item.color || powerColors[index % powerColors.length] }));
+    }
+
+    function powerPie(slices, total) {
+        const body = node('div', undefined, 'power-chart');
+        const pie = node('div', undefined, 'power-pie');
+        pie.setAttribute('aria-hidden', 'true');
+        const legend = node('ul', undefined, 'power-legend');
+        legend.setAttribute('aria-label', strings.components);
+        const sum = slices.reduce((amount, item) => amount + item.watts, 0);
+        let angle = 0;
+        const stops = slices.map(({ label, watts, color }, index) => {
+            const start = angle;
+            angle = index === slices.length - 1 ? 100 : angle + watts / sum * 100;
+            const item = node('li');
+            const swatch = node('span', undefined, 'power-swatch');
+            swatch.style.backgroundColor = color;
+            swatch.setAttribute('aria-hidden', 'true');
+            item.append(swatch, node('span', label), node('span', powerText.format(watts) + ' W · ' + percentText(watts / sum * 100), 'numbers'));
+            legend.append(item);
+            return color + ' ' + start + '% ' + angle + '%';
+        });
+        pie.style.background = 'conic-gradient(' + stops.join(', ') + ')';
+        body.append(pie, legend);
+        if (sum - total > 1e-9) body.append(node('p', strings.roundedShares, 'muted power-note'));
+        return body;
+    }
+
+    function powerComponents(components) {
+        const list = node('dl', undefined, 'power-components');
+        list.setAttribute('aria-label', strings.components);
+        for (const { label, watts, below } of components) {
+            const item = node('div');
+            const value = Number.isFinite(watts) ? powerText.format(watts) : '<' + powerText.format(below);
+            item.append(node('dt', componentName(label)), node('dd', value + ' W', 'numbers'));
             list.append(item);
         }
         return list;
     }
 
     function powerView(data) {
-        const values = node('dl', undefined, 'power-values');
+        const content = node('div'), values = node('dl', undefined, 'power-values');
         const fields = [['totalPower', data.total], ['dynamic', data.dynamic], ['static', data.static]];
         for (const [key, value] of fields) {
             if (!Number.isFinite(value)) continue;
@@ -211,7 +306,30 @@
             item.append(node('dt', strings.confidence), node('dd', strings.confidenceLevels[data.confidence.toLowerCase()] || data.confidence));
             values.append(item);
         }
-        return values;
+        content.append(values);
+        const slices = powerSlices(data), components = data.components || [];
+        if (!slices.length) {
+            if (components.length) content.append(powerComponents(components));
+            return content;
+        }
+        const controls = node('div', undefined, 'power-controls');
+        controls.setAttribute('role', 'group');
+        controls.setAttribute('aria-label', strings.powerDisplay);
+        const detail = node('button', strings.powerDetails), chart = node('button', strings.pie);
+        detail.type = chart.type = 'button';
+        controls.append(detail, chart);
+        const display = node('div');
+        const update = () => {
+            detail.setAttribute('aria-pressed', String(powerMode === 'details'));
+            chart.setAttribute('aria-pressed', String(powerMode === 'pie'));
+            if (powerMode === 'pie') display.replaceChildren(powerPie(slices, data.total));
+            else display.replaceChildren(...(components.length ? [powerComponents(components)] : []));
+        };
+        detail.onclick = () => { powerMode = 'details'; remember(); update(); };
+        chart.onclick = () => { powerMode = 'pie'; remember(); update(); };
+        update();
+        content.append(controls, display);
+        return content;
     }
 
     function drcView({ total, counts, rules }) {
@@ -245,12 +363,15 @@
     }
 
     function drawAnalysis(analysis) {
-        const cards = [['utilization', 'noUtilization', utilizationView], ['power', 'noPower', powerView], ['drc', 'noDrc', drcView]];
+        drawUtilization(analysis?.results?.utilization);
+        drawTiming(analysis?.results?.timing);
+        const cards = [['power', 'noPower', powerView], ['drc', 'noDrc', drcView]];
         for (const [kind, empty, renderCard] of cards) {
             const result = analysis?.results?.[kind];
             $(kind).replaceChildren(...(result ? [reportSource(kind, result), renderCard(result.data)] : [node('p', strings[empty], 'empty')]));
         }
         $('generate').hidden = !analysis?.generation;
+        $('generate').title = analysis?.generation ? phrase('generateFor', analysis.generation.run) : '';
     }
 
     function status(text, kind = '', busy = false) {
@@ -271,7 +392,6 @@
             drawProject(next.project || {});
             drawCards(synthesis, implementation);
             drawAnalysis(next.analysis);
-            drawTiming(implementation || synthesis);
             drawMessages(next.messages);
             drawRuns(runs, next.paths, [synthesis?.id, implementation?.id]);
         }
@@ -283,7 +403,7 @@
     $('auto').checked = auto;
     $('auto').onchange = () => {
         auto = $('auto').checked;
-        vscode.setState({ auto });
+        remember();
         vscode.postMessage({ action: 'auto', enabled: auto });
     };
     $('refresh').onclick = () => vscode.postMessage({ action: 'refresh' });

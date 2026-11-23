@@ -46,8 +46,11 @@ function html(webview, vscode, resources, strings) {
         <section class="analysis" aria-labelledby="analysis-title">
             <header class="section-heading"><h2 id="analysis-title">${strings.analysis}</h2><button id="generate" hidden>${strings.generate}</button></header>
             <div class="analysis-grid">
-                <article class="surface utilization" aria-labelledby="utilization-title">
+                <article class="surface analysis-wide" aria-labelledby="utilization-title">
                     <h3 id="utilization-title">${strings.utilization}</h3><div id="utilization"></div>
+                </article>
+                <article class="surface analysis-wide" aria-labelledby="timing-title">
+                    <h3 id="timing-title">${strings.timing}</h3><div id="timing-source"></div><div id="timing" class="timing"></div>
                 </article>
                 <article class="surface" aria-labelledby="power-title">
                     <h3 id="power-title">${strings.power}</h3><div id="power"></div>
@@ -57,15 +60,9 @@ function html(webview, vscode, resources, strings) {
                 </article>
             </div>
         </section>
-        <div class="insights">
-            <section class="surface" aria-labelledby="timing-title">
-                <header class="section-heading"><h2 id="timing-title">${strings.timing}</h2><p id="timing-source" class="muted"></p></header>
-                <div id="timing" class="timing"></div>
-            </section>
-            <section class="surface" aria-labelledby="messages-title">
-                <h2 id="messages-title">${strings.messages}</h2><dl id="messages" class="messages"></dl>
-            </section>
-        </div>
+        <section class="surface" aria-labelledby="messages-title">
+            <h2 id="messages-title">${strings.messages}</h2><dl id="messages" class="messages"></dl>
+        </section>
         <section class="surface run-section" aria-labelledby="runs-title">
             <header class="section-heading"><h2 id="runs-title">${strings.runs}</h2><p id="run-count" class="muted"></p></header>
             <table id="run-table" class="runs"><thead><tr><th scope="col">${strings.run}</th><th scope="col">${strings.status}</th><th scope="col">${strings.progressTime}</th><th scope="col">${strings.artifacts}</th></tr></thead><tbody id="runs"></tbody></table>
@@ -142,8 +139,11 @@ function openSummaryPanels(context, vscode, { load, generate, openPath, log = ()
                 if (message.action === 'generate') { void generateReports(); return; }
                 if (message.action === 'auto') { auto = message.enabled !== false; schedule(); return; }
                 if (message.action === 'openFolder') { void openPath(path.dirname(currentXpr)); return; }
-                if (message.action === 'openReport' && ['utilization', 'power', 'drc'].includes(message.kind)) {
-                    const file = latest?.analysis?.results?.[message.kind]?.file;
+                if (message.action === 'openReport' && ['utilization', 'timing', 'power', 'drc'].includes(message.kind)) {
+                    const report = latest?.analysis?.results?.[message.kind];
+                    const file = message.kind === 'utilization'
+                        ? (['synthesis', 'implementation'].includes(message.stage) ? report?.[message.stage]?.file : undefined)
+                        : report?.file;
                     if (file) void openPath(file);
                     return;
                 }
