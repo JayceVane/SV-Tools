@@ -261,7 +261,8 @@ function activateAssetCommands(context, { vscode, findProjectXpr, incrementalAct
     }
 
     async function createIp(session, vlnv) {
-        const name = await nameInput('IP 模块名', vlnv.split(':')[2].replace(/[^\w]/gu, '_') + '_0');
+        const ipName = vlnv.split(':')[2].replace(/[^\w]/gu, '_');
+        const name = await nameInput('IP 实例名（' + ipName + '）', ipName + '_0');
         if (!name) return;
         const location = await pick(choices([['local', '保存在工程内'], ['external', '选择外部目录']]), 'IP 保存位置');
         if (!location) return;
@@ -330,7 +331,8 @@ function activateAssetCommands(context, { vscode, findProjectXpr, incrementalAct
     async function addBlockIp(xpr, vlnv) {
         const target = bdCatalogTarget;
         if (!target || !samePath(target.xpr, xpr)) throw new Error('Block Design 已切换，请从当前设计重新打开 IP Catalog');
-        const name = await nameInput('实例名', vlnv.split(':')[2].replace(/[^\w]/gu, '_') + '_0');
+        const ipName = vlnv.split(':')[2].replace(/[^\w]/gu, '_');
+        const name = await nameInput('实例名（' + ipName + '）', ipName + '_0');
         if (!name) return '已取消';
         const result = await queueAction('添加 IP', xpr, async session => {
             const guard = await hash(target.file);
@@ -548,7 +550,7 @@ function activateAssetCommands(context, { vscode, findProjectXpr, incrementalAct
                 return {
                     info: { name: target.id, vlnv: target.vlnv || '', ...await describeCell(session, target, parametersOf(rows)),
                         locked: false, preview: false },
-                    message: '已应用 ' + changes.length + ' 项修改'
+                    message: '已应用 ' + changes.length + ' 项修改到 ' + target.id
                 };
             });
             if (!result || result.status === 'failed') return { error: result?.error || '应用已取消' };

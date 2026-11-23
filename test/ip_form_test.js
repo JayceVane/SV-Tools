@@ -86,7 +86,15 @@ function harness() {
             setState: value => { saved = value; }
         }) };
     vm.runInNewContext(fs.readFileSync(path.join(__dirname, '..', 'src', 'vivado', 'ip-form-client.js'), 'utf8'), context);
-    return { nodes, messages, listeners };
+    // 表单现在按页面包一层容器，行需要递归收集。
+    const rows = () => {
+        const found = [];
+        const walk = item => { for (const child of item.children || []) {
+            if (child.className === 'row') found.push(child); else walk(child); } };
+        walk(nodes.get('form'));
+        return found;
+    };
+    return { nodes, messages, listeners, rows };
 }
 
 const info = {
@@ -104,10 +112,10 @@ test('定制表单渲染控件并在应用时提交修改', () => {
     assert.deepEqual(JSON.parse(JSON.stringify(ui.messages[0])), { action: 'ready' });
     const form = buildForm(info.parameters, []);
     ui.listeners.message({ data: { type: 'form', revision: 3, info, form, busy: false, status: '' } });
-    const sections = ui.nodes.get('form').children;
-    assert.equal(sections.length, 2);
-    const rows = sections.flatMap(section => section.children.filter(child => child.className === 'row'));
+    const rows = ui.rows();
     assert.equal(rows.length, 3);
+    assert.equal(ui.nodes.get('name').textContent, 'gpio_0', '标题显示 IP 实例名');
+    assert.match(ui.nodes.get('subtitle').textContent, /IP 定制 · xilinx\.com:ip:axi_gpio:2\.0/u);
     const dual = rows[0].children[1].children[0];
     assert.equal(dual.tagName, 'INPUT');
     assert.equal(dual.type, 'checkbox');
@@ -146,10 +154,10 @@ test('依赖不满足的参数禁用并提示来源', () => {
     const parameters = [{ ...info.parameters[0], value: 'true' }, dependent];
     ui.listeners.message({ data: { type: 'form', revision: 1, info: { ...info, parameters },
         form: buildForm(parameters, []), busy: false, status: '' } });
-    const rows = ui.nodes.get('form').children.flatMap(section => section.children.filter(child => child.className === 'row'));
+    const rows = ui.rows();
     const field = rows[1].children[1].children[0];
     assert.equal(field.disabled, true);
-    const note = rows[1].children[1].children[1];
+    const note = rows[1].children[1].children[2];
     assert.equal(note.hidden, false);
     assert.match(note.textContent, /C_IS_DUAL/);
 });
@@ -224,14 +232,14 @@ test('Vivado 判定禁用的参数置灰，数值参数带范围', () => {
     ];
     ui.listeners.message({ data: { type: 'form', revision: 1, info: { ...info, parameters },
         form: buildForm(parameters, []), busy: false, status: '' } });
-    const rows = ui.nodes.get('form').children.flatMap(section => section.children.filter(child => child.className === 'row'));
+    const rows = ui.rows();
     const ranged = rows[0].children[1].children[0];
     assert.equal(ranged.type, 'number');
     assert.equal(ranged.min, '1');
     assert.equal(ranged.max, '32');
     const disabled = rows[1].children[1].children[0];
     assert.equal(disabled.disabled, true);
-    const note = rows[1].children[1].children[1];
+    const note = rows[1].children[1].children[2];
     assert.equal(note.hidden, false);
     assert.match(note.textContent, /Vivado 按当前参数值禁用/u);
     assert.equal(ui.nodes.get('apply').disabled, true);
@@ -245,8 +253,7 @@ test('修改参数后防抖回问 Vivado，并用结果刷新禁用与隐藏', a
     ];
     ui.listeners.message({ data: { type: 'form', revision: 2, info: { ...info, parameters, hidden: { pages: [], groups: [], params: [] } },
         form: buildForm(parameters, []), busy: false, status: '' } });
-    const rows = () => ui.nodes.get('form').children.flatMap(section => section.children.filter(child => child.className === 'row'));
-    const dual = rows()[0].children[1].children[0];
+    const dual = ui.rows()[0].children[1].children[0];
     dual.checked = true;
     dual.onchange();
     const before = ui.messages.length;
@@ -258,11 +265,11 @@ test('修改参数后防抖回问 Vivado，并用结果刷新禁用与隐藏', a
         [['CONFIG.C_IS_DUAL', 'true'], ['CONFIG.C_GPIO2_WIDTH', '32']]);
     ui.listeners.message({ data: { type: 'state', seq: evaluation.seq,
         disabled: ['C_GPIO2_WIDTH'], hidden: { pages: [], groups: [], params: [] } } });
-    const second = rows()[1].children[1].children[0];
+    const second = ui.rows()[1].children[1].children[0];
     assert.equal(second.disabled, true);
     ui.listeners.message({ data: { type: 'state', seq: evaluation.seq + 1, disabled: [],
         hidden: { pages: [], groups: [], params: ['c_gpio2_width'] } } });
-    assert.equal(rows().length, 1, '隐藏参数应从表单移除');
+    assert.equal(ui.rows()[1].hidden, true, '隐藏参数就地隐藏，不重建节点');
 });
 
 test('对话框宿主：依赖求值结果以 state 消息回推', async () => {
@@ -300,11 +307,33 @@ test('隐藏的页面与分组同时从树和表单移除', () => {
         form: buildForm(parameters, []), busy: false, status: '' } });
     const treeText = ui.nodes.get('pages').children.map(item => item.textContent || '').join('|');
     assert.equal(treeText.includes('AXI'), false);
-    const rows = ui.nodes.get('form').children.flatMap(section => section.children.filter(child => child.className === 'row'));
-    assert.equal(rows.length, 1);
+    const rows = ui.rows();
+    assert.equal(rows.length, 2, '隐藏用 hidden 标记，不删节点');
+    assert.equal(rows[1].hidden, true);
+    assert.equal(rows[0].hidden, false);
     ui.listeners.message({ data: { type: 'form', revision: 1,
         info: { ...info, parameters, hidden: { pages: [], groups: ['axi / 通道'], params: [] } },
         form: buildForm(parameters, []), busy: false, status: '' } });
-    const after = ui.nodes.get('form').children.flatMap(section => section.children.filter(child => child.className === 'row'));
-    assert.equal(after.length, 1);
+    assert.equal(ui.rows()[1].hidden, true);
+});
+
+test('求值结果只打补丁：控件节点不变、焦点保留', () => {
+    const ui = harness();
+    const parameters = [
+        { key: 'CONFIG.A', value: '1', choices: [], label: 'A', group: 'Page' },
+        { key: 'CONFIG.B', value: '2', choices: [], label: 'B', group: 'Page' }
+    ];
+    ui.listeners.message({ data: { type: 'form', revision: 1,
+        info: { ...info, parameters, hidden: { pages: [], groups: [], params: [] } },
+        form: buildForm(parameters, []), busy: false, status: '' } });
+    const field = ui.rows()[1].children[1].children[0];
+    field.focused = true;
+    ui.listeners.message({ data: { type: 'state', seq: 1, disabled: ['B'],
+        hidden: { pages: [], groups: [], params: [] } } });
+    assert.equal(ui.rows()[1].children[1].children[0], field, '同一控件节点');
+    assert.equal(field.disabled, true);
+    assert.equal(field.focused, true, '焦点没有被重建抢走');
+    ui.listeners.message({ data: { type: 'state', seq: 2, disabled: [],
+        hidden: { pages: [], groups: ['page'], params: [] } } });
+    assert.equal(ui.rows()[1].hidden, true);
 });

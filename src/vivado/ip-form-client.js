@@ -4,6 +4,9 @@
     const vscode = acquireVsCodeApi(), $ = id => document.getElementById(id);
     let state = { info: null, form: null, busy: true, status: '' }, draft = new Map(), activeGroup = '';
     let evaluateSeq = 0, evaluateTimer = null;
+    // 表单只构建一次，之后的禁用/隐藏变化就地打补丁，避免重绘抢走输入焦点。
+    const rowViews = new Map(), groupViews = new Map(), pageViews = new Map();
+    let emptyNote = null;
 
     const hiddenSets = () => {
         const hidden = state.info?.hidden || {};
@@ -38,6 +41,14 @@
     };
     const available = (parameter, current) => Boolean(parameter) && !parameter.readOnly && !parameter.disabled &&
         !parameter.dependency?.some(([key, allowed]) => !allowed.includes(current.get(key)));
+    const editableFor = (parameter, current) => available(parameter, current) &&
+        !state.info?.locked && !state.info?.preview && !state.busy;
+    const noteFor = parameter => parameter.readOnly ? '只读参数'
+        : parameter.dependency?.length ? '由 ' + parameter.dependency.map(([key]) => key.slice(7)).join('、') + ' 控制'
+            : 'Vivado 按当前参数值禁用，应用后刷新';
+    const matches = (parameter, current, query) => !query ||
+        (parameter.key + ' ' + (parameter.label || '') + ' ' + (parameter.help || '') + ' ' + (current.get(parameter.key) ?? ''))
+            .toLowerCase().includes(query);
     const editedValues = () => {
         const current = values(), result = [];
         for (const [key, value] of draft) {
@@ -72,7 +83,8 @@
         const commit = next => {
             if (next === parameter.value) draft.delete(parameter.key);
             else draft.set(parameter.key, next);
-            render();
+            renderToolbar();
+            applyVisibility();
             scheduleEvaluate();
         };
         if (kind === 'check') {
@@ -113,7 +125,7 @@
         return field;
     }
 
-    function parameterRow(parameter, current) {
+    function parameterRow(parameter, current, pagePath, groupPath) {
         const row = node('div', undefined, 'row');
         if (draft.has(parameter.key)) row.classList.add('edited');
         const caption = node('div', undefined, 'caption');
@@ -125,20 +137,15 @@
         const controls = node('div', undefined, 'control');
         const field = control(parameter, current);
         field.id = 'field-' + parameter.key;
-        controls.append(field);
-        if (draft.has(parameter.key)) {
-            controls.append(node('small', '原值 ' + (parameter.value || '(空)'), 'original'));
-        }
+        const original = node('small', '原值 ' + (parameter.value || '(空)'), 'original');
+        original.hidden = !draft.has(parameter.key);
         const note = node('small', undefined, 'condition');
-        const editable = available(parameter, current);
+        const editable = editableFor(parameter, current);
         note.hidden = editable;
-        if (!editable) {
-            note.textContent = parameter.readOnly ? '只读参数'
-                : parameter.dependency?.length ? '由 ' + parameter.dependency.map(([key]) => key.slice(7)).join('、') + ' 控制'
-                    : 'Vivado 按当前参数值禁用，应用后刷新';
-        }
-        controls.append(note);
+        if (!editable) note.textContent = noteFor(parameter);
+        controls.append(field, original, note);
         row.append(caption, controls);
+        rowViews.set(parameter.key, { row, field, note, original, parameter, pagePath, groupPath });
         return row;
     }
 
@@ -168,46 +175,78 @@
     }
 
     function renderForm() {
-        const query = $('search').value.trim().toLowerCase();
-        const current = values(), hidden = hiddenSets();
+        rowViews.clear(); groupViews.clear(); pageViews.clear();
+        const current = values();
         const sections = [];
         for (const page of state.form?.pages || []) {
-            if (hidden.pages.has(String(page.path || page.title).toLowerCase())) continue;
+            const pagePath = String(page.path || page.title).toLowerCase();
+            const section = node('div', undefined, 'page-form');
             for (const group of page.groups) {
-                if (hidden.groups.has(String(group.path || '').toLowerCase())) continue;
-                const rows = group.rows.filter(parameter => {
-                    if (hidden.params.has(parameter.key.slice(7).toLowerCase())) return false;
-                    const value = current.get(parameter.key) ?? '';
-                    return !query || (parameter.key + ' ' + (parameter.label || '') + ' ' + (parameter.help || '') + ' ' + value).toLowerCase().includes(query);
-                });
-                if (!rows.length) continue;
+                const groupPath = String(group.path || '').toLowerCase();
                 const fieldset = node('fieldset', undefined, 'group');
                 fieldset.id = 'group-' + group.id;
-                const legend = node('legend', group.title);
-                fieldset.append(legend);
+                fieldset.append(node('legend', group.title));
                 for (const note of group.notes) fieldset.append(node('p', note, 'note'));
-                for (const parameter of rows) fieldset.append(parameterRow(parameter, current));
-                sections.push(fieldset);
+                for (const parameter of group.rows) fieldset.append(parameterRow(parameter, current, pagePath, groupPath));
+                groupViews.set(groupPath, { element: fieldset, pagePath });
+                section.append(fieldset);
             }
+            pageViews.set(pagePath, { element: section, page });
+            sections.push(section);
         }
-        if (!sections.length) sections.push(node('p', query ? '没有匹配的参数。' : 'Vivado 没有为此 IP 返回可配置参数。', 'empty'));
+        emptyNote = node('p', '', 'empty');
+        sections.push(emptyNote);
         $('form').replaceChildren(...sections);
+        applyVisibility();
+    }
+
+    function renderToolbar() {
+        const info = state.info, edits = editedValues();
+        $('changed').textContent = edits.length ? edits.length + ' 项待应用' : '';
+        $('apply').disabled = !edits.length || state.busy || !info || info.locked || info.preview;
+        $('revert').disabled = !draft.size || state.busy;
+    }
+
+    // 只改隐藏/禁用/提示，不动已经渲染的控件，输入焦点保持不变。
+    function applyVisibility() {
+        const current = values(), hidden = hiddenSets();
+        const query = $('search').value.trim().toLowerCase();
+        let visible = 0;
+        for (const [path, view] of pageViews) view.element.hidden = hidden.pages.has(path);
+        for (const [path, view] of groupViews) view.element.hidden = hidden.groups.has(path);
+        for (const [key, view] of rowViews) {
+            const pageHidden = hidden.pages.has(view.pagePath);
+            const groupHidden = pageHidden || hidden.groups.has(view.groupPath);
+            const hide = groupHidden || hidden.params.has(key.slice(7).toLowerCase()) ||
+                !matches(view.parameter, current, query);
+            view.row.hidden = hide;
+            if (!hide) visible += 1;
+            const editable = editableFor(view.parameter, current);
+            view.field.disabled = !editable;
+            view.note.hidden = editable;
+            view.note.textContent = editable ? '' : noteFor(view.parameter);
+            view.original.hidden = !draft.has(key);
+            view.row.classList.toggle('edited', draft.has(key));
+        }
+        if (emptyNote) {
+            emptyNote.hidden = visible > 0;
+            emptyNote.textContent = query ? '没有匹配的参数。' : 'Vivado 没有为此 IP 返回可配置参数。';
+        }
     }
 
     function render() {
         const info = state.info;
         document.body.setAttribute('aria-busy', String(state.busy));
         $('name').textContent = info?.name || 'IP 定制';
-        $('subtitle').textContent = [info?.vlnv, info?.locked ? '已锁定 · 只读' : '', info?.preview ? '预览' : ''].filter(Boolean).join(' · ');
+        // 名称是这段配置实际作用的 IP 实例；副标题保留类型信息。
+        $('subtitle').textContent = [info?.name ? 'IP 定制' : '', info?.vlnv, info?.locked ? '已锁定 · 只读' : '',
+            info?.preview ? '预览' : ''].filter(Boolean).join(' · ');
         $('status').textContent = state.status || (state.busy ? '正在处理…' : '');
-        const edits = editedValues();
-        $('changed').textContent = edits.length ? edits.length + ' 项待应用' : '';
-        $('apply').disabled = !edits.length || state.busy || !info || info.locked || info.preview;
-        $('revert').disabled = !draft.size || state.busy;
+        renderToolbar();
         if (info) { renderTree(); renderForm(); }
     }
 
-    $('search').oninput = renderForm;
+    $('search').oninput = applyVisibility;
     $('revert').onclick = () => { draft.clear(); render(); };
     $('apply').onclick = () => {
         const edits = editedValues();
@@ -225,7 +264,8 @@
                 parameter.disabled = off.has(name) ? true : undefined;
             }
             if (state.info) state.info.hidden = data.hidden || { pages: [], groups: [], params: [] };
-            render();
+            applyVisibility();
+            renderTree();
             return;
         }
         if (data?.type !== 'form') return;
