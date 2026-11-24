@@ -211,6 +211,51 @@ test('片上功耗显示分层堆叠条，阈值数据仅显示在明细', () =>
     assert.equal(ui.preferences().powerMode, 'distribution');
 });
 
+test('从概览生成详情报告时使用当前运行并打开真实生成产物', async () => {
+    const { openSummaryPanels } = require('../src/vivado/summary-view');
+    const xpr = path.resolve('bin/demo.xpr'), file = path.resolve('bin/synth_2_logic.rpt');
+    const request = { run: 'synth_2', identity: 'synth_2-checkpoint', kinds: ['logicLevels'] };
+    let receive, dispose, detail = { request }, finishRefresh;
+    const posted = [], opened = [];
+    const panel = {
+        visible: false, reveal() {}, onDidChangeViewState() {}, onDidDispose(handler) { dispose = handler; },
+        webview: { cspSource: 'local', asWebviewUri: uri => uri, postMessage: message => posted.push(message),
+            onDidReceiveMessage(handler) { receive = handler; } }
+    };
+    const vscode = { Uri: { joinPath: (...parts) => parts.join('/') }, ViewColumn: { Active: 1 },
+        env: { language: 'zh-cn' }, window: { createWebviewPanel: () => panel } };
+    const snapshot = () => ({ ...sample, analysis: { details: { synthesis: { logicLevels: detail } } } });
+    let reads = 0;
+    const api = openSummaryPanels({ extensionUri: 'local' }, vscode, {
+        load: async () => ++reads === 2 ? new Promise(resolve => { finishRefresh = () => resolve(snapshot()); }) : snapshot(),
+        generate: async (project, actual) => {
+            assert.equal(project, xpr);
+            assert.deepEqual(actual, request);
+            detail = { request, file };
+        },
+        openDetail: (...args) => opened.push(args)
+    });
+    api.open(xpr, 'utilization');
+    receive({ action: 'ready', auto: false });
+    const flush = () => new Promise(resolve => setImmediate(resolve));
+    await flush();
+    assert.deepEqual(posted.at(-1), { type: 'focusReport', section: 'utilization' });
+    const ui = harness();
+    ui.listeners.message({ data: posted.find(message => message.type === 'summary') });
+    const synthesis = ui.nodes.get('utilization').children[0].children[0].children[0].children[1];
+    synthesis.children.at(-1).children[0].onclick();
+    same(ui.messages.at(-1), { action: 'openDetail', stage: 'synthesis', kind: 'logicLevels' });
+    receive({ action: 'refresh' });
+    receive({ ...ui.messages.at(-1), run: 'synth_1', file: 'untrusted.rpt' });
+    assert.deepEqual(opened, []);
+    finishRefresh();
+    await flush();
+    assert.deepEqual(opened, [[file, '逻辑级数', 'synth_2']]);
+    receive(ui.messages.at(-1));
+    assert.equal(opened.length, 2);
+    dispose();
+});
+
 test('概览切换工程时丢弃在途结果，产物只打开新工程快照里的条目', async () => {
     const { openSummaryPanels } = require('../src/vivado/summary-view');
     const old = path.resolve('bin/old.xpr'), current = path.resolve('bin/new.xpr');

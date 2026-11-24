@@ -29,11 +29,9 @@ const path = require('path');
 const { parseXpr, fileSetOf, samePath } = require('./xpr');
 const { buildProjectTree } = require('./tree-model');
 const { cancelledError } = require('../toolchains/job');
-const { showReport } = require('./reportView');
 const {
     buildAddFilesScript, buildRemoveFilesScript, buildSetTopScript, buildMoveFileScript,
-    buildLaunchRunScript, buildRunReportsScript,
-    parseUtilHierSummary, parseLogicLevelSummary
+    buildLaunchRunScript
 } = require('./tclgen');
 
 /**
@@ -372,50 +370,6 @@ function activateProjectTree(context, deps) {
         log('[' + run + '] ' + label + '完成');
     }
 
-    /**
-     * 报告：跑 tcl 生成 .rpt → webview 打开 + 摘要进通道。
-     * @param {'synth_1'|'impl_1'} run
-     * @param {Array<'utilization'|'logic_levels'|'timing_summary'>} [kinds] 缺省 = 该 run 全套
-     */
-    async function openRunReports(run, kinds, nodeArg) {
-        const xpr = await currentXpr(nodeArg); if (!xpr) return;
-        const base = vscode.workspace.getWorkspaceFolder(vscode.Uri.file(xpr))?.uri.fsPath || path.dirname(xpr);
-        const parent = path.join(base, '.svtools', 'vivado', 'reports', run);
-        await fs.promises.mkdir(parent, { recursive: true });
-        const outDir = await fs.promises.mkdtemp(path.join(parent, 'report-'));
-        const r = await runTcl('reports_' + run + '.tcl', buildRunReportsScript({ xprPath: xpr, run, outDir, reports: kinds }), xpr);
-        if (r?.status === 'cancelled') { log('[工程树] 报告任务已取消'); return; }
-        if (!succeeded(r)) {
-            out.show(true);
-            vscode.window.showErrorMessage(run + ' 报告生成失败——若 run 未完成请先运行综合/布局布线（详见输出通道）');
-            return;
-        }
-        const list = kinds || (run === 'synth_1' ? ['utilization', 'logic_levels'] : ['utilization', 'timing_summary']);
-        const FILE_OF = {
-            'synth_1:utilization': ['synth_utilization.rpt', '综合报告 · 分层资源占用', (t) => summarizeHier('synth', t)],
-            'synth_1:logic_levels': ['synth_logic_levels.rpt', '综合报告 · 逻辑级数分布', (t) => log('[synth] ' + parseLogicLevelSummary(t))],
-            'impl_1:utilization': ['impl_utilization.rpt', '布局布线报告 · 分层资源占用', (t) => summarizeHier('impl', t)],
-            'impl_1:timing_summary': ['timing_summary.rpt', '时序报告 · Timing Summary', summarizeTiming]
-        };
-        for (const k of list) {
-            const entry = FILE_OF[run + ':' + k];
-            if (!entry) continue;
-            const p = path.join(outDir, entry[0]);
-            if (fs.existsSync(p)) showReport(vscode, vscode.Uri.file(p), entry[1]);
-            if (entry[2]) { try { entry[2](fs.readFileSync(p, 'utf8')); } catch (err) { log('[工程树] 读取报告摘要失败：' + err.message); } }
-        }
-    }
-
-    /** 分层资源摘要进通道（synth/impl 共用 parseUtilHierSummary）。 */
-    function summarizeHier(tag, text) {
-        for (const s of parseUtilHierSummary(text)) log('[' + tag + '] ' + s);
-    }
-    function summarizeTiming(text) {
-        const m = text.match(/^\|\s*(?:Design Timing Summary|WNS\(ns\)[^\n]*\|)\s*\n[^\n]*\n\|\s*(-?[\d.]+)\s*\|\s*(-?[\d.]+)\s*\|\s*(-?[\d.]+)\s*\|\s*(-?[\d.]+)/m);
-        if (m) log('[impl] WNS ' + m[1] + 'ns | TNS ' + m[2] + 'ns | WHS ' + m[3] + 'ns | THS ' + m[4] + 'ns'
-            + (parseFloat(m[1]) >= 0 && parseFloat(m[3]) >= 0 ? '（时序满足）' : '（存在违例！）'));
-    }
-
     /** 全部展开（视图标题栏按钮；收起用 VS Code 内置 collapse-all）。 */
     async function expandAll() {
         if (deps.headless) return vscode.commands.executeCommand('svtools.project.expandAll');
@@ -448,10 +402,10 @@ function activateProjectTree(context, deps) {
         vscode.commands.registerCommand('svtools.vivado.tree.synthesize', guarded('综合', n => launchRun('synth_1', null, '综合', n))),
         vscode.commands.registerCommand('svtools.vivado.tree.implement', guarded('布局布线', n => launchRun('impl_1', 'route_design', '布局布线', n))),
         vscode.commands.registerCommand('svtools.vivado.tree.bitstream', guarded('生成 Bitstream', n => launchRun('impl_1', 'write_bitstream', 'Bitstream 生成', n))),
-        vscode.commands.registerCommand('svtools.vivado.tree.reportSynth', guarded('综合报告', n => openRunReports('synth_1', undefined, n))),
-        vscode.commands.registerCommand('svtools.vivado.tree.reportImpl', guarded('实现报告', n => openRunReports('impl_1', undefined, n))),
-        vscode.commands.registerCommand('svtools.vivado.tree.reportImplUtil', guarded('资源报告', n => openRunReports('impl_1', ['utilization'], n))),
-        vscode.commands.registerCommand('svtools.vivado.tree.reportTiming', guarded('时序报告', n => openRunReports('impl_1', ['timing_summary'], n))),
+        vscode.commands.registerCommand('svtools.vivado.tree.reportSynth', n => vscode.commands.executeCommand('svtools.vivado.summary', n, 'utilization')),
+        vscode.commands.registerCommand('svtools.vivado.tree.reportImpl', n => vscode.commands.executeCommand('svtools.vivado.summary', n, 'utilization')),
+        vscode.commands.registerCommand('svtools.vivado.tree.reportImplUtil', n => vscode.commands.executeCommand('svtools.vivado.summary', n, 'utilization')),
+        vscode.commands.registerCommand('svtools.vivado.tree.reportTiming', n => vscode.commands.executeCommand('svtools.vivado.summary', n, 'timing')),
         vscode.commands.registerCommand('svtools.vivado.tree.expandAll', expandAll)
     );
 

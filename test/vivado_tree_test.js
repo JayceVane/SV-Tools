@@ -86,6 +86,18 @@ test('刷新保留稳定节点ID，父节点合同支持全部展开', async t =
     } finally { h.dispose(); }
 });
 
+test('旧报告命令定位到概览对应区域，无需启动固定运行名的 Tcl', async t => {
+    const f = await fixture(t);
+    const h = await harness(f, { runScript: () => assert.fail('旧命令启动了 Tcl') });
+    try {
+        const node = { nodeData: { xpr: f.xpr } };
+        for (const [action, section] of [['reportSynth', 'utilization'], ['reportImplUtil', 'utilization'], ['reportTiming', 'timing']]) {
+            await h.commands.get('svtools.vivado.tree.' + action)(node);
+            assert.deepEqual(h.notifications.at(-1), ['svtools.vivado.summary', node, section]);
+        }
+    } finally { h.dispose(); }
+});
+
 test('无工程和读取失败均显示内容，之后刷新可恢复真实工程', async t => {
     const f = await fixture(t); let selected = null, failure = false;
     const h = await harness(f, { findProjectXpr: async () => { if (failure) throw new Error('discovery failed'); return selected; } });

@@ -104,6 +104,7 @@ dt, .muted, .empty, .run-detail { color: var(--muted); }
 .utilization-comparison tbody tr { border-top: 1px solid var(--border); }
 .utilization-comparison tbody th { font-weight: 500; }
 .utilization-comparison .report-source, .missing-report { margin: 3px 0 0; font-weight: 400; }
+.report-detail-actions { display: flex; flex-wrap: wrap; gap: 4px; font-weight: 400; }
 .missing-report { display: block; color: var(--muted); font-size: 11px; }
 .resource-delta { display: inline-block; margin-left: 6px; padding: 0 3px; border-radius: 3px; background: var(--track); color: var(--muted); font-size: 10px; }
 .resource-meter { display: flex; align-items: center; gap: 5px; min-height: 16px; }

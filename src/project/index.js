@@ -22,15 +22,12 @@ const RUN_ACTIONS = [
     { id: 'synthesize', label: '综合', icon: 'synthesize', group: 'build' },
     { id: 'implement', label: '布局布线', icon: 'implement', group: 'build' },
     { id: 'bitstream', label: '生成 Bitstream', icon: 'bitstream', group: 'build' },
-    { id: 'stop', label: '停止任务', icon: 'stop', group: 'build' },
-    { id: 'reportSynth', label: '综合报告', icon: 'report', group: 'reports' },
-    { id: 'reportImplUtil', label: '资源报告', icon: 'report', group: 'reports' },
-    { id: 'reportTiming', label: '时序报告', icon: 'report', group: 'reports' }
+    { id: 'stop', label: '停止任务', icon: 'stop', group: 'build' }
 ];
 const TOOL_ACTIONS = [SUMMARY_ACTION, ...RUN_ACTIONS, ...[BD_ACTION, CATALOG_ACTION].map(action => ({ ...action, group: 'assets' }))];
 const ENGLISH_TOOL_LABELS = {
     projectSummary: 'Project Overview', synthesize: 'Synthesize', implement: 'Implement', bitstream: 'Bitstream',
-    stop: 'Stop', reportSynth: 'Synthesis Report', reportImplUtil: 'Utilization Report', reportTiming: 'Timing Report'
+    stop: 'Stop'
 };
 /**
  * 单一侧边栏；页面只传节点令牌和允许的动作，文件路径与工程身份由宿主持有。

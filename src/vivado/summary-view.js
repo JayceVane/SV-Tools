@@ -48,10 +48,10 @@ function html(webview, vscode, resources, strings) {
             <header class="section-heading"><h2 id="analysis-title">${strings.analysis}</h2><button id="generate" hidden>${strings.generate}</button></header>
             <div class="analysis-grid">
                 <article class="surface analysis-wide" aria-labelledby="utilization-title">
-                    <h3 id="utilization-title">${strings.utilization}</h3><div id="utilization"></div>
+                    <h3 id="utilization-title" tabindex="-1">${strings.utilization}</h3><div id="utilization"></div>
                 </article>
                 <article class="surface analysis-wide" aria-labelledby="timing-title">
-                    <h3 id="timing-title">${strings.timing}</h3><div id="timing-source"></div><div id="timing" class="timing"></div>
+                    <h3 id="timing-title" tabindex="-1">${strings.timing}</h3><div id="timing-source"></div><div id="timing" class="timing"></div>
                 </article>
                 <article class="surface" aria-labelledby="power-title">
                     <h3 id="power-title">${strings.power}</h3><div id="power"></div>
@@ -83,22 +83,28 @@ function html(webview, vscode, resources, strings) {
     <script nonce="${nonce}" src="${uri('summary-client.js')}"></script></body></html>`;
 }
 
-function openSummaryPanels(context, vscode, { load, generate, openPath, runMessages, log = () => {} }) {
+function openSummaryPanels(context, vscode, { load, generate, openPath, openDetail = file => openPath(file), runMessages, log = () => {} }) {
     let entry = null, currentXpr = null;
     const strings = summaryStrings(vscode.env?.language);
     return {
-        open(xpr) {
+        open(xpr, section) {
             if (entry) {
-                entry.select(xpr);
                 entry.panel.reveal();
+                entry.select(xpr, section);
                 return;
             }
             currentXpr = xpr;
             const resources = vscode.Uri.joinPath(context.extensionUri, 'src', 'vivado');
             const panel = vscode.window.createWebviewPanel('svtoolsVivadoSummary', 'Vivado · ' + strings.title, vscode.ViewColumn.Active,
                 { enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [resources] });
-            let closed = false, ready = false, auto = true, loading = false, timer = null, latest = null;
+            let closed = false, ready = false, auto = true, loading = false, generating = false;
+            let timer = null, latest = null, pendingSection = section, pendingGeneration = null;
             const post = message => { if (!closed && ready) void panel.webview.postMessage(message); };
+            function focusSection() {
+                if (!latest || !pendingSection) return;
+                post({ type: 'focusReport', section: pendingSection });
+                pendingSection = undefined;
+            }
             const schedule = () => {
                 clearTimeout(timer);
                 if (!auto || closed || !panel.visible) return;
@@ -106,7 +112,7 @@ function openSummaryPanels(context, vscode, { load, generate, openPath, runMessa
             };
             async function refresh(manual = false) {
                 clearTimeout(timer);
-                if (closed || !ready || loading) return;
+                if (closed || !ready || loading || generating) return;
                 loading = true;
                 const selected = currentXpr;
                 if (manual) post({ type: 'loading' });
@@ -118,34 +124,41 @@ function openSummaryPanels(context, vscode, { load, generate, openPath, runMessa
                     else if (data) {
                         latest = data;
                         post({ type: 'summary', data, at: Date.now() });
+                        focusSection();
                     }
                 } catch (error) {
                     if (!closed && selected === currentXpr) post({ type: 'error', message: error.message });
                 } finally {
                     loading = false;
                     if (!closed && selected !== currentXpr) void refresh();
-                    else schedule();
+                    else if (pendingGeneration) {
+                        const pending = pendingGeneration;
+                        pendingGeneration = null;
+                        void generateReports(pending.request, pending.onReady);
+                    } else schedule();
                 }
             }
-            async function generateReports() {
-                const request = latest?.analysis?.generation;
-                if (closed || loading || !request || !generate) return;
+            async function generateReports(request, onReady) {
+                if (closed || generating || !request || !generate) return;
+                if (loading) { pendingGeneration = { request, onReady }; return; }
                 clearTimeout(timer);
                 const selected = currentXpr;
-                loading = true;
+                generating = true;
                 post({ type: 'generating' });
                 let error;
                 try { error = (await generate(selected, request))?.error; }
                 catch (failure) { error = failure.message; }
-                finally { loading = false; }
+                finally { generating = false; }
                 await refresh();
-                if (!closed && selected === currentXpr && error) post({ type: 'error', message: error });
+                if (closed || selected !== currentXpr) return;
+                if (error) post({ type: 'error', message: error });
+                else onReady?.();
             }
             panel.webview.onDidReceiveMessage(message => {
                 if (closed || !message) return;
                 if (message.action === 'ready') { ready = true; auto = message.auto !== false; void refresh(); return; }
                 if (message.action === 'refresh') { void refresh(true); return; }
-                if (message.action === 'generate') { void generateReports(); return; }
+                if (message.action === 'generate') { void generateReports(latest?.analysis?.generation); return; }
                 if (message.action === 'auto') { auto = message.enabled !== false; schedule(); return; }
                 if (message.action === 'openFolder') { void openPath(path.dirname(currentXpr)); return; }
                 if (message.action === 'listMessages' && runMessages && latest?.paths && Number.isSafeInteger(message.request)) {
@@ -158,6 +171,20 @@ function openSummaryPanels(context, vscode, { load, generate, openPath, runMessa
                 if (message.action === 'openMessage' && runMessages && latest?.paths && typeof message.run === 'string') {
                     const location = runMessages.location(latest.paths, message.run, message.line);
                     if (location) void openPath(location.file, location.line);
+                    return;
+                }
+                if (message.action === 'openDetail' && ['synthesis', 'implementation'].includes(message.stage) &&
+                    ['hierarchy', 'logicLevels'].includes(message.kind)) {
+                    const { stage, kind } = message;
+                    const detailFor = () => latest?.analysis?.details?.[stage]?.[kind];
+                    const detail = detailFor();
+                    if (detail?.file) void openDetail(detail.file, strings[kind], detail.request.run);
+                    else if (detail?.request) void generateReports(detail.request, () => {
+                        const updated = detailFor();
+                        if (updated?.file && updated.request.identity === detail.request.identity) {
+                            void openDetail(updated.file, strings[kind], updated.request.run);
+                        } else post({ type: 'error', message: strings.generationFailed });
+                    });
                     return;
                 }
                 if (message.action === 'openReport' && ['utilization', 'timing', 'power', 'drc'].includes(message.kind)) {
@@ -177,12 +204,18 @@ function openSummaryPanels(context, vscode, { load, generate, openPath, runMessa
             panel.onDidChangeViewState(() => { if (panel.visible && auto) void refresh(); else clearTimeout(timer); });
             panel.onDidDispose(() => { closed = true; clearTimeout(timer); entry = null; });
             panel.webview.html = html(panel.webview, vscode, resources, strings);
-            entry = { panel, select(next) {
+            entry = { panel, select(next, section) {
+                pendingSection = section;
                 if (!samePath(next, currentXpr)) {
                     currentXpr = next;
                     latest = null;
+                    pendingGeneration = null;
                     post({ type: 'reset' });
+                } else if (latest && section) {
+                    focusSection();
+                    return;
                 }
+                focusSection();
                 void refresh();
             } };
             log('[vivado] 打开工程概览：' + currentXpr);

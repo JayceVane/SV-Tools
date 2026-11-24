@@ -308,7 +308,7 @@
         return cell;
     }
 
-    function drawUtilization(data = {}) {
+    function drawUtilization(data = {}, details = {}) {
         const table = node('table', undefined, 'utilization-comparison');
         const thead = node('thead'), header = node('tr'), tbody = node('tbody');
         const resourceColumn = node('th', strings.resource);
@@ -319,6 +319,19 @@
             cell.scope = 'col';
             const result = data[stage];
             cell.append(result ? reportSource('utilization', result, stage) : node('span', strings.noUtilization, 'missing-report'));
+            if (details[stage]) {
+                const actions = node('div', undefined, 'report-detail-actions');
+                for (const [kind, detail] of Object.entries(details[stage])) {
+                    const button = node('button', strings[kind], 'link-button');
+                    button.type = 'button';
+                    const label = strings[kind] + ' · ' + detail.request.run;
+                    button.title = phrase(detail.file ? 'reportFor' : 'generateFor', label);
+                    button.setAttribute('aria-label', button.title);
+                    button.onclick = () => vscode.postMessage({ action: 'openDetail', kind, stage });
+                    actions.append(button);
+                }
+                cell.append(actions);
+            }
             header.append(cell);
         }
         const synth = new Map((data.synthesis?.data || []).map(row => [row.resource, row]));
@@ -473,7 +486,7 @@
     }
 
     function drawAnalysis(analysis) {
-        drawUtilization(analysis?.results?.utilization);
+        drawUtilization(analysis?.results?.utilization, analysis?.details);
         drawTiming(analysis?.results?.timing);
         const cards = [['power', 'noPower', powerView], ['drc', 'noDrc', drcView]];
         for (const [kind, empty, renderCard] of cards) {
@@ -530,6 +543,11 @@
     $('message-next').onclick = () => { if (messagePage) listMessages(messagePage.offset + messagePage.items.length); };
     window.addEventListener('message', ({ data: message }) => {
         if (message?.type === 'summary') render(message.data, message.at);
+        else if (message?.type === 'focusReport' && ['utilization', 'timing'].includes(message.section)) {
+            const heading = $(message.section + '-title');
+            heading.focus();
+            heading.scrollIntoView({ block: 'start' });
+        }
         else if (message?.type === 'runMessages' && message.request === messageRequest) drawMessages(message);
         else if (message?.type === 'loading') status(strings.refreshing, '', true);
         else if (message?.type === 'generating') status(strings.generating, '', true);

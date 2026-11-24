@@ -89,12 +89,11 @@ test('空工程状态也发送恢复入口，工程文本不插入可执行HTML'
     assert.match(html, /style-src vscode-webview:\/\/test/);
     assert.match(html, /href="\/src\/project\/style.css"/);
     assert.match(html, /src="\/src\/project\/icons.js"/);
-    for (const id of ['actions', 'toolReports']) {
-        const trigger = html.match(new RegExp('<button[^>]*id="' + id + '"[^>]*>'))[0];
-        assert.match(trigger, /aria-haspopup="menu"/);
-        assert.match(trigger, /aria-expanded="false"/);
-        assert.match(trigger, /aria-controls="menu"/);
-    }
+    const trigger = html.match(/<button[^>]*id="actions"[^>]*>/u)[0];
+    assert.match(trigger, /aria-haspopup="menu"/);
+    assert.match(trigger, /aria-expanded="false"/);
+    assert.match(trigger, /aria-controls="menu"/);
+    assert.doesNotMatch(html, /id="toolReports"/u);
     assert.ok(!html.includes('unsafe-inline'));
     const client = fs.readFileSync(path.resolve(__dirname, '../src/project/client.js'), 'utf8');
     assert.ok(!client.includes('innerHTML'));
@@ -111,13 +110,14 @@ test('工程菜单允许切换自动/手动追踪，并即时显示当前模式'
     assert.deepEqual(h.errors,[]);
 });
 
-test('Vivado 流程提供构建、报告和资产入口并校验快照世代', async t => {
+test('Vivado 流程集中显示概览、构建和资产入口并校验快照世代', async t => {
     const h=await host(t),local=h.api.getSnapshot().project;
     assert.deepEqual(h.sent.at(-1).toolActions,[]);
     h.setProject({...local,id:'vivado',kind:'vivado',path:path.resolve('bin/top.xpr')});
     await h.api.refresh();
     let snapshot=h.sent.at(-1);
-    assert.equal(snapshot.toolActions.length,10);
+    assert.equal(snapshot.toolActions.length,7);
+    assert.equal(snapshot.toolActions.some(action => action.group === 'reports'), false);
     assert.equal(snapshot.toolActions[0].id,'projectSummary');
     assert.equal(snapshot.actions.some(action=>action.id==='projectSummary'),false);
     await h.message({action:'command',revision:snapshot.revision,command:'projectSummary'});
@@ -151,7 +151,7 @@ test('Vivado 流程和工程概览入口跟随英文界面', async t => {
     await h.api.refresh();
     const actions = h.sent.at(-1).toolActions;
     assert.equal(actions.find(action => action.id === 'projectSummary').label, 'Project Overview');
-    assert.equal(actions.find(action => action.id === 'reportImplUtil').label, 'Utilization Report');
+    assert.equal(actions.find(action => action.id === 'implement').label, 'Implement');
 });
 test('文件视图聚合角色，实例视图区分同文件多实例，信号不会成为树节点', () => {
     const file = path.resolve('bin/leaf.sv'), project = { root: path.dirname(file), sets: [{ name: 'sources', files: [file] }] }, nodes = [{ id: 'a', parentId: null, moduleName: 'leaf', label: 'u_a : leaf', source: { path: file }, names: ['u_a'], roles: ['internal', 'output'], details: [], declaration: { name: 'r_data', indices: [0] } }, { id: 'b', parentId: null, moduleName: 'leaf', label: 'u_b : leaf', source: { path: file }, names: ['u_b'], roles: ['input'], details: [] }];

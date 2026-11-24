@@ -81,9 +81,10 @@ test('设计讲解允许先读预期，返回同一事件时不会混入上一�
 function client() {
     let document;
     const createElement = tag => { const element = new Element(tag); element.focus = () => { document.activeElement = element; }; return element; };
-    const elements = new Map(['progress','tree','menu','choose','projectName','projectLocation','projectKind','files','instances','add','ipManager','vivadoTools','tools','toggleTools','addVivado','toolBody','toolOverview','toolActions','assetActions','toolReports','diagnostics','refresh','actions','trace','traceRoot','pin','clear','message','issues'].map(id=>[id,createElement()]));
+    const elements = new Map(['progress','tree','menu','choose','projectName','projectLocation','projectKind','files','instances','add','ipManager','vivadoTools','tools','toggleTools','addVivado','toolBody','toolOverview','toolActions','assetActions','diagnostics','refresh','actions','trace','traceRoot','pin','clear','message','issues'].map(id=>[id,createElement()]));
     elements.get('menu').hidden = true;
-    for (const id of ['actions', 'toolReports']) { elements.get(id).setAttribute('aria-haspopup', 'menu'); elements.get(id).setAttribute('aria-expanded', 'false'); }
+    elements.get('actions').setAttribute('aria-haspopup', 'menu');
+    elements.get('actions').setAttribute('aria-expanded', 'false');
     const messages=[],events={},documentEvents={}; let saved;
     document={ getElementById:id=>elements.get(id), createElement, createElementNS:(_,tag)=>createElement(tag), querySelectorAll:()=>[], addEventListener:(key,fn)=>{documentEvents[key]=fn;} };
     const context=vm.createContext({document,window:{innerWidth:320,innerHeight:900,addEventListener:(key,fn)=>{events[key]=fn;}},acquireVsCodeApi:()=>({getState:()=>({}),setState:value=>{saved=value;},postMessage:message=>messages.push(message)})});
@@ -95,36 +96,33 @@ function client() {
 }
 
 function menuSnapshot(c) {
-    c.receive({ project:{id:'v',name:'top',kind:'vivado'}, actions:[{id:'trace',label:'追踪信号'}],
-        toolActions:[{id:'reportTiming',label:'时序报告',group:'reports'},{id:'reportUtilization',label:'资源报告',group:'reports'}] });
+    c.receive({ project:{id:'v',name:'top',kind:'vivado'}, actions:[{id:'trace',label:'追踪信号'}] });
 }
 
-test('工程操作和报告按钮再次点击收起，按钮子元素及键盘激活遵循同一开关状态',()=>{
+test('工程操作按钮再次点击收起，按钮子元素及键盘激活遵循同一开关状态',()=>{
     const c=client(); menuSnapshot(c);
     const menu=c.elements.get('menu');
-    for (const id of ['actions','toolReports']) {
-        const trigger=c.elements.get(id),child=new Element('span');trigger.append(child);
-        c.pointerClick(trigger,child);assert.equal(menu.hidden,false);const expanded=trigger.getAttribute('aria-expanded');
-        c.pointerClick(trigger,child);assert.equal(menu.hidden,true);assert.equal(trigger.getAttribute('aria-expanded'),'false');
-        assert.equal(expanded,'true');
-        trigger.click();assert.equal(menu.hidden,false);trigger.click();assert.equal(menu.hidden,true);
-    }
+    const trigger=c.elements.get('actions'),child=new Element('span');trigger.append(child);
+    c.pointerClick(trigger,child);assert.equal(menu.hidden,false);const expanded=trigger.getAttribute('aria-expanded');
+    c.pointerClick(trigger,child);assert.equal(menu.hidden,true);assert.equal(trigger.getAttribute('aria-expanded'),'false');
+    assert.equal(expanded,'true');
+    trigger.click();assert.equal(menu.hidden,false);trigger.click();assert.equal(menu.hidden,true);
     assert.equal(c.messages.length,1);
 });
 
-test('共享菜单切换入口、外部关闭、Escape和执行动作都同步展开状态与焦点',()=>{
+test('工程操作菜单外部关闭、Escape和执行动作都同步展开状态与焦点',()=>{
     const c=client();menuSnapshot(c);
-    const menu=c.elements.get('menu'),actions=c.elements.get('actions'),reports=c.elements.get('toolReports');
-    c.pointerClick(actions);c.pointerClick(reports);
-    assert.equal(menu.hidden,false);assert.equal(actions.getAttribute('aria-expanded'),'false');assert.equal(reports.getAttribute('aria-expanded'),'true');
-    assert.equal(menu.children[0].textContent,'时序报告');assert.equal(c.document.activeElement,menu.children[0]);
+    const menu=c.elements.get('menu'),actions=c.elements.get('actions');
+    c.pointerClick(actions);
+    assert.equal(menu.hidden,false);assert.equal(actions.getAttribute('aria-expanded'),'true');
+    assert.equal(menu.children[0].textContent,'追踪信号');assert.equal(c.document.activeElement,menu.children[0]);
     c.dispatch('pointerdown',{target:menu.children[0]});assert.equal(menu.hidden,false);
-    menu.children[0].click();assert.equal(menu.hidden,true);assert.equal(reports.getAttribute('aria-expanded'),'false');
-    assert.equal(c.messages.at(-1).command,'reportTiming');assert.equal(c.document.activeElement,reports);
-    reports.click();c.dispatch('keydown',{key:'Escape'});
-    assert.equal(menu.hidden,true);assert.equal(reports.getAttribute('aria-expanded'),'false');assert.equal(c.document.activeElement,reports);
-    reports.click();c.dispatch('pointerdown',{target:c.elements.get('tree')});
-    assert.equal(menu.hidden,true);assert.equal(reports.getAttribute('aria-expanded'),'false');
+    menu.children[0].click();assert.equal(menu.hidden,true);assert.equal(actions.getAttribute('aria-expanded'),'false');
+    assert.equal(c.messages.at(-1).command,'trace');assert.equal(c.document.activeElement,actions);
+    actions.click();c.dispatch('keydown',{key:'Escape'});
+    assert.equal(menu.hidden,true);assert.equal(actions.getAttribute('aria-expanded'),'false');assert.equal(c.document.activeElement,actions);
+    actions.click();c.dispatch('pointerdown',{target:c.elements.get('tree')});
+    assert.equal(menu.hidden,true);assert.equal(actions.getAttribute('aria-expanded'),'false');
     actions.focus();c.dispatch('keydown',{key:'Escape'});assert.equal(c.document.activeElement,actions);
 });
 
@@ -147,8 +145,8 @@ test('真实页面脚本显示节点右侧标记、保留文本和工具提示�
     row.events.contextmenu({preventDefault(){}});assert.equal(c.elements.get('menu').children[0].textContent,'移出工程');c.elements.get('menu').children[0].click();assert.equal(c.messages.at(-1).nodeId,'leaf');
 });
 
-test('Vivado流程独立显示，构建和报告分组路由，切换自管理工程恢复添加入口',()=>{
-    const c=client(),tools=[{id:'synthesize',label:'综合',icon:'synthesize',group:'build'},{id:'implement',label:'布局布线',icon:'implement',group:'build'},{id:'reportTiming',label:'时序报告',icon:'report',group:'reports'},
+test('Vivado流程显示概览、构建、资产，切换自管理工程恢复添加入口',()=>{
+    const c=client(),tools=[{id:'synthesize',label:'综合',icon:'synthesize',group:'build'},{id:'implement',label:'布局布线',icon:'implement',group:'build'},
         {id:'blockDesign',label:'Block Design',icon:'blockDesign',group:'assets'},{id:'ipCatalog',label:'IP Catalog',icon:'catalog',group:'assets'},
         {id:'projectSummary',label:'工程概览',icon:'report',group:'overview'}];
     c.receive({project:{id:'v',name:'top',kind:'vivado'},toolActions:tools});
@@ -169,10 +167,6 @@ test('Vivado流程独立显示，构建和报告分组路由，切换自管理�
     assert.equal(c.messages.at(-1).command,'ipCatalog');
     c.elements.get('toolActions').children[1].click();
     assert.equal(c.messages.at(-1).command,'implement');
-    c.elements.get('toolReports').click();
-    assert.equal(c.elements.get('menu').children.length,1);
-    c.elements.get('menu').children[0].click();
-    assert.equal(c.messages.at(-1).command,'reportTiming');
     c.elements.get('toggleTools').click();
     assert.equal(c.elements.get('toolBody').hidden,true);
     c.elements.get('vivadoTools').click();

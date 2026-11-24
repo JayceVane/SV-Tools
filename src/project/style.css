@@ -58,8 +58,6 @@ header { padding: 8px 8px 6px; }
 .asset-actions { margin-top: 5px; padding-top: 5px; border-top: 1px solid var(--vscode-panel-border); }
 .asset-actions button { background: transparent; color: inherit; }
 .asset-actions button:hover { background: var(--vscode-toolbar-hoverBackground); }
-#toolReports { width: 100%; margin-top: 5px; display: flex; align-items: center; gap: 7px; min-height: 28px; text-align: left; }
-#toolReports .chevron { min-height: 16px; transform: rotate(90deg); }
 #diagnostics { flex-shrink: 0; border-top: 1px solid var(--vscode-panel-border); padding: 5px 12px; max-height: 25vh; overflow: auto; }
 #diagnostics summary { cursor: pointer; }
 #issues { padding-top: 6px; white-space: pre-wrap; color: var(--vscode-descriptionForeground); }

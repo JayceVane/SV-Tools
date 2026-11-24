@@ -256,36 +256,6 @@ function buildLaunchRunScript(o) {
 }
 
 /**
- * 生成"打开已完成的 run 并输出报告"TCL。synth 报告含分层资源 + 逻辑级数；
- * impl 报告含时序汇总 + 资源。run 未完成时 open_run 报错（插件提示先跑）。
- * @param {{xprPath:string, run:'synth_1'|'impl_1', outDir:string, reports?:Array<'utilization'|'logic_levels'|'timing_summary'>}} o
- * reports 缺省 = 该 run 全套；传子集则只生成所选报告（快捷区拆分入口用）。
- */
-function buildRunReportsScript(o) {
-    const isSynth = o.run === 'synth_1';
-    const kinds = o.reports || (isSynth ? ['utilization', 'logic_levels'] : ['utilization', 'timing_summary']);
-    const L = [
-        'open_project ' + tclQuote(o.xprPath),
-        'set outDir ' + tclQuote(o.outDir),
-        'file mkdir $outDir',
-        'open_run ' + o.run + (isSynth ? ' -name netlist_1' : ' -name impl_1')
-    ];
-    for (const k of kinds) {
-        if (k === 'utilization') {
-            // 与 Vivado GUI 对齐：synth/impl 打开设计后的 Utilization 视图都是
-            // 分层表（synthesized/implemented design 默认 hierarchical 展示）
-            L.push('report_utilization -hierarchical -file $outDir/' + (isSynth ? 'synth_utilization.rpt' : 'impl_utilization.rpt'));
-        } else if (k === 'logic_levels') {
-            L.push('report_design_analysis -logic_level_distribution -file $outDir/synth_logic_levels.rpt');
-        } else if (k === 'timing_summary') {
-            L.push('report_timing_summary -file $outDir/timing_summary.rpt');
-        }
-    }
-    L.push('puts "SVTOOLS_REPORTS_DONE"', 'puts "SVTOOLS_DONE"');
-    return L.join('\n') + '\n';
-}
-
-/**
  * 生成 xsim 行为仿真 TCL：打开工程（缺文件先补入）→ 当前文件模块置为 sim_1 顶层 → launch_simulation。
  * @param {{xprPath:string, top:string, file:string, isSv:boolean, runtime:string,fileset?:string}} o
  */
@@ -486,7 +456,7 @@ function buildVivadoDrcScript({ xprPath, run }) {
 module.exports = {
     tclQuote, tclList, wrapProjectScript,
     buildCreateProjectScript, buildAddFilesScript, buildRemoveFilesScript, buildSimulateScript,
-    buildSetTopScript, buildMoveFileScript, buildLaunchRunScript, buildRunReportsScript,
+    buildSetTopScript, buildMoveFileScript, buildLaunchRunScript,
     buildOocReportsScript, parseUtilHierSummary, parseLogicLevelSummary,
     buildVivadoStatusScript, buildVivadoTimingScript, buildVivadoUtilizationScript, buildVivadoDrcScript,
     buildAddFilesBatchScript,

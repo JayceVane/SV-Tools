@@ -238,6 +238,36 @@ test('概览按实际阶段汇总资源、功耗、DRC，缺报告时回退且�
     assert.deepEqual(generation.kinds, ['timing', 'power']);
 });
 
+test('概览的分层资源和逻辑级数按当前非默认运行生成并复用', async t => {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'svtools-detail-reports-'));
+    t.after(() => fs.rm(directory, { recursive: true, force: true }));
+    const synthesis = path.join(directory, 'synth_2'), implementation = path.join(directory, 'impl_3');
+    await Promise.all([fs.mkdir(synthesis), fs.mkdir(implementation)]);
+    const checkpoint = path.join(synthesis, 'top.dcp');
+    await Promise.all([fs.writeFile(checkpoint, 'synth'), fs.writeFile(path.join(implementation, 'top_routed.dcp'), 'impl')]);
+    const snapshot = { currentRuns: { synthesis: 'synth_2', implementation: 'impl_3' }, runs: [
+        { id: 'synth_2', status: 'synth_design Complete!' },
+        { id: 'impl_3', status: 'route_design Complete!', implementation: true }
+    ] };
+    const paths = { synth_2: { directory: synthesis }, impl_3: { directory: implementation } };
+    const reports = createSummaryReports();
+    const { details, generation } = await reports.read(snapshot, paths);
+    const request = details.synthesis.logicLevels.request;
+    assert.equal(request.run, 'synth_2');
+    assert.equal(generation.kinds.includes('logicLevels'), false);
+    assert.equal(details.implementation.logicLevels, undefined);
+    assert.equal(details.implementation.hierarchy.request.run, 'impl_3');
+    assert.match(analysisCommands(request).join('\n'), /report_design_analysis -logic_level_distribution/u);
+    assert.match(analysisCommands(details.implementation.hierarchy.request).join('\n'), /report_utilization -hierarchical/u);
+    const file = path.join(directory, 'summary_logicLevels.rpt');
+    await fs.writeFile(file, 'Logic levels report');
+    await reports.remember(request, directory);
+    assert.equal((await reports.read(snapshot, paths)).details.synthesis.logicLevels.file, file);
+    await fs.writeFile(checkpoint, 'changed synth checkpoint');
+    assert.equal(await reports.isCurrent(request), false);
+    assert.equal((await reports.read(snapshot, paths)).details.synthesis.logicLevels.file, undefined);
+});
+
 test('Block Design 布局在宿主重启后复用坐标，结构、层级和接口展开状态分别匹配', async t => {
     const temp = await fs.realpath(os.tmpdir());
     const folder = await fs.mkdtemp(path.join(temp, 'svtools-bd-cache-'));

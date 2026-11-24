@@ -5,6 +5,7 @@ const path = require('node:path');
 const { literal } = require('./asset-task');
 
 const REPORTS = ['utilization', 'timing', 'power', 'drc'];
+const DETAIL_REPORTS = { hierarchy: 'report_utilization -hierarchical', logicLevels: 'report_design_analysis -logic_level_distribution' };
 const GENERATED_REPORTS_KEY = 'svtools.vivado.summaryReports';
 const MAX_PREFIX = 512 * 1024;
 const RESOURCE_NAMES = [
@@ -217,6 +218,17 @@ function createSummaryReports(workspaceState) {
         return { run, identity, reports };
     }
 
+    async function detailsFor(item) {
+        if (!item?.identity || !/complete/i.test(item.run.status)) return undefined;
+        const { run, identity } = item;
+        const kinds = run.implementation ? ['hierarchy'] : Object.keys(DETAIL_REPORTS);
+        const existing = generated.get(identity);
+        return Object.fromEntries(await Promise.all(kinds.map(async kind => {
+            const file = existing?.[kind];
+            return [kind, { file: file && await getFile(file) ? file : undefined, request: { run: run.id, identity, kinds: [kind] } }];
+        })));
+    }
+
     return {
         async read(snapshot, paths) {
             const current = snapshot.currentRuns;
@@ -244,7 +256,8 @@ function createSummaryReports(workspaceState) {
             const generation = eligible.map((item, index) => ({ run: item.run.id, identity: item.identity,
                 kinds: (index === 0 ? REPORTS : ['utilization']).filter(kind => !item.reports[kind])
             })).find(request => request.kinds.length) || null;
-            return { results, generation };
+            const [synthDetails, implDetails] = await Promise.all([detailsFor(synthesis), detailsFor(implementation)]);
+            return { results, generation, details: { synthesis: synthDetails, implementation: implDetails } };
         },
         async isCurrent(request) {
             const [, file, stamp] = request.identity.split('\0');
@@ -267,8 +280,9 @@ function createSummaryReports(workspaceState) {
 function analysisCommands({ run, kinds }) {
     return [
         'open_run ' + literal(run),
-        ...REPORTS.filter(kind => kinds.includes(kind)).map(kind => {
-            const command = kind === 'timing' ? 'report_timing_summary' : 'report_' + kind;
+        ...[...REPORTS, ...Object.keys(DETAIL_REPORTS)].filter(kind => kinds.includes(kind)).map(kind => {
+            const command = Object.hasOwn(DETAIL_REPORTS, kind) ? DETAIL_REPORTS[kind]
+                : kind === 'timing' ? 'report_timing_summary' : 'report_' + kind;
             return 'if {[catch {' + command + ' -file [file join [pwd] summary_' + kind + '.rpt]} message]} { sv_row analysis_error ' + kind + ' $message }';
         })
     ];

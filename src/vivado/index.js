@@ -30,6 +30,7 @@ const { createSummaryReports, analysisCommands } = require('./summary-reports');
 const { createSummaryMessages } = require('./summary-messages');
 const { openSummaryPanels } = require('./summary-view');
 const { summaryStrings } = require('./summary-strings');
+const { showReport } = require('./reportView');
 const { scanWorkspaceSources } = require('../workspace/sources');
 const fs = require('fs');
 const os = require('os');
@@ -894,21 +895,25 @@ function activateVivado(context, deps) {
                 if (!await reports.isCurrent(request)) throw new Error(overviewText.checkpointChanged);
             }
         }, { quiet: true, panel: true });
-        if (result?.code !== 0 || !result.logPath) return { error: result?.error || overviewText.generationFailed };
+        if (result?.code !== 0 || !result.logPath) {
+            const reason = result?.stdout?.match(/^SVTOOLS_TCL_ERROR (.*)$/mu)?.[1];
+            return { error: reason || result?.error || overviewText.generationFailed };
+        }
         const directory = path.dirname(result.logPath);
         await reports.remember(request, directory);
         const errors = rowsOf(await readRows(directory), 'analysis_error');
         if (errors.length) return { error: overviewText.partial + '\n' + errors.map(([kind, error]) => overviewText[kind] + ' · ' + error).join('\n') };
     }
     const summaryPanels = openSummaryPanels(context, vscode, {
-        load: loadSummary, generate: generateSummaryReports, openPath: openSummaryPath, runMessages, log
+        load: loadSummary, generate: generateSummaryReports, openPath: openSummaryPath, runMessages, log,
+        openDetail: (file, label, run) => showReport(vscode, vscode.Uri.file(file), run + ' · ' + label)
     });
-    context.subscriptions.push(vscode.commands.registerCommand('svtools.vivado.summary', async node => {
+    context.subscriptions.push(vscode.commands.registerCommand('svtools.vivado.summary', async (node, section) => {
         try {
             const xpr = await refreshProjectContext();
             if (!xpr) { vscode.window.showErrorMessage(overviewText.noProject); return; }
             if (node?.nodeData?.xpr && !samePath(xpr, node.nodeData.xpr)) throw new Error(overviewText.switched);
-            summaryPanels.open(xpr);
+            summaryPanels.open(xpr, ['utilization', 'timing'].includes(section) ? section : undefined);
         } catch (error) { vscode.window.showErrorMessage(overviewText.overviewFailed + '\n' + error.message); }
     }));
 

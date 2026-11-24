@@ -122,9 +122,11 @@ async function buildProjectTree(parsed, { workspaceFiles = [], readFile = readBo
             tooltip: file, contextValue: kind, icon: missing ? 'warning' : kind === 'orphan' ? 'diff-add' : kind === 'constraint' ? 'gauge' : kind === 'simFile' ? 'beaker' : 'file-code', children,
             nodeData: { kind, file, fileset: set?.name, xpr: project } };
     }
-    const actions = [['xelab 详细化', 'zap', 'quickElaborate'], ['工程综合', 'tools', 'synthesize'], ['综合报告', 'graph', 'reportSynth'],
-        ['布局布线', 'circuit-board', 'implement'], ['资源报告', 'list-tree', 'reportImplUtil'], ['时序报告', 'watch', 'reportTiming'], ['生成 Bitstream', 'package', 'bitstream']]
+    const actions = [['xelab 详细化', 'zap', 'quickElaborate'], ['工程综合', 'tools', 'synthesize'],
+        ['布局布线', 'circuit-board', 'implement'], ['生成 Bitstream', 'package', 'bitstream']]
         .map(([label, icon, command]) => ({ id: prefix + '/action:' + command, label, icon, contextValue: 'action', command: 'svtools.vivado.tree.' + command, children: [], nodeData: { xpr: project } }));
+    actions.unshift({ id: prefix + '/action:summary', label: '工程概览', icon: 'graph', contextValue: 'action',
+        command: 'svtools.vivado.summary', children: [], nodeData: { xpr: project } });
     const children = [category(prefix + '/actions', '工程操作', actions, false)];
     for (const set of parsed.sets) {
         const id = prefix + '/set:' + set.name, kind = set.type === 'SimulationSrcs' ? 'simFile' : set.type === 'Constrs' ? 'constraint' : 'file';

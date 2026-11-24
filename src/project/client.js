@@ -190,7 +190,7 @@
                 });
                 row.addEventListener('contextmenu', event => {
                     event.preventDefault();
-                    showMenu(node, undefined, row);
+                    showMenu(node, row);
                 });
                 row.addEventListener('keydown', event => {
                     if (event.key === 'ArrowRight' && node.children.length && !expanded) {
@@ -231,15 +231,16 @@
         if (anchor?.getAttribute('aria-haspopup') === 'menu') anchor.setAttribute('aria-expanded', 'false');
         if (restoreFocus) anchor?.focus?.();
     }
-    function toggleMenu(commandList, anchor = document.getElementById('actions')) {
+    function toggleMenu() {
+        const anchor = document.getElementById('actions');
         if (!menu.hidden && menuAnchor === anchor) closeMenu(true);
-        else showMenu(undefined, commandList, anchor);
+        else showMenu();
     }
-    function showMenu(node, commandList, anchor = document.getElementById('actions')) {
+    function showMenu(node, anchor = document.getElementById('actions')) {
         closeMenu();
         menuAnchor = anchor;
         menu.replaceChildren();
-        const commands = commandList || (node ? node.actions : [...(snapshot.actions || []), ...(snapshot.issues?.length ? [{ id: 'diagnostics', label: currentState().diagnostics ? '收起分析提示' : '查看分析提示' }] : [])]);
+        const commands = node ? node.actions : [...(snapshot.actions || []), ...(snapshot.issues?.length ? [{ id: 'diagnostics', label: currentState().diagnostics ? '收起分析提示' : '查看分析提示' }] : [])];
         for (const action of commands || []) {
             const button = document.createElement('button');
             button.type = 'button';
@@ -284,7 +285,6 @@
         remember();
         render();
     });
-    document.getElementById('toolReports').addEventListener('click', () => toggleMenu((snapshot.toolActions || []).filter(action => action.group === 'reports'), document.getElementById('toolReports')));
     for (const projection of ['files', 'instances', 'progress'])
         document.getElementById(projection)?.addEventListener('click', () => {
             currentState().projection = projection;
