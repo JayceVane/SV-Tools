@@ -32,8 +32,9 @@ function checksSection(checks) {
     }
     const lines = ['## 结构检查', '', '| 级别 | 诊断 | 实例/端口 | 说明 |', '| --- | --- | --- | --- |'];
     for (const item of checks) {
-        const target = item.details.instance ? item.details.instance + '/' + (item.details.port || '')
-            : item.details.port || (item.details.drivers || []).join('、');
+        const details = item.details || {};
+        const target = details.instance ? details.instance + '/' + (details.port || '')
+            : details.port || (details.drivers || []).join('、');
         lines.push('| ' + item.severity + ' | ' + item.code + ' | ' + target + ' | ' + item.message.replaceAll('|', '\\|') + ' |');
     }
     lines.push('');

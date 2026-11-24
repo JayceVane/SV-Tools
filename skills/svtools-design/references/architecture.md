@@ -30,4 +30,4 @@ node <svtools-root>/src/cli/main.js design render --workspace <rtl-workspace> --
 
 ## 能力边界
 
-当前架构由 Yosys 的 `read_verilog -sv`、`hierarchy`、`proc`、`memory_collect` 得到，只投影顶层实例。它保留空模块，但并不支持完整 SystemVerilog/UVM 语言。无法展开的类型、宏、位宽或层级必须报告限制，不伪造结果。输入使用捕获文本的隔离副本；未被捕获的初始化数据或动态文件读取无法作为证据。`design check`（逐端口结构诊断）、`design diff`（快照对比）、无宿主 PNG（内置 resvg 栅格化）与 `design report`（证据包）已交付；任意深度层级展开仍未交付。scaffold 的规格检查仅覆盖其生成输入；`design check` 只报告结构事实，不代表综合结果、时序收敛、CDC 或功能验证。
+当前架构有两条引擎路径：默认使用 Yosys 的 `read_verilog -sv`、`hierarchy`、`proc`、`memory_collect`；`--engine struct` 使用内置结构前端（不依赖 Yosys），工程含 SV `interface` 或实现省略符 `...` 时也会自动选择结构前端。两条路径都只投影顶层实例，保留空模块/黑盒边界，并不支持完整 SystemVerilog/UVM 语言；结构前端的 `ARCH_SYNTAX`、`ARCH_MODPORT_MISMATCH` 等诊断必须结合 `limitations[]` 阅读。无法展开的类型、宏、位宽或层级必须报告限制，不伪造结果。输入使用捕获文本的隔离副本；未被捕获的初始化数据或动态文件读取无法作为证据。`design check`（逐端口结构诊断）、`design diff`（快照对比）、无宿主 PNG（内置 resvg 栅格化）与 `design report`（证据包）已交付；任意深度层级展开仍未交付。scaffold 的规格检查仅覆盖其生成输入；`design check` 只报告结构事实，不代表综合结果、时序收敛、CDC 或功能验证。

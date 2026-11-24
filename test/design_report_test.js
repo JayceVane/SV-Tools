@@ -8,6 +8,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { createHash } = require('node:crypto');
 const { run } = require('../src/cli/main');
+const { generateReportMarkdown } = require('../src/design/report');
 
 const FIXTURES = path.join(__dirname, 'fixtures', 'design');
 
@@ -73,6 +74,13 @@ test('design report 对结构问题设计同样成包，检查表进入 Markdown
     assert.match(markdown, /4 error \/ 4 warning/);
     assert.match(markdown, /\| error \| UNRESOLVED_MODULE \|/);
     assert.match(markdown, /\| warning \| WIDTH_MISMATCH \|/);
+});
+
+test('结构诊断缺少 details 时也能生成报告', () => {
+    const markdown = generateReportMarkdown({ top: { name: 'top' }, checks: [{ severity: 'error', code: 'SYNTAX', message: 'bad | token' }],
+        instances: [], interfaces: [], sourceFiles: [], limitations: [] },
+        { svgFile: 'top.svg', pngFile: null, scale: null, svgSha256: 'svg-hash' });
+    assert.match(markdown, /\| error \| SYNTAX \|  \| bad \\| token \|/);
 });
 
 test('design render --format png 输出无宿主位图，--format 非法拒绝', async t => {
