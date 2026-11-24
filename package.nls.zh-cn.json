@@ -59,6 +59,7 @@
   "cmd.iverilog_showText.title": "VCD: 以文本显示",
   "cmd.vivado_runScript.title": "Vivado: 运行 TCL 脚本",
   "cmd.vivado_runActiveScript.title": "Vivado: 运行当前 TCL 脚本",
+  "cmd.vivado_runScriptInSession.title": "Vivado: 在常驻会话中运行 TCL",
   "cmd.vivado_stop.title": "Vivado: 停止",
   "cmd.vivado_assets_ip.title": "Vivado: IP 管理",
   "cmd.vivado_assets_bd.title": "Vivado: Block Design",

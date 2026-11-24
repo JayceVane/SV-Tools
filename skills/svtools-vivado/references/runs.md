@@ -11,7 +11,7 @@
   - `power`：从选定运行的检查点执行 `report_power`，返回 `power`（总量 `total`、动态 `dynamic`、静态 `static`、`confidence` 和组件 `components[]`，单位 W）。组件只报告阈值时给出 `below`，原始报告路径随 `artifacts` 返回。`source` 区分 `project` 原工程和 `agent-build` 隔离构建。
   - 报告优先打开该次隔离构建，附带 `runInfo`（id、状态、完成时间、revision、实际工程与工具版本）、`stale`/`staleInputs` 和 `configurationChanged`。源码、约束、top、器件、宏、include、文件属性或运行策略变化会使记录过期；没有可验证记录时 `stale=null`，不会把旧记录升级为当前证据。
   - 工程无法打开、run 阶段未完成或工具执行失败时分别返回 `VIVADO_SCRIPT_FAILED`、`VIVADO_EXEC_FAILED`，不以空数据代替未执行。
-- `vivado run [--run synth_1|impl_1] [--jobs n]`：后台任务，用 `task status/logs/cancel` 管理。每轮从捕获的工程设置、源码、头文件与XDC建立独立副本并重新构建；实现run会先构建其综合依赖。只有明确完成且检查点通过校验时才写成功记录。运行前后复核原始输入，变化返回 `CONTEXT_CHANGED`；失败/取消不会继续引用上一次成功报告。
+- `vivado run [--run synth_1|impl_1] [--jobs n] [--bitstream]`：后台任务，用 `task status/logs/cancel` 管理。`--bitstream` 需要 `impl_*` run（默认 `impl_1`），以 `-to_step write_bitstream` 启动，并在证据 `verification.checks` 中记录 `bitstream`。每轮从捕获的工程设置、源码、头文件与XDC建立独立副本并重新构建；实现run会先构建其综合依赖。只有明确完成且检查点通过校验时才写成功记录。运行前后复核原始输入，变化返回 `CONTEXT_CHANGED`；失败/取消不会继续引用上一次成功报告。
 
 隔离构建位于 `.svtools/agent/vivado/builds/`，默认保留最近5次；原工程的run目录保持独立，`vivado status` 的 `agentRuns` 展示CLI构建。报告校验对应DCP的SHA-256，单份检查点上限512MiB；构建被清理返回 `ARTIFACT_EXPIRED`，检查点被替换返回 `ARTIFACT_INVALID`。输入、配置、源码副本映射与检查点身份记录在每轮 `manifest.json`，结果还提供完整 `inputFingerprint`，后台当前性判断包含初始化数据等非RTL输入。
 
@@ -27,6 +27,8 @@
 - `verification`：验证做到哪一步（`checks[]`、`acceptance`）。当前 `acceptance=false` 表示只有构建/检查，**不代表功能验证通过**。
 
 Agent 不得把 `execution.success` 当作 `inputs.complete`，也不得把任一轴当作 `verification.acceptance`。
+
+- `vivado tcl --file <script> [--cwd <dir>]`：在独立批处理进程中执行任意 Tcl，不打开也不保存工程，除非脚本自行 `open_project`。返回退出码和完整日志；非零退出返回 `VIVADO_EXEC_FAILED`。这类脚本的副作用由脚本自身负责。
 
 ## 原工程概览与消息
 

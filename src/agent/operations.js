@@ -448,6 +448,8 @@ async function report(input) {
     return response;
 }
 async function lint(input, {signal,onContext,onArtifacts} = {}) {
+    if (input.engine === 'xvlog') return require('./xvlog').lint(input, { signal, onContext, onArtifacts });
+    if (input.engine && input.engine !== 'iverilog') fail('INVALID_ARGUMENT', '--engine 必须为 iverilog 或 xvlog');
     const resolved = await resolveContext(input), {context,options} = resolved;
     if (input.expectedRevision && input.expectedRevision!==context.revision) fail('CONTEXT_CHANGED','任务启动前工程或源码已经变化',{},4);
     const target=selectTarget(resolved), tool=await locateIverilog(options);

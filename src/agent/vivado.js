@@ -16,6 +16,7 @@ const tclgen = require('../vivado/tclgen');
 const assets = require('../vivado/asset-task');
 const { analysisCommands, readReport } = require('../vivado/summary-reports');
 const { projectVersion } = require('../vivado/version');
+const { parseXpr, samePath } = require('../vivado/xpr');
 
 const RUN_NAME = /^(?:synth|impl)_\d+$/;
 const REPORT_RUN_NAME = /^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$/;
@@ -254,6 +255,95 @@ async function addFiles(input, { runner } = {}) {
     return result('project.add', { fileset, added: tagged(lines, 'SVTOOLS_ADDED'), already: tagged(lines, 'SVTOOLS_ALREADY_IN') }, resolved.context, [], artifactLogs(logs));
 }
 
+function projectFiles(input, options) {
+    return (input.sources || []).map(file => path.resolve(options.workspace, file));
+}
+
+function setOfFile(parsed, file, name) {
+    return name ? parsed.sets.find(set => set.name === name) : parsed.sets.find(set => set.files.some(item => samePath(item, file)));
+}
+
+/** 移出工程：按 XPR 当前成员定位文件集，逐文件执行 remove_files 并核对标记。 */
+async function removeFiles(input, { runner } = {}) {
+    const { options, xpr } = await vivadoTarget(input);
+    const files = projectFiles(input, options);
+    if (!files.length) fail('FILE_REQUIRED', 'project remove 需要至少一个 --source');
+    const parsed = parseXpr(xpr), removed = [], absent = [], logs = [], filesets = [];
+    for (const file of files) {
+        const stat = await fs.stat(file).catch(() => null);
+        if (!stat?.isFile()) fail('SOURCE_NOT_FOUND', '源文件不存在：' + file, { file });
+        if (input.filesetTarget && !['sources_1', 'constrs_1', 'sim_1'].includes(input.filesetTarget)) {
+            fail('INVALID_ARGUMENT', '目标文件集必须为sources_1、constrs_1或sim_1');
+        }
+        const set = setOfFile(parsed, file, input.filesetTarget);
+        if (!set) fail('ASSET_NOT_FOUND', '文件不属于所选 Vivado 工程：' + file, { file });
+        const { stdout, summary, logs: stageLogs } = await execute(options, tclgen.buildRemoveFilesScript(xpr, file, set.name), { runner });
+        logs.push(...stageLogs); filesets.push(set.name);
+        ensureSucceeded(summary, stdout, logs);
+        (/(?:^|\n)SVTOOLS_REMOVED(?:\r?\n|$)/u.test(stdout) ? removed : absent).push(file);
+    }
+    const resolved = await resolveContext({ ...options, project: xpr });
+    return result('project.remove', { filesets: [...new Set(filesets)], removed, absent }, resolved.context, [], artifactLogs(logs));
+}
+
+/** 在文件集之间移动：默认按工程成员推断源文件集，目标必须显式给出。 */
+async function moveFile(input, { runner } = {}) {
+    const { options, xpr } = await vivadoTarget(input);
+    const files = projectFiles(input, options);
+    if (files.length !== 1) fail('INVALID_ARGUMENT', 'project move 需要且只接受一个 --source');
+    const file = files[0];
+    const to = input.to || input.toFileset;
+    if (!to) fail('INVALID_ARGUMENT', 'project move 需要 --to <文件集>');
+    if (!['sources_1', 'constrs_1', 'sim_1'].includes(to)) fail('INVALID_ARGUMENT', '目标文件集必须为sources_1、constrs_1或sim_1');
+    const parsed = parseXpr(xpr);
+    const from = input.from || input.filesetTarget || setOfFile(parsed, file, null)?.name;
+    if (!from) fail('ASSET_NOT_FOUND', '文件不属于所选 Vivado 工程：' + file, { file });
+    const { stdout, summary, logs } = await execute(options, tclgen.buildMoveFileScript({ xprPath: xpr, file, from, to }), { runner });
+    ensureSucceeded(summary, stdout, logs);
+    const resolved = await resolveContext({ ...options, project: xpr });
+    return result('project.move', { file, from, to }, resolved.context, [], artifactLogs(logs));
+}
+
+/** 设置约束文件的 TARGET_CONSTRS_FILE；默认在 Constrs 文件集中查找该 XDC。 */
+async function setConstraintTarget(input, { runner } = {}) {
+    const { options, xpr } = await vivadoTarget(input);
+    const files = projectFiles(input, options);
+    if (files.length !== 1) fail('INVALID_ARGUMENT', 'project set-constraint-target 需要且只接受一个 --source');
+    const file = files[0];
+    if (!/\.xdc$/iu.test(file)) fail('INVALID_ARGUMENT', '约束目标只接受 .xdc 文件');
+    const parsed = parseXpr(xpr);
+    const candidates = parsed.sets.filter(set => set.type === 'Constrs' && set.files.some(item => samePath(item, file)));
+    const set = input.filesetTarget ? candidates.find(item => item.name === input.filesetTarget) : candidates[0];
+    if (!set) fail('ASSET_NOT_FOUND', '约束文件不属于所选工程的约束集：' + file, { file });
+    const { stdout, summary, logs } = await execute(options, tclgen.buildSetConstraintTargetScript(xpr, set.name, file), { runner });
+    ensureSucceeded(summary, stdout, logs);
+    const resolved = await resolveContext({ ...options, project: xpr });
+    return result('project.set-constraint-target', { file, fileset: set.name }, resolved.context, [], artifactLogs(logs));
+}
+
+/** 运行任意 Tcl 脚本：独立批处理进程，不打开或修改工程，除非脚本自行 open_project。 */
+async function tclScript(input, { runner } = {}) {
+    const { options } = await readOptions(input);
+    const file = input.file ? path.resolve(options.workspace, input.file) : null;
+    if (!file || !/\.tcl$/iu.test(file)) fail('INVALID_ARGUMENT', 'vivado tcl 需要 --file <.tcl>');
+    const stat = await fs.stat(file).catch(() => null);
+    if (!stat?.isFile()) fail('SOURCE_NOT_FOUND', 'Tcl 脚本不存在：' + file, { file });
+    const cwd = input.cwd ? path.resolve(options.workspace, input.cwd) : path.dirname(file);
+    const executable = await locateVivado(options);
+    const manager = createToolTaskManager({});
+    const job = manager.start('cli-vivado-tcl');
+    try {
+        const summary = await runVivadoBatchTask({ task: job, executable, args: buildBatchArgs(file), cwd, scriptPath: file,
+            timeoutMs: options.timeoutMs });
+        if (!summary.ok) fail('VIVADO_EXEC_FAILED', summary.message || 'Vivado Tcl 脚本执行失败',
+            { exitCode: summary.exitCode ?? null, artifacts: artifactLogs(job.logPaths) });
+        return result('vivado.tcl', { file, exitCode: summary.exitCode ?? 0 }, null, [], artifactLogs(job.logPaths));
+    } finally {
+        await job.finish({ keepArtifacts: true });
+        await manager.dispose();
+    }
+}
+
 async function setTop(input, { runner } = {}) {
     const { options, xpr } = await vivadoTarget(input);
     if (!input.top && !input.simTop) fail('INVALID_ARGUMENT', 'project set-top 需要 --top 或 --sim-top');
@@ -328,7 +418,9 @@ async function report(input, { runner } = {}) {
 /** 后台操作：launch_runs + wait_on_run（Vivado自有并发与队列），进度由任务状态承载。 */
 async function run(input, { signal, onContext, onArtifacts, runner } = {}) {
     const resolved=await vivadoTarget(input), { options, context, xpr, run: selected } = resolved;
-    const target = selected || 'synth_1';
+    const bitstream = input.bitstream === true;
+    const target = selected || (bitstream ? 'impl_1' : 'synth_1');
+    if (bitstream && !target.startsWith('impl_')) fail('INVALID_ARGUMENT', '生成 Bitstream 需要 --run impl_*（如 impl_1）');
     // 排队请求携带启动时的 revision；工程/源码已变化时不能拿旧上下文跑新任务。
     if (input.expectedRevision && input.expectedRevision !== context.revision) fail('CONTEXT_CHANGED', '任务启动前工程或源码已经变化，本轮结果失效', {}, 4);
     const manager = createToolTaskManager({ onChange: task => onArtifacts?.(artifactLogs(task.logPaths)) });
@@ -354,7 +446,8 @@ async function run(input, { signal, onContext, onArtifacts, runner } = {}) {
         if(snapshot.includeDirs.length) setup.push('set_property include_dirs '+tclgen.tclList(snapshot.includeDirs)+' [get_filesets '+tclgen.tclQuote(context.fileset)+']');
         const prerequisiteRun=target.startsWith('impl_')?(captured.synthRun || 'synth_1'):null;
         if(prerequisiteRun && !RUN_NAME.test(prerequisiteRun)) fail('INVALID_ARGUMENT','不支持的综合依赖run名称');
-        const script = tclgen.buildLaunchRunScript({ xprPath:snapshot.project,run:target,jobs:input.jobs || 4,reset:true,setup,prerequisiteRun,captureArtifacts:true });
+        const script = tclgen.buildLaunchRunScript({ xprPath:snapshot.project,run:target,jobs:input.jobs || 4,reset:true,setup,prerequisiteRun,captureArtifacts:true,
+            toStep: bitstream ? 'write_bitstream' : undefined });
         const { stdout, summary: runSummary, logs } = await execute(options, script, { task: job, timeoutMs: input.timeoutMs || options.timeoutMs, runner, snapshot });
         // 取消优先于失败：中止的进程没有完成记录，不能报成脚本失败。
         if (signal?.aborted || job.signal?.aborted) fail('TOOL_CANCELLED', 'Vivado运行已取消', { run: target, artifacts: artifactLogs(logs) }, 3);
@@ -376,14 +469,14 @@ async function run(input, { signal, onContext, onArtifacts, runner } = {}) {
             inputs: { completeness: 'complete', fingerprint: captured.fingerprint, used: captured.used,
                 checkpoint: captured.checkpoint ? { sha256: captured.checkpoint.sha256, size: captured.checkpoint.size } : null },
             regeneration: { mode: 'source' },
-            verification: { checks: [target.startsWith('impl_') ? 'synth+impl' : 'synth'], acceptance: false }
+            verification: { checks: [target.startsWith('impl_') ? 'synth+impl' : 'synth', ...(bitstream ? ['bitstream'] : [])], acceptance: false }
         };
         const manifest = {schemaVersion:2,state:'complete',runId:job.id,run:target,status,project:snapshot.project,
             toolVersion,completedAt:new Date().toISOString(),context:identity(current),inputs:captured.inputs,copies:snapshot.copies,config:captured.config,checkpoints:outputs,evidence};
         await writeJson(path.join(buildDirectory,'manifest.json'),manifest);
         await writeJson(pointer,manifest);
         await pruneCache(options.workspace,5,budgetOf(options).cacheMiB).catch(()=>{});
-        return result('vivado.run', { run:target,status,runId:job.id,project:snapshot.project,inputFingerprint:captured.fingerprint,evidence }, current, [], artifactLogs(logs)
+        return result('vivado.run', { run:target,bitstream,status,runId:job.id,project:snapshot.project,inputFingerprint:captured.fingerprint,evidence }, current, [], artifactLogs(logs)
             .concat([{kind:'manifest',path:path.join(buildDirectory,'manifest.json')}], runLog?[{kind:'run-log',path:runLog.file}]:[]));
     } catch(error) {
         if(!(error instanceof Error)) error=new Error(String(error));
@@ -397,5 +490,5 @@ async function run(input, { signal, onContext, onArtifacts, runner } = {}) {
     }
 }
 
-module.exports = { status, report, run, createProject, addFiles, setTop, locateVivado, vivadoTarget, incrementalStatus, reuseSummary, readRunLog,
-    executeAsset };
+module.exports = { status, report, run, createProject, addFiles, setTop, removeFiles, moveFile, setConstraintTarget, tclScript,
+    locateVivado, vivadoTarget, incrementalStatus, reuseSummary, readRunLog, executeAsset };

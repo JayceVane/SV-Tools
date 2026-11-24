@@ -563,9 +563,9 @@ function activateVivado(context, deps) {
     }
 
     /** 生成动作可复用常驻会话；用户脚本与未提供会话用脚本仍走批处理。 */
-    async function executeVivado(job, input, { binDir, executable, args, cwd, scriptPath, timeoutMs }) {
+    async function executeVivado(job, input, { binDir, executable, args, cwd, scriptPath, timeoutMs, session = false }) {
         const sessionBody = input && typeof input === 'object' ? input.sessionBody : undefined;
-        const enabled = sessionBody && vscode.workspace.getConfiguration('svtools.vivado').get('session', true);
+        const enabled = sessionBody && (session || vscode.workspace.getConfiguration('svtools.vivado').get('session', true));
         const batch = () => runVivadoBatchTask({ task: job, executable, args, cwd, scriptPath, timeoutMs, onOutput: output.append });
         if (enabled) {
             const sessionPath = path.join(path.dirname(scriptPath), 'session-' + path.basename(scriptPath));
@@ -608,6 +608,23 @@ function activateVivado(context, deps) {
             });
             return { code: null, error: 'not-found' };
         }
+        // “在常驻会话中运行”：把用户脚本包装成 source 语句，先切换到脚本目录，再交给常驻会话执行。
+        if (opts.session) {
+            if (typeof input !== 'string') throw new TypeError('常驻会话运行只接受 TCL 脚本文件');
+            const scriptFile = path.resolve(input);
+            const anchor = await refreshProjectContext();
+            if (!anchor) {
+                vscode.window.showErrorMessage('在常驻会话中运行 TCL 需要先选择 Vivado 工程');
+                return { code: null, error: 'project-required' };
+            }
+            if (!binDir) return { code: null, error: 'not-found' };
+            const check = await ensureVivadoVersion(anchor);
+            if (!check.ok) return { code: null, status: 'cancelled', error: 'version-mismatch' };
+            binDir = check.binDir;
+            const body = 'cd ' + tclQuote(path.dirname(scriptFile)) + '\n' + 'source -notrace ' + tclQuote(scriptFile);
+            input = { anchor, name: 'user_script.tcl', body, sessionBody: body };
+            opts = { ...opts, cwd: path.dirname(scriptFile) };
+        }
         const executable = path.join(binDir, process.platform === 'win32' ? 'vivado.bat' : 'vivado');
         const timeoutMs = opts.timeoutMs === undefined
             ? vscode.workspace.getConfiguration('svtools.vivado').get('timeoutMs', 0) : opts.timeoutMs;
@@ -624,7 +641,7 @@ function activateVivado(context, deps) {
             log('————————————————————————————————————');
             log('[vivado] ' + executable + ' ' + args.join(' '));
             log('[vivado] cwd: ' + cwd);
-            const result = await executeVivado(job, input, { binDir, executable, args, cwd, scriptPath, timeoutMs });
+            const result = await executeVivado(job, input, { binDir, executable, args, cwd, scriptPath, timeoutMs, session: Boolean(opts.session) });
             output.flush();
             log(`[vivado] ${result.ok ? '完成' : result.message}，耗时 ${(result.ms / 1000).toFixed(1)}s`);
             if (result.logPath) log('完整日志：' + result.logPath);
@@ -776,38 +793,40 @@ function activateVivado(context, deps) {
 
     // ---------------- 命令接线 ----------------
 
+    async function pickTclScript() {
+        const ws = vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders[0];
+        if (!ws) { vscode.window.showErrorMessage('请先打开一个工作区'); return undefined; }
+        const picks = await scanTclFiles(vscode, ws.uri.fsPath);
+        if (!picks.length) { vscode.window.showInformationMessage('工作区内没有 .tcl 脚本'); return undefined; }
+        const sel = await vscode.window.showQuickPick(
+            picks.map(f => ({ label: path.relative(ws.uri.fsPath, f), abs: f })),
+            { placeHolder: '选择要运行的 TCL 脚本' });
+        return sel?.abs;
+    }
+    async function tclFileFromEditor(editorOnly) {
+        const editor = vscode.window.activeTextEditor;
+        if (editor && /\.tcl$/i.test(editor.document.fileName)) {
+            if (editor.document.isUntitled) { vscode.window.showErrorMessage('请先保存 TCL 脚本'); return undefined; }
+            await editor.document.save();
+            return editor.document.fileName;
+        }
+        if (editorOnly) { vscode.window.showErrorMessage('当前编辑器不是 .tcl 文件'); return undefined; }
+        return pickTclScript();
+    }
+    async function runTclCommand({ session = false, editorOnly = false } = {}) {
+        const file = await tclFileFromEditor(editorOnly);
+        if (!file) return undefined;
+        return runScript(file, session ? { session: true } : {});
+    }
+
     context.subscriptions.push(out, { dispose() {
         tasks.cancelAll(); output.dispose(); statusItem?.dispose();
         sessions.dispose().catch(error => console.error('Vivado 会话释放失败：', error));
         tasks.dispose().catch(error => console.error('Vivado 任务释放失败：', error));
     } },
-        vscode.commands.registerCommand('svtools.vivado.runScript', async () => {
-            const editor = vscode.window.activeTextEditor;
-            if (editor && /\.tcl$/i.test(editor.document.fileName)) {
-                if (editor.document.isUntitled) { vscode.window.showErrorMessage('请先保存 TCL 脚本'); return; }
-                await editor.document.save();
-                return runScript(editor.document.fileName);
-            }
-            const ws = vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders[0];
-            if (!ws) { vscode.window.showErrorMessage('请先打开一个工作区'); return; }
-            const picks = await scanTclFiles(vscode, ws.uri.fsPath);
-            if (!picks.length) { vscode.window.showInformationMessage('工作区内没有 .tcl 脚本'); return; }
-            const sel = await vscode.window.showQuickPick(
-                picks.map(f => ({ label: path.relative(ws.uri.fsPath, f), abs: f })),
-                { placeHolder: '选择要运行的 TCL 脚本' });
-            if (!sel) return;
-            return runScript(sel.abs);
-        }),
-        vscode.commands.registerCommand('svtools.vivado.runActiveScript', async () => {
-            const editor = vscode.window.activeTextEditor;
-            if (!editor || !/\.tcl$/i.test(editor.document.fileName)) {
-                vscode.window.showErrorMessage('当前编辑器不是 .tcl 文件');
-                return;
-            }
-            if (editor.document.isUntitled) { vscode.window.showErrorMessage('请先保存 TCL 脚本'); return; }
-            await editor.document.save();
-            return runScript(editor.document.fileName);
-        }),
+        vscode.commands.registerCommand('svtools.vivado.runScript', () => runTclCommand()),
+        vscode.commands.registerCommand('svtools.vivado.runScriptInSession', () => runTclCommand({ session: true })),
+        vscode.commands.registerCommand('svtools.vivado.runActiveScript', () => runTclCommand({ editorOnly: true })),
         vscode.commands.registerCommand('svtools.vivado.stop', () => stopRun()),
         vscode.commands.registerCommand('svtools.vivado.createProject', () => createProject()),
         vscode.commands.registerCommand('svtools.vivado.addToFileset', () => addCurrentToProject()),

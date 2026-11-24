@@ -6,6 +6,11 @@ const workflow = require('../design/workflow');
 const tasks = require('../agent/tasks');
 const vivado = require('../agent/vivado');
 const vivadoAssets = require('../agent/vivado-assets');
+const simulateService = require('../agent/simulate');
+const xvlogService = require('../agent/xvlog');
+const circuitService = require('../agent/circuit');
+const { createRtlCommands } = require('../agent/rtl');
+const rtl = createRtlCommands();
 const { fail, failure } = require('../agent/protocol');
 
 const help=`SV Tools headless CLI (API 1)
@@ -14,15 +19,23 @@ const help=`SV Tools headless CLI (API 1)
   project create --name <n> [--dir <d>] [--part <p>] [--top <t>] [--sim-top <t>]
   project add --source <file> [--source <file>...] [--target-fileset sources_1|constrs_1|sim_1]
   project set-top [--top <t>] [--sim-top <t>]
+  project remove --source <file> [--source <file>...] [--target-fileset sources_1|constrs_1|sim_1]
+  project move --source <file> --to <fileset> [--from <from-fileset>]
+  project set-constraint-target --source <xdc> [--target-fileset constrs_1]
   format --file <path> [--check|--write]
-  lint [--file <path>] [--top <module>]
+  lint [--file <path>] [--top <module>] [--engine iverilog|xvlog]
+  simulate --file <tb> --top <tb> [--engine iverilog|xsim] [--source <file>...]
+           [--include <dir>...] [--define <name[=value]>...] [--standard <std>] [--out <dir>]
+  elaborate --file <hdl> [--top <module>]
   vivado status
   vivado report timing|utilization|drc|power [--run <id>]
-  vivado run [--run synth_1|impl_1] [--jobs <n>]
+  vivado run [--run synth_1|impl_1] [--jobs <n>] [--bitstream]
+  vivado tcl --file <script> [--cwd <dir>]
   vivado overview
   vivado messages [--run <id>] [--severity error|critical-warning|warning|info|status] [--query <text>]
   vivado ip catalog|list [--query <text>]
-  vivado ip repositories
+  vivado ip remove --file <xci|xcix>
+  vivado ip repositories [--repo-add <dir>...] [--repo-remove <dir>...]
   vivado ip create --name <n> --vlnv <vendor:library:name:version>
   vivado ip inspect|import|configure|generate|template|upgrade|synthesize --file <xci|xcix>
             [--copy] [--spec <json|file>] [--target <target>] [--language verilog|vhdl]
@@ -63,6 +76,8 @@ const help=`SV Tools headless CLI (API 1)
   wave diff --file <a.vcd> --against <b.vcd> [--signals <a,b>] [--from <t>] [--to <t>] [--limit <n>]
   wave export --file <vcd> --signals <a,b> --out <dir> [--from <t>] [--to <t>] [--at <t>] [--at-b <t>]
               [--format svg|png|csv|layout] [--title <t>] [--force] (image/csv, or .svwave.json layout; layout 可省 --out)
+  rtl instantiate|testbench --file <hdl> [--out <file>]
+  circuit trace --file <hdl> --signal <name> [--direction drivers|loads] [--top <module>] [--depth <n>]
   task start lint [lint options]
   task list|status|logs|cancel [task-id]
 
@@ -77,20 +92,21 @@ Output:  JSON on stdout; --help and --version return text.
 Node.js >=22. The existing Rust formatter CLI remains available in bin/.
 `;
 function argumentsFor(argv) {
-    const strings=['workspace','config','project','fileset','file','top','iverilog','cygwin','vivado','standard','run','timeout','offset','limit','log-index','max-paths','jobs','name','dir','part','sim-top','target-fileset','depth','save','spec','format','out','title','style','detail','boundary-layout','baseline','against','clock','query','scope','role','bit','at','at-b','from','to','signal','signals','min-width','max-width','clock-edge','kind','max-values','plan','module','actor','revision','token','evidence','reason'];
+    const strings=['workspace','config','project','fileset','file','top','iverilog','cygwin','vivado','standard','run','timeout','offset','limit','log-index','max-paths','jobs','name','dir','part','sim-top','target-fileset','depth','save','spec','format','out','title','style','detail','boundary-layout','baseline','against','clock','query','scope','role','bit','at','at-b','from','to','signal','signals','min-width','max-width','clock-edge','kind','max-values','plan','module','actor','revision','token','evidence','reason','direction','cwd'];
     const options=Object.fromEntries(strings.map(name=>[name,{type:'string'}]));
-    for(const name of ['help','version','json','write','check','fold-ports','force']) options[name]={type:'boolean'};
+    for(const name of ['help','version','json','write','check','fold-ports','force','bitstream']) options[name]={type:'boolean'};
     for(const name of ['note','body','topic','expect','engine','browser']) options[name]={type:'string'};
     for(const name of ['severity','vlnv','target','language']) options[name]={type:'string'};
     options.copy={type:'boolean'};
     for(const name of ['symbol','final']) options[name]={type:'boolean'};
     options.include={type:'string',multiple:true}; options.define={type:'string',multiple:true}; options.source={type:'string',multiple:true};
     options['bundle-name']={type:'string',multiple:true}; options.where={type:'string',multiple:true};
+    options['repo-add']={type:'string',multiple:true}; options['repo-remove']={type:'string',multiple:true};
     let parsed;
     try { parsed=parseArgs({args:argv,options,allowPositionals:true,strict:true}); }
     catch(error) { fail('INVALID_ARGUMENT',error.message); }
     const input={...parsed.values};
-    for(const [from,to] of [['timeout','timeoutMs'],['log-index','logIndex'],['max-paths','maxPaths'],['sim-top','simTop'],['source','sources'],['target-fileset','filesetTarget'],['clock-edge','clockEdge'],['min-width','minWidth'],['max-width','maxWidth'],['at-b','atB'],['max-values','maxValues'],['boundary-layout','boundaryLayout']]) if(input[from]!==undefined) {input[to]=input[from]; delete input[from];}
+    for(const [from,to] of [['timeout','timeoutMs'],['log-index','logIndex'],['max-paths','maxPaths'],['sim-top','simTop'],['source','sources'],['target-fileset','filesetTarget'],['clock-edge','clockEdge'],['min-width','minWidth'],['max-width','maxWidth'],['at-b','atB'],['max-values','maxValues'],['boundary-layout','boundaryLayout'],['repo-add','repoAdd'],['repo-remove','repoRemove']]) if(input[from]!==undefined) {input[to]=input[from]; delete input[from];}
     for(const field of ['timeoutMs','offset','limit','logIndex','maxPaths','jobs','depth','maxValues','revision']) if(input[field]!==undefined) {
         if(!/^\d+$/.test(input[field]) || !Number.isSafeInteger(Number(input[field]))) fail('INVALID_ARGUMENT',field+'必须为非负整数');
         input[field]=Number(input[field]);
@@ -112,16 +128,21 @@ async function run(argv) {
         const [command,action,id,...extra]=positionals; let output;
         if(extra.length) fail('INVALID_ARGUMENT','位置参数过多');
         if(command!=='format' && (input.write || input.check)) fail('INVALID_ARGUMENT','--write与--check仅用于format');
-        operation=['project','task','design','wave','note','struct'].includes(command)?command+'.'+action:command;
+        const grouped=['project','task','design','wave','note','struct','rtl','circuit','simulate','elaborate'];
+        operation=grouped.includes(command)?command+(action?'.'+action:''):command;
         if(command==='doctor' && !action) output=await services.doctor(input);
         else if(command==='project' && !id && ['list','inspect'].includes(action)) output=await services[action==='list'?'projects':'inspect'](input);
         else if(command==='project' && action==='create' && !id) output=await vivado.createProject(input);
         else if(command==='project' && action==='add' && !id) output=await vivado.addFiles(input);
         else if(command==='project' && action==='set-top' && !id) output=await vivado.setTop(input);
+        else if(command==='project' && action==='remove' && !id) output=await vivado.removeFiles(input);
+        else if(command==='project' && action==='move' && !id) output=await vivado.moveFile(input);
+        else if(command==='project' && action==='set-constraint-target' && !id) output=await vivado.setConstraintTarget(input);
         else if(command==='format' && !action) output=await services.format(input);
         else if(command==='vivado' && action==='status' && !id) output=await vivado.status(input);
         else if(command==='vivado' && action==='report' && ['timing','utilization','drc','power'].includes(id)) output=await vivado.report({...input,kind:id});
         else if(command==='vivado' && action==='run' && !id) output=await tasks.start({...input,operation:'vivado.run'});
+        else if(command==='vivado' && action==='tcl' && !id) output=await vivado.tclScript(input);
         else if(command==='vivado' && ['overview','messages','ip','bd'].includes(action)) {
             operation='vivado.'+action+(id?'.'+id:'');
             output=await vivadoAssets.command(action,id,input);
@@ -140,6 +161,10 @@ async function run(argv) {
         else if(command==='design' && action==='diff' && !id) output=await services.diff(input);
         else if(command==='design' && action==='report' && !id) output=await services.report(input);
         else if(command==='wave' && !id && ['signals','values','changes','edges','glitches','stats','timeline','sample','diff','export'].includes(action)) output=await services[{signals:'waveSignals',values:'waveValues',changes:'waveChanges',edges:'waveEdges',glitches:'waveGlitches',stats:'waveStats',timeline:'waveTimeline',sample:'waveSample',diff:'waveDiff',export:'waveExport'}[action]](input);
+        else if(command==='simulate' && !action) output=await simulateService.simulate(input);
+        else if(command==='elaborate' && !action) output=await xvlogService.elaborate(input);
+        else if(command==='rtl' && ['instantiate','testbench'].includes(action) && !id) output=await rtl[action](input);
+        else if(command==='circuit' && action==='trace' && !id) output=await circuitService.trace(input);
         else if(command==='lint' && !action) {
             const controller=new AbortController(), cancel=()=>controller.abort();
             process.once('SIGINT',cancel);process.once('SIGTERM',cancel);

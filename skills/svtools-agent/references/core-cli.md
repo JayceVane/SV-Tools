@@ -47,9 +47,24 @@ node src/cli/main.js lint --workspace D:/project --file src/top.sv --top top
 
 `format` 默认只返回最多 32768 字符的预览，不写源码。`--check` 在有格式差异时退出 1；`--write` 才会写入，并在替换前复核源码和工程身份。除普通空格、Tab、CR、LF 外，其余字符值、数量和顺序必须保持；不满足时拒绝写入。只接受严格 UTF-8 输入。
 
-`lint` 使用 Icarus 的空目标编译/详细化检查，不运行仿真。依赖补入限于当前工程中唯一可确定的模块文件，package 在引用方之前编译。宏、条件分支和语法的最终结果来自实际编译器；不支持的 SystemVerilog 特性仍可能报错，不能将 Icarus 的通过等同于功能验证完成。
+`lint` 使用 Icarus 的空目标编译/详细化检查，不运行仿真。依赖补入限于当前工程中唯一可确定的模块文件，package 在引用方之前编译。宏、条件分支和语法的最终结果来自实际编译器；不支持的 SystemVerilog 特性仍可能报错，不能将 Icarus 的通过等同于功能验证完成。`--engine xvlog` 改用 Vivado 的 `xvlog`：返回带 file/line/column 的 `diagnostics[]`，有编译错误时结果为 `failed`，仍然不运行仿真。
 
 每轮从源码快照运行，结束时复核当前工程/源码哈希；有变化则返回 `CONTEXT_CHANGED`，保留日志。日志与 manifest 保存到 `.svtools/agent/runs/`，记录工具版本、参数、输入摘要和结果。支持双引号字面量 include，宏 include 暂明确拒绝；头文件须包含在工作区 HDL/头文件、工程成员或显式 include 目录中。无法收录的 include 交由编译器报告，不读取快照外的实时源码。
+
+## 仿真、详细化与生成
+
+```powershell
+node src/cli/main.js simulate --workspace D:/project --file tb/tb_top.sv --top tb_top --engine iverilog
+node src/cli/main.js simulate --project top.xpr --file tb/tb_top.sv --top tb_top --engine xsim
+node src/cli/main.js elaborate --workspace D:/project --file src/top.sv --top top
+node src/cli/main.js rtl instantiate --workspace D:/project --file src/top.sv --out src/inst.sv
+node src/cli/main.js rtl testbench --workspace D:/project --file src/top.sv --out tb/tb_top.sv
+node src/cli/main.js circuit trace --workspace D:/project --file src/top.sv --top top --signal mid --direction loads --depth 2
+```
+
+`simulate` 依次编译、详细化并运行 testbench。`--engine iverilog` 使用 Icarus（注入其 Cygwin 运行环境），`--engine xsim` 使用 xvlog/xelab/xsim。`--source` 补充源文件，`--include`/`--define`/`--standard` 覆盖上下文。返回编译/详细化/运行日志、波形路径（VCD/FST 或 xsim 产物）和 `workDir`；编译、详细化、运行失败分别返回 `SIM_COMPILE_FAILED`、`SIM_ELABORATE_FAILED`、`SIM_FAILED`。
+
+`elaborate` 只做 xvlog + xelab 的静态详细化。`rtl` 复用扩展的原生生成器（需要 `bin/svtools.<platform>.node`），默认不修改源码，只有 `--out` 才写文件。`circuit trace` 用静态 RTL 网表追踪顶层模块内信号的 drivers/loads，输出 `nets/cells/selections/boundaries`；子模块内部信号需要层次路径，当前只解析顶层模块。
 
 ## 后台任务
 

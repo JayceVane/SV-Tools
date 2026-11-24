@@ -9,7 +9,7 @@ const { executeAsset, locateVivado } = require('./vivado');
 const { acquireWorkspaceLease } = require('../toolchains/workspace-lease');
 const { keyOf } = require('../project/model');
 const { parseXpr, samePath } = require('../vivado/xpr');
-const { rowsOf, parametersOf } = require('../vivado/asset-task');
+const { rowsOf, parametersOf, removeFromProject } = require('../vivado/asset-task');
 const { createIpMetadata } = require('../vivado/ip-metadata');
 const { readAssetText } = require('../vivado/asset-preview');
 const summary = require('../vivado/summary');
@@ -19,7 +19,7 @@ const ip = require('../vivado/ip');
 const bd = require('../vivado/block-design');
 
 const commands = {
-    ip: ['list', 'catalog', 'inspect', 'create', 'configure', 'import', 'generate', 'template', 'upgrade', 'synthesize', 'repositories'],
+    ip: ['list', 'catalog', 'inspect', 'create', 'configure', 'import', 'generate', 'template', 'upgrade', 'synthesize', 'remove', 'repositories'],
     bd: ['list', 'inspect', 'create', 'import', 'edit', 'validate', 'generate', 'wrapper', 'export']
 };
 const capabilities = ['vivado.overview', 'vivado.messages', 'vivado.report.power', ...Object.entries(commands)
@@ -161,8 +161,35 @@ async function ipCommand(project, verb, runner) {
         return { data: { version, part, ...queryItems(items, options.query, item => [item.vlnv, item.label, item.description, ...item.categories], options) }, artifacts };
     }
     if (verb === 'repositories') {
+        const adds = (options.repoAdd || []).map(dir => path.resolve(options.workspace, dir));
+        const removes = (options.repoRemove || []).map(dir => path.resolve(options.workspace, dir));
         const { rows, artifacts } = await runBatch(project, ip.repositories(), runner);
-        return { data: { repositories: rowsOf(rows, 'repo').map(([repo]) => repo) }, artifacts };
+        const before = rowsOf(rows, 'repo').map(([repo]) => repo);
+        if (!adds.length && !removes.length) return { data: { repositories: before }, artifacts };
+        const key = value => (process.platform === 'win32' ? path.resolve(value).toLowerCase() : path.resolve(value));
+        for (const dir of adds) {
+            const stat = await fs.stat(dir).catch(() => null);
+            if (!stat?.isDirectory()) fail('INVALID_ARGUMENT', 'IP 仓库目录不存在：' + dir, { dir });
+        }
+        const after = before.filter(dir => !removes.some(item => key(item) === key(dir)));
+        for (const dir of adds) if (!after.some(item => key(item) === key(dir))) after.push(dir);
+        if (JSON.stringify(after) === JSON.stringify(before)) return { data: { repositories: before, changed: false }, artifacts };
+        return locked(project, async () => {
+            const output = await runBatch(project, ip.setRepositories(before, after), runner, false);
+            return { data: { repositories: after, changed: true }, artifacts: output.artifacts };
+        });
+    }
+    if (verb === 'remove') {
+        const file = memberFile(project, 'ip');
+        const fileset = members(project, 'ip').find(item => samePath(item.file, file))?.fileset;
+        if (!fileset) fail('ASSET_NOT_FOUND', '资产不属于所选 Vivado 工程', { file, project: project.xpr });
+        return locked(project, async () => {
+            const { artifacts } = await runBatch(project, removeFromProject(file, fileset), runner, false);
+            if (members(project, 'ip').some(item => samePath(item.file, file))) {
+                fail('VIVADO_SCRIPT_FAILED', '工程没有保存 IP 移出结果', { file, fileset });
+            }
+            return { data: { file, fileset }, artifacts };
+        });
     }
     if (verb === 'inspect') {
         const file = memberFile(project, 'ip');
