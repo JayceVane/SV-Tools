@@ -121,6 +121,44 @@ test('综合与实现告警卡片筛选各自运行的消息，支持定位日�
     same(ui.messages.at(-1), { action: 'openMessage', run: 'impl_1', line: 98 });
 });
 
+test('同 ID 的消息默认折叠，展开分页后仍可定位日志并在刷新时保持展开', () => {
+    const ui = harness();
+    const warning = { id: 'Timing 38-35', level: 'criticalWarnings', run: 'impl_1', step: 'route_design', text: 'First clock', line: 98 };
+    const first = { ...warning, count: 2 };
+    function overview(data) {
+        ui.listeners.message({ data: { type: 'summary', data, at: 10 } });
+        ui.listeners.message({ data: { type: 'runMessages', request: ui.messages.at(-1).request,
+            available: true, offset: 0, size: 50, total: 1, messageCount: 2, items: [first] } });
+        return ui.nodes.get('messages').children[0].children[0];
+    }
+    const group = overview(sample);
+    const [summary, , list, controls] = group.children;
+    assert.equal(group.open, false);
+    assert.equal(summary.children[0].children.at(-1).textContent, '2 次');
+    assert.match(ui.nodes.get('message-status').textContent, /2 条消息/u);
+    const toggle = ui.nodes.get('toggle-message-groups');
+    toggle.onclick();
+    assert.equal(group.open, true);
+    group.ontoggle();
+    const data = { type: 'messageGroup', id: warning.id, run: warning.run, level: warning.level, total: 2, size: 1 };
+    const { request } = ui.messages.at(-1);
+    same(ui.messages.at(-1), { action: 'listMessageGroup', request, id: warning.id, run: warning.run, level: warning.level, search: '', offset: 0 });
+    ui.listeners.message({ data: { ...data, request, offset: 0, items: [warning] } });
+    controls.children[1].onclick();
+    assert.equal(ui.messages.at(-1).offset, 1);
+    ui.listeners.message({ data: { ...data, request, offset: 0, items: [{ ...warning, text: 'Stale' }] } });
+    assert.equal(list.children[0].children[1].textContent, 'First clock');
+    ui.listeners.message({ data: { ...data, request: ui.messages.at(-1).request, offset: 1, items: [{ ...warning, line: 104, text: 'Second clock' }] } });
+    list.children[0].children[0].children.at(-1).onclick();
+    same(ui.messages.at(-1), { action: 'openMessage', run: 'impl_1', line: 104 });
+    const updated = overview({ ...sample, runMessages: {} });
+    assert.equal(updated.open, true);
+    updated.ontoggle();
+    assert.equal(ui.messages.at(-1).offset, 1);
+    toggle.onclick();
+    assert.equal(updated.open, false);
+});
+
 test('工程概览使用当前运行并保留轮询前的按钮焦点', () => {
     const ui = harness();
     const data = { ...sample, runs: [{ ...sample.runs[0], id: 'ooc' },

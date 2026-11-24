@@ -8,8 +8,9 @@
     const powerText = new Intl.NumberFormat(strings.locale, { minimumFractionDigits: 3, maximumFractionDigits: 6 });
     const preferences = vscode.getState() || {};
     let signature, auto = preferences.auto !== false, powerMode = preferences.powerMode === 'details' ? 'details' : 'distribution';
-    let messageRequest = 0, messagePage, messageTimer, runOptionsKey;
+    let messageRequest = 0, groupRequest = 0, messagePage, messageTimer, messageQuery, runOptionsKey;
     const expandedRuns = new Set();
+    const visibleGroups = new Map(), expandedMessageGroups = new Map();
     const remember = () => vscode.setState({ auto, powerMode });
     const severityLabels = { errors: strings.errors, criticalWarnings: strings.criticalWarnings,
         warnings: strings.warnings, info: strings.info, status: strings.messageStatus };
@@ -228,9 +229,10 @@
 
     function listMessages(offset = 0, loading = false) {
         clearTimeout(messageTimer);
+        messageQuery = $('message-search').value;
         if (loading) $('message-status').textContent = strings.messagesLoading;
         vscode.postMessage({ action: 'listMessages', request: ++messageRequest, run: $('message-run').value,
-            level: $('message-level').value, search: $('message-search').value, offset });
+            level: $('message-level').value, search: messageQuery, offset });
     }
 
     function showRunMessages(run, level) {
@@ -243,24 +245,91 @@
         heading.scrollIntoView({ block: 'start' });
     }
 
+    function drawMessage(message, grouped = false) {
+        const item = node('li'), heading = node('div', undefined, 'message-heading');
+        if (!grouped) {
+            heading.append(node('span', severityLabels[message.level], 'severity ' + message.level));
+            if (message.id) heading.append(node('code', message.id));
+        }
+        heading.append(node('span', [grouped ? '' : message.run, message.step].filter(Boolean).join(' · '), 'muted'));
+        const button = node('button', phrase('logLine', message.line), 'link-button');
+        button.type = 'button';
+        button.onclick = () => vscode.postMessage({ action: 'openMessage', run: message.run, line: message.line });
+        heading.append(button);
+        item.append(heading, node('p', message.text, 'message-text'));
+        return item;
+    }
+
+    const messageGroupKey = ({ run, level, id }) => JSON.stringify([run, level, id]);
+    function messageRange(page) {
+        const range = [page.offset + 1, page.offset + page.items.length, page.total].map(value => countText.format(value));
+        return page.messageCount > page.total ? phrase('messageGroupRange', ...range, countText.format(page.messageCount)) : phrase('messageRange', ...range);
+    }
+
+    function syncMessageGroupToggle() {
+        const toggle = $('toggle-message-groups'), groups = [...visibleGroups.values()];
+        toggle.hidden = !groups.length;
+        toggle.textContent = groups.every(group => group.details.open) ? strings.collapseMessageGroups : strings.expandMessageGroups;
+    }
+
+    function drawMessageGroup(message, pageRequest) {
+        const { run, level, id } = message;
+        const key = messageGroupKey(message), item = node('li'), details = node('details', undefined, 'message-group');
+        const summary = node('summary'), heading = node('span', undefined, 'message-group-heading');
+        heading.append(node('span', severityLabels[level], 'severity ' + level), node('code', id), node('span', run, 'muted'),
+            node('span', phrase('messageOccurrences', countText.format(message.count)), 'message-occurrences'));
+        summary.append(heading, node('span', message.text.split('\n', 1)[0], 'message-preview'));
+
+        const status = node('p', undefined, 'muted'), list = node('ol', undefined, 'message-group-list');
+        status.setAttribute('role', 'status');
+        const controls = node('div', undefined, 'message-pages');
+        controls.hidden = true;
+        const previous = node('button', strings.previous), next = node('button', strings.next);
+        previous.type = next.type = 'button';
+        controls.append(previous, next);
+        details.append(summary, status, list, controls);
+        item.append(details);
+        let pending;
+        function load(offset) {
+            if (pageRequest !== messageRequest) return;
+            expandedMessageGroups.set(key, offset);
+            status.textContent = strings.messagesLoading;
+            status.hidden = false;
+            previous.disabled = next.disabled = true;
+            pending = ++groupRequest;
+            vscode.postMessage({ action: 'listMessageGroup', request: pending, run, level, id, search: messageQuery, offset });
+        }
+        const group = { details, receive(result) {
+            if (!details.open || result.request !== pending || pageRequest !== messageRequest) return;
+            if (result.offset && result.offset >= result.total) { load(0); return; }
+            list.replaceChildren(...result.items.map(entry => drawMessage(entry, true)));
+            status.textContent = !result.total ? strings.noMessages : result.total > result.items.length ? messageRange(result) : '';
+            status.hidden = !status.textContent;
+            controls.hidden = !result.offset && result.items.length >= result.total;
+            previous.disabled = !result.offset;
+            next.disabled = result.offset + result.items.length >= result.total;
+            previous.onclick = () => load(Math.max(0, result.offset - result.size));
+            next.onclick = () => load(result.offset + result.items.length);
+        } };
+        visibleGroups.set(key, group);
+        details.ontoggle = () => {
+            if (visibleGroups.get(key) !== group) return;
+            if (details.open) load(expandedMessageGroups.get(key) || 0);
+            else expandedMessageGroups.delete(key);
+            syncMessageGroupToggle();
+        };
+        details.open = expandedMessageGroups.has(key);
+        return item;
+    }
+
     function drawMessages(page) {
         if (page.offset && page.offset >= page.total) { listMessages(); return; }
         messagePage = page;
-        $('messages').replaceChildren(...page.items.map(message => {
-            const item = node('li');
-            const heading = node('div', undefined, 'message-heading');
-            heading.append(node('span', severityLabels[message.level], 'severity ' + message.level));
-            if (message.id) heading.append(node('code', message.id));
-            heading.append(node('span', [message.run, message.step].filter(Boolean).join(' · '), 'muted'));
-            const button = node('button', phrase('logLine', message.line), 'link-button');
-            button.type = 'button';
-            button.onclick = () => vscode.postMessage({ action: 'openMessage', run: message.run, line: message.line });
-            heading.append(button);
-            item.append(heading, node('p', message.text, 'message-text'));
-            return item;
-        }));
-        const caption = !page.available ? strings.noLogs : !page.total ? strings.noMessages
-            : phrase('messageRange', countText.format(page.offset + 1), countText.format(page.offset + page.items.length), countText.format(page.total));
+        visibleGroups.clear();
+        $('messages').replaceChildren(...page.items.map(message =>
+            message.count > 1 ? drawMessageGroup(message, page.request) : drawMessage(message)));
+        syncMessageGroupToggle();
+        const caption = !page.available ? strings.noLogs : !page.total ? strings.noMessages : messageRange(page);
         $('message-status').textContent = [caption, page.truncated && strings.truncatedMessages].filter(Boolean).join(' · ');
         $('message-pages').hidden = !page.offset && page.items.length >= page.total;
         $('message-prev').disabled = page.offset === 0;
@@ -541,6 +610,12 @@
     };
     $('message-prev').onclick = () => { if (messagePage) listMessages(Math.max(0, messagePage.offset - messagePage.size)); };
     $('message-next').onclick = () => { if (messagePage) listMessages(messagePage.offset + messagePage.items.length); };
+    $('toggle-message-groups').onclick = () => {
+        const groups = [...visibleGroups.values()];
+        const expand = groups.some(group => !group.details.open);
+        for (const { details } of groups) details.open = expand;
+        syncMessageGroupToggle();
+    };
     window.addEventListener('message', ({ data: message }) => {
         if (message?.type === 'summary') render(message.data, message.at);
         else if (message?.type === 'focusReport' && ['utilization', 'timing'].includes(message.section)) {
@@ -549,6 +624,7 @@
             heading.scrollIntoView({ block: 'start' });
         }
         else if (message?.type === 'runMessages' && message.request === messageRequest) drawMessages(message);
+        else if (message?.type === 'messageGroup') visibleGroups.get(messageGroupKey(message))?.receive(message);
         else if (message?.type === 'loading') status(strings.refreshing, '', true);
         else if (message?.type === 'generating') status(strings.generating, '', true);
         else if (message?.type === 'error') status(message.message, message.busy ? 'warning' : 'negative');
@@ -558,6 +634,9 @@
             messageRequest++;
             messagePage = runOptionsKey = undefined;
             expandedRuns.clear();
+            visibleGroups.clear();
+            expandedMessageGroups.clear();
+            syncMessageGroupToggle();
             $('message-run').value = $('message-level').value = $('message-search').value = '';
             $('messages').replaceChildren();
             $('message-status').textContent = '';

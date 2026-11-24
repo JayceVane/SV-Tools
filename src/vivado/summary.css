@@ -178,6 +178,18 @@ dt, .muted, .empty, .run-detail { color: var(--muted); }
 .message-list { list-style: none; padding: 0; margin: 8px 0; max-height: 480px; overflow: auto; }
 .message-list > li { border-top: 1px solid var(--border); padding: 7px 0; }
 .message-heading { display: flex; gap: 4px 9px; align-items: center; flex-wrap: wrap; font-size: 11px; overflow-wrap: anywhere; }
+.message-group > summary { cursor: pointer; padding: 2px 4px; border-radius: 4px; }
+.message-group > summary:hover { background: var(--vscode-toolbar-hoverBackground); }
+.message-group > summary:focus-visible { outline: 2px solid var(--vscode-focusBorder); outline-offset: -2px; }
+.message-group-heading { display: inline-flex; max-width: calc(100% - 18px); gap: 4px 9px; align-items: center; flex-wrap: wrap; overflow-wrap: anywhere; }
+.message-occurrences { padding: 0 6px; border-radius: 4px; font-size: 11px;
+    color: var(--vscode-badge-foreground, var(--vscode-foreground)); background: var(--vscode-badge-background, var(--track)); }
+.message-preview { display: block; margin-inline-start: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.message-group[open] .message-preview { display: none; }
+.message-group-list { list-style: none; padding: 0 0 0 10px; margin: 6px 0 0 14px; border-inline-start: 1px solid var(--border); }
+.message-group-list > li { padding: 4px 0; }
+.message-group-list > li + li { border-top: 1px solid var(--border); }
+.message-group > p { padding-inline-start: 15px; }
 .message-heading .link-button { margin-left: auto; }
 .severity { font-weight: 650; }
 .message-text { white-space: pre-wrap; overflow-wrap: anywhere; }

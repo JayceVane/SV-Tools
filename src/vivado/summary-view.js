@@ -67,7 +67,10 @@ function html(webview, vscode, resources, strings) {
             <p id="runs-empty" class="empty" hidden>${strings.emptyRuns}</p>
         </section>
         <section class="surface" aria-labelledby="messages-title">
-            <h2 id="messages-title" tabindex="-1">${strings.messages}</h2>
+            <header class="section-heading">
+                <h2 id="messages-title" tabindex="-1">${strings.messages}</h2>
+                <button type="button" id="toggle-message-groups" hidden>${strings.expandMessageGroups}</button>
+            </header>
             <div class="message-filters">
                 <label>${strings.run}<select id="message-run"></select></label>
                 <label>${strings.severity}<select id="message-level"></select></label>
@@ -161,11 +164,19 @@ function openSummaryPanels(context, vscode, { load, generate, openPath, openDeta
                 if (message.action === 'generate') { void generateReports(latest?.analysis?.generation); return; }
                 if (message.action === 'auto') { auto = message.enabled !== false; schedule(); return; }
                 if (message.action === 'openFolder') { void openPath(path.dirname(currentXpr)); return; }
-                if (message.action === 'listMessages' && runMessages && latest?.paths && Number.isSafeInteger(message.request)) {
+                if (['listMessages', 'listMessageGroup'].includes(message.action) && runMessages && latest?.paths && Number.isSafeInteger(message.request)) {
                     const run = typeof message.run === 'string' && Object.hasOwn(latest.paths, message.run) ? message.run : '';
                     const level = LEVELS.includes(message.level) ? message.level : '';
-                    post({ type: 'runMessages', request: message.request, ...runMessages.page(latest.paths,
-                        { run, level, search: message.search, offset: message.offset }) });
+                    const withinGroup = message.action === 'listMessageGroup';
+                    const options = { run, level, search: message.search, offset: message.offset };
+                    if (withinGroup) {
+                        if (!run || !level || typeof message.id !== 'string' || !message.id) return;
+                        post({ type: 'messageGroup', request: message.request, run, level, id: message.id,
+                            ...runMessages.page(latest.paths, { ...options, messageId: message.id }) });
+                    } else {
+                        post({ type: 'runMessages', request: message.request,
+                            ...runMessages.page(latest.paths, { ...options, groupById: true }) });
+                    }
                     return;
                 }
                 if (message.action === 'openMessage' && runMessages && latest?.paths && typeof message.run === 'string') {

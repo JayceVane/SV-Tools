@@ -150,6 +150,33 @@ test('运行消息按日志统计级别，支持筛选分页、原始行号和�
     assert.equal(messages.page(paths, { search: 'needs review' }).total, 1);
 });
 
+test('概览跨页按运行、严重级别和消息 ID 合并，详情保留原始顺序与筛选', async t => {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'svtools-message-groups-'));
+    t.after(() => fs.rm(directory, { recursive: true, force: true }));
+    const paths = Object.fromEntries(['synth_1', 'impl_1'].map(run => [run, { log: path.join(directory, run + '.log') }]));
+    await Promise.all([
+        fs.writeFile(paths.synth_1.log, ['Command: synth_design', 'WARNING: [Synth 8-9] First pin',
+            'INFO: [Synth 8-9] Unrelated information', 'INFO: No identifier', 'INFO: No identifier',
+            ...Array.from({ length: 52 }, () => 'WARNING: [Common 17-10] Independent issue'), 'WARNING: [Synth 8-9] Second pin'].join('\n')),
+        fs.writeFile(paths.impl_1.log, 'WARNING: [Synth 8-9] Implementation warning')
+    ]);
+    const messages = createSummaryMessages();
+    await messages.summarize(paths);
+    const page = messages.page(paths, { groupById: true, limit: 1 });
+    assert.equal(page.total, 6);
+    assert.equal(page.messageCount, 58);
+    assert.equal(page.items[0].count, 2);
+    assert.equal(messages.page(paths, { groupById: true, limit: 1, offset: 4 }).items[0].count, 52);
+    assert.equal(messages.page(paths, { groupById: true, limit: 1, offset: 5 }).items[0].run, 'impl_1');
+    const query = { run: 'synth_1', level: 'warnings', messageId: 'Synth 8-9' };
+    const detail = messages.page(paths, { ...query, offset: 1, limit: 1 });
+    assert.equal(detail.total, 2);
+    assert.deepEqual(detail.items.map(({ text, line, step }) => [text, line, step]), [['Second pin', 58, 'synth_design']]);
+    const search = messages.page(paths, { run: 'synth_1', groupById: true, search: 'second pin' });
+    assert.equal(search.items[0].line, 58);
+    assert.equal(search.items[0].count, 1);
+});
+
 test('概览按实际阶段汇总资源、功耗、DRC，缺报告时回退且使用检查点指纹生成', async t => {
     const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'svtools-overview-'));
     t.after(() => fs.rm(directory, { recursive: true, force: true }));

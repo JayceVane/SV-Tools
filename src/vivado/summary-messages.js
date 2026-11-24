@@ -77,11 +77,11 @@ function createSummaryMessages() {
             }
             return Object.fromEntries(summary);
         },
-        page(paths, { run, level, search, offset, limit = PAGE_SIZE }) {
+        page(paths, { run, level, search, offset, limit = PAGE_SIZE, groupById = false, messageId }) {
             const query = typeof search === 'string' ? search.slice(0, 160).trim().toLowerCase() : '';
             const start = Number.isSafeInteger(offset) && offset > 0 ? offset : 0;
             const items = [];
-            let total = 0, available = false, truncated = false;
+            let total = 0, messageCount = 0, available = false, truncated = false;
             for (const [id, { log }] of Object.entries(paths)) {
                 if (run && run !== id) continue;
                 const snapshot = logs.get(log);
@@ -89,13 +89,28 @@ function createSummaryMessages() {
                 available = true;
                 const levels = level ? [level] : LEVELS;
                 truncated ||= snapshot.countsPartial || levels.some(key => snapshot.counts[key] > entryLimit(key));
+                const groups = groupById ? new Map() : null;
                 for (const entry of snapshot.entries) {
-                    if (level && level !== entry.level) continue;
+                    if ((level && level !== entry.level) || (messageId && messageId !== entry.id)) continue;
                     if (query && ![entry.id, entry.text, entry.step, id].join(' ').toLowerCase().includes(query)) continue;
-                    if (total++ >= start && items.length < limit) items.push({ run: id, ...entry });
+                    messageCount++;
+                    if (groups && entry.id) {
+                        const key = JSON.stringify([entry.level, entry.id]);
+                        if (groups.has(key)) {
+                            const item = groups.get(key);
+                            if (item) item.count++;
+                            continue;
+                        }
+                        // Keep counts across the full filtered log, including matches beyond the page.
+                        const item = total++ >= start && items.length < limit ? { run: id, ...entry, count: 1 } : null;
+                        groups.set(key, item);
+                        if (item) items.push(item);
+                    } else if (total++ >= start && items.length < limit) {
+                        items.push({ run: id, ...entry });
+                    }
                 }
             }
-            return { items, total, available, truncated, offset: start, size: limit };
+            return { items, total, available, truncated, offset: start, size: limit, ...(groupById ? { messageCount } : {}) };
         },
         location(paths, run, line) {
             if (!Object.hasOwn(paths, run)) return undefined;
