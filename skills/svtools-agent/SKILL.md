@@ -7,7 +7,7 @@ description: SV Tools CLI 的通用入口：doctor 能力发现、RTL 工程与�
 
 将 `<svtools-root>` 替换为已构建的 SV Tools 目录，以 `node <svtools-root>/src/cli/main.js` 调用；已链接的 Node 包也提供 `svtools-agent`。CLI 的 `--workspace` 明确指向用户的 RTL 工作区，不能把工具安装目录当作被检查工程。
 
-先运行 `doctor --workspace <rtl-workspace>` 查看 `data.capabilities` 和实际工具可用性。缺依赖是未执行，不是零错误通过。MCP 尚未实现，不要编造；IP/BD、外部 Tcl 钩子与动态 XDC 读取暂不支持，遇到 `SNAPSHOT_UNSUPPORTED` 按未支持处理并停止。
+先运行 `doctor --workspace <rtl-workspace>` 查看 `data.capabilities` 和实际工具可用性。缺依赖是未执行，不是零错误通过。遇到 `SNAPSHOT_UNSUPPORTED` 时，按诊断核对隔离构建的输入范围。IP／BD 的工程内管理见 `svtools-vivado`。
 
 ## 任务路由（按域读取对应技能）
 
@@ -34,4 +34,4 @@ RTL 修改后运行 `lint --file <path> --top <module>`。这属于编译/详细
 
 报告实际运行的命令、工程/源码版本、工具版本、结论和仍未验证的部分。原始日志按需分页读取，避免将整份日志交给模型。
 
-需要配置字段、退出码、分页、include 边界或安装说明时，读取 `references/cli.md`；用 `--help` 核对当前版本命令。
+通用配置、退出码和分页字段见[通用 CLI 参考](references/core-cli.md)。按任务查[命令索引](references/cli.md)。

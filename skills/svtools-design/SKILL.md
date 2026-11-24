@@ -5,7 +5,7 @@ description: RTL 架构建模与图表交付：packed struct 虚拟端口骨架�
 
 # 架构建模与图表（M3）
 
-入口技能 `svtools-agent` 提供 CLI 调用约定；执行架构设计或图表交付前，先读取 [references/architecture.md](references/architecture.md)（生成规格、方向约束、时钟/复位处理、验收与当前限制）。
+入口技能 `svtools-agent` 提供 CLI 调用约定；执行架构设计或图表交付前，先读取 [references/architecture.md](references/architecture.md)（生成规格、方向约束、时钟/复位处理、验收与当前限制）。具体参数、模型字段和导出合同见[架构 CLI](references/cli.md)。
 
 架构任务化交付可用 `design plan --spec <json|file>` 生成稳定需求/模块 ID 和 Markdown 报告，`design tasks` 查询；既有 scaffold 规格可附 `workflow` 字段复用模块/接口名单。职责、需求与必需 ΔCycle 信号不能从空骨架臆造。交接与证据协议使用 `svtools-delivery` 的工作流约定；修改计划后用 `design plan-report --force` 更新报告。
 

@@ -5,7 +5,7 @@ description: 使用 SV Tools CLI 管理 Vivado 工程、综合与实现运行、
 
 # Vivado 工程、运行与资产
 
-入口技能 `svtools-agent` 提供 CLI 调用约定。先用 `doctor` 确认当前安装支持所需命令，并用 `--project` 锁定目标 XPR。命令参数和编辑规格见 [CLI 的 Vivado 参考](../svtools-agent/references/cli.md#vivado)。
+入口技能 `svtools-agent` 提供 CLI 调用约定。先用 `doctor` 确认当前安装支持所需命令，并用 `--project` 锁定目标 XPR。查询运行与报告时读[工程与运行命令](references/runs.md)。管理 IP 或编辑设计时读[资产命令与编辑规格](references/assets.md)。
 
 - **查看原工程。** 先用 `vivado overview` 找到当前顶层综合和实现 run，按报告的 run 与阶段比较资源、Setup/Hold/Pulse Width、功耗和 DRC。用 `vivado messages --run <id> --severity critical-warning` 核对严重警告。按需用 `--query` 搜索消息 ID、步骤或正文，按 `nextOffset` 翻页，引用时保留 `file` 和 `line`。检查 `available`、`truncated` 和 `countsPartial` 后再总结条数。
 - **核验一轮构建。** `vivado run` 启动隔离构建，使用 `task status/logs/cancel` 跟踪。用显式 `--run` 获取该轮 `vivado report timing|utilization|drc|power`，并检查 `runInfo`、`stale` 和产物。报告类型有各自默认 run，复杂工程优先从实际运行名选择。

@@ -52,7 +52,7 @@ svtools-agent design plan --workspace <rtl-root> --spec spec.json
 svtools-agent design tasks --workspace <rtl-root>
 ```
 
-生成 `svtools.design.json` 和同名 Markdown 架构报告，默认拒绝覆盖。两份纳入 RTL 工程版本管理。计划变更后运行 `design plan-report --workspace <rtl-root> --force` 更新同名报告；运行状态独立放 `.svtools/agent/design-workflow/`。非默认计划用 `--plan <relative.json>`；插件用 `svtools.design.planFile` 相对所选工程根目录查找。
+生成 `svtools.design.json` 和同名 Markdown 架构报告，默认拒绝覆盖。两份纳入 RTL 工程版本管理。计划变更后运行 `design plan-report --workspace <rtl-root> --force` 更新同名报告；运行状态独立放 `.svtools/agent/design-workflow/`。非默认计划用 `--plan <relative.json>`；插件用 `svtools.design.planFile` 相对所选工程根目录查找。 计划和交接命令管理协作记录。仿真、Yosys 与 Vivado 验证由对应命令单独触发。
 
 已有 `design scaffold` 规格可附加 `workflow` 对象（id/title/overview/clocks/resets/requirements/modules）。`workflow.modules` 按 `name` 关联骨架模块，补职责、需求、检查、deltaSignals 等。骨架默认共享 `rtl/<top>.sv`，并发编辑会串行；按模块分开源码后更新清单，不能假装共享文件属于不同写入者。虚拟通道继续使用 packed struct，成员与方向写在架构报告。
 
