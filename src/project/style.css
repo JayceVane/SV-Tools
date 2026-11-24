@@ -36,6 +36,15 @@ header { padding: 8px 8px 6px; }
 .row[aria-expanded=true] > .chevron .icon { transform: rotate(90deg); }
 .row .symbol { width: 18px; height: 20px; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; color: var(--vscode-symbolIcon-fileForeground, var(--vscode-textLink-foreground)); }
 .row[data-kind=folder] .symbol, .row[data-kind=set] .symbol { color: var(--vscode-symbolIcon-folderForeground, var(--vscode-icon-foreground)); }
+.row .symbol[data-icon=verilog] { color: var(--vscode-charts-blue, var(--vscode-icon-foreground)); }
+.row .symbol[data-icon=systemverilog] { color: var(--vscode-charts-purple, var(--vscode-icon-foreground)); }
+.row .symbol[data-icon=constraint] { color: var(--vscode-charts-orange, var(--vscode-icon-foreground)); }
+.row .symbol[data-icon=tcl] { color: var(--vscode-charts-green, var(--vscode-icon-foreground)); }
+.row[data-mark] .label { font-weight: 650; }
+.file-mark { flex-shrink: 0; padding: 0 5px; margin-left: 1px; border: 1px solid var(--vscode-contrastBorder, currentColor);
+    border-radius: 4px; font-size: .82em; line-height: 1.35; font-weight: 600; color: var(--vscode-textLink-foreground); }
+.row[data-mark=target] .file-mark { color: inherit; }
+.row[aria-selected=true] .file-mark { color: inherit; }
 .flags { display: flex; align-items: center; gap: 3px; flex-shrink: 0; color: var(--vscode-textLink-foreground); }
 .flag { width: 23px; height: 23px; display: inline-flex; align-items: center; justify-content: center; border-radius: 4px; background: color-mix(in srgb, currentColor 9%, transparent); }
 .flag .icon { width: 18px; height: 18px; stroke-width: 2; }

@@ -166,6 +166,23 @@ function buildSetTopScript(o) {
     ]);
 }
 
+function buildSetConstraintTargetScript(xpr, fileset, file) {
+    return wrapProjectScript(xpr, [
+        'set name ' + tclQuote(fileset),
+        'set sets [lsearch -all -inline -exact [get_filesets -quiet] $name]',
+        'if {[llength $sets] != 1 || [get_property FILESET_TYPE $sets] ne "Constrs"} { error "Constraint set unavailable: $name" }',
+        'set wanted [file normalize ' + tclQuote(file) + ']',
+        'set matches {}',
+        'foreach f [get_files -quiet -of_objects $sets -filter {FILE_TYPE == XDC}] {',
+        '    set actual [file normalize $f]',
+        '    if {$::tcl_platform(platform) eq "windows"} { set equal [string equal -nocase $actual $wanted] } else { set equal [string equal $actual $wanted] }',
+        '    if {$equal} { lappend matches $f }',
+        '}',
+        'if {[llength $matches] != 1} { error "XDC file unavailable or ambiguous in set $name ($wanted)" }',
+        'set_property TARGET_CONSTRS_FILE [lindex $matches 0] $sets'
+    ]);
+}
+
 /**
  * 生成文件集移动事务：先加入并验证目标引用，再移除源；后续失败恢复源引用与常用属性。
  * @param {{xprPath:string, file:string, from:string, to:string, isSv:boolean}} o
@@ -456,7 +473,7 @@ function buildVivadoDrcScript({ xprPath, run }) {
 module.exports = {
     tclQuote, tclList, wrapProjectScript,
     buildCreateProjectScript, buildAddFilesScript, buildRemoveFilesScript, buildSimulateScript,
-    buildSetTopScript, buildMoveFileScript, buildLaunchRunScript,
+    buildSetTopScript, buildSetConstraintTargetScript, buildMoveFileScript, buildLaunchRunScript,
     buildOocReportsScript, parseUtilHierSummary, parseLogicLevelSummary,
     buildVivadoStatusScript, buildVivadoTimingScript, buildVivadoUtilizationScript, buildVivadoDrcScript,
     buildAddFilesBatchScript,

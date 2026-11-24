@@ -3,6 +3,7 @@
 (() => {
     const vscode = acquireVsCodeApi(), saved = vscode.getState() || {}, tree = document.getElementById('tree'), menu = document.getElementById('menu');
     const english = document.documentElement?.lang === 'en';
+    const fileIcons = { v: 'verilog', vh: 'verilog', sv: 'systemverilog', svh: 'systemverilog', xdc: 'constraint', tcl: 'tcl' };
     let snapshot = { nodes: [], revision: 0 }, state = saved, focusId, menuAnchor;
     const send = (action, extra = {}) => vscode.postMessage({ action, revision: snapshot.revision, ...extra });
     const currentState = () => state[snapshot.project?.id] || (state[snapshot.project?.id] = { expanded: (snapshot.nodes || []).filter(node => !node.collapsedByDefault).map(node => node.id), projection: 'files' });
@@ -156,7 +157,10 @@
                 padding.style.width = Math.min(depth, 32) * 14 + 'px';
                 const symbol = document.createElement('span');
                 symbol.className = 'symbol';
-                const iconName = node.icon || (node.kind === 'set' ? 'fileset' : node.kind === 'folder' ? (expanded ? 'folderOpen' : 'folder') : node.kind === 'instance' ? 'instance' : /\.xdc$/i.test(node.file || '') ? 'constraint' : 'file');
+                const extension = node.file?.match(/\.([A-Za-z]+)$/)?.[1].toLowerCase();
+                const iconName = node.icon || (node.kind === 'set' ? 'fileset' : node.kind === 'folder' ? (expanded ? 'folderOpen' : 'folder')
+                    : node.kind === 'instance' ? 'instance' : Object.hasOwn(fileIcons, extension) ? fileIcons[extension] : 'file');
+                symbol.dataset.icon = iconName;
                 symbol.append(icon(iconName));
                 const label = document.createElement('span');
                 label.className = 'label';
@@ -173,6 +177,16 @@
                 }
                 row.title = [node.file, node.tooltip].filter(Boolean).join('\n');
                 row.append(padding, chevron, symbol, label, flags);
+                if (node.isTop || node.isConstraintTarget) {
+                    const isTop = node.isTop;
+                    const status = document.createElement('span');
+                    row.dataset.mark = isTop ? 'top' : 'target';
+                    status.className = 'file-mark';
+                    status.textContent = isTop ? 'Top' : english ? 'Target' : '目标';
+                    status.title = isTop ? (english ? 'Top module' : '顶层模块') : (english ? 'Target constraints file' : '目标约束文件');
+                    row.title = [row.title, status.title].filter(Boolean).join('\n');
+                    row.append(status);
+                }
                 if (node.children.length) {
                     row.setAttribute('aria-expanded', String(expanded));
                 }

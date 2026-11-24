@@ -3,7 +3,7 @@ const fs = require('node:fs/promises');
 const { createReadStream } = require('node:fs');
 const path = require('node:path');
 const { maskSourceText, extractDesignUnits } = require('../workspace/sources');
-const { samePath } = require('./xpr');
+const { samePath, isXdc } = require('./xpr');
 const MAX_INDEX_FILES = 3000, MAX_HIERARCHY_NODES = 5000, MAX_HIERARCHY_DEPTH = 32;
 const MAX_SOURCE_BYTES = 4 * 1024 * 1024, MAX_TOTAL_SOURCE_BYTES = 64 * 1024 * 1024;
 const SOURCE_EXT = /\.(sv|v|svh|vh)$/i;
@@ -114,12 +114,16 @@ async function buildProjectTree(parsed, { workspaceFiles = [], readFile = readBo
             icon: isReference ? 'references' : top ? 'rocket' : 'symbol-module', contextValue: isReference ? 'referenceModule' : top ? 'topModule' : 'module', children,
             nodeData: { kind: 'module', file, module: name, fileset: owner, isReference, isTop: top, xpr: project } };
     }
+    const topFiles = new Map();
     function fileNode(file, kind, parent, set) {
         const id = parent + '/file:' + keyOf(file), missing = failures.has(keyOf(file));
         const children = set ? (names.get(keyOf(file)) || []).map(name => ({ id: id + '/unit:' + name, label: name, icon: 'symbol-module', contextValue: name === set.top ? 'topModule' : 'module', children: [],
             nodeData: { kind: 'module', file, module: name, fileset: set.name, isTop: name === set.top, xpr: project } })) : [];
-        return { id, label: path.basename(file), description: missing ? '无法读取 · ' + path.dirname(file) : path.relative(parsed.dir, path.dirname(file)) || '.',
-            tooltip: file, contextValue: kind, icon: missing ? 'warning' : kind === 'orphan' ? 'diff-add' : kind === 'constraint' ? 'gauge' : kind === 'simFile' ? 'beaker' : 'file-code', children,
+        const target = isXdc(set, file) && samePath(set.constraintTarget, file);
+        const top = samePath(topFiles.get(set?.name)?.file, file);
+        const location = missing ? '无法读取 · ' + path.dirname(file) : path.relative(parsed.dir, path.dirname(file)) || '.';
+        return { id, label: path.basename(file), description: [target ? 'Target' : top ? 'Top' : '', location].filter(Boolean).join(' · '),
+            tooltip: file, contextValue: kind, icon: missing ? 'warning' : kind === 'orphan' ? 'diff-add' : 'file', children,
             nodeData: { kind, file, fileset: set?.name, xpr: project } };
     }
     const actions = [['xelab 详细化', 'zap', 'quickElaborate'], ['工程综合', 'tools', 'synthesize'],
@@ -132,6 +136,10 @@ async function buildProjectTree(parsed, { workspaceFiles = [], readFile = readBo
         const id = prefix + '/set:' + set.name, kind = set.type === 'SimulationSrcs' ? 'simFile' : set.type === 'Constrs' ? 'constraint' : 'file';
         const allowed = new Set(set.files.map(keyOf));
         if (set.type === 'SimulationSrcs') for (const member of parsed.sets.filter(entry => entry.type === 'DesignSrcs').flatMap(entry => entry.files)) allowed.add(keyOf(member));
+        if (set.top) {
+            const declarations = [...new Map(set.files.filter(file => names.get(keyOf(file))?.includes(set.top)).map(file => [keyOf(file), file])).values()];
+            if (declarations.length === 1) topFiles.set(set.name, { module: set.top, file: declarations[0] });
+        }
         const files = set.files.map(file => fileNode(file, kind, id, set)), contents = [];
         if (set.top) contents.push(units.has(set.top) && allowed.has(keyOf(units.get(set.top)))
             ? category(id + '/hierarchy', '层级预览 · ' + set.top, [moduleNode(set.top, id + '/hierarchy', set, allowed, new Set(), true)].filter(Boolean), false)
@@ -143,7 +151,7 @@ async function buildProjectTree(parsed, { workspaceFiles = [], readFile = readBo
     const unadded = [...new Set(workspaceFiles)].filter(file => !members.has(keyOf(file))).sort().map(file => fileNode(file, 'orphan', prefix + '/unadded'));
     if (unadded.length) children.push(category(prefix + '/unadded', '未加入工程', unadded, false));
     if (issues.length) children.push(category(prefix + '/issues', '工程提示 · ' + issues.length, issues.map((issue, index) => info(prefix + '/issue:' + index, issue)), false));
-    return { project, issues, units, roots: [{ id: prefix, label: path.basename(project, '.xpr'), description: parsed.part || 'Vivado 工程', tooltip: project,
+    return { project, issues, units, topFiles, roots: [{ id: prefix, label: path.basename(project, '.xpr'), description: parsed.part || 'Vivado 工程', tooltip: project,
         icon: 'circuit-board', contextValue: 'project', expanded: true, nodeData: { file: project, xpr: project }, children }] };
 }
 module.exports = { buildProjectTree, referencedUnits };

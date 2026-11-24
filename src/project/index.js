@@ -68,6 +68,11 @@ function activateProjectView(context, { vscode, projects, vivado, designReview }
             if (node.id === 'vivado:bd') return [BD_ACTION];
             if (node.kind === 'file' && /\.(xci|xcix)$/iu.test(node.file)) return [IP_ACTION, REMOVE_VIVADO_FILE];
             if (node.kind === 'file' && /\.bd$/iu.test(node.file)) return [BD_ACTION, REMOVE_VIVADO_FILE];
+            if (node.isConstraint) {
+                const label = english ? 'Set as Target Constraints File' : '设为目标约束文件';
+                return node.isXdc && !node.isConstraintTarget
+                    ? [{ id: 'setConstraintTarget', label }, REMOVE_VIVADO_FILE] : [REMOVE_VIVADO_FILE];
+            }
         }
         if (!project || !node.file || node.kind === 'set') {
             return [];
@@ -130,7 +135,8 @@ function activateProjectView(context, { vscode, projects, vivado, designReview }
             progress=loaded.snapshot;progressLinks=loaded.links;nodes=[];nodeIndex.clear();revision++;send();return;
         }
         progress=null;progressLinks.clear();
-        let next = projectTree(project, { projection, flow: flow.get() });
+        const topFiles = project?.kind === 'vivado' ? vivado.projectTree?.getTopFiles?.(project.path) : undefined;
+        let next = projectTree(project, { projection, flow: flow.get(), topFiles });
         if (project && projection === 'instances' && !flow.get()) {
             const preview = await buildProjectTree(project.parsed || { path: project.path, dir: project.root, sets: project.sets }, { workspaceFiles: [] });
             if (disposed || version !== refreshGeneration) {
@@ -138,7 +144,8 @@ function activateProjectView(context, { vscode, projects, vivado, designReview }
             }
             function convert(node) {
                 return { id: node.id, label: node.label, kind: node.nodeData?.kind === 'module' ? 'instance' : 'set', file: node.nodeData?.file,
-                    module: node.nodeData?.module, fileset: node.nodeData?.fileset, tooltip: node.tooltip, flags: [], children: (node.children || []).map(convert) };
+                    module: node.nodeData?.module, fileset: node.nodeData?.fileset, isTop: node.nodeData?.isTop,
+                    tooltip: node.tooltip, flags: [], children: (node.children || []).map(convert) };
             }
             next = preview.roots[0].children.filter(node => node.children.some(child => child.id.endsWith('/hierarchy'))).flatMap(node => node.children.filter(child => child.id.endsWith('/hierarchy')).map(convert));
             if (!next.length) {

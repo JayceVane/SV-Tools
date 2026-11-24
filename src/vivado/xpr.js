@@ -163,6 +163,9 @@ function parseXprText(text, xprPath, { onElement } = {}) {
             if (!attrs.Path) fail('File 缺少 Path');
             try { set.files.push(resolveXprPath(attrs.Path, parsed.dir, path.basename(xprPath, '.xpr'))); }
             catch (error) { fail('File 路径无效：' + error.message); }
+        } else if (element.name === 'FileInfo' && set?.type === 'Constrs' && stack.at(-1)?.name === 'File'
+            && attrs.SFType && attrs.SFType.toUpperCase() !== 'XDC') {
+            (set.nonXdcFiles ||= []).push(set.files.at(-1));
         } else if (element.name === 'Define' && set && stack.at(-1)?.name === 'Config' && stack.at(-2)?.name === 'FileSet'
             && /^[A-Za-z_][A-Za-z0-9_$]*$/.test(attrs.Name || '')) {
             (set.defines ||= []).push(Object.hasOwn(attrs, 'Val') ? `${attrs.Name}=${attrs.Val}` : attrs.Name);
@@ -175,6 +178,10 @@ function parseXprText(text, xprPath, { onElement } = {}) {
                 if (!Object.hasOwn(attrs, 'Val')) fail('TopModule 缺少 Val');
                 set.top = attrs.Val;
                 topNames.add(set.name);
+            } else if (set?.type === 'Constrs' && attrs.Name === 'TargetConstrsFile' && attrs.Val
+                && stack.at(-1)?.name === 'Config' && stack.at(-2)?.name === 'FileSet') {
+                try { set.constraintTarget = resolveXprPath(attrs.Val, parsed.dir, path.basename(xprPath, '.xpr')); }
+                catch (error) { fail('目标约束文件路径无效：' + error.message); }
             }
         }
         return set;
@@ -236,10 +243,15 @@ function fileSetOf(parsed, absFile) {
     for (const set of parsed.sets) if (set.files.some(file => samePath(file, absFile))) return set.name;
     return null;
 }
+
+// 调用方先确认文件属于该文件集。Vivado 允许将 .xdc 的实际文件类型设为 Tcl。
+function isXdc(set, file) {
+    return set?.type === 'Constrs' && /\.xdc$/i.test(file) && !set.nonXdcFiles?.some(member => samePath(member, file));
+}
 /** 复用严格XML解析器提供源码跨度，重定位时不以正则猜测XML结构。 */
 function inspectXprText(text, xprPath) {
     const normalized=text.replace(/^\uFEFF/,'').replace(/\r\n?/g,'\n'), elements=[];
     const parsed=parseXprText(normalized,xprPath,{onElement:element=>elements.push(element)});
     return {text:normalized,parsed,elements};
 }
-module.exports = { parseXpr, parseXprText, inspectXprText, fileSetOf, samePath, resolveXprPath, walkXml };
+module.exports = { parseXpr, parseXprText, inspectXprText, fileSetOf, samePath, isXdc, resolveXprPath, walkXml };

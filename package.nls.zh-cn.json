@@ -90,6 +90,7 @@
   "cmd.vivado_tree_removeFile.title": "从工程移除文件",
   "cmd.vivado_tree_setTopSynth.title": "设为综合顶层",
   "cmd.vivado_tree_setTopSim.title": "设为仿真顶层",
+  "cmd.vivado_tree_setConstraintTarget.title": "设置目标约束文件",
   "cmd.vivado_tree_moveToSim.title": "移到 sim_1（仿真源文件）",
   "cmd.vivado_tree_moveToSources.title": "移到 sources_1（设计源文件）",
   "cmd.vivado_tree_elaborate.title": "xelab 详细化（顶层模块）",

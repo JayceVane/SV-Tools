@@ -72,6 +72,45 @@ test('异步首次构建会通知树重新读取，工程面板不会停留在�
     finally { h.dispose(); }
 });
 
+test('约束目标按文件集和完整路径校验，顶层按声明定位', async t => {
+    const f = await fixture(t);
+    const first = path.join(f.root, 'a', 'board.xdc'), second = path.join(f.root, 'b', 'board.xdc');
+    const script = path.join(f.root, 'run.xdc');
+    const rootXml = await fs.readFile(f.xpr, 'utf8');
+    const fixtureXml = target => rootXml.replace('Val="top"', 'Val="actual_top"').replace('</FileSets>',
+        `<FileSet Name="constrs_1" Type="Constrs">
+            <File Path="$PPRDIR/a/board.xdc"/><File Path="$PPRDIR/b/board.xdc"/>
+            <File Path="$PPRDIR/run.xdc"><FileInfo SFType="TCL"/></File>
+            <Config><Option Name="TargetConstrsFile" Val="$PPRDIR/${target}/board.xdc"/></Config>
+        </FileSet><FileSet Name="constrs_alt" Type="Constrs"><File Path="$PPRDIR/a/board.xdc"/></FileSet></FileSets>`);
+    await fs.writeFile(f.xpr, fixtureXml('a'));
+    await fs.writeFile(f.files['top.sv'], '// module actual_top;\nmodule other; endmodule');
+    await fs.writeFile(f.files['child.sv'], 'module actual_top; endmodule');
+    let runs = 0;
+    const h = await harness(f, { runScript: async input => {
+        runs++;
+        assert.equal(input.name, 'set_constraint_target.tcl');
+        assert.ok(input.body.includes(second.replaceAll('\\', '/')));
+        assert.match(input.body, /FILE_TYPE == XDC/);
+        assert.match(input.body, /set_property TARGET_CONSTRS_FILE/);
+        await input.validate();
+        await fs.writeFile(f.xpr, fixtureXml('b'));
+        return { code: 0, status: 'success' };
+    } });
+    t.after(h.dispose);
+    assert.deepEqual(h.api.getTopFiles(f.xpr).get('sources_1'), { module: 'actual_top', file: f.files['child.sv'] });
+    const switchTo = (file, fileset = 'constrs_1') =>
+        h.commands.get('svtools.vivado.tree.setConstraintTarget')({ nodeData: { file, fileset, xpr: f.xpr } });
+    await switchTo(first);
+    await switchTo(script);
+    await switchTo(second, 'constrs_alt');
+    assert.equal(runs, 0);
+    await switchTo(second);
+    assert.equal(runs, 1);
+    assert.equal(parseXpr(f.xpr).sets.find(set => set.name === 'constrs_1').constraintTarget, second);
+    assert.equal(parseXpr(f.xpr).sets.find(set => set.name === 'constrs_alt').constraintTarget, undefined);
+});
+
 function flatten(nodes) { return nodes.flatMap(node => [node, ...flatten(node.children || [])]); }
 function deferred() { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; }
 async function waitFor(predicate) { const deadline = Date.now() + 3000; while (!predicate()) { assert.ok(Date.now() < deadline); await delay(5); } }

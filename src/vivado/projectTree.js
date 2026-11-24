@@ -26,12 +26,12 @@
 'use strict';
 const fs = require('fs');
 const path = require('path');
-const { parseXpr, fileSetOf, samePath } = require('./xpr');
+const { parseXpr, fileSetOf, samePath, isXdc } = require('./xpr');
 const { buildProjectTree } = require('./tree-model');
 const { cancelledError } = require('../toolchains/job');
 const {
     buildAddFilesScript, buildRemoveFilesScript, buildSetTopScript, buildMoveFileScript,
-    buildLaunchRunScript
+    buildLaunchRunScript, buildSetConstraintTargetScript
 } = require('./tclgen');
 
 /**
@@ -42,9 +42,12 @@ const {
 function activateProjectTree(context, deps) {
     const vscode = deps.vscode || require('vscode');
     const { findProjectXpr, runScript, log, out } = deps;
+    const english = !/^zh\b/i.test(vscode.env?.language || 'zh-CN');
+    const targetAction = english ? 'Set Target Constraints File' : '设置目标约束文件';
     const changes = new vscode.EventEmitter();
     let roots = [], parents = new WeakMap(), disposed = false, revision = 0, queued = false, refreshing = null;
     let watcherTimer = null, operation = null, externalStage = null, stopRequested = false, stopAction = null, modelUnits = new Map(), pickerToken = null;
+    let indexedProject, topFiles;
     function setRunning(stage) {
         if (disposed) return;
         externalStage = stage;
@@ -58,7 +61,7 @@ function activateProjectTree(context, deps) {
                 : node.expanded ? vscode.TreeItemCollapsibleState.Expanded : vscode.TreeItemCollapsibleState.Collapsed;
             const item = new vscode.TreeItem(node.label, state);
             for (const key of ['id', 'description', 'tooltip', 'contextValue', 'nodeData']) item[key] = node[key];
-            item.iconPath = new vscode.ThemeIcon(node.icon || 'file-code');
+            item.iconPath = new vscode.ThemeIcon(node.icon || 'file');
             if (node.command) item.command = { command: node.command, title: node.label, arguments: [item] };
             else if (node.nodeData?.file) {
                 item.resourceUri = vscode.Uri.file(node.nodeData.file);
@@ -100,6 +103,7 @@ function activateProjectTree(context, deps) {
                 catch (error) { log('[工程树] 刷新失败：' + error.message); snapshot = { roots: [info('读取工程失败：' + error.message)], issues: [error.message] }; }
                 if (disposed || version !== revision) continue;
                 parents = new WeakMap(); roots = items(snapshot.roots); modelUnits = snapshot.units || new Map();
+                indexedProject = snapshot.project; topFiles = snapshot.topFiles;
                 tree.description = snapshot.project ? path.basename(snapshot.project) : undefined;
                 tree.message = operation ? '正在执行：' + operation : externalStage ? 'Vivado 正在运行，可使用标题栏停止任务' : snapshot.issues.length ? '有 ' + snapshot.issues.length + ' 项工程提示，详见树和输出通道' : undefined;
                 tree.badge = snapshot.count ? { value: snapshot.count, tooltip: '当前工程文件数' } : undefined;
@@ -277,6 +281,37 @@ function activateProjectTree(context, deps) {
         vscode.window.showInformationMessage(mod + ' 已设为 ' + fileset + ' 顶层');
     }
 
+    async function setConstraintTarget(nodeArg) {
+        const xpr = await currentXpr(nodeArg); if (!xpr) return;
+        const parsed = parseXpr(xpr);
+        let node = nodeArg?.nodeData;
+        if (!nodeArg) {
+            const choices = parsed.sets.flatMap(set => set.files.filter(file => isXdc(set, file) && !samePath(set.constraintTarget, file))
+                .map(file => ({ label: path.basename(file), description: set.name, detail: file, file, fileset: set.name })));
+            if (!choices.length) {
+                vscode.window.showInformationMessage(english ? 'No other XDC files are available as a target.' : '没有其他可设为目标约束文件的 XDC。');
+                return;
+            }
+            node = await vscode.window.showQuickPick(choices, { title: targetAction }, pickerToken?.token);
+            if (!node) return;
+        }
+        const eligibleSet = snapshot => snapshot.sets.find(set => set.name === node?.fileset
+            && isXdc(set, node.file) && set.files.some(member => samePath(member, node.file)));
+        const set = eligibleSet(parsed);
+        if (!set) {
+            vscode.window.showWarningMessage(english ? 'Select an XDC file in a constraints set of the current project.' : '请选择当前工程约束集内的 XDC 文件。');
+            return;
+        }
+        if (samePath(set.constraintTarget, node.file)) return;
+        const result = await runTcl('set_constraint_target.tcl', buildSetConstraintTargetScript(xpr, set.name, node.file), xpr, eligibleSet);
+        if (!succeeded(result) || !xprFact(xpr, latest => samePath(eligibleSet(latest)?.constraintTarget, node.file))) {
+            reportWriteFail(targetAction, result);
+            return;
+        }
+        const name = path.basename(node.file);
+        vscode.window.showInformationMessage(english ? `${name} is now the target constraints file for ${set.name}.` : `${name} 已设为 ${set.name} 的目标约束文件。`);
+    }
+
     async function moveFile(nodeArg, type) {
         if (nodeArg?.nodeData?.isReference) { vscode.window.showWarningMessage('此节点仅为引用，请在实际文件集中管理。'); return; }
         const xpr = await currentXpr(nodeArg); if (!xpr) return;
@@ -395,6 +430,7 @@ function activateProjectTree(context, deps) {
         vscode.commands.registerCommand('svtools.vivado.tree.removeFile', guarded('移出文件', removeFileFromProject)),
         vscode.commands.registerCommand('svtools.vivado.tree.setTopSynth', guarded('设置综合顶层', n => setTop(n, 'DesignSrcs'))),
         vscode.commands.registerCommand('svtools.vivado.tree.setTopSim', guarded('设置仿真顶层', n => setTop(n, 'SimulationSrcs'))),
+        vscode.commands.registerCommand('svtools.vivado.tree.setConstraintTarget', guarded(targetAction, setConstraintTarget)),
         vscode.commands.registerCommand('svtools.vivado.tree.moveToSim', guarded('移入仿真集', n => moveFile(n, 'SimulationSrcs'))),
         vscode.commands.registerCommand('svtools.vivado.tree.moveToSources', guarded('移入设计集', n => moveFile(n, 'DesignSrcs'))),
         vscode.commands.registerCommand('svtools.vivado.tree.elaborate', guarded('详细化', elaborateTop)),
@@ -411,7 +447,8 @@ function activateProjectTree(context, deps) {
 
     const ready = refresh();
     setRunning(null);
-    return { refresh, ready, dispose, setRunning, isBusy: () => !!operation, getChildren: provider.getChildren, onDidChangeTreeData: changes.event };
+    return { refresh, ready, dispose, setRunning, isBusy: () => !!operation, getChildren: provider.getChildren, onDidChangeTreeData: changes.event,
+        getTopFiles: xpr => samePath(xpr, indexedProject) ? topFiles : undefined };
 }
 
 module.exports = { activateProjectTree };
