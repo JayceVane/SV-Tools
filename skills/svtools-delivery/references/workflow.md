@@ -8,11 +8,11 @@
 
 | # | 阶段 | 命令 | 输入 | 产物 → 下一环 | 失效条件 |
 | --- | --- | --- | --- | --- | --- |
-| ① | 架构契约 | `design plan` / `design report` | `spec.json`：需求、模块 ID、源文件清单、依赖门禁、三项必需检查 | `svtools.design.json` 与架构报告包 → ② | 源码 / 接口契约 / 设计说明变更 → 设计候选过期 |
+| ① | 架构契约 | `design plan` / `design export` | `spec.json` 中的需求、模块 ID、源文件清单、依赖门禁、三项必需检查。架构文档取自独立伪 SV。 | `svtools.design.json` 与分层架构文档 → ② | 源码 / 接口契约 / 设计说明变更 → 设计候选过期 |
 | ② | 按模块分发 | `design tasks` / `design claim` | 当前 `revision`、角色、actor | 领取令牌与依赖门禁状态 → ③ | 并发写入冲突、依赖门禁未满足 |
 | ③ | 设计提交 | `design submit`（设计侧） | 领取令牌、revision、设计说明 | `candidateId` + `candidateInputs` → ④ | 源码或设计说明变更 → 候选过期 |
 | ④ | 验证复核 | `design claim`（验证侧）/ `design evidence` / `design submit` / `design review` | 同一候选输入，编译 / 仿真 / ΔCycle 收据 | 验证收据、独立期望、哈希与复核结论 → ⑤ | TB / 日志 / 报告 / 波形变更 → 验证过期 |
-| ⑤ | 报告包交付 | `design report` / 波形导出 / 归档验证收据 | 当前 RTL、已复核的波形和验证收据 | 架构报告包（JSON / MD / SVG / PNG 及其哈希清单），另附波形导出产物和验证收据 → ⑥ | 依赖候选变更连带撤销下游当前性 |
+| ⑤ | 报告包交付 | `design export` / `design report` / 波形导出 / 归档验证收据 | 独立伪 SV、当前 RTL、已复核的波形和验证收据 | 分层架构文档、静态图和机器证据清单、波形及验证收据 → ⑥ | 依赖候选变更连带撤销下游当前性 |
 | ⑥ | 回流 | `design return` / 重新领取 | 失效原因与返工条件 | 过期项不计入「核验通过」，复验后恢复当前 → ① | — |
 
 **闭环的定义**：输入或产物一变，工具只做「标记过期 + 不计入核验通过」，**不自动重跑、不自动重新领取、不自动裁决**。由人或 Agent 重新走 ②→④ 并复核，链路才回到当前状态。工具校验的是本地产物一致性（第 4 节），不认证执行主体，也不证明功能完整。
@@ -54,7 +54,7 @@ svtools-agent design tasks --workspace <rtl-root>
 
 生成 `svtools.design.json` 和同名 Markdown 架构报告，默认拒绝覆盖。两份纳入 RTL 工程版本管理。计划变更后运行 `design plan-report --workspace <rtl-root> --force` 更新同名报告；运行状态独立放 `.svtools/agent/design-workflow/`。非默认计划用 `--plan <relative.json>`；插件用 `svtools.design.planFile` 相对所选工程根目录查找。 计划和交接命令管理协作记录。仿真、Yosys 与 Vivado 验证由对应命令单独触发。
 
-已有 `design scaffold` 规格可附加 `workflow` 对象（id/title/overview/clocks/resets/requirements/modules）。`workflow.modules` 按 `name` 关联骨架模块，补职责、需求、检查、deltaSignals 等。骨架默认共享 `rtl/<top>.sv`，并发编辑会串行；按模块分开源码后更新清单，不能假装共享文件属于不同写入者。虚拟通道继续使用 packed struct，成员与方向写在架构报告。
+已有 `design scaffold` 规格可附加 `workflow` 对象（id/title/overview/clocks/resets/requirements/modules）。`workflow.modules` 按 `name` 关联骨架模块，补职责、需求、检查、deltaSignals 等。骨架默认共享 `rtl/<top>.sv`，并发编辑会串行。按模块分开源码后更新清单。生成器使用 packed struct 端口。分层架构文档的伪 SV、接口契约和来源映射按 `svtools-design` 准备。
 
 ## 2. 领取、提交、退回、复验
 

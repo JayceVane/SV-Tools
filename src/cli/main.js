@@ -53,6 +53,7 @@ const help=`SV Tools headless CLI (API 1)
        [--role design|verification] [--token <claim-token>] [--evidence <file>] [--reason <text>]
   design evidence --module <id> --evidence <file>
   design scaffold --spec <json|file> [--out <dir>] [--force]
+  design export --workspace <virtual-sv-dir> --top <module> [--format html|pdf] [--out <file>] [--browser <exe>]
   design render --top <module> [--format svg] [--style document|presentation] [--out <dir>] [--title <t>]
                 [--detail interfaces|signals] [--boundary-layout auto|ends] [--fold-ports] [--bundle-name <prefix=display>] (repeatable)
   design check --top <module>
@@ -155,6 +156,7 @@ async function run(argv) {
         else if(command==='design' && action==='evidence' && !id) output=await workflow.checkEvidence(input);
         else if(command==='design' && ['claim','submit','return','review'].includes(action) && !id) output=await workflow.mutate(action,input);
         else if(command==='design' && action==='arch' && !id) output=await services.arch(input);
+        else if(command==='design' && action==='export' && !id) output=await require('../design/architecture-export').exportFromCli(input);
         else if(command==='design' && action==='scaffold' && !id) output=await services.scaffold(input);
         else if(command==='design' && action==='render' && !id) output=await services.render(input);
         else if(command==='design' && action==='check' && !id) output=await services.check(input);

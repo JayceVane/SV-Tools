@@ -11,4 +11,6 @@
 
 可以在根目录放置 `svtools.architecture.json`。`titles` 以模块类型名为键，`groups` 以父模块名为键，为其直接实例指定功能块名称。查看器以源码为连接依据，配置仅供章节命名和简图排版。[四路采集与报文汇聚示例](../example/struct-packet-hub/README.md)
 
+Agent 可在单独的伪 SystemVerilog 工作区用 `design export --workspace <目录> --top <模块> --format html|pdf --out <文件>` 生成同样的分层文档。[架构 CLI](../skills/svtools-design/references/cli.md)
+
 架构是源级连接快照。它会标出空实现和静态诊断；复杂宏、生成分支和动态连接需要结合编译结果。握手时序、背压期间的数据稳定性、CDC 和复位语义仍需要用仿真或其他验证方法核对。

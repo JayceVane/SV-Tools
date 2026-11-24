@@ -4,7 +4,9 @@ const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const assert = require('node:assert/strict');
+const { createHash } = require('node:crypto');
 const test = require('node:test');
+const { run } = require('../src/cli/main');
 const { buildArchitectureBook, resolveContext, assertBookCurrent } = require('../src/design/architecture-model');
 const { diagramTopology, layoutDiagram, renderDiagram } = require('../src/design/architecture-diagram');
 const { exportArchitecture } = require('../src/design/architecture-export');
@@ -74,8 +76,55 @@ test('报文汇聚简图保留独立实例、标签网络和架构握手证据�
     assert.deepEqual(missing, [], '完整连线导出的图内跳转必须有目标');
     const invalid = await exportArchitecture(loaded, 'html', { out: 'architecture-invalid.html', modes: { [top.id]: 'bogus' } });
     assert.equal(pinCount(await fs.readFile(invalid, 'utf8')), pinCount(html));
+    const args = ['design', 'export', '--workspace', workspace, '--top', 'packet_hub', '--out', 'cli-architecture.html'];
+    const cli = await run(args);
+    assert.equal(cli.exitCode, 0);
+    assert.equal(cli.output.operation, 'design.export');
+    assert.equal(cli.output.data.chapterCount, loaded.book.pages.length);
+    assert.equal(cli.output.data.revision, loaded.book.revision);
+    const artifact = cli.output.artifacts[0];
+    assert.equal(await fs.readFile(artifact.path, 'utf8'), html);
+    assert.equal(artifact.sha256, createHash('sha256').update(html).digest('hex'));
+    assert.equal((await run(args)).output.diagnostics[0].code, 'EEXIST');
     await fs.writeFile(path.join(workspace, 'svtools.architecture.json'), '{}');
     await assert.rejects(assertBookCurrent(loaded), /已修改/u);
+});
+
+test('架构文档标出子模块接口的多个输出端，并在读取 XPR 之前拒绝用真实工程导出', async t => {
+    const base = await fs.realpath(os.tmpdir());
+    const workspace = await fs.mkdtemp(path.join(base, 'svtools-arch-export-'));
+    t.after(async () => {
+        if (await fs.realpath(workspace) === workspace && path.dirname(workspace) === base) await fs.rm(workspace, { recursive: true, force: true });
+    });
+    await fs.writeFile(path.join(workspace, 'top.sv'), `interface events;
+    logic irq;
+    modport producer(output irq);
+endinterface
+module owner(events.producer signal_out); endmodule
+module subsystem;
+    events shared();
+    owner x(.signal_out(shared));
+    owner y(.signal_out(shared));
+endmodule
+module top;
+    subsystem child();
+endmodule
+`);
+    const args = ['design', 'export', '--workspace', workspace, '--top', 'top'];
+    const exported = await run([...args, '--format', 'html', '--out', 'review.html']);
+    assert.equal(exported.exitCode, 0);
+    const found = exported.output.diagnostics.find(item => item.code === 'ARCH_INTERFACE_MULTI_DRIVER');
+    assert.deepEqual(found?.details, { interface: 'shared', members: [{ name: 'irq', outputs: ['x.signal_out', 'y.signal_out'] }] });
+    assert.equal(found.chapter, 'module-2');
+    assert.match(await fs.readFile(exported.output.data.path, 'utf8'), /成员 irq 声明了多个输出端/u);
+    const invalid = await run([...args, '--format', 'pdf', '--out', 'review.html']);
+    assert.equal(invalid.output.diagnostics[0].code, 'INVALID_ARGUMENT');
+    await fs.writeFile(path.join(workspace, 'hardware.xpr'), 'invalid fixture');
+    for (const selection of [[], ['--project', 'hardware.xpr']]) {
+        const rejected = await run([...args, ...selection]);
+        assert.equal(rejected.output.diagnostics[0].code, 'INVALID_ARGUMENT');
+        assert.match(rejected.output.diagnostics[0].message, /伪 SystemVerilog/u);
+    }
 });
 
 test('小型子模块显示完整连接，接口宽度按实例参数解析，边界保留可确定的位宽', async t => {

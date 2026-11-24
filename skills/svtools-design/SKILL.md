@@ -1,22 +1,14 @@
 ---
 name: svtools-design
-description: RTL 架构建模与图表交付：packed struct 虚拟端口骨架（design scaffold）、架构分析（design arch）、接口级/信号级 SVG/PNG 渲染、结构检查 design check（悬空/多驱动/缺失模块）、架构 diff 与报告证据包 design report。
+description: 用独立的分层伪 SystemVerilog 建立新设计或提炼已有工程的架构，检查接口契约，导出可逐层核验的 HTML／PDF。
 ---
 
-# 架构建模与图表（M3）
+# 架构设计与报告
 
-入口技能 `svtools-agent` 提供 CLI 调用约定；执行架构设计或图表交付前，先读取 [references/architecture.md](references/architecture.md)（生成规格、方向约束、时钟/复位处理、验收与当前限制）。具体参数、模型字段和导出合同见[架构 CLI](references/cli.md)。
+架构设计和事后架构报告均先建立独立的伪 SystemVerilog 工作区。用模块层级和 `interface/modport` 表达功能分块、接口方向与关键数据路径，叶子模块可保留实现桩。事后报告以原工程为取证来源，将关键虚拟模块及接口映射到实际 RTL 实例、BD 或 IP。
 
-架构任务化交付可用 `design plan --spec <json|file>` 生成稳定需求/模块 ID 和 Markdown 报告，`design tasks` 查询；既有 scaffold 规格可附 `workflow` 字段复用模块/接口名单。职责、需求与必需 ΔCycle 信号不能从空骨架臆造。交接与证据协议使用 `svtools-delivery` 的工作流约定；修改计划后用 `design plan-report --force` 更新报告。
+1. 读取[建模与核验约定](references/architecture.md)，建立顶层、子系统和接口层。先确认功能边界，再决定展开到哪一层。
+2. 用 `design check --engine struct` 初查模型，再用 `design export --format html` 导出分层架构文档。查看返回的 `chapterCount`、`diagnostics` 和 `artifacts`，抽查关键子章节与接口端点。需要定版时导出 PDF。
+3. 交付伪 SV、章节化文档，以及事后报告的原工程映射。约束、仲裁、位宽或连接仍待核实时，在交付中明确状态。
 
-新建骨架默认声明 **packed struct 虚拟端口**，一个逻辑接口一个端口、一条连接；整体 inout 可用于架构中的双向接口，成员内容和收发约定写入架构文档。不要为出图强制拆开请求/响应或展开完整协议引脚，不要把主/从角色等同于电气方向。分析已有 RTL 则保留其真实端口。
-
-实际命令为 `design scaffold --spec <json|file>`、`design arch --top <module>` 和 `design render --top <module>`。SVG 默认采用接口级连线（--detail interfaces）：接口表外一条汇总线，方向缩写（`i`/`o`/`io`）在表内逐行标注；--detail signals 用于信号级排查。`--format png` 用内置 resvg 2x 栅格化（`sourceSha256` 关联源 SVG；中文依赖系统字体，文档首选 SVG）。默认黑白 document 风格；`--style presentation` 用于演示。`--boundary-layout auto|ends` 控制边界接口表布局（`design render` 与 `design report` 均支持，默认 `auto`），`ends` 把表格接口放在普通端口两端；`--fold-ports` 仅作可选的显示折叠，不能替代虚拟端口声明；`--bundle-name` 仅与折叠选项同时生效。输入快照及哈希绑定生成模型，源码变化后应重新运行。
-
-结构检查用 `design check --top <module>`：诊断逐条指认悬空 input（error）、无驱动网络（error）、多驱动（error）、缺失模块（error）与悬空 output、顶层无驱动输出、隐式位宽补常量（warning）；有 error 时退出码 1、`status=failed`，检查完成不等于结构干净，warning 也不得当作已验证。常量驱动不产生假诊断。
-
-架构比较用 `design arch --save <name>` 保存快照，改动后 `design diff --top <module> --baseline <name>` 报告实例/模块/端口/接口增删改与 `implemented[]`（空骨架补实现）；diff 只报告差异，好坏由设计判断。
-
-交付文档用 `design report --top <module> [--out <dir>]` 一次导出 SVG+PNG+`architecture.json`+`architecture.md`+`report.json`（清单含每份产物哈希；Markdown 检查表与 `checksSummary` 呈现结构结论，报告生成不等于结构合格）；引用产物时按清单哈希核对。任意深度层级展开尚未交付，不得编造调用或通过结论。
-
-架构产物进入验证交付时，证据身份与必需项见 `svtools-delivery` 技能。
+[架构 CLI](references/cli.md) 给出命令、输出字段和诊断边界。`design arch`、`design render` 和 `design report` 提供结构投影、单图及机器证据。`design plan` 和模块任务交接按 `svtools-delivery` 执行。

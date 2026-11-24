@@ -1,33 +1,30 @@
-# 架构骨架与报告图
+# 分层伪 SystemVerilog 建模与核验
 
-用于“先定模块边界和接口，再补 RTL 实现”。新架构默认通过 packed struct 声明虚拟端口，每个逻辑接口只占一个模块端口和一条连接。架构阶段可用整体 `inout axi4_t m_axi` 表达含双向成员的接口；不为出图强制拆开请求/响应或展开为物理引脚。接口成员、位宽、角色及收发约定在配套架构文档中声明。
+## 创建架构工作区
 
-## 端口约束
+- 架构设计和事后架构报告都新建独立的伪 SystemVerilog 工作区，包含顶层、子系统和接口定义。保留源文件作为可维护的交付物。
+- 新设计从需求和工程约束拟定接口契约、时钟域、复位边界和设计取舍，把未决事项写进设计说明。
+- 事后报告先确认原工程的顶层、文件集和版本，从 RTL、BD 和 IP 核实关键路径。在同一交付目录写一份来源映射，记录「虚拟模块或接口、对应的 RTL 实例／端口或 BD 对象、文件与行号、已核实或待确认」。保留原工程的当前快照标识。遇到编码、宏或生成文件边界，把缺失依据标为待确认。
 
-- `master` / `slave` 是架构角色。端口仍需显式指定 `direction`，整体双向接口可用 `inout`；一条连接表示接口相连，不代表所有成员都具有同一电气方向。
-- 文档列出接口类型定义、成员宽度及角色相关收发约定。没有成员方向定义时标记未声明，不能仅从字段名推断；不要把虚拟 inout 当成最终 RTL 已完成方向约束或协议验证。用户要求按通道拆分时，也可以采用单独的 request/response struct。
-- 新建骨架保持子模块体为空，顶层只组织声明和例化；暂不添加占位行为、常量驱动或完整控制逻辑。用户要求实现时，再按模块补行为并保留接口身份。
-- 时钟与复位作为独立、方向明确的端口处理，不混入数据通道。当前 scaffold 只生成 struct 端口且顶层不暴露端口；有时钟、复位或板级顶层边界要求时，须在生成后补上对应 RTL 声明和连接再出图，不能声称生成器已经完成这些部分。
-- 位宽来自用户约束或设计依据。scaffold 当前只接受整数宽度；未定宽度保留表达式并说明尚需确认，不能随意填 1 位来通过工具。
-- 每个实例显式连接所有已声明端口；有意悬空使用 JSON `null`，生成 `.port()` 并返回 `UNCONNECTED_PORT` 提示。连接使用相同类型，总线只有一个 output 驱动；不能把检查通过称为功能验证通过。
-- 新建骨架采用上述虚拟端口约定。分析已有 RTL 时保留其真实端口和用户命名；`--fold-ports` 只是显示折叠，不能替代对真实接口的声明与验证。这里的虚拟端口也不是 SystemVerilog class 中的 `virtual interface` 句柄。
+## 分层和接口
 
-## 最小流程
+- 顶层组织功能块与主要数据、控制和外部接口。时钟与复位按域分开，用明确的端口名和同名标签表示分发关系。
+- 将复杂子系统写成包含内部例化的伪 SV 模块，以便阅读者逐层进入。简单叶子模块可以只声明接口。只为图面分组的同层实例通过 `svtools.architecture.json` 的 `groups` 命名，`titles` 补充模块职责。
+- 使用 `interface` 保存成员名称和位宽，用 `modport` 明确各端的输入、输出及双向成员。协议角色由连接契约定义。对 valid/ready 接口，分别核对前向数据与反向回压。以同一接口表示多路源时，表达实际仲裁、选通或中断汇聚边界。
+- 宽度及数据方向来自设计依据。未知部分保留表达式或说明，明确标记有意未连的端口。编译、复位时序、CDC 和握手行为由对应验证环节核对。
 
-从 [architecture-interface-spec.json](../assets/architecture-interface-spec.json) 复制到目标工作区后修改接口、宽度与实例。这个例子使用一条 `control_link_t` 接口；文档中的示例约定是 request 由 controller 发往 engine，response 反向返回，这种约定并不由整体 inout 声明自动验证。需要分通道的任务可参考 [architecture-spec.json](../assets/architecture-spec.json)。
+## 生成与抽查
 
-```text
-node <svtools-root>/src/cli/main.js design scaffold --workspace <rtl-workspace> --spec architecture-interface-spec.json
-node <svtools-root>/src/cli/main.js design arch --workspace <rtl-workspace> --top architecture_top
-node <svtools-root>/src/cli/main.js design render --workspace <rtl-workspace> --top architecture_top --style document
+```powershell
+node <svtools-root>/src/cli/main.js design check --workspace <architecture-workspace> --top architecture_top --engine struct
+node <svtools-root>/src/cli/main.js design export --workspace <architecture-workspace> --top architecture_top --format html --out architecture.html
+node <svtools-root>/src/cli/main.js design export --workspace <architecture-workspace> --top architecture_top --format pdf --out architecture.pdf
 ```
 
-检查返回的 `suggestions`、模块/实例端口、方向、位宽、`graph.edges`、未解析实例及 `limitations`。SVG 默认绘制实际声明的端口；对于上面的骨架，它们本身已经是虚拟端口，因此不需要额外折叠。
+先用 HTML 核对目录、顶层、复杂子系统章节、叶子模块端口图和关键接口成员，并确认来源映射能回到原工程。检查导出结果的 `chapterCount`、`diagnostics` 和 `limitations`。期望有子层级的工程，应能从顶层跳到子系统内部再打开对应接口。发布时交付伪 SV 和 HTML／PDF，事后报告同时交付来源映射。
 
-多个同前缀顶层引脚排成接口表，例如 DDR 地址、控制和数据。默认 `--detail interfaces`：每个模块与接口表之间使用一条汇总线，方向缩写（`i` 输入、`o` 输出、`io` 双向）只在表内逐行标注，不用箭头（左右两侧表中箭头含义会翻转）；表格分组不等于协议识别。底层 JSON 保留原始端口和连接，`--detail signals` 可用于信号级排查。`m_`/`s_`（含 m0_/s0_）只提示架构布局，不用于伪造驱动关系。`--boundary-layout auto|ends`（默认 `auto`）控制接口表位置，`ends` 把表格接口放在普通端口两端。
+## 结构投影和骨架工具
 
-交付 SVG 及架构 Markdown：包含接口定义、模块接口分配、接口连接表与源码/图像身份。整体 inout 必须在图中保留连接，接口内容放进文档，不拆成每个成员的线路。确认标签可读、没有遮挡和裁剪；能看图时实际检查 SVG。图片内嵌源码哈希、上下文及导出参数，引用实际 artifact 路径和哈希。不同标题/粒度/折叠参数分别保留产物。程序化交付优先用 `design report` 一次导出证据包（SVG+PNG+`architecture.json`+`architecture.md`+`report.json` 哈希清单）；交付前用 `design check` 复核结构结论，检查表会进入报告。
+`design arch`、`design render` 和 `design report` 用于结构检查、单张静态图或机器证据包。含 SV `interface` 或 `...` 的结构模型会自动选择 struct，也可以指定 `--engine struct`。Yosys 路径适用于支持的 RTL 静态投影。结构前端保留可解析的声明和端口，复杂宏、generate、类型与动态表达式仍有解析边界。
 
-## 能力边界
-
-当前架构有两条引擎路径：默认使用 Yosys 的 `read_verilog -sv`、`hierarchy`、`proc`、`memory_collect`；`--engine struct` 使用内置结构前端（不依赖 Yosys），工程含 SV `interface` 或实现省略符 `...` 时也会自动选择结构前端。两条路径都只投影顶层实例，保留空模块/黑盒边界，并不支持完整 SystemVerilog/UVM 语言；结构前端的 `ARCH_SYNTAX`、`ARCH_MODPORT_MISMATCH` 等诊断必须结合 `limitations[]` 阅读。无法展开的类型、宏、位宽或层级必须报告限制，不伪造结果。输入使用捕获文本的隔离副本；未被捕获的初始化数据或动态文件读取无法作为证据。`design check`（逐端口结构诊断）、`design diff`（快照对比）、无宿主 PNG（内置 resvg 栅格化）与 `design report`（证据包）已交付；任意深度层级展开仍未交付。scaffold 的规格检查仅覆盖其生成输入；`design check` 只报告结构事实，不代表综合结果、时序收敛、CDC 或功能验证。
+`design scaffold` 可从规格生成 packed struct 端口骨架。使用[整体接口规格](../assets/architecture-interface-spec.json)或[分通道规格](../assets/architecture-spec.json)时，按声明写明成员收发约定，并补齐所需的时钟、复位和板级边界。完整的分层交付优先使用上面的 `interface/modport` 工作流。

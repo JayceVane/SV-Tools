@@ -4,7 +4,9 @@ const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const { randomUUID } = require('node:crypto');
-const { assertBookCurrent } = require('./architecture-model');
+const { resolveContext, buildArchitectureBook, assertBookCurrent } = require('./architecture-model');
+const { hash } = require('../agent/context');
+const { fail, result } = require('../agent/protocol');
 const { layoutDiagram, renderDiagram } = require('./architecture-diagram');
 const { escape, code, pageName, sourceLink, portTable, renderModuleSymbol, interfaceDetails, signalEnds, backgroundSignals } = require('./architecture-details');
 const { printPdf } = require('./note-export');
@@ -68,4 +70,28 @@ async function exportArchitecture(loaded, format, { out, browser, modes } = {}) 
     return create(loaded.snapshot.context.workspace, destination, content);
 }
 
-module.exports = { exportArchitecture, renderArchitectureBook };
+async function exportFromCli(input) {
+    const format = input.imageFormat ?? 'html';
+    if (!input.workspace || !input.top) fail('INVALID_ARGUMENT', 'design export 需要伪 SystemVerilog 的 --workspace 和 --top');
+    if (!['html', 'pdf'].includes(format)) fail('INVALID_ARGUMENT', 'design export 的 --format 需要 html 或 pdf');
+    if (input.out !== undefined && path.extname(input.out).toLowerCase() !== '.' + format) {
+        fail('INVALID_ARGUMENT', 'design export 的 --out 必须是扩展名为 .' + format + ' 的文件路径');
+    }
+    if (input.engine !== undefined && input.engine !== 'struct') fail('INVALID_ARGUMENT', 'design export 使用 struct 结构前端');
+
+    const snapshot = await resolveContext(input, { requireVirtualWorkspace: true });
+    const loaded = await buildArchitectureBook(snapshot);
+    const file = await exportArchitecture(loaded, format, { out: input.out, browser: input.browser });
+    const content = await fs.readFile(file);
+    const artifact = { kind: 'document', format, path: file, sha256: hash(content), bytes: content.length };
+    const { book } = loaded;
+    const diagnostics = [...book.diagnostics, ...book.pages.flatMap(page => page.checks.map(check => ({ ...check, chapter: page.id })))];
+    return result('design.export', {
+        top: book.top, revision: book.revision, chapterCount: book.pages.length,
+        interfaceCount: book.pages.reduce((count, page) => count + page.links.filter(link => link.kind === 'interface').length, 0),
+        sourceFiles: snapshot.context.files.map(({ path: file, sha256 }) => ({ path: path.relative(snapshot.context.workspace, file).split(path.sep).join('/'), sha256 })),
+        limitations: book.issues, ...artifact
+    }, snapshot.context, diagnostics, [artifact]);
+}
+
+module.exports = { exportArchitecture, renderArchitectureBook, exportFromCli };

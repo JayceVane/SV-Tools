@@ -27,7 +27,7 @@
 | 产物 | 必需内容 |
 |---|---|
 | `requirements.md` | 需求 ID、可观察行为、边界、假设、验收条件 |
-| `design.md` | 接口/参数、时钟复位、数据通路和控制、延迟、取舍、已知限制；复杂结构附 `design report` 图表清单 |
+| `design.md` | 接口、参数、时钟复位、数据通路、控制、延迟、取舍和已知限制。复杂结构附独立的分层伪 SV 和 `design export` 文档，按 `svtools-design` 核对。 |
 | `verification_plan.md` | 需求→用例→独立期望→检查方法；种子/参数矩阵；需检查的时钟、复位、valid/ready、使能和标志信号及窗口 |
 | `verification_report.md` | 每项判定、实际运行命令、版本、日志、失败复现/修复复验、ΔCycle 排查、未验证项与最终结论 |
 | `verification-evidence.json` | 源码、TB/参考模型/约束及波形身份；工具版本、top、参数、种子、命令/退出状态、产物路径和 SHA-256；需求/用例/检查结果索引 |

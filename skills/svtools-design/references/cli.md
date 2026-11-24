@@ -1,5 +1,22 @@
 # 架构 CLI 参考
 
+## 分层架构文档
+
+先按[建模与核验约定](architecture.md)建立独立的伪 SystemVerilog 工作区。新设计和事后报告使用同一个导出命令。
+
+```powershell
+node <svtools-root>/src/cli/main.js design export --workspace <architecture-workspace> --top architecture_top --format html --out architecture.html
+node <svtools-root>/src/cli/main.js design export --workspace <architecture-workspace> --top architecture_top --format pdf --out architecture.pdf
+```
+
+`design export` 由 `doctor` 声明。它使用与架构查看器相同的 struct 结构模型、布局与导出逻辑。复杂模块默认使用简图，简单模块默认显示完整连线。输出有目录、子模块章节、模块端口图、接口定义及成员方向。Vivado XPR 工程用于取证，导出的输入是单独的伪 SV 工作区。
+
+默认格式为 HTML。PDF 使用 Edge、`SVTOOLS_PDF_BROWSER` 或显式的 `--browser <exe>`。指定 `--out` 时给出工作区内的文件路径，后缀与格式一致，已有同名文件需另选路径。省略 `--out` 时写入 `.svtools/agent/architecture/`。
+
+JSON 返回 `data.chapterCount`、`data.interfaceCount`、结构快照 `data.revision`、输入文件指纹 `data.sourceFiles` 和 `data.limitations`。`artifacts[]` 提供实际文档位置、SHA-256 与字节数。`diagnostics[]` 包含结构解析和各模块章节的检查结果。接口同一成员有多个已声明的输出端时，`ARCH_INTERFACE_MULTI_DRIVER` 标记需要复核的仲裁或汇聚。命令成功表示文档已生成，结构与功能结论需分别核对。
+
+## 结构快照与静态投影
+
 ```powershell
 node src/cli/main.js design arch --workspace D:/project --top top
 node src/cli/main.js design arch --workspace D:/project --top top --depth 1 --save arch-1
@@ -36,7 +53,7 @@ node src/cli/main.js design diff --top top --baseline before
 
 默认接口级示例见 [architecture-interface-spec.json](../assets/architecture-interface-spec.json)：每个模块用一个整体 inout packed struct 端口连接逻辑接口，成员内容和收发约定写入架构文档。需要按通道区分方向时，可参考 [architecture-spec.json](../assets/architecture-spec.json)。`master/slave` 是接口角色，不等同于输出/输入。每个端口必须显式指定 `direction`，每个实例必须列出所有端口；显式 `null` 表示有意悬空并产生 `UNCONNECTED_PORT` 提示。生成前拒绝遗漏连接、已知方向的总线多驱动与无驱动输入；整体 inout 的成员方向不在这项检查范围内。
 
-工作流：`design scaffold` 生成虚拟端口与空模块 → `design arch --top <top>` 检查结构 → `design render` 查看架构 → 按模块补充实现。时钟/复位独立声明，当前 scaffold 仅支持 struct 端口，板级顶层端口需要补充 RTL。架构图是源级结构事实，不得当作综合、时序或功能验证证据。
+规格骨架可用 `design scaffold` 生成虚拟端口与空模块，再用 `design arch --top <top>` 和 `design render` 检查静态投影。时钟与复位独立声明，当前 scaffold 仅支持 struct 端口，板级顶层端口需要补充声明。分层架构文档使用 `design export`。综合、时序及功能结论来自各自的验证环节。
 
 `design render` 用纯 Node 字符串生成自含 SVG（不依赖编辑器 DOM）：
 

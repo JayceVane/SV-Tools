@@ -168,6 +168,17 @@ function modulePage(module, { design, parsed, parameterValues }, chapterIds, pre
         return !instance || !port || !typedPort(instanceId(instance), port) || item.code === 'UNCONNECTED_PORT' &&
             !typed.links.some(link => link.endpoints.some(endpoint => endpoint.node === instanceId(instance) && endpoint.port === port));
     });
+    for (const link of typed.links) {
+        const conflicts = link.members.filter(member => member.drivers.length > 1).map(member => ({
+            name: member.name, outputs: member.drivers.map(index => link.endpoints[index].name)
+        }));
+        if (conflicts.length) checks.push({
+            code: 'ARCH_INTERFACE_MULTI_DRIVER', severity: 'warning',
+            message: `接口 ${link.name} 的成员 ${conflicts.map(member => member.name).join('、')} 声明了多个输出端，请复核仲裁或汇聚约定。`,
+            source: link.declaration && { file: link.declaration.file, line: link.declaration.line },
+            details: { interface: link.name, members: conflicts }
+        });
+    }
     const instances = nodes.filter(node => node.kind === 'instance');
     const dense = instances.length > 6 || links.length > 18 || nodes.length > 14 || instances.some(node => node.ports.length > 14);
     const hasStructure = instances.length > 0;
