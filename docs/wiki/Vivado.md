@@ -49,6 +49,8 @@
 
 命令面板可执行 **运行 TCL 脚本**、**运行当前 TCL 脚本**、**在常驻会话中运行 TCL**、**停止**。前两个默认走批处理：每次新进程、状态隔离，适合工程脚本；**在常驻会话中运行 TCL** 复用已打开的 Vivado 会话，适合连续调试，但脚本会改变该会话的当前工程与目录，状态不再隔离。`svtools.vivado.timeoutMs` 为 batch 超时，默认 `0` 不限时；仿真运行长度使用 `svtools.vivado.simRuntime` 按本机仿真任务配置。
 
+综合、布局布线、Bitstream 在批处理运行期间，Tcl 每 2 秒轮询 run 的 `STATUS/PROGRESS` 并打印 `SVTOOLS_RUN_PROGRESS`。状态栏显示 `<run> <百分比>`，悬停可看当前 step；工程概览在运行期间仍显示忙，结束后自动刷新最终状态。
+
 Vivado 日志中的 `ERROR` 即使进程退出码为 0，也判定任务失败。先定位具体设计单元、端口、语法、器件或许可错误，再查看完整阶段日志。
 
 IP 管理与 Block Design 的读写默认复用一个常驻 Tcl 会话：启动一次并打开工程，后续操作只发送脚本，不再每次点击都重新启动 Vivado 并重新打开工程。`svtools.vivado.session` 关闭后回退为每次批处理，`svtools.vivado.sessionIdleMinutes` 控制空闲关闭时间（默认 10 分钟）。会话遇到异常、工程或设计文件被外部修改、或需要执行批处理任务时会自动释放并在下次操作时重建。

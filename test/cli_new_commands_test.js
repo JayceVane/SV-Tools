@@ -8,6 +8,8 @@ const tclgen = require('../src/vivado/tclgen');
 const { createRtlCommands } = require('../src/agent/rtl');
 const { trace } = require('../src/agent/circuit');
 const { simulate } = require('../src/agent/simulate');
+const { parseRunProgress } = require('../src/vivado/progress');
+const { runVivadoBatchTask } = require('../src/vivado/batch');
 
 const SOURCE = 'module top(input logic clk, input logic [7:0] d, output logic [7:0] q);\n' +
     'logic [7:0] mid;\n' +
@@ -24,7 +26,32 @@ async function workspace() {
 test('bitstream 让 impl 运行停在 write_bitstream', () => {
     const script = tclgen.buildLaunchRunScript({ xprPath: 'C:/work/demo.xpr', run: 'impl_1', jobs: 2, toStep: 'write_bitstream' });
     assert.match(script, /launch_runs impl_1 -to_step write_bitstream -jobs 2/u);
-    assert.match(script, /wait_on_run impl_1/u);
+    assert.match(script, /SVTOOLS_RUN_PROGRESS impl_1/u);
+    assert.match(script, /after 2000/u);
+    assert.doesNotMatch(script, /wait_on_run/u);
+});
+
+test('解析批处理 run 进度标记', () => {
+    assert.deepEqual(parseRunProgress('SVTOOLS_RUN_PROGRESS impl_1 45% write_bitstream Running'),
+        { run: 'impl_1', progress: '45%', status: 'write_bitstream Running' });
+    assert.deepEqual(parseRunProgress('SVTOOLS_RUN_PROGRESS synth_1 100% synth_design Complete!'),
+        { run: 'synth_1', progress: '100%', status: 'synth_design Complete!' });
+    assert.deepEqual(parseRunProgress('SVTOOLS_RUN_PROGRESS impl_1 83.333333333333343% write_bitstream ERROR'),
+        { run: 'impl_1', progress: '83%', status: 'write_bitstream ERROR' });
+    assert.equal(parseRunProgress('INFO: unrelated'), null);
+});
+
+test('批处理进度标记转交状态栏回调', async () => {
+    const seen = [];
+    const task = { run: async (command, args, options) => {
+        options.onLine('SVTOOLS_RUN_PROGRESS impl_1 45% route_design', false, {});
+        options.onLine('INFO: unrelated', false, {});
+        return { code: 0, output: '', stdout: '', stderr: '', elapsedMs: 1 };
+    } };
+    const output = await runVivadoBatchTask({ task, executable: process.execPath, args: [], cwd: process.cwd(), scriptPath: 'x.tcl',
+        onProgress: line => seen.push(line) });
+    assert.deepEqual(seen, ['SVTOOLS_RUN_PROGRESS impl_1 45% route_design']);
+    assert.equal(output.ok, true);
 });
 
 test('工程移出/移动/约束目标脚本保留标记与属性', () => {

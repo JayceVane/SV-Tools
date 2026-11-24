@@ -38,7 +38,7 @@ async function withVivadoInvocation({ executable, args, cwd, scriptPath }, actio
  * @param {{task:object,executable:string,args:string[],cwd:string,scriptPath:string,timeoutMs?:number,onOutput?:Function,maxOutputChars?:number}} options
  * @returns {Promise<object>} 保留兼容 code/issues/stdout，同时提供明确 status、exitCode 和日志路径。
  */
-async function runVivadoBatchTask({ task, executable, args, cwd, scriptPath, timeoutMs, onOutput, maxOutputChars }) {
+async function runVivadoBatchTask({ task, executable, args, cwd, scriptPath, timeoutMs, onOutput, onProgress, maxOutputChars }) {
     const capture = createDiagnosticCapture({ parseLine: line => extractVivadoIssues(line).map(issue => ({
         file: scriptPath, line: 1, severity: issue.level === 'ERROR' ? 'error' : 'warning', message: issue.text, level: issue.level
     })) });
@@ -47,6 +47,9 @@ async function runVivadoBatchTask({ task, executable, args, cwd, scriptPath, tim
         task.run(executable, invocation.args, { cwd: invocation.cwd, env: invocation.env, stage: 'vivado', timeoutMs, maxOutputChars,
             onStdout: onOutput, onStderr: onOutput, onLine(line, isStderr, meta) {
                 capture.onLine(line, isStderr, meta);
+                if (!isStderr && typeof onProgress === 'function' && line.startsWith('SVTOOLS_RUN_PROGRESS ')) {
+                    try { onProgress(line); } catch { /* 状态栏更新失败不能影响 Vivado 任务 */ }
+                }
                 if (!/^SVTOOLS_[A-Z0-9_]+/.test(line)) return;
                 if (markerChars + line.length <= MAX_MARKER_CHARS) { markers.push(line); markerChars += line.length; }
                 else markerOverflow = true;

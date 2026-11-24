@@ -235,10 +235,32 @@ function buildMoveFileScript(o) {
 }
 
 /**
- * 生成"综合 / 布局布线"TCL：launch_runs（impl 自动级联 synth）+ wait_on_run，
- * 结束打印 run 的 STATUS/PROGRESS 供插件判定成败。
+ * 生成"综合 / 布局布线"TCL：launch_runs（impl 自动级联 synth）+ 轮询 run 状态，
+ * 每 2 秒打印 SVTOOLS_RUN_PROGRESS 供插件更新状态栏，结束打印 STATUS/PROGRESS 供判定成败。
  * @param {{xprPath:string, run:'synth_1'|'impl_1', toStep?:string, jobs?:number}} o
  */
+function runProgressWait(runName) {
+    return [
+        '    set svtools_run ' + tclQuote(runName),
+        '    set svtools_initial [get_property STATUS [get_runs $svtools_run]]',
+        '    set svtools_polls 0',
+        '    while {1} {',
+        '        set svtools_status [get_property STATUS [get_runs $svtools_run]]',
+        '        set svtools_progress [get_property PROGRESS [get_runs $svtools_run]]',
+        '        incr svtools_polls',
+        '        puts "SVTOOLS_RUN_PROGRESS ' + runName + ' $svtools_progress $svtools_status"',
+        '        catch { flush stdout }',
+        '        if {$svtools_progress eq "100%" || [string match -nocase "*complete*" $svtools_status] || ' +
+            '[string match -nocase "*error*" $svtools_status] || [string match -nocase "*fail*" $svtools_status] || ' +
+            '[string match -nocase "*abort*" $svtools_status] || [string match -nocase "*cancel*" $svtools_status]} {',
+        '            if {$svtools_polls > 1 || $svtools_status ne $svtools_initial} { break }',
+        '        }',
+        '        after 2000',
+        '    }',
+        '    set r [get_runs $svtools_run]'
+    ];
+}
+
 function buildLaunchRunScript(o) {
     const step = o.toStep ? ' -to_step ' + o.toStep : '';
     // reset：显式"重新运行"语义（源已变化的已完成run需重置，否则launch_runs拒绝）。
@@ -250,13 +272,12 @@ function buildLaunchRunScript(o) {
         ...(o.prerequisiteRun ? [
             '    reset_run '+tclQuote(o.prerequisiteRun),
             '    launch_runs '+tclQuote(o.prerequisiteRun)+' -jobs '+(o.jobs || 4),
-            '    wait_on_run '+tclQuote(o.prerequisiteRun),
-            '    if {[get_property PROGRESS [get_runs '+tclQuote(o.prerequisiteRun)+']] ne "100%"} { error "Synthesis prerequisite failed" }'
+            ...runProgressWait(o.prerequisiteRun),
+            '    if {[get_property PROGRESS $r] ne "100%"} { error "Synthesis prerequisite failed" }'
         ] : []),
         ...(o.reset ? ['    reset_run ' + o.run] : []),
         '    launch_runs ' + o.run + step + ' -jobs ' + (o.jobs || 4),
-        '    wait_on_run ' + o.run,
-        '    set r [get_runs ' + o.run + ']',
+        ...runProgressWait(o.run),
         '    puts "SVTOOLS_RUN_STATUS [get_property STATUS $r] [get_property PROGRESS $r]"',
         ...(o.captureArtifacts ? [
             '    puts "SVTOOLS_RUN_VERSION [version -short]"',

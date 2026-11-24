@@ -21,6 +21,7 @@ const { createToolTaskManager, cancelledError } = require('../toolchains/job');
 const { createBufferedOutput } = require('../toolchains/channel');
 const { createSimulationEnginePicker } = require('../toolchains/simulation-engines');
 const { runVivadoBatchTask } = require('./batch');
+const { parseRunProgress } = require('./progress');
 const { prepareVivadoScript } = require('./script-task');
 const { createVivadoSessions } = require('./session');
 const versionCheck = require('./version');
@@ -69,14 +70,14 @@ function activateVivado(context, deps) {
 
     function log(msg) { out.appendLine(msg); }
 
-    function status(text, command) {
+    function status(text, command, tooltip) {
         if (!statusItem) {
             statusItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 90);
             statusItem.name = 'svtools Vivado';
         }
         if (!text) { statusItem.hide(); return; }
         statusItem.text = text;
-        statusItem.tooltip = 'svtools Vivado';
+        statusItem.tooltip = tooltip || 'svtools Vivado';
         statusItem.command = command || undefined;
         statusItem.show();
     }
@@ -563,10 +564,10 @@ function activateVivado(context, deps) {
     }
 
     /** 生成动作可复用常驻会话；用户脚本与未提供会话用脚本仍走批处理。 */
-    async function executeVivado(job, input, { binDir, executable, args, cwd, scriptPath, timeoutMs, session = false }) {
+    async function executeVivado(job, input, { binDir, executable, args, cwd, scriptPath, timeoutMs, session = false, onProgress }) {
         const sessionBody = input && typeof input === 'object' ? input.sessionBody : undefined;
         const enabled = sessionBody && (session || vscode.workspace.getConfiguration('svtools.vivado').get('session', true));
-        const batch = () => runVivadoBatchTask({ task: job, executable, args, cwd, scriptPath, timeoutMs, onOutput: output.append });
+        const batch = () => runVivadoBatchTask({ task: job, executable, args, cwd, scriptPath, timeoutMs, onOutput: output.append, onProgress });
         if (enabled) {
             const sessionPath = path.join(path.dirname(scriptPath), 'session-' + path.basename(scriptPath));
             try {
@@ -632,6 +633,13 @@ function activateVivado(context, deps) {
         status('$(loading~spin) Vivado 运行中…', 'svtools.vivado.stop');
         const job = tasks.start('vivado');
         const task = { job, scriptPath: typeof input === 'string' ? input : undefined };
+        const onProgress = line => {
+            if (running !== task) return;
+            const parsed = parseRunProgress(line);
+            if (!parsed) return;
+            status('$(loading~spin) Vivado ' + parsed.run + ' ' + parsed.progress, 'svtools.vivado.stop',
+                'svtools Vivado · ' + parsed.run + ' · ' + parsed.progress + (parsed.status ? '\n' + parsed.status : ''));
+        };
         running = task;
         try {
             const prepared = await prepareVivadoScript(job, input, { workspace: vscode.workspace, uri: vscode.Uri.file });
@@ -641,7 +649,7 @@ function activateVivado(context, deps) {
             log('————————————————————————————————————');
             log('[vivado] ' + executable + ' ' + args.join(' '));
             log('[vivado] cwd: ' + cwd);
-            const result = await executeVivado(job, input, { binDir, executable, args, cwd, scriptPath, timeoutMs, session: Boolean(opts.session) });
+            const result = await executeVivado(job, input, { binDir, executable, args, cwd, scriptPath, timeoutMs, session: Boolean(opts.session), onProgress });
             output.flush();
             log(`[vivado] ${result.ok ? '完成' : result.message}，耗时 ${(result.ms / 1000).toFixed(1)}s`);
             if (result.logPath) log('完整日志：' + result.logPath);
