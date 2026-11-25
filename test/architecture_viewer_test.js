@@ -212,6 +212,9 @@ test('端口图按声明方向归类，引脚可选择，名称中的标记按�
         { name: 'flag', direction: 'inout', width: 1 },
     ], { interactive: true, selected: 'data<in>' });
     assert.match(markup, /group input[^]*?data-port="data&lt;in&gt;" aria-pressed="true"[^]*?16 位/u);
-    assert.match(markup, /group output[^]*?data-port="ready"/u);
-    assert.match(markup, /group shared[^]*?sample_link\.sink[^]*?data-port="flag"/u);
+    const right = markup.match(/class="module-pin-group output"[^]*?<\/section>/u)?.[0];
+    assert.match(right, /data-port="ready"[^]*?data-port="flag"[^]*?<span class="module-pin-direction" role="img" aria-label="双向">↔<\/span>/u);
+    const shared = markup.match(/class="module-pin-group shared"[^]*?<\/section>/u)?.[0];
+    assert.match(shared, /sample_link\.sink/u);
+    assert.doesNotMatch(shared, /data-port="flag"|双向/u);
 });

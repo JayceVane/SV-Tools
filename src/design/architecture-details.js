@@ -27,11 +27,12 @@
             `<tr><th scope="row">${code(port.name)}</th><td>${port.type ? code(port.type) : '—'}</td><td>${direction(port.direction)}</td><td>${port.width ?? '—'}</td><td>${sourceLink(port.declaration, interactive)}</td></tr>`).join('')}</tbody></table></div>`;
     }
 
-    function groupPorts(ports) {
+    function groupPorts(ports, inoutSide = 'shared') {
         const groups = { input: [], output: [], shared: [] };
         for (const port of ports) {
-            const side = port.direction === 'input' || port.direction === 'output' ? port.direction : 'shared';
-            groups[side].push(port);
+            if (port.direction === 'inout') groups[inoutSide].push(port);
+            else if (port.direction === 'input' || port.direction === 'output') groups[port.direction].push(port);
+            else groups.shared.push(port);
         }
         return groups;
     }
@@ -42,10 +43,11 @@
 
     function renderModuleSymbol(name, ports, { interactive = false, selected, targets } = {}) {
         if (!ports.length) return '<p class="subtle">没有已解析的端口。</p>';
-        const groups = groupPorts(ports);
+        const groups = groupPorts(ports, 'output');
         const side = (kind, label) => {
             if (!groups[kind].length) return '';
             const pins = groups[kind].map(port => {
+                const bidirectional = port.direction === 'inout';
                 const width = port.width == null ? '' : `${port.width} 位`;
                 const description = kind === 'shared' ? [port.type, port.direction === 'interface' ? '' : direction(port.direction), width].filter(Boolean).join(' · ')
                     : width || '位宽待确认';
@@ -54,13 +56,15 @@
                 const tag = interactive ? 'button' : target ? 'a' : 'span';
                 const attrs = interactive ? ` type="button" data-port="${escape(port.name)}" aria-pressed="${port.name === selected}"`
                     : target ? ` href="#${escape(target)}"` : '';
-                return `<li><${tag} class="module-pin"${attrs} title="${escape(portDescription(port))}">${content}</${tag}></li>`;
+                const marker = bidirectional ? '<span class="module-pin-direction" role="img" aria-label="双向">↔</span>' : '';
+                return `<li${bidirectional ? ' class="bidirectional"' : ''}><${tag} class="module-pin"${attrs} title="${escape(portDescription(port))}">${content}${marker}</${tag}></li>`;
             }).join('');
             return `<section class="module-pin-group ${kind}" aria-label="${label}"><h4>${label}</h4><ul>${pins}</ul></section>`;
         };
-        const sharedLabel = [...new Set(groups.shared.map(port => ({ interface: '接口', inout: '双向', ref: '引用' })[port.direction] || '方向待确认'))].join(' / ');
+        const outputLabel = groups.output.some(port => port.direction === 'inout') ? '输出 / 双向' : '输出';
+        const sharedLabel = [...new Set(groups.shared.map(port => ({ interface: '接口', ref: '引用' })[port.direction] || '方向待确认'))].join(' / ');
         return `<figure class="module-symbol" aria-label="${escape(name)} 端口图"><figcaption>${code(name)}</figcaption>
-            <div class="module-pin-sides">${side('input', '输入')}${side('output', '输出')}</div>${side('shared', sharedLabel)}</figure>`;
+            <div class="module-pin-sides">${side('input', '输入')}${side('output', outputLabel)}</div>${side('shared', sharedLabel)}</figure>`;
     }
 
     function routeText(member, endpoints) {

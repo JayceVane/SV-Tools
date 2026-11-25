@@ -97,11 +97,13 @@ dd { margin-inline-start: 0; overflow-wrap: anywhere; }
 .module-pin-group h4 { color: var(--muted); margin: 0 0 3px; }
 .module-pin-group ul { list-style: none; padding: 0; margin: 0; display: grid; gap: 2px; }
 .module-pin-group li { position: relative; }
-.module-pin-group.input li::before, .module-pin-group.output li::after {
+.module-pin-group.input li::before, .module-pin-group.output li:not(.bidirectional)::after {
     content: ''; position: absolute; width: 15px; height: 2px; top: 50%; background: var(--up); pointer-events: none;
 }
 .module-pin-group.input li::before { left: -17px; }
-.module-pin-group.output li::after { right: -17px; background: var(--down); }
+.module-pin-group.output li:not(.bidirectional)::after { right: -17px; background: var(--down); }
+.module-pin-direction { position: absolute; right: -17px; top: 50%; transform: translateY(-50%); width: 15px;
+    color: var(--weak); font-size: 14px; line-height: 1; font-weight: 700; text-align: center; pointer-events: none; }
 .module-pin-group.shared { border-top: 1px dashed var(--divider); }
 .module-pin-group.shared ul { display: flex; flex-wrap: wrap; gap: 5px 8px; }
 .module-pin { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 0 6px; padding: 3px 5px;
