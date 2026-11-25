@@ -10,7 +10,7 @@ let elk;
 function diagramTopology(page, mode) {
     const overview = mode === 'overview';
     const drawn = overview ? page.links.filter(link => !link.labeled) : page.links;
-    const wired = new Set(drawn.flatMap(link => link.endpoints.map(endpoint => endpoint.node)));
+    const wired = new Set(drawn.filter(link => link.endpoints.length > 1).flatMap(link => link.endpoints.map(endpoint => endpoint.node)));
     const labels = new Map();
     for (const link of page.links.filter(link => link.labeled)) for (const endpoint of link.endpoints) {
         if (!labels.has(endpoint.node)) labels.set(endpoint.node, new Set());
@@ -18,7 +18,7 @@ function diagramTopology(page, mode) {
     }
     const cards = [], groups = new Map(), locations = new Map();
     for (const node of page.nodes) {
-        if (overview && node.kind === 'boundary' && labels.has(node.id) && !wired.has(node.id)) continue;
+        if (overview && node.kind === 'boundary' && !wired.has(node.id)) continue;
         const group = overview && node.group;
         let card = group && groups.get(group);
         if (!card) {

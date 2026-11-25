@@ -131,16 +131,6 @@ table { width: 100%; border-collapse: collapse; margin: 4px 0 10px; }
 th, td { padding: 5px 8px; vertical-align: top; border-bottom: 1px solid var(--divider); text-align: start; overflow-wrap: anywhere; }
 thead th { background: color-mix(in srgb, var(--up) 8%, var(--panel)); white-space: nowrap; }
 tbody th { font-weight: 500; }
-.architecture-book main { max-width: 1310px; margin: auto; padding: 26px 29px; }
-.architecture-book nav { margin-bottom: 20px; }
-.architecture-book nav li span { color: var(--muted); margin-left: 7px; }
-.chapter { border-top: 1px solid var(--divider); padding: 16px 0 23px; }
-.chapter header h2 { margin: 7px 0 2px; }
-.chapter > h3 { margin-top: 11px; }
-.chapter .module-title { font-size: 15px; }
-.diagram-print { background: var(--panel); padding: 3px; border: 1px solid var(--divider); border-radius: 5px; }
-.interface-index { padding-left: 18px; columns: 2; }
-.interface-section { border-top: 1px solid var(--divider); margin-top: 14px; }
 @media screen and (max-width: 850px) {
     .workspace { grid-template-columns: minmax(0, 1fr); }
     .chapters { position: static; display: flex; gap: 4px; padding: 7px 14px; overflow-x: auto; }
@@ -149,15 +139,4 @@ tbody th { font-weight: 500; }
     .work-area { border: 0; padding-inline: 14px; }
     .viewer-header, .breadcrumbs { padding-inline: 14px; }
     .inspector-grid { grid-template-columns: minmax(0, 1fr); }
-}
-@page { size: A4 landscape; margin: 12mm; }
-@media print {
-    body { background: #fff; font-size: 10pt; print-color-adjust: exact; }
-    .architecture-book main { max-width: none; padding: 0; }
-    .chapter { break-before: page; border: 0; padding: 0; }
-    h2, h3, h4 { break-after: avoid; }
-    tr, .diagram-print, .handshake, .interface-section, .module-symbol { break-inside: avoid; }
-    .diagram-print .architecture-svg { max-height: 130mm; max-width: 100%; }
-    .table-scroll { overflow: visible; }
-    thead { display: table-header-group; }
 }

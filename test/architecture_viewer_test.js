@@ -9,7 +9,7 @@ const test = require('node:test');
 const { run } = require('../src/cli/main');
 const { buildArchitectureBook, resolveContext, assertBookCurrent } = require('../src/design/architecture-model');
 const { diagramTopology, layoutDiagram, renderDiagram } = require('../src/design/architecture-diagram');
-const { exportArchitecture } = require('../src/design/architecture-export');
+const { exportArchitecture, renderArchitectureBook } = require('../src/design/architecture-export');
 const { renderModuleSymbol } = require('../src/design/architecture-details');
 
 test('报文汇聚简图保留独立实例、标签网络和架构握手证据，导出按章节跳转', async t => {
@@ -47,6 +47,10 @@ test('报文汇聚简图保留独立实例、标签网络和架构握手证据�
     assert.equal(detailed.cards.find(card => card.nodes.some(node => node.name === 'u_lane0')).nodes.length, 1);
     assert.equal(detailed.cards.some(card => card.nodes.some(node => node.name === 'clk')), true);
     assert.ok(detailed.edges.length > overview.edges.length);
+    const idle = { id: 'boundary:idle', kind: 'boundary', name: 'idle', direction: 'input', ports: [{ name: 'idle', direction: 'input' }] };
+    const withIdle = { ...top, nodes: [...top.nodes, idle] };
+    assert.ok(!diagramTopology(withIdle, 'overview').cards.some(card => card.nodes.includes(idle)));
+    assert.ok(diagramTopology(withIdle, 'detailed').cards.some(card => card.nodes.includes(idle)));
     const detailedLayout = await layoutDiagram(top, 'detailed');
     const clock = detailedLayout.cards.find(card => card.nodes[0]?.name === 'clk');
     assert(clock.terminal.labelX < clock.terminal.left);
@@ -66,6 +70,12 @@ test('报文汇聚简图保留独立实例、标签网络和架构握手证据�
     assert.match(html, /<code>u_fifo\.enqueue<\/code> → <code>u_arbiter\.selected<\/code>/u);
     assert.match(html, /<figure class="module-symbol" aria-label="packet_fifo #\(DEPTH=32\) 端口图"/u);
     assert.match(html, /<a class="module-pin" href="#module-\d+-link-\d+"[^>]*><code>enqueue<\/code>/u);
+    assert.match(html, /id="chapter-filter"/u);
+    assert.ok(html.includes(`data-print-open id="${link.id}"><summary>`));
+    const printed = await renderArchitectureBook(loaded.book, undefined, { print: true });
+    assert.ok(printed.includes(`data-print-open id="${link.id}" open><summary>`));
+    assert.match(printed, /class="book-detail book-stubs" data-print-open open/u);
+    assert.ok(!printed.includes('<script>'));
     const pinCount = markup => (markup.match(/schematic-pin/g) || []).length;
     const forced = await exportArchitecture(loaded, 'html', { out: 'architecture-detailed.html', modes: { [top.id]: 'detailed' } });
     const forcedHtml = await fs.readFile(forced, 'utf8');
@@ -100,7 +110,7 @@ test('架构文档标出子模块接口的多个输出端，并在读取 XPR 之
     logic irq;
     modport producer(output irq);
 endinterface
-module owner(events.producer signal_out); endmodule
+module owner(events.producer signal_out, output stub_flag); endmodule
 module subsystem;
     events shared();
     owner x(.signal_out(shared));
@@ -116,7 +126,10 @@ endmodule
     const found = exported.output.diagnostics.find(item => item.code === 'ARCH_INTERFACE_MULTI_DRIVER');
     assert.deepEqual(found?.details, { interface: 'shared', members: [{ name: 'irq', outputs: ['x.signal_out', 'y.signal_out'] }] });
     assert.equal(found.chapter, 'module-2');
-    assert.match(await fs.readFile(exported.output.data.path, 'utf8'), /成员 irq 声明了多个输出端/u);
+    const html = await fs.readFile(exported.output.data.path, 'utf8');
+    assert.match(html, /成员 irq 声明了多个输出端/u);
+    assert.match(html, /实现桩待实现输出 · 1/u);
+    assert.match(html, /href="#module-2">subsystem<\/a> · \d+ 条待复核/u);
     const invalid = await run([...args, '--format', 'pdf', '--out', 'review.html']);
     assert.equal(invalid.output.diagnostics[0].code, 'INVALID_ARGUMENT');
     await fs.writeFile(path.join(workspace, 'hardware.xpr'), 'invalid fixture');

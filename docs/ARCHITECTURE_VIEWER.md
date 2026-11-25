@@ -13,4 +13,6 @@
 
 Agent 可在单独的伪 SystemVerilog 工作区用 `design export --workspace <目录> --top <模块> --format html|pdf --out <文件>` 生成同样的分层文档。[架构 CLI](../skills/svtools-design/references/cli.md)
 
+导出的 HTML 支持筛选章节、展开接口或端口明细，并可按原始尺寸查看复杂架构图。报告开头的复核索引跳转到涉及的章节，实现桩输出单独计数。PDF 展开接口和端口表，按内容分页并重复跨页表头。
+
 架构是源级连接快照。它会标出空实现和静态诊断；复杂宏、生成分支和动态连接需要结合编译结果。握手时序、背压期间的数据稳定性、CDC 和复位语义仍需要用仿真或其他验证方法核对。
