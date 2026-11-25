@@ -44,27 +44,39 @@
     function renderModuleSymbol(name, ports, { interactive = false, selected, targets } = {}) {
         if (!ports.length) return '<p class="subtle">没有已解析的端口。</p>';
         const groups = groupPorts(ports, 'output');
+        const interfaces = groups.shared.filter(port => port.direction === 'interface');
+        groups.shared = groups.shared.filter(port => port.direction !== 'interface');
+        const control = (port, content, className = 'module-pin') => {
+            const target = targets?.get(port.name);
+            const tag = interactive ? 'button' : target ? 'a' : 'span';
+            const attrs = interactive ? ` type="button" data-port="${escape(port.name)}" aria-pressed="${port.name === selected}"`
+                : target ? ` href="#${escape(target)}"` : '';
+            return `<${tag} class="${className}"${attrs} title="${escape(portDescription(port))}">${content}</${tag}>`;
+        };
         const side = (kind, label) => {
             if (!groups[kind].length) return '';
             const pins = groups[kind].map(port => {
                 const bidirectional = port.direction === 'inout';
                 const width = port.width == null ? '' : `${port.width} 位`;
-                const description = kind === 'shared' ? [port.type, port.direction === 'interface' ? '' : direction(port.direction), width].filter(Boolean).join(' · ')
+                const description = kind === 'shared' ? [port.type, direction(port.direction), width].filter(Boolean).join(' · ')
                     : width || '位宽待确认';
-                const content = `${code(port.name)}<small>${escape(description)}</small>`;
-                const target = targets?.get(port.name);
-                const tag = interactive ? 'button' : target ? 'a' : 'span';
-                const attrs = interactive ? ` type="button" data-port="${escape(port.name)}" aria-pressed="${port.name === selected}"`
-                    : target ? ` href="#${escape(target)}"` : '';
                 const marker = bidirectional ? '<span class="module-pin-direction" role="img" aria-label="双向">↔</span>' : '';
-                return `<li${bidirectional ? ' class="bidirectional"' : ''}><${tag} class="module-pin"${attrs} title="${escape(portDescription(port))}">${content}${marker}</${tag}></li>`;
+                const content = `${code(port.name)}<small>${escape(description)}</small>${marker}`;
+                return `<li${bidirectional ? ' class="bidirectional"' : ''}>${control(port, content)}</li>`;
             }).join('');
             return `<section class="module-pin-group ${kind}" aria-label="${label}"><h4>${label}</h4><ul>${pins}</ul></section>`;
         };
+        const terminals = interfaces.map(port => {
+            const [type, role] = (port.type || '').split('.', 2);
+            const content = `<span class="module-bus-symbol" aria-hidden="true"></span><span class="module-interface-label">
+                <strong>${code(port.name)}</strong><small>${escape(type || '类型待确认')} · ${escape(role || '未声明 modport')}</small></span>`;
+            return `<li>${control(port, content, 'module-pin module-interface-pin')}</li>`;
+        }).join('');
+        const buses = terminals ? `<section class="module-pin-group interfaces" aria-label="接口束"><h4>接口束</h4><ul>${terminals}</ul></section>` : '';
         const outputLabel = groups.output.some(port => port.direction === 'inout') ? '输出 / 双向' : '输出';
-        const sharedLabel = [...new Set(groups.shared.map(port => ({ interface: '接口', ref: '引用' })[port.direction] || '方向待确认'))].join(' / ');
+        const sharedLabel = [...new Set(groups.shared.map(port => port.direction === 'ref' ? '引用' : '方向待确认'))].join(' / ');
         return `<figure class="module-symbol" aria-label="${escape(name)} 端口图"><figcaption>${code(name)}</figcaption>
-            <div class="module-pin-sides">${side('input', '输入')}${side('output', outputLabel)}</div>${side('shared', sharedLabel)}</figure>`;
+            <div class="module-pin-sides">${side('input', '输入')}${buses}${side('output', outputLabel)}</div>${side('shared', sharedLabel)}</figure>`;
     }
 
     function routeText(member, endpoints) {

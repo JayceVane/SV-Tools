@@ -48,7 +48,7 @@
     .chapter { padding: 9px 0 11px; }
     .chapter-lead { break-inside: avoid; }
     .architecture-book :is(h2, h3, h4, summary) { break-after: avoid; }
-    .architecture-book :is(tr, .diagram-print, .handshake > div, .book-review li, .named-connections dl > div) { break-inside: avoid; }
+    .architecture-book :is(tr, .diagram-print, .handshake > div, .book-review li, .named-connections dl > div, .module-pin-group.interfaces li) { break-inside: avoid; }
     .architecture-book p { margin-block: 3px 6px; }
     .diagram-print { max-height: none; overflow: visible; }
     .diagram-print .architecture-svg, .diagram-print.book-full-size .architecture-svg { max-height: 120mm; max-width: 100%; }

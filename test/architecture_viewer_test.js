@@ -69,7 +69,7 @@ test('报文汇聚简图保留独立实例、标签网络和架构握手证据�
     assert.ok(html.includes(`href="#${link.id}"`));
     assert.match(html, /<code>u_fifo\.enqueue<\/code> → <code>u_arbiter\.selected<\/code>/u);
     assert.match(html, /<figure class="module-symbol" aria-label="packet_fifo #\(DEPTH=32\) 端口图"/u);
-    assert.match(html, /<a class="module-pin" href="#module-\d+-link-\d+"[^>]*><code>enqueue<\/code>/u);
+    assert.match(html, /<a class="module-pin module-interface-pin" href="#module-\d+-link-\d+"[^>]*><span class="module-bus-symbol"[^>]*><\/span>\s*<span class="module-interface-label">\s*<strong><code>enqueue<\/code>/u);
     assert.match(html, /id="chapter-filter"/u);
     assert.ok(html.includes(`data-print-open id="${link.id}"><summary>`));
     const printed = await renderArchitectureBook(loaded.book, undefined, { print: true });
@@ -209,12 +209,17 @@ test('端口图按声明方向归类，引脚可选择，名称中的标记按�
         { name: 'data<in>', direction: 'input', width: 16 },
         { name: 'ready', direction: 'output', width: 1 },
         { name: 'adc', direction: 'interface', type: 'sample_link.sink' },
+        { name: 'adc_full', direction: 'interface', type: 'sample_link' },
+        { name: 'state_ref', direction: 'ref', type: 'logic' },
         { name: 'flag', direction: 'inout', width: 1 },
     ], { interactive: true, selected: 'data<in>' });
     assert.match(markup, /group input[^]*?data-port="data&lt;in&gt;" aria-pressed="true"[^]*?16 位/u);
     const right = markup.match(/class="module-pin-group output"[^]*?<\/section>/u)?.[0];
     assert.match(right, /data-port="ready"[^]*?data-port="flag"[^]*?<span class="module-pin-direction" role="img" aria-label="双向">↔<\/span>/u);
+    const interfaces = markup.match(/class="module-pin-group interfaces"[^]*?<\/section>/u)?.[0];
+    assert.match(interfaces, /data-port="adc"[^]*?sample_link · sink/u);
+    assert.match(interfaces, /data-port="adc_full"[^]*?sample_link · 未声明 modport/u);
     const shared = markup.match(/class="module-pin-group shared"[^]*?<\/section>/u)?.[0];
-    assert.match(shared, /sample_link\.sink/u);
-    assert.doesNotMatch(shared, /data-port="flag"|双向/u);
+    assert.match(shared, /data-port="state_ref"/u);
+    assert.doesNotMatch(shared, /data-port="(?:adc|flag)"|双向/u);
 });
