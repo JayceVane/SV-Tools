@@ -210,6 +210,8 @@ test('端口图按声明方向归类，引脚可选择，名称中的标记按�
         { name: 'ready', direction: 'output', width: 1 },
         { name: 'adc', direction: 'interface', type: 'sample_link.sink' },
         { name: 'adc_full', direction: 'interface', type: 'sample_link' },
+        { name: 'request', direction: 'interface', type: 'axi_if.master' },
+        { name: 'reply', direction: 'interface', type: 'axi_if.slave' },
         { name: 'state_ref', direction: 'ref', type: 'logic' },
         { name: 'flag', direction: 'inout', width: 1 },
     ], { interactive: true, selected: 'data<in>' });
@@ -219,6 +221,8 @@ test('端口图按声明方向归类，引脚可选择，名称中的标记按�
     const interfaces = markup.match(/class="module-pin-group interfaces"[^]*?<\/section>/u)?.[0];
     assert.match(interfaces, /data-port="adc"[^]*?sample_link · sink/u);
     assert.match(interfaces, /data-port="adc_full"[^]*?sample_link · 未声明 modport/u);
+    assert.match(interfaces, /module-interface-pin master"[^>]*data-port="request"[^>]*>[^]*?class="module-interface-role">Master</u);
+    assert.match(interfaces, /module-interface-pin slave"[^>]*data-port="reply"[^>]*>[^]*?class="module-interface-role">Slave</u);
     const shared = markup.match(/class="module-pin-group shared"[^]*?<\/section>/u)?.[0];
     assert.match(shared, /data-port="state_ref"/u);
     assert.doesNotMatch(shared, /data-port="(?:adc|flag)"|双向/u);

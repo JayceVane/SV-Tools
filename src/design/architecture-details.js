@@ -68,9 +68,13 @@
         };
         const terminals = interfaces.map(port => {
             const [type, role] = (port.type || '').split('.', 2);
+            const roleLabel = role === 'master' ? 'Master' : role === 'slave' ? 'Slave' : '';
+            const badge = roleLabel ? `<span class="module-interface-role">${roleLabel}</span>` : '';
+            const description = type || '类型待确认';
+            const subtitle = roleLabel ? description : `${description} · ${role || '未声明 modport'}`;
             const content = `<span class="module-bus-symbol" aria-hidden="true"></span><span class="module-interface-label">
-                <strong>${code(port.name)}</strong><small>${escape(type || '类型待确认')} · ${escape(role || '未声明 modport')}</small></span>`;
-            return `<li>${control(port, content, 'module-pin module-interface-pin')}</li>`;
+                <strong>${code(port.name)}${badge}</strong><small>${escape(subtitle)}</small></span>`;
+            return `<li>${control(port, content, 'module-pin module-interface-pin' + (roleLabel ? ` ${role}` : ''))}</li>`;
         }).join('');
         const buses = terminals ? `<section class="module-pin-group interfaces" aria-label="接口束"><h4>接口束</h4><ul>${terminals}</ul></section>` : '';
         const outputLabel = groups.output.some(port => port.direction === 'inout') ? '输出 / 双向' : '输出';

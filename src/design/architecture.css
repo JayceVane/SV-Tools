@@ -113,17 +113,21 @@ dd { margin-inline-start: 0; overflow-wrap: anywhere; }
 .module-pin-group.shared .module-pin { border-color: var(--divider); }
 .module-pin-group.interfaces { grid-column: 1 / -1; grid-row: 1; align-self: start; border-bottom: 1px solid var(--divider); }
 .module-pin-group.interfaces ul { grid-template-columns: repeat(auto-fit, minmax(min(100%, 124px), 1fr)); gap: 5px; }
-.module-interface-pin { display: grid; grid-template-columns: 18px minmax(0, 1fr); align-items: center; gap: 6px;
+.module-interface-pin { --bus-accent: var(--muted); display: grid; grid-template-columns: 18px minmax(0, 1fr); align-items: center; gap: 6px;
     width: 100%; min-height: 38px; padding: 4px 7px; text-align: left; text-decoration: none; line-height: 1.3;
-    background: color-mix(in srgb, var(--up) 6%, var(--panel)); border-color: var(--divider); }
+    background: color-mix(in srgb, var(--bus-accent) 7%, var(--panel)); border-color: color-mix(in srgb, var(--bus-accent) 23%, var(--divider)); }
+.module-interface-pin.master { --bus-accent: var(--up); }
+.module-interface-pin.slave { --bus-accent: var(--down); }
 .module-interface-pin:is(a, button) strong { color: var(--action); }
-.module-interface-pin:is(a, button):hover strong { text-decoration: underline; }
+.module-interface-pin:is(a, button):hover strong code { text-decoration: underline; }
 .module-interface-label { display: grid; gap: 2px; }
-.module-interface-label strong { font-weight: 600; }
-.module-bus-symbol { position: relative; width: 18px; height: 13px; color: var(--up); border-inline-end: 2px solid currentColor; }
+.module-interface-label strong { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 2px 5px; font-weight: 600; }
+.module-interface-role { padding: 0 4px; border: 1px solid currentColor; border-radius: 3px; color: var(--bus-accent); font-size: 10px; }
+.module-bus-symbol { position: relative; width: 18px; height: 13px; color: var(--bus-accent); border-inline-end: 2px solid currentColor; }
 .module-bus-symbol::before { content: ''; position: absolute; inset: 2px 0 auto 1px; height: 1px;
     background: currentColor; box-shadow: 0 4px currentColor, 0 8px currentColor; }
 .module-pin[aria-pressed=true], .module-pin:hover:is(button, a) { background: color-mix(in srgb, var(--up) 12%, var(--panel)); border-color: var(--focus); }
+.module-interface-pin[aria-pressed=true], .module-interface-pin:hover:is(button, a) { background: color-mix(in srgb, var(--bus-accent) 13%, var(--panel)); }
 .module-pin-group li, .module-pin small { overflow-wrap: anywhere; }
 @container (min-width: 620px) {
     .module-pin-sides:has(> .interfaces) { grid-template-columns: minmax(0, 1fr) minmax(0, 1.5fr) minmax(0, 1fr); }
