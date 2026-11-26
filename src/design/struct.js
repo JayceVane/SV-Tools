@@ -229,12 +229,99 @@ function analyzeStructure(options) {
     return { ...basis, parsed, main };
 }
 
+/**
+ * 为结构投影里的接口连接收集方向证据。
+ * 结构投影只认位级连线，接口两端在它那里都是"成员方向未知"，报告表格于是全写成 bus。
+ * 这里按实例端口和 modport 声明重算一次，供 attachInterfaceEvidence 回填。
+ * @param {{units:Map<string,object>}} parsed parseFiles 的结果。
+ * @returns {Array<{key:string, flowEvidence:string|null, handshake:boolean, routes:boolean}>}
+ */
+function interfaceEvidence(parsed) {
+    // 先把"接口实例 → 各实例端口的 modport"聚合起来：同一模块里接在同一接口实例上的实例共有这条束，
+    // 必须两两配对判定，单看一端拿不到对端 modport（接口实例本身不声明 modport）。
+    const endpoints = new Map();
+    const remember = (key, endpoint, intf) => {
+        if (!endpoints.has(key)) endpoints.set(key, { intf, list: [] });
+        const entry = endpoints.get(key);
+        if (!entry.list.some(item => item.modport === endpoint.modport && item.boundary === endpoint.boundary)) entry.list.push(endpoint);
+    };
+    for (const unit of parsed.units.values()) {
+        if (unit.scope.kind !== 'module') continue;
+        const targets = unit.instances.filter(instance => instance.scope === unit.scope.id);
+        for (const instance of targets) {
+            const child = parsed.units.get(instance.type);
+            if (!child?.ports?.length) continue;
+            let connections;
+            try { connections = bindings(unit.source, instance.ports, child.ports.map(port => port.name), new Map()); }
+            catch { continue; }
+            for (const port of child.ports) {
+                const [type, modport] = port.type.split('.');
+                const intf = parsed.units.get(type);
+                if (intf?.scope.kind !== 'interface') continue;
+                const tokens = connections.get(port.name);
+                const actual = tokens === undefined && connections.has('*') ? port.name : tokens?.length === 1 ? tokens[0].value : undefined;
+                if (!actual) continue;
+                const parent = [...unit.ports, ...targets].find(symbol => symbol.name === actual);
+                if (!parent) continue;
+                // 对端是模块边界端口：两侧 modport 都能拿到，直接登记。
+                if (parent.kind === 'port') {
+                    const [, parentModport] = parent.type.split('.');
+                    if (parent.type.split('.')[0] !== type) continue;
+                    remember(actual, { modport: parentModport, boundary: true }, intf);
+                    remember(actual, { modport, boundary: false }, intf);
+                    continue;
+                }
+                // 对端是接口实例：只登记本端 modport，配对在下面统一完成。
+                remember(actual, { modport, boundary: false }, intf);
+            }
+        }
+    }
+    const evidence = [];
+    for (const [key, bundle] of endpoints) {
+        // 两端束按第一对配对判定；多端束逐对比较，任一对给出方向即视为可判定。
+        let best = null;
+        for (let left = 0; left < bundle.list.length; left++) for (let right = left + 1; right < bundle.list.length; right++) {
+            const model = unitInterface(bundle.intf);
+            const result = require('./interface-evidence').connectionEvidence([bundle.list[left], bundle.list[right]], model);
+            if (result.routes.length && (!best || result.routes.length > best.routes.length)) best = result;
+        }
+        if (!best) continue;
+        evidence.push({ key, flowEvidence: best.flowEvidence, handshake: best.handshake, routes: true });
+    }
+    return evidence;
+}
+
+/**
+ * 把接口束级的方向证据回填到结构投影的连接记录上。
+ * @param {object} output projectArchitecture 的结果（就地修改）。
+ * @param {Array<{key:string, flowEvidence:string|null, handshake:boolean, routes:boolean}>} evidence 由 interfaceEvidence 产生的证据。
+ */
+function attachInterfaceEvidence(output, evidence) {
+    if (!evidence.length) return;
+    // 同一接口名会在多个模块里出现（父子模块共用一条束），证据可能互相覆盖：
+    // 优先保留能给出方向的结论，避免后遍历到的"未知"把已知方向冲掉。
+    const byKey = new Map();
+    for (const item of evidence) {
+        const previous = byKey.get(item.key);
+        if (!previous || (!previous.routes && item.routes)) byKey.set(item.key, item);
+    }
+    for (const item of output.interfaces || []) {
+        if (item.direction !== 'connection') continue;
+        const found = byKey.get(item.label);
+        if (!found) continue;
+        item.flowEvidence = found.flowEvidence;
+        item.handshake = found.handshake;
+        if (found.routes) item.direction = found.handshake ? 'bidirectional' : 'forward';
+    }
+}
+
 async function build(options) {
     const { workspace, files, top, contextRevision } = options;
     const { design, parsed, main, issues } = analyzeStructure(options);
     const { projectArchitecture, archHash } = require('./arch');
     const output = projectArchitecture(design, options);
     output.engine = 'struct';
+    attachInterfaceEvidence(output, interfaceEvidence(parsed));
     output.structuralUnits = [...parsed.units.values()].map(unit => publicUnit(unit, parsed.units));
     output.checks = [...parsed.diagnostics, ...output.checks];
     for (const diagnostic of output.checks) {

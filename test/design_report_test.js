@@ -76,6 +76,34 @@ test('design report 对结构问题设计同样成包，检查表进入 Markdown
     assert.match(markdown, /\| warning \| WIDTH_MISMATCH \|/);
 });
 
+test('报告接口方向使用 modport 证据，全双工总线不再一律写成 bus', async t => {
+    // 结构投影只认位级连线，接口两端在它那里都是未知方向；这里确认 modport 证据已回填到报告表格。
+    const directory = await fsp.realpath(await fsp.mkdtemp(path.join(os.tmpdir(), 'svtools-report-flow-')));
+    t.after(() => fsp.rm(directory, { recursive: true, force: true }));
+    await fsp.writeFile(path.join(directory, 'flow.sv'), `
+interface axi_like_if;
+    logic [31:0] addr, wdata, rdata;
+    modport master (output addr, wdata, input rdata);
+    modport slave  (input addr, wdata, output rdata);
+endinterface
+module host(axi_like_if.master m); ... endmodule
+module device(axi_like_if.slave s); ... endmodule
+module top;
+    axi_like_if bus();
+    host   u_host(.m(bus));
+    device u_device(.s(bus));
+endmodule
+`);
+    const response = await run(['design', 'report', '--workspace', directory, '--top', 'top', '--out', 'rep']);
+    assert.equal(response.exitCode, 0, JSON.stringify(response.output.diagnostics));
+    const markdown = await fsp.readFile(path.join(directory, 'rep', 'architecture.md'), 'utf8');
+    // 两端都驱动成员：角色名 master/slave 判定主流向，这条连接应写成 o 而不是 bus。
+    const connectionSection = markdown.slice(markdown.indexOf('## 接口连接'));
+    const row = connectionSection.split('\n').find(line => line.includes(' u_host ') || line.includes(' u_device '));
+    assert.ok(row, '接口连接表应包含该束：\n' + connectionSection.slice(0, 600));
+    assert.match(row, /\| o \|/u, '全双工接口应判定出方向，而不是 bus：' + row);
+});
+
 test('结构诊断缺少 details 时也能生成报告', () => {
     const markdown = generateReportMarkdown({ top: { name: 'top' }, checks: [{ severity: 'error', code: 'SYNTAX', message: 'bad | token' }],
         instances: [], interfaces: [], sourceFiles: [], limitations: [] },

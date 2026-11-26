@@ -93,6 +93,24 @@
         return `${code(from)} → ${member.receivers.map(index => code(endpoints[index])).join('、')}`;
     }
 
+    // 束的流向来自哪级证据：向读者说明结论的可信度，也提示写法上还缺什么。
+    const EVIDENCE = {
+        valid: 'valid/ready 握手',
+        single: '单一驱动端',
+        role: 'modport 角色名',
+        width: '驱动位宽',
+        member: '逐成员方向',
+    };
+
+    function evidenceLine(link, endpoints) {
+        if (!link.routes.length) return '';
+        const single = link.routes.length === 1;
+        const source = single ? endpoints[link.routes[0].source] : undefined;
+        // 只有一条通路时才给出具体端点；逐成员通路已经在下表逐行列出，这里不重复。
+        const detail = single ? `${code(source)} → ${link.routes.length} 条通路` : `逐成员 ${link.routes.length} 条通路`;
+        return `<p class="subtle flow-evidence">流向依据：${EVIDENCE[link.flowEvidence] || '待确认'} · ${detail}</p>`;
+    }
+
     function interfaceDetails(link, nodes, interactive) {
         const endpoints = link.endpoints.map(endpoint => endpointName(endpoint, nodes));
         const signals = [link.members.find(member => member.name === 'valid'), link.members.find(member => member.name === 'ready')];
@@ -101,6 +119,7 @@
         const evidence = link.endpoints.map((endpoint, index) => `<tr><th scope="row">${code(endpoints[index])}</th><td>${code(endpoint.type)}</td><td>${endpoint.boundary ? '模块边界' : '子实例'}${endpoint.invalid ? ' · modport 不匹配' : ''}</td><td>${[sourceLink(endpoint.declaration, interactive, '端口声明'), sourceLink(endpoint.modportSource, interactive, 'modport'), sourceLink(endpoint.binding, interactive, '例化连接')].filter(Boolean).join(' · ')}</td></tr>`).join('');
         const members = link.members.map(member => `<tr><th scope="row">${member.declaration && interactive ? sourceLink(member.declaration, true, member.name) : code(member.name)}</th><td>${member.width ?? '待确认'}</td>${member.directions.map(value => `<td>${direction(value)}</td>`).join('')}<td class="${member.flow}">${flowNames[member.flow]}${member.proven ? `<br>${routeText(member, endpoints)}` : ''}</td></tr>`).join('');
         return `<p class="connection-type">${code(link.type)} · ${sourceLink(link.definition, interactive, '接口定义')} · ${sourceLink(link.declaration, interactive, '连接声明')}</p>${summary}
+            ${evidenceLine(link, endpoints)}
             <h3>端点与声明</h3><div class="table-scroll"><table><thead><tr><th scope="col">端点</th><th scope="col">接口视图</th><th scope="col">位置</th><th scope="col">源码</th></tr></thead><tbody>${evidence}</tbody></table></div>
             <h3>成员方向</h3><p class="subtle">各端口列显示其 modport 声明。图内流向按当前模块观察，顶层边界的方向已按内侧换算。</p><div class="table-scroll"><table><thead><tr><th scope="col">信号</th><th scope="col">位宽</th>${endpoints.map(name => `<th scope="col">${code(name)}</th>`).join('')}<th scope="col">图内流向</th></tr></thead><tbody>${members}</tbody></table></div>`;
     }

@@ -6,6 +6,7 @@ const { json } = require('./workflow-files');
 const { projectArchitecture } = require('./arch');
 const { analyzeStructure, unitInterface, interfaceOverrides, position } = require('./struct');
 const { bindings } = require('../project/rtl-model');
+const { connectionEvidence } = require('./interface-evidence');
 
 const CONFIG = 'svtools.architecture.json';
 const labeledSignal = /(?:^|_)(?:clk|clock|rst|reset)(?:_n|_b)?$/i;
@@ -23,37 +24,6 @@ async function readPresentation(root) {
     });
 }
 
-function connectionEvidence(endpoints, model) {
-    const members = model.members.map(member => {
-        const directions = endpoints.map(endpoint => {
-            if (!endpoint.modport || endpoint.invalid) return 'unknown';
-            const view = model.modports.find(view => view.name === endpoint.modport);
-            if (!view) return 'unknown';
-            if (!view.members.some(item => item.name === member.name)) return 'unlisted';
-            return view.members.find(item => item.name === member.name).direction || 'unknown';
-        });
-        const effective = directions.map((direction, index) => endpoints[index].boundary ? flip(direction) : direction);
-        const drivers = effective.flatMap((direction, index) => direction === 'output' ? [index] : []);
-        const receivers = effective.flatMap((direction, index) => direction === 'input' ? [index] : []);
-        const proven = drivers.length === 1 && receivers.length > 0 && effective.every(direction => ['input', 'output', 'unlisted'].includes(direction));
-        return { ...member, directions, drivers, receivers, proven };
-    });
-    const valid = members.find(member => member.name === 'valid');
-    const ready = members.find(member => member.name === 'ready');
-    const producer = valid?.proven ? valid.drivers[0] : null;
-    const handshake = producer !== null && ready?.proven && ready.receivers.includes(producer) && valid.receivers.includes(ready.drivers[0]);
-    for (const member of members) {
-        member.flow = !member.proven ? 'unknown'
-            : producer === member.drivers[0] ? 'forward'
-            : producer !== null && member.receivers.includes(producer) ? 'reverse' : 'directed';
-    }
-    // Interfaces without a proven valid signal can still carry a unidirectional route.
-    const senders = new Set(members.filter(member => member.proven).flatMap(member => member.drivers));
-    const leading = producer ?? (senders.size === 1 ? [...senders][0] : null);
-    const routes = leading === null ? [] : [...new Set(members.filter(member => member.proven && member.drivers[0] === leading)
-        .flatMap(member => member.receivers))].map(target => ({ source: leading, target }));
-    return { members, handshake, routes };
-}
 
 function typedConnections(unit, module, parsed, values, source) {
     const groups = new Map(), connectedPorts = new Set(), unitPorts = [...unit.ports];

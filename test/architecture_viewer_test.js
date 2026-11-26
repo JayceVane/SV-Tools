@@ -246,6 +246,52 @@ endmodule
     assert.match(svg, /class="card-foot internal"[^>]*>组内束 inner</u);
 });
 
+test('全双工接口按 modport 角色名与驱动位宽判定主流向，多端共享束逐成员连线', async t => {
+    const base = await fs.realpath(os.tmpdir());
+    const workspace = await fs.mkdtemp(path.join(base, 'svtools-arch-flow-'));
+    t.after(async () => {
+        if (await fs.realpath(workspace) === workspace && path.dirname(workspace) === base) await fs.rm(workspace, { recursive: true, force: true });
+    });
+    // 两端都驱动成员（AXI 式全双工），不能只凭 valid 判方向；多端共享束按成员逐条出通路。
+    await fs.writeFile(path.join(workspace, 'flow.sv'), `
+interface axi_like_if;
+    logic [31:0] addr, wdata, rdata;
+    logic        awvalid, awready, arvalid, arready;
+    modport master (output addr, wdata, awvalid, arvalid, input rdata, awready, arready);
+    modport slave  (input addr, wdata, awvalid, arvalid, output rdata, awready, arready);
+endinterface
+interface irq_if;
+    logic a_irq, b_irq;
+    modport src_a (output a_irq);
+    modport src_b (output b_irq);
+    modport sink  (input a_irq, b_irq);
+endinterface
+module src_a(irq_if.src_a irq); ... endmodule
+module src_b(irq_if.src_b irq); ... endmodule
+module host(axi_like_if.master m, irq_if.sink irq); ... endmodule
+module device(axi_like_if.slave s); ... endmodule
+module top;
+    axi_like_if host_bus();     // 单从设备：两端都驱动成员，角色名才能决定主流向
+    irq_if irqs();              // 三端共享束：两个源汇入一个 sink
+    host   u_host(.m(host_bus), .irq(irqs));
+    device u_device(.s(host_bus));
+    src_a  u_src_a(.irq(irqs));
+    src_b  u_src_b(.irq(irqs));
+endmodule
+`);
+    const { book } = await buildArchitectureBook(await resolveContext({ workspace, top: 'top' }));
+    const [top] = book.pages;
+    const bus = top.links.find(link => link.name === 'host_bus');
+    // 两端各驱动一部分成员，因此不是"单一驱动端"，要靠角色名 master/slave 定主流向。
+    assert.equal(bus.flowEvidence, 'role');
+    assert.deepEqual(bus.routes.map(route => [route.source, route.target]), [[0, 1]], 'master 应作为驱动端');
+    const irqs = top.links.find(link => link.name === 'irqs');
+    assert.equal(irqs.routes.length > 0, true, '三端共享束必须给出逐成员通路，不能整条判为未知');
+    assert.equal(irqs.members.length, 2);
+    const unknown = top.links.filter(link => link.kind === 'interface' && !link.routes.length);
+    assert.deepEqual(unknown.map(link => link.name), [], '所有接口束都应有可解释的流向');
+});
+
 test('端口图按声明方向归类，引脚可选择，名称中的标记按文本显示', () => {
     const markup = renderModuleSymbol('top', [
         { name: 'data<in>', direction: 'input', width: 16 },
