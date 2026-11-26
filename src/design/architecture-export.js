@@ -35,7 +35,10 @@ async function renderArchitectureBook(book, modes, { print = false } = {}) {
     const chapters = [];
     for (const [index, page] of book.pages.entries()) {
         const mode = ['overview', 'detailed'].includes(modes?.[page.id]) ? modes[page.id] : page.auto;
-        const diagram = renderDiagram(await layoutDiagram(page, mode), page, false);
+        const layout = await layoutDiagram(page, mode);
+        const diagram = renderDiagram(layout, page, false);
+        const diagramDescription = mode === 'detailed' ? '完整连线，落到具体引脚'
+            : layout.wrapped ? '简图：分行展示，沿箭头追踪跨行接口' : '简图：功能分组，边界端口单列成排';
         const nodes = new Map(page.nodes.map(node => [node.id, node]));
         const instances = page.nodes.filter(node => node.kind === 'instance');
         const instanceTable = instances.length ? `<div class="table-scroll"><table><thead><tr><th scope="col">实例</th><th scope="col">模块</th><th scope="col">源码</th></tr></thead><tbody>${instances.map(node =>
@@ -51,7 +54,7 @@ async function renderArchitectureBook(book, modes, { print = false } = {}) {
             ? `<figure class="diagram-figure">
                 <div class="diagram-toolbar book-diagram-tools">${print ? '' : '<button type="button" data-zoom aria-pressed="false">原始尺寸</button>'}</div>
                 <div class="diagram-print" tabindex="0" aria-label="架构图">${diagram}</div>
-                <figcaption class="diagram-caption">图 ${pad(index + 1)} · 结构连线（${mode === 'overview' ? '简图：功能分组，边界端口单列成排' : '完整连线，落到具体引脚'}）</figcaption>
+                <figcaption class="diagram-caption">图 ${pad(index + 1)} · 结构连线（${diagramDescription}）</figcaption>
             </figure>`
             : `<p class="diagram-empty">本章是叶子模块，没有内部实例；下方是模块边界端口图。</p>`;
         const counts = [page.ports.length ? page.ports.length + ' 个端口' : '', instances.length ? instances.length + ' 个子模块' : '', interfaces.length ? interfaces.length + ' 个接口' : '']

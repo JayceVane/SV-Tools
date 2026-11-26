@@ -294,7 +294,7 @@ endmodule
     assert.deepEqual(unknown.map(link => link.name), [], '所有接口束都应有可解释的流向');
 });
 
-test('简图分组卡片按 BD 式画法只排对外接口端口，不再罗列组内实例', async t => {
+test('简图分组卡片沿用模块框并排列对外接口端口', async t => {
     const base = await fs.realpath(os.tmpdir());
     const workspace = await fs.mkdtemp(path.join(base, 'svtools-arch-ports-'));
     t.after(async () => {
@@ -331,7 +331,49 @@ endmodule
     assert.equal(card.entries.length, 0, '分组卡片不再保留组内实例清单');
     const svg = renderDiagram(diagram, top, false);
     assert.match(svg, /class="group-port-label"/u, '分组卡片要画出对外端口');
+    assert.match(svg, /class="card-subtitle"[^>]*>2 个实例</u);
     assert.equal(/class="node-entry"/u.test(svg), false, '分组卡片不再罗列组内实例');
+});
+
+test('超宽流水通路自动折行并保留完整连接模式', async t => {
+    const base = await fs.realpath(os.tmpdir());
+    const workspace = await fs.mkdtemp(path.join(base, 'svtools-arch-wrap-'));
+    t.after(async () => {
+        assert.equal(await fs.realpath(workspace), workspace);
+        assert.equal(path.dirname(workspace), base);
+        await fs.rm(workspace, { recursive: true, force: true });
+    });
+    const connections = Array.from({ length: 6 }, (_, index) => `channel mid_${index}();`).join('\n');
+    const stages = Array.from({ length: 7 }, (_, index) => `stage u_stage_${index}(
+        .data_in(${index === 0 ? 'data_in' : 'mid_' + (index - 1)}),
+        .data_out(${index === 6 ? 'data_out' : 'mid_' + index}), .clk(clk));`).join('\n');
+    await fs.writeFile(path.join(workspace, 'pipeline.sv'), `
+interface channel;
+    logic [31:0] data;
+    modport master(output data);
+    modport slave(input data);
+endinterface
+module stage(channel.slave data_in, channel.master data_out, input clk); ... endmodule
+module top(input clk, channel.slave data_in, channel.master data_out);
+    ${connections}
+    ${stages}
+endmodule
+`);
+    await fs.writeFile(path.join(workspace, 'svtools.architecture.json'), JSON.stringify({
+        titles: { stage: '视频处理流水级（输入帧同步、像素整形与事务传递）' },
+    }));
+    const { book } = await buildArchitectureBook(await resolveContext({ workspace, top: 'top' }));
+    const [top] = book.pages;
+    const compact = await layoutDiagram(top, 'overview');
+    assert.equal(compact.wrapped, true);
+    assert.ok(compact.width <= 1400, '折行后的流水线应在内容列里保持可读字号');
+    assert.equal(compact.cards.filter(card => card.kind === 'instance').length, 7);
+    const covered = new Set(compact.edges.flatMap(edge => edge.links));
+    assert.ok(top.links.every(link => covered.has(link.id)), '折行必须保留每条数据与时钟连接');
+    assert.ok(compact.edges.every(edge => edge.sections.length > 0));
+    const detailed = await layoutDiagram(top, 'detailed');
+    assert.equal(detailed.wrapped, false);
+    assert.ok(detailed.width > compact.width);
 });
 
 test('简图以可追溯的同名标签保留时钟复位，详细图保留端到端走线', async t => {

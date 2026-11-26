@@ -26,6 +26,7 @@ const TITLE_NAMES = 3;
 const ENTRY_ROW = 22;
 // 分组卡片的对外端口行高：一行一个端口，名称 + 端点符号。
 const GROUP_PORT_ROW = 22;
+const OVERVIEW_MAX_WIDTH = 1400;
 
 const FONT = {
     title: 12.5, subtitle: 10.5, chip: 9.5, pin: 10.5, foot: 10, label: 10,
@@ -342,7 +343,7 @@ function measureInstance(card, detailed, assignment, incident) {
     const node = card.nodes[0];
     const title = card.title || node?.name || '';
     card.subH = SUB;
-    card.subtitleName = grouped ? '' : multi ? card.nodes.length + ' 个实例' : node?.name && node.name !== title ? node.name : '';
+    card.subtitleName = multi ? card.nodes.length + ' 个实例' : node?.name && node.name !== title ? node.name : '';
     card.chips = [];
     if (!multi && node) {
         if (node.type) card.chips.push({ kind: 'type', text: clipText(node.type, 160, FONT.chip, MONO) });
@@ -750,7 +751,7 @@ function anchorFor(card, port, edge) {
     return card.id;
 }
 
-async function runLayout(cards, edges, detailed) {
+async function runLayout(cards, edges, detailed, wrapped = false) {
     if (!elk) {
         let Engine;
         try { Engine = require('../../bin/vendor/elk.bundled.js'); }
@@ -780,8 +781,15 @@ async function runLayout(cards, edges, detailed) {
             'elk.layered.considerModelOrder.strategy': 'NODES_AND_EDGES',
             // 网络单纯形摆放把各层节点在竖直方向摊平，避免顶层长链被拉成斜向长条。
             'elk.layered.nodePlacement.strategy': 'NETWORK_SIMPLEX',
-            // 简图改用最长路径分层并收紧间距，保证 1100px 容器内不缩到不可读；详细图保持原参数。
+            // 先排列主通路，超出内容列时改用多行布局。
             ...(detailed ? {} : { 'elk.layered.layering.strategy': 'LONGEST_PATH' }),
+            ...(wrapped ? {
+                'elk.layered.wrapping.strategy': 'MULTI_EDGE',
+                'elk.layered.wrapping.multiEdge.improveCuts': 'true',
+                // 当前 ELK 的跨行缩短阶段会在固定端口长链上抛错，保留原始正交路线。
+                'elk.layered.wrapping.multiEdge.improveWrappedEdges': 'false',
+                'elk.aspectRatio': '1.6',
+            } : {}),
             'elk.padding': detailed ? '[top=24,left=24,bottom=24,right=24]' : '[top=16,left=12,bottom=16,right=12]',
         },
         children: elkChildren(primary),
@@ -791,6 +799,8 @@ async function runLayout(cards, edges, detailed) {
             targets: [anchorFor(byId.get(edge.to), edge.toPort, edge.id) || edge.to],
         })),
     });
+    if (!detailed && !wrapped && layout.width > OVERVIEW_MAX_WIDTH) return runLayout(cards, edges, detailed, true);
+    layout.wrapped = wrapped;
     if (support.length) {
         const gap = 28, padding = 16, heading = 34;
         const top = layout.height + 20;
@@ -898,17 +908,18 @@ async function layoutDiagram(page, mode) {
         }
     }
     let assignment = initialAssignment(cards, detailed, incident);
-    let layout, stable = false;
+    let layout, stable = false, wrapped = false;
     for (let pass = 0; pass < 3 && !stable; pass++) {
         measureCards(cards, detailed, assignment, incident);
-        layout = await runLayout(cards, edges, detailed);
+        layout = await runLayout(cards, edges, detailed, wrapped);
+        wrapped = layout.wrapped;
         const derived = deriveAssignment(cards, layout, assignment, detailed, incident);
         stable = !derived.changed;
         assignment = derived.assignment;
     }
     if (!stable) {
         measureCards(cards, detailed, assignment, incident);
-        layout = await runLayout(cards, edges, detailed);
+        layout = await runLayout(cards, edges, detailed, wrapped);
     }
     const placed = new Map(layout.children.map(child => [child.id, child]));
     const routed = new Map((layout.edges || []).map(edge => [edge.id, edge]));
@@ -932,7 +943,7 @@ async function layoutDiagram(page, mode) {
         }
     }
     placeLabels(edges, cards, width, height);
-    return { width, height, cards, edges, clockRegion: layout.clockRegion };
+    return { width, height, cards, edges, clockRegion: layout.clockRegion, wrapped: layout.wrapped };
 }
 
 /* ---------- 渲染 ---------- */
@@ -1109,8 +1120,6 @@ function renderDiagram(diagram, page, interactive) {
                 + '" text-anchor="' + (west ? 'start' : 'end') + '">'
                 + escape(clipText(port.caption, card.width - 24, FONT.pin, MONO)) + '</text></g>';
         }).join('');
-        // BD 式分组卡：无标题带、虚线层级框，标题浮在框内左上角，端口沿边框排。
-        const grouped = !single && card.groupPorts.length > 0;
         const split = card.pinSplit
             ? '<line class="pin-split" x1="12" y1="' + card.pinSplit + '" x2="' + (card.width - 12) + '" y2="' + card.pinSplit + '"/>' : '';
         const pins = card.pins.map(pin => {
@@ -1132,11 +1141,11 @@ function renderDiagram(diagram, page, interactive) {
         const foot = footLines.length
             ? '<line class="card-rule" x1="0" y1="' + footTop + '" x2="' + card.width + '" y2="' + footTop + '"/>'
                 + footLines.map((line, index) => line.replace('y="0"', 'y="' + (footTop + 14 + index * FOOT) + '"')).join('') : '';
-        return open + '<g class="diagram-card instance' + status + (grouped ? ' bd-block' : '') + '" ' + translate + attrs + '><title>'
+        return open + '<g class="diagram-card instance' + status + '" ' + translate + attrs + '><title>'
             + escape([card.title, node?.type].filter(Boolean).join(' · ')) + '</title>'
             + '<rect class="card-bg" width="' + card.width + '" height="' + card.height + '" rx="5"/>'
-            + (grouped ? '' : '<path class="card-head" d="' + headPath(card.width, card.headH) + '"/>'
-                + '<line class="card-rule" x1="0" y1="' + card.headH + '" x2="' + card.width + '" y2="' + card.headH + '"/>')
+            + '<path class="card-head" d="' + headPath(card.width, card.headH) + '"/>'
+            + '<line class="card-rule" x1="0" y1="' + card.headH + '" x2="' + card.width + '" y2="' + card.headH + '"/>'
             + titles + subtitle + chips + entries + groupPortMarkup + split + pins + foot
             + '<rect class="card-frame" width="' + card.width + '" height="' + card.height + '" rx="5"/></g>' + close;
     }).join('');

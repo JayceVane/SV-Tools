@@ -42,12 +42,6 @@
 .clock-region rect { fill: var(--sunk); }
 .clock-region text { font-family: var(--font-ui); font-size: 11px; fill: var(--muted); }
 
-/* BD 式分组块：虚线层级框 + 浅色底，不画标题带和分隔线。
-   它表示"一组实例构成的子系统"，不是单个模块卡片。 */
-.diagram-card.instance.bd-block .card-bg { fill: color-mix(in srgb, var(--bus) 4%, var(--panel)); }
-.diagram-card.instance.bd-block .card-frame { stroke: var(--line-2); stroke-dasharray: 5 4; }
-.diagram-card.instance.bd-block .card-title { fill: var(--ink-2); font-size: 11.5px; }
-
 /* 图2 式边界端口：没有外框、表头和分隔线，只有端口符号 + 名称 + 类型。 */
 .diagram-card.pad .card-bg, .pad-frame, .pad-spine, .pad-eyebrow, .pad-count, .pad-title,
 .pad-row-state, .pad-row-rule, .pad-glyph { display: none; }
