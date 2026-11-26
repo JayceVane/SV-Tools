@@ -9,6 +9,7 @@ const path = require('node:path');
 const { createHash } = require('node:crypto');
 const { run } = require('../src/cli/main');
 const { generateReportMarkdown } = require('../src/design/report');
+const { resolveStyles } = require('../src/design/architecture-image');
 
 const FIXTURES = path.join(__dirname, 'fixtures', 'design');
 
@@ -165,4 +166,13 @@ test('design report --out 越界拒绝，capabilities 与 help 同步', async t 
     assert.equal(doctor.output.data.capabilities.includes('design.report'), true);
     const help = await run(['--help']);
     assert.match(help.text, /design report --top/);
+});
+
+test('独立图主题令牌按引用解析，未知令牌与循环引用显式失败', () => {
+    const shared = ':root { --page: #ffffff; --ink: var(--page); --late: var(--ink); }';
+    assert.equal(resolveStyles(shared, 'fill:var(--late)', {}), 'fill:#ffffff', '前向引用必须解析');
+    assert.equal(resolveStyles(shared, 'fill:var(--late)', { late: '#111111' }), 'fill:#111111', '覆盖优先');
+    assert.throws(() => resolveStyles(shared, 'fill:var(--missing)', {}), /未知主题令牌/u, '拼错令牌不能静默');
+    assert.throws(() => resolveStyles(':root { --a: var(--b); --b: var(--a); }', 'fill:var(--a)', {}), /循环引用/u);
+    assert.equal(resolveStyles(shared, 'fill:color-mix(in srgb, #ffffff 50%, #000000)', {}), 'fill:#808080');
 });

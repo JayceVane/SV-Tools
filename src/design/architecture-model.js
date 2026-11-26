@@ -4,12 +4,12 @@ const path = require('node:path');
 const { resolveContext, assertCurrent, hash } = require('../agent/context');
 const { json } = require('./workflow-files');
 const { projectArchitecture } = require('./arch');
-const { analyzeStructure, unitInterface, interfaceOverrides, position } = require('./struct');
+const { analyzeStructure, unitInterface, interfaceOverrides, interfaceEvidence, position } = require('./struct');
 const { bindings } = require('../project/rtl-model');
 const { connectionEvidence } = require('./interface-evidence');
+const { isClockLike } = require('./architecture-details');
 
 const CONFIG = 'svtools.architecture.json';
-const labeledSignal = /(?:^|_)(?:clk|clock|rst|reset)(?:_n|_b)?$/i;
 const instanceId = name => 'instance:' + name;
 const boundaryId = name => 'boundary:' + name;
 const portKey = (node, port) => JSON.stringify([node, port]);
@@ -24,6 +24,17 @@ async function readPresentation(root) {
     });
 }
 
+
+// 接口方向证据只在 struct 侧算一次；页面链接复用同一结论，避免两处对同一束接口给出不同方向。
+const sharedEvidence = new WeakMap();
+function evidenceFor(parsed) {
+    let value = sharedEvidence.get(parsed);
+    if (!value) {
+        value = new Map(interfaceEvidence(parsed).map(item => [item.key, item]));
+        sharedEvidence.set(parsed, value);
+    }
+    return value;
+}
 
 function typedConnections(unit, module, parsed, values, source) {
     const groups = new Map(), connectedPorts = new Set(), unitPorts = [...unit.ports];
@@ -78,11 +89,14 @@ function typedConnections(unit, module, parsed, values, source) {
                 binding: at(unit, sites.get(port.name) ?? instance.start) }));
         }
     }
-    const links = [];
+    const links = [], canonical = evidenceFor(parsed);
     for (const [name, group] of groups) {
         if (!group.endpoints.length) continue;
+        const shared = canonical.get(name);
         links.push({ name, kind: 'interface', type: group.type, endpoints: group.endpoints, declaration: group.declaration,
-            definition: group.definition, ...connectionEvidence(group.endpoints, group.model) });
+            definition: group.definition, ...connectionEvidence(group.endpoints, group.model),
+            // struct 的束级配对结论优先；本地的 routes 数组只用于渲染端点方向。
+            ...(shared ? { flowEvidence: shared.flowEvidence, handshake: shared.handshake } : {}) });
     }
     return { links, connectedPorts };
 }
@@ -90,7 +104,7 @@ function typedConnections(unit, module, parsed, values, source) {
 function ordinaryConnection(edge, undirected) {
     const names = edge.netNames?.length ? edge.netNames : [edge.sourcePort + ' → ' + edge.targetPort];
     return { name: names.join(' / '), kind: 'signal', width: edge.width, names,
-        labeled: Boolean(edge.netNames?.length && edge.netNames.every(name => labeledSignal.test(name))),
+        labeled: Boolean(edge.netNames?.length && edge.netNames.every(name => isClockLike(name))),
         endpoints: [{ node: edge.sourceNode, port: edge.sourcePort }, { node: edge.targetNode, port: edge.targetPort }],
         routes: undirected ? [] : [{ source: 0, target: 1 }] };
 }

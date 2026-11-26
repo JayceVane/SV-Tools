@@ -3,7 +3,7 @@
     'use strict';
 
     const api = acquireVsCodeApi();
-    const { escape, code, pageName, parameterText, sourceLink, portTable, renderModuleSymbol, portDescription,
+    const { escape, code, pageName, chapterNumber, chapterTitle, parameterText, sourceLink, portTable, renderModuleSymbol, portDescription,
         interfaceDetails, signalEnds, backgroundSignals, connectionPreview } = ArchitectureDetails;
     const $ = id => document.getElementById(id);
     const action = (field, id, label) => `<button class="text-action" type="button" data-${field}="${escape(id)}">${escape(label)}</button>`;
@@ -34,7 +34,7 @@
     function chapterNavigation(parent = null) {
         return book.pages.filter(module => (module.parent || null) === parent).map(module => {
             const children = chapterNavigation(module.id);
-            return `<button type="button" data-chapter="${module.id}"${module.id === page.id ? ' aria-current="page"' : ''}>${module.title ? `<span>${escape(module.title)}</span>` : ''}${code((module.number || String(book.pages.indexOf(module) + 1).padStart(2, '0')) + ' · ' + pageName(module))}</button>${children ? `<div class="chapter-nav-children">${children}</div>` : ''}`;
+            return `<button type="button" data-chapter="${module.id}"${module.id === page.id ? ' aria-current="page"' : ''}>${module.title ? `<span>${escape(module.title)}</span>` : ''}${code(chapterNumber(module, book.pages.indexOf(module)) + ' · ' + pageName(module))}</button>${children ? `<div class="chapter-nav-children">${children}</div>` : ''}`;
         }).join('');
     }
 
@@ -63,9 +63,8 @@
         $('breadcrumbs').innerHTML = [...ancestors.map(parent => action('chapter', parent, chapters.get(parent).name)),
             `<span aria-current="page">${escape(page.name)}</span>`].join('<span aria-hidden="true" class="separator">›</span>');
         $('chapters').innerHTML = `<h2>模块章节</h2>${chapterNavigation()}`;
-        $('page-title').textContent = page.title || page.name;
-        $('page-meta').innerHTML = [page.title ? code(pageName(page)) : parameterText(page.parameters) && code(parameterText(page.parameters)),
-            page.empty && '实现桩', site('', page)].filter(Boolean).join(' · ');
+        $('page-title').textContent = chapterTitle(page);
+        $('page-meta').innerHTML = [code(pageName(page)), page.empty && '实现桩', site('', page)].filter(Boolean).join(' · ');
         $('labels').innerHTML = backgroundSignals(page, true);
         $('page-checks').innerHTML = diagnosticMarkup(page);
         $('graph-tools').hidden = !page.hasStructure;

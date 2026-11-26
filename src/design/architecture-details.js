@@ -9,6 +9,9 @@
         unlisted: '未列入', unknown: '待确认' })[value] || '待确认';
     const parameterText = parameters => Object.entries(parameters || {}).map(([name, value]) => `${name}=${value}`).join(', ');
     const pageName = page => page.name + (parameterText(page.parameters) ? ` #(${parameterText(page.parameters)})` : '');
+    // 章节编号与标题兜底只此一处：导出文档、目录和查看器共用同一规则。
+    const chapterNumber = (page, index) => page.number || String(index + 1).padStart(2, '0');
+    const chapterTitle = page => page.title || '（未命名模块职责）';
     const flowNames = { forward: '正向', reverse: '反向', directed: '已知方向', unknown: '待确认' };
     const endpointName = (endpoint, nodes) => {
         const node = nodes.get(endpoint.node);
@@ -47,6 +50,8 @@
         if (/(?:^|_)(?:[a-z]*clk|clock)(?:_|$)/iu.test(name || '')) return 'CLK';
         return '';
     }
+    // 时钟/复位判定只此一处；图形层、模型层和详情表都调用它，避免同一网名在不同视图里结论不同。
+    const isClockLike = name => signalKind(name) !== '';
 
     function renderModuleSymbol(name, ports, { interactive = false, selected, targets, owner } = {}) {
         if (!ports.length) return '<p class="subtle">没有已解析的端口。</p>';
@@ -174,8 +179,8 @@
         }).join('')}</dl></details>`;
     }
 
-    const details = { escape, code, pageName, parameterText, sourceLink, portTable, groupPorts, portDescription, renderModuleSymbol,
-        interfaceDetails, signalEnds, backgroundSignals, connectionPreview, signalKind };
+    const details = { escape, code, pageName, chapterNumber, chapterTitle, parameterText, sourceLink, portTable, portDescription, renderModuleSymbol,
+        interfaceDetails, signalEnds, backgroundSignals, connectionPreview, signalKind, isClockLike };
     if (typeof module === 'object' && module.exports) module.exports = details;
     else root.ArchitectureDetails = details;
 })(globalThis);

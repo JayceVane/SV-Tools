@@ -9,8 +9,9 @@ const test = require('node:test');
 const { run } = require('../src/cli/main');
 const { buildArchitectureBook, resolveContext, assertBookCurrent } = require('../src/design/architecture-model');
 const { diagramTopology, layoutDiagram, renderDiagram } = require('../src/design/architecture-diagram');
+const { analyzeStructure, interfaceEvidence } = require('../src/design/struct');
 const { exportArchitecture, renderArchitectureBook } = require('../src/design/architecture-export');
-const { renderModuleSymbol, connectionPreview, signalKind } = require('../src/design/architecture-details');
+const { renderModuleSymbol, connectionPreview, signalKind, isClockLike } = require('../src/design/architecture-details');
 
 test('报文汇聚简图保留独立实例、标签网络和架构握手证据，导出按章节跳转', async t => {
     const base = await fs.realpath(os.tmpdir());
@@ -153,7 +154,8 @@ endmodule
     assert.equal(found.chapter, 'module-2');
     const html = await fs.readFile(exported.output.data.path, 'utf8');
     assert.match(html, /<span class="chapter-index">1\.1\.1<\/span>/u);
-    assert.match(html, /<h4 class="chapter-heading">owner<\/h4>/u);
+    assert.match(html, /<h4 class="chapter-heading">（未命名模块职责）<\/h4>/u);
+    assert.match(html, /<p class="chapter-title"><code>owner<\/code><\/p>/u);
     assert.match(html, /成员 irq 声明了多个输出端/u);
     assert.match(html, /实现桩待实现输出 · 1/u);
     assert.match(html, /href="#module-2">subsystem<\/a> · \d+ 条待复核/u);
@@ -300,8 +302,17 @@ module top;
     src_b  u_src_b(.irq(irqs));
 endmodule
 `);
-    const { book } = await buildArchitectureBook(await resolveContext({ workspace, top: 'top' }));
+    const snapshot = await resolveContext({ workspace, top: 'top' });
+    const { book } = await buildArchitectureBook(snapshot);
     const [top] = book.pages;
+    // 结构层（struct）与页面模型必须给出同一份束级方向证据，否则同一接口在两个视图里会互相矛盾。
+    const files = [...snapshot.contents].map(([path, item]) => ({ path, text: item.text }));
+    const shared = new Map(interfaceEvidence(analyzeStructure({ workspace, files, top: 'top' }).parsed).map(item => [item.key, item]));
+    for (const link of top.links.filter(item => item.kind === 'interface')) {
+        assert.ok(shared.has(link.name), link.name + ' 缺少结构层证据');
+        assert.equal(link.flowEvidence, shared.get(link.name).flowEvidence, link.name + ' 两处方向证据应一致');
+        assert.equal(link.handshake, shared.get(link.name).handshake, link.name + ' 两处握手结论应一致');
+    }
     const bus = top.links.find(link => link.name === 'host_bus');
     // 两端各驱动一部分成员，因此不是"单一驱动端"，要靠角色名 master/slave 定主流向。
     assert.equal(bus.flowEvidence, 'role');
@@ -512,6 +523,32 @@ test('端口图按声明方向归类，引脚可选择，名称中的标记按�
     assert.doesNotMatch(shared, /data-port="(?:adc|flag)"|双向/u);
 });
 
+test('同一网名在标签网络、卡底时钟行与图形层只有一个结论', async t => {
+    const base = await fs.realpath(os.tmpdir());
+    const workspace = await fs.mkdtemp(path.join(base, 'svtools-arch-clock-'));
+    t.after(async () => { await fs.rm(workspace, { recursive: true, force: true }); });
+    await fs.writeFile(path.join(workspace, 'clock.sv'), [
+        'module clock_top(input logic sys_clk_div, input logic nrst, input logic clk_en, output logic done);',
+        '    lane u_lane(.clk(sys_clk_div), .rst(nrst), .en(clk_en), .d(done));',
+        'endmodule',
+        'module lane(input logic clk, input logic rst, input logic en, output logic d);',
+        '    assign d = clk & ~rst & en;',
+        'endmodule',
+        '',
+    ].join('\n'));
+    const snapshot = await resolveContext({ workspace, top: 'clock_top' });
+    const { book } = await buildArchitectureBook(snapshot);
+    const page = book.pages.find(item => item.name === 'clock_top');
+    for (const name of ['sys_clk_div', 'nrst', 'clk_en']) {
+        assert.equal(isClockLike(name), true, name + ' 应判为时钟/复位');
+        assert.equal(page.links.find(item => item.name === name)?.labeled, true, name + ' 应进入标签网络');
+    }
+    const { edges } = diagramTopology(page, 'overview');
+    const clockEdges = edges.filter(edge => edge.clock);
+    assert.ok(clockEdges.length >= 3, '时钟/复位连线应进入时钟域');
+    assert.ok(clockEdges.every(edge => edge.clockOnly), '时钟连线应全部标记为同名标签连接');
+    assert.equal(isClockLike('ddr_init_done'), false);
+});
 test('时钟复位短标签与接口预览保留真实名称和未知方向', () => {
     assert.equal(signalKind('hp_axi_aclk'), 'CLK');
     assert.equal(signalKind('gp_clk_rst'), 'RST');

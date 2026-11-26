@@ -6,6 +6,7 @@ const { tokenize, parseDocument, matchDelimiters } = require('../editor/completi
 const { buildRTLDesign, bindings, protectedRanges } = require('../project/rtl-model');
 const { constantValue, MAX_WIDTH } = require('../project/rtl-expression');
 const { createNativeLoader } = require('../native-loader');
+const { connectionEvidence } = require('./interface-evidence');
 const { resolveContext, assertCurrent } = require('../agent/context');
 const { fail, result } = require('../agent/protocol');
 const { relative } = require('./workflow-contract');
@@ -279,10 +280,10 @@ function interfaceEvidence(parsed) {
     const evidence = [];
     for (const [key, bundle] of endpoints) {
         // 两端束按第一对配对判定；多端束逐对比较，任一对给出方向即视为可判定。
+        const model = unitInterface(bundle.intf);
         let best = null;
         for (let left = 0; left < bundle.list.length; left++) for (let right = left + 1; right < bundle.list.length; right++) {
-            const model = unitInterface(bundle.intf);
-            const result = require('./interface-evidence').connectionEvidence([bundle.list[left], bundle.list[right]], model);
+            const result = connectionEvidence([bundle.list[left], bundle.list[right]], model);
             if (result.routes.length && (!best || result.routes.length > best.routes.length)) best = result;
         }
         if (!best) continue;
@@ -375,4 +376,4 @@ async function command(action, input, { native } = {}) {
     return parsed.diagnostics.some(item => item.severity === 'error') ? { ...response, status: 'failed' } : response;
 }
 
-module.exports = { usesProfile, build, command, normalize, analyzeStructure, unitInterface, interfaceOverrides, position };
+module.exports = { usesProfile, build, command, normalize, analyzeStructure, unitInterface, interfaceOverrides, interfaceEvidence, position };

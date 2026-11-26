@@ -50,8 +50,6 @@
 .clock-net:hover { fill: var(--focus); }
 
 /* 图2 式边界端口：没有外框、表头和分隔线，只有端口符号 + 名称 + 类型。 */
-.diagram-card.pad .card-bg, .pad-frame, .pad-spine, .pad-eyebrow, .pad-count, .pad-title,
-.pad-row-state, .pad-row-rule, .pad-glyph { display: none; }
 .diagram-card.pad .pad-row-bg { fill: transparent; }
 .diagram-card.pad .pad-row:hover .pad-row-bg, .diagram-card.pad .pad-row:focus-visible .pad-row-bg { fill: var(--sunk-2); }
 .pad-pin-shape {
@@ -85,9 +83,6 @@
 .pin-label { font-family: var(--font-mono); font-size: 10.5px; fill: var(--ink-2); }
 .pin-label.bus { fill: var(--bus); }
 .pin-split { stroke: var(--line); stroke-width: 1; }
-
-/* ---------- 边界端口条（图2 式：无框，见文件上部 .diagram-card.pad 规则） ---------- */
-/* 形状与配色统一在上面的「图2 式边界端口」段落里定义，这里不再重复。 */
 
 /* ---------- 边界旗标（同方向端口不超过两个） ---------- */
 .boundary-symbol { fill: var(--sunk-2); stroke: var(--line-2); stroke-width: 1; }
@@ -144,8 +139,6 @@
 .architecture-svg [data-state]:not([data-state=normal], [data-state=dimmed]) .pad-row-bg {
     fill: color-mix(in srgb, var(--active) 12%, var(--panel));
 }
-.architecture-svg [data-state]:not([data-state=normal], [data-state=dimmed]) .pad-row-state { fill: var(--active); }
-.architecture-svg [data-state]:not([data-state=normal], [data-state=dimmed]) .pad-glyph,
 .architecture-svg [data-state]:not([data-state=normal], [data-state=dimmed]) .pad-name { fill: var(--active); }
 .architecture-svg [data-state]:not([data-state=normal], [data-state=dimmed]) .entry-name { fill: var(--ink); }
 .architecture-svg .diagram-edge[data-state]:not([data-state=normal], [data-state=dimmed]) .edge-line {

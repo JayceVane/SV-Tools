@@ -21,27 +21,50 @@ const MONO_TOKENS = {
     focus: '#2b2b2b', accent: '#2b2b2b', action: '#2b2b2b',
     bus: '#3c3c3c', wire: '#8f8f8f',
     up: '#333333', down: '#4d4d4d', weak: '#6a6a6a', warn: '#7a7a7a', bad: '#242424',
+    // 交互态令牌在浏览器里由 [data-state] 规则就地定义；独立图没有状态，固定为灰阶焦点色。
+    active: '#2b2b2b',
 };
 
 /** 独立图的文字颜色也要是灰阶，不能沿用页面上的蓝灰墨色。 */
 const MONO_INK = '#1a1a1a';
 const MONO_MUTED = '#666666';
 
-function resolveStyles(shared, diagram, overrides) {
-    const tokens = new Map();
-    const root = /:root\s*\{([^}]+)\}/u.exec(shared)[1];
+/** 解析 :root 主题令牌：先登记原值，再递归求值；前向引用、循环引用和拼写错误都会显式失败。 */
+function resolveTokens(shared, overrides) {
+    const root = /:root\s*\{([^}]+)\}/u.exec(shared)?.[1];
+    if (!root) throw new Error('架构样式缺少 :root 主题令牌。');
+    const declared = new Map();
     for (const [, name, original] of root.matchAll(/--([\w-]+):\s*([^;]+);/gu)) {
-        const value = original.trim().replace(/^var\(--vscode[^,]+,\s*(.*)\)$/u, '$1')
-            .replace(/^#([\da-f])([\da-f])([\da-f])$/iu, '#$1$1$2$2$3$3');
-        tokens.set(name, value.replace(/var\(--([\w-]+)\)/gu, (_, reference) => tokens.get(reference) || ''));
+        declared.set(name, original.trim().replace(/^#([\da-f])([\da-f])([\da-f])$/iu, '#$1$1$2$2$3$3'));
     }
-    for (const [name, value] of Object.entries(overrides || {})) tokens.set(name, value);
-    const resolved = diagram.replace(/var\(--([\w-]+)\)/gu, (_, name) => tokens.get(name) || tokens.get('focus'))
-        .replace(/color-mix\(in srgb,\s*#([\da-f]{6})\s+(\d+)%,\s*#([\da-f]{6})\)/giu, (_, first, amount, second) => {
-            const ratio = Number(amount) / 100;
-            return '#' + [0, 2, 4].map(offset => Math.round(parseInt(first.slice(offset, offset + 2), 16) * ratio
-                + parseInt(second.slice(offset, offset + 2), 16) * (1 - ratio)).toString(16).padStart(2, '0')).join('');
-        });
+    for (const [name, value] of Object.entries(overrides || {})) declared.set(name, value);
+    const resolved = new Map();
+    const resolve = (name, stack = []) => {
+        if (resolved.has(name)) return resolved.get(name);
+        if (!declared.has(name)) throw new Error('独立架构图引用了未知主题令牌 --' + name + '。');
+        if (stack.includes(name)) throw new Error('主题令牌存在循环引用：' + [...stack, name].join(' → '));
+        // 逐层剥掉 VS Code 变量：var(--vscode-x, fallback) 取 fallback，嵌套形式也能处理。
+        let raw = declared.get(name);
+        for (let next = raw.replace(/var\(--vscode[^,]+,\s*(.*)\)$/u, '$1'); next !== raw;
+            next = raw.replace(/var\(--vscode[^,]+,\s*(.*)\)$/u, '$1')) raw = next;
+        const value = raw.replace(/var\(--([\w-]+)\)/gu, (_, reference) => resolve(reference, [...stack, name]));
+        resolved.set(name, value);
+        return value;
+    };
+    for (const name of declared.keys()) resolve(name);
+    return resolved;
+}
+
+function resolveStyles(shared, diagram, overrides) {
+    const tokens = resolveTokens(shared, overrides);
+    const resolved = diagram.replace(/var\(--([\w-]+)\)/gu, (_, name) => {
+        if (!tokens.has(name)) throw new Error('独立架构图引用了未知主题令牌 --' + name + '。');
+        return tokens.get(name);
+    }).replace(/color-mix\(in srgb,\s*#([\da-f]{6})\s+(\d+)%,\s*#([\da-f]{6})\)/giu, (_, first, amount, second) => {
+        const ratio = Number(amount) / 100;
+        return '#' + [0, 2, 4].map(offset => Math.round(parseInt(first.slice(offset, offset + 2), 16) * ratio
+            + parseInt(second.slice(offset, offset + 2), 16) * (1 - ratio)).toString(16).padStart(2, '0')).join('');
+    });
     if (/var\(--|color-mix\(/u.test(resolved)) {
         throw new Error('独立架构图仍有未解析的主题令牌，PNG 栅格化会与浏览器不一致。');
     }
@@ -75,4 +98,4 @@ async function blockDesignImage(snapshot, arch, image, { style, detail, bundle }
     return { ...image, svg, evidence, width, height, bytes: Buffer.byteLength(svg, 'utf8'), sha256: createHash('sha256').update(svg).digest('hex') };
 }
 
-module.exports = { blockDesignImage, resolveStyles, MONO_TOKENS };
+module.exports = { blockDesignImage, resolveStyles, resolveTokens, MONO_TOKENS };

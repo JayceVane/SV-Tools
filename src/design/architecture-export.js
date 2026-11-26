@@ -8,7 +8,7 @@ const { resolveContext, buildArchitectureBook, assertBookCurrent } = require('./
 const { hash } = require('../agent/context');
 const { fail, result } = require('../agent/protocol');
 const { layoutDiagram, renderDiagram } = require('./architecture-diagram');
-const { escape, code, pageName, sourceLink, portTable, renderModuleSymbol, interfaceDetails, signalEnds, backgroundSignals, connectionPreview } = require('./architecture-details');
+const { escape, code, pageName, chapterNumber, chapterTitle, sourceLink, portTable, renderModuleSymbol, interfaceDetails, signalEnds, backgroundSignals, connectionPreview } = require('./architecture-details');
 const { printPdf } = require('./note-export');
 const { create } = require('./workflow-files');
 
@@ -33,7 +33,7 @@ async function renderArchitectureBook(book, modes, { print = false } = {}) {
     const review = book.pages.flatMap(page => page.checks.filter(item => !stubOutput(page, item)));
     const stubCount = book.pages.reduce((total, page) => total + page.checks.filter(item => stubOutput(page, item)).length, 0);
     const interfaceCount = book.pages.reduce((total, page) => total + page.links.filter(link => link.kind === 'interface').length, 0);
-    const chapters = new Map();
+    const chapterHtml = new Map();
     const children = new Map();
     for (const page of book.pages) {
         const parent = byId.has(page.parent) ? page.parent : null;
@@ -76,12 +76,12 @@ async function renderArchitectureBook(book, modes, { print = false } = {}) {
             .filter(Boolean).join(' · ');
         const heading = 'h' + Math.min(6, (page.depth || 0) + 2);
         const parent = byId.get(page.parent);
-        chapters.set(page.id, `<section class="chapter" id="${page.id}">
+        chapterHtml.set(page.id, `<section class="chapter" id="${page.id}">
             <div class="chapter-lead">
                 <header class="chapter-header">
-                    <div class="chapter-crumbs"><span class="chapter-index">${page.number || pad(index + 1)}</span><span class="chapter-nav"><a href="#contents">目录</a>${parent ? ` · <a href="#${parent.id}">返回 ${escape(parent.name)}</a>` : ''}</span></div>
-                    <${heading} class="chapter-heading">${escape(page.title || pageName(page))}</${heading}>
-                    <p class="chapter-title">${code(pageName(page))}${page.title ? '' : '（未命名模块职责）'}</p>
+                    <div class="chapter-crumbs"><span class="chapter-index">${chapterNumber(page, index)}</span><span class="chapter-nav"><a href="#contents">目录</a>${parent ? ` · <a href="#${parent.id}">返回 ${escape(parent.name)}</a>` : ''}</span></div>
+                    <${heading} class="chapter-heading">${escape(chapterTitle(page))}</${heading}>
+                    <p class="chapter-title">${code(pageName(page))}</p>
                     <p class="chapter-meta">${sourceLink(page.source, false)}${page.empty ? ' · 实现桩' : ''}${counts ? ' · ' + counts : ''}</p>
                 </header>
                 ${diagnostics.length ? `<aside class="book-review"><h3>本章待复核 · ${diagnostics.length}</h3><ul>${diagnosticItems(diagnostics)}</ul></aside>` : ''}
@@ -109,11 +109,11 @@ async function renderArchitectureBook(book, modes, { print = false } = {}) {
     const title = book.pages[0].title || book.top;
     function chapterContent(page) {
         const descendants = (children.get(page.id) || []).map(chapterContent).join('');
-        return chapters.get(page.id).replace('<!--chapter-children-->', descendants ? `<div class="chapter-children">${descendants}</div>` : '');
+        return chapterHtml.get(page.id).replace('<!--chapter-children-->', descendants ? `<div class="chapter-children">${descendants}</div>` : '');
     }
     function chapterNav(page) {
         const descendants = (children.get(page.id) || []).map(chapterNav).join('');
-        return `<li><a href="#${page.id}"><span class="toc-index">${page.number || pad(book.pages.indexOf(page) + 1)}</span><span class="toc-title">${escape(page.title || page.name)}</span><span class="toc-module">${page.title ? code(pageName(page)) : ''}</span></a>${descendants ? `<ol>${descendants}</ol>` : ''}</li>`;
+        return `<li><a href="#${page.id}"><span class="toc-index">${chapterNumber(page, book.pages.indexOf(page))}</span><span class="toc-title">${escape(chapterTitle(page))}</span><span class="toc-module">${code(pageName(page))}</span></a>${descendants ? `<ol>${descendants}</ol>` : ''}</li>`;
     }
     const roots = children.get(null) || [];
     const nav = roots.map(chapterNav).join('');
