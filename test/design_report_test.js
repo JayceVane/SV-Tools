@@ -96,6 +96,20 @@ endmodule
 `);
     const response = await run(['design', 'report', '--workspace', directory, '--top', 'top', '--out', 'rep']);
     assert.equal(response.exitCode, 0, JSON.stringify(response.output.diagnostics));
+    assert.equal(response.output.data.evidence.layout.renderer, 'block-design');
+    const svgFile = response.output.data.files.find(file => file.path.endsWith('.svg'));
+    const svg = await fsp.readFile(path.join(directory, svgFile.path), 'utf8');
+    assert.match(svg, /class="card-head"/u);
+    assert.match(svg, /class="schematic-pin/u);
+    assert.match(svg, /#2f6db3/u, '接口束沿用查看器的蓝色');
+    assert.ok(!svg.includes('var(--'), '独立 SVG 中的配色已解析，PNG 栅格化不依赖宿主主题');
+    assert.equal((svg.match(/id="svtools-evidence"/gu) || []).length, 1);
+    const leaf = await run(['design', 'render', '--workspace', directory, '--top', 'host', '--out', 'leaf']);
+    assert.equal(leaf.exitCode, 0, JSON.stringify(leaf.output.diagnostics));
+    assert.equal(leaf.output.data.evidence.layout.renderer, 'block-design');
+    const leafSvg = await fsp.readFile(leaf.output.artifacts[0].path, 'utf8');
+    assert.equal((leafSvg.match(/class="card-head"/gu) || []).length, 1, '叶子模块仍应绘出自己的模块框');
+    assert.match(leafSvg, /class="pin-label bus"[^>]*text-anchor="end">≡ m<\/text>/u, 'Master 接口放在模块右侧');
     const markdown = await fsp.readFile(path.join(directory, 'rep', 'architecture.md'), 'utf8');
     // 两端都驱动成员：角色名 master/slave 判定主流向，这条连接应写成 o 而不是 bus。
     const connectionSection = markdown.slice(markdown.indexOf('## 接口连接'));

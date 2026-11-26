@@ -17,6 +17,7 @@ const { summarizeToolResult, processSucceeded } = require('../toolchains/result'
 const { acquireWorkspaceLease } = require('../toolchains/workspace-lease');
 const { buildArchitecture } = require('../design/arch');
 const { layoutArchitecture, renderArchitectureSvg, defaultFileName, normalizeStyle } = require('../design/svg');
+const { blockDesignImage } = require('../design/architecture-image');
 const { validateSpec, generateScaffold } = require('../design/scaffold');
 const { createContainedDirectories, cleanupDirectories } = require('../design/scaffold-paths');
 const { diffArchitectures } = require('../design/diff');
@@ -329,7 +330,9 @@ async function render(input, { native } = {}) {
     const arch = await buildArchitecture({ workspace: options.workspace, files, top: input.top, includeDirs: context.includeDirs,
         defines: context.defines, depth: input.depth ?? 1, timeoutMs: options.timeoutMs, contextRevision: context.revision, engine: input.engine, native });
     const layoutResult = await layoutArchitecture(arch, { bundle, bundleNames, detail, boundaryLayout });
-    const image = renderArchitectureSvg(arch, layoutResult, { title: typeof input.title === 'string' ? input.title : undefined, style });
+    const image = await blockDesignImage(resolved, arch,
+        renderArchitectureSvg(arch, layoutResult, { title: typeof input.title === 'string' ? input.title : undefined, style }),
+        { style, detail, bundle });
     await assertCurrent(resolved);
     const outputDirectory = input.out ? path.resolve(options.workspace, input.out) : await directory(options.workspace,'design','render');
     // 与 design scaffold 同一安全模型：拒绝越界 --out 与 symlink/junction 逃逸，失败清理本轮创建的目录。
@@ -389,7 +392,7 @@ async function report(input) {
         defines: context.defines, depth: input.depth ?? 1, timeoutMs: options.timeoutMs, contextRevision: context.revision, engine: input.engine });
     const layoutResult = await layoutArchitecture(arch, { bundle, bundleNames, detail, boundaryLayout });
     const title = typeof input.title === 'string' ? input.title : (input.top + ' 架构报告');
-    const image = renderArchitectureSvg(arch, layoutResult, { title, style });
+    const image = await blockDesignImage(resolved, arch, renderArchitectureSvg(arch, layoutResult, { title, style }), { style, detail, bundle });
     await assertCurrent(resolved);
     const rasterized = rasterizeSvg(image.svg, { scale: DEFAULT_SCALE });
     const outputDirectory = input.out ? path.resolve(options.workspace, input.out) : await directory(options.workspace,'design','report');
