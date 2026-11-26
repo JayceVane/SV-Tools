@@ -166,11 +166,17 @@ async function buildArchitectureBook(snapshot, native) {
     const { design } = basis;
     const byId = new Map(design.modules.map(module => [module.id, module]));
     const ids = new Map();
-    function visit(id) {
+    const positions = new Map();
+    function visit(id, parent = null, number = '1') {
         const module = byId.get(id);
         if (!module || ids.has(id)) return;
         ids.set(id, 'module-' + (ids.size + 1));
-        for (const cell of module.cells) visit(cell.moduleId);
+        positions.set(id, { parent: parent ? ids.get(parent) : null, number, depth: number.split('.').length - 1 });
+        let child = 0;
+        for (const cell of module.cells) {
+            if (!byId.has(cell.moduleId) || ids.has(cell.moduleId)) continue;
+            visit(cell.moduleId, id, number + '.' + ++child);
+        }
     }
     visit(design.top);
     const sourceLocations = new Map();
@@ -186,7 +192,7 @@ async function buildArchitectureBook(snapshot, native) {
         }
         return { id, file: path.relative(workspace, location.path).split(path.sep).join('/'), line: location.line };
     }
-    const pages = [...ids.keys()].map(id => modulePage(byId.get(id), basis, ids, presentation, source, workspace));
+    const pages = [...ids.keys()].map(id => ({ ...modulePage(byId.get(id), basis, ids, presentation, source, workspace), ...positions.get(id) }));
     const loaded = { snapshot, presentationRevision, sourceLocations, book: { revision: hash(context.revision + presentationRevision),
         top: context.top, pages, diagnostics: basis.parsed.diagnostics, issues: basis.issues } };
     await assertBookCurrent(loaded);

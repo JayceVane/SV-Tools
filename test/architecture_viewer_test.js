@@ -10,7 +10,7 @@ const { run } = require('../src/cli/main');
 const { buildArchitectureBook, resolveContext, assertBookCurrent } = require('../src/design/architecture-model');
 const { diagramTopology, layoutDiagram, renderDiagram } = require('../src/design/architecture-diagram');
 const { exportArchitecture, renderArchitectureBook } = require('../src/design/architecture-export');
-const { renderModuleSymbol } = require('../src/design/architecture-details');
+const { renderModuleSymbol, connectionPreview, signalKind } = require('../src/design/architecture-details');
 
 test('报文汇聚简图保留独立实例、标签网络和架构握手证据，导出按章节跳转', async t => {
     const base = await fs.realpath(os.tmpdir());
@@ -26,6 +26,12 @@ test('报文汇聚简图保留独立实例、标签网络和架构握手证据�
     const [top] = loaded.book.pages;
     assert.equal(top.auto, 'overview');
     const fifo = top.nodes.find(node => node.name === 'u_fifo');
+    assert.equal(top.parent, null);
+    assert.equal(top.number, '1');
+    const child = loaded.book.pages.find(page => page.id === fifo.chapter);
+    assert.equal(child.parent, top.id);
+    assert.match(child.number, /^1\.\d+$/u);
+    assert.equal(child.depth, 1);
     assert.deepEqual(fifo.parameters, { DEPTH: 32 });
     assert.equal(loaded.book.pages.find(page => page.id === fifo.chapter).auto, 'detailed');
     const link = top.links.find(link => link.name === 'arbitrated');
@@ -34,6 +40,12 @@ test('报文汇聚简图保留独立实例、标签网络和架构握手证据�
     assert.deepEqual(link.members.map(({ name, width, flow }) => [name, width, flow]),
         [['payload', 32, 'forward'], ['lane', 2, 'forward'], ['last', 1, 'forward'], ['valid', 1, 'forward'], ['ready', 1, 'reverse']]);
     assert.deepEqual(link.members.at(-1).drivers, [1]);
+    const preview = connectionPreview(link, { node: fifo.id, port: 'enqueue' });
+    assert.match(preview, /<th>u_fifo\.enqueue<small>sink<\/small><\/th>/u);
+    assert.match(preview, /<code>payload<\/code><\/td><td>32<\/td><td>input<\/td>/u);
+    assert.match(preview, /<code>ready<\/code><\/td><td>1<\/td><td>output<\/td>/u);
+    assert.ok(!preview.includes('u_arbiter.selected'), '端口预览只展示所指端口的 modport 方向');
+    assert.match(connectionPreview(link), /<th>u_arbiter\.selected<small>source/u);
     const site = loaded.sourceLocations.get(link.endpoints[1].binding.id);
     assert.match((await fs.readFile(site.path, 'utf8')).split(/\r?\n/u)[site.line - 1], /\.enqueue\(arbitrated\)/u);
     const adc = top.links.find(link => link.name === 'adc0');
@@ -71,6 +83,10 @@ test('报文汇聚简图保留独立实例、标签网络和架构握手证据�
     const html = await fs.readFile(out, 'utf8');
     assert.ok(html.includes(`href="#${fifo.chapter}"`));
     assert.ok(html.includes(`id="${fifo.chapter}"`));
+    assert.match(html, /class="chapter-children"><section class="chapter"/u);
+    assert.match(html, /<h3 class="chapter-heading">/u);
+    assert.ok(html.includes(`<template id="preview-${link.id}:${fifo.id}:enqueue">`));
+    assert.match(svg, /data-preview-link="module-\d+-link-\d+"/u);
     assert.ok(html.includes(`href="#${link.id}"`));
     assert.match(html, /<code>u_fifo\.enqueue<\/code> → <code>u_arbiter\.selected<\/code>/u);
     assert.match(html, /<figure class="module-symbol" aria-label="packet_fifo #\(DEPTH=32\) 端口图"/u);
@@ -81,6 +97,7 @@ test('报文汇聚简图保留独立实例、标签网络和架构握手证据�
     assert.ok(printed.includes(`data-print-open id="${link.id}" open><summary>`));
     assert.match(printed, /class="book-detail book-stubs" data-print-open open/u);
     assert.ok(!printed.includes('<script>'));
+    assert.ok(!printed.includes('<template'), '打印报告不嵌入交互预览副本');
     const pinCount = markup => (markup.match(/schematic-pin/g) || []).length;
     const forced = await exportArchitecture(loaded, 'html', { out: 'architecture-detailed.html', modes: { [top.id]: 'detailed' } });
     const forcedHtml = await fs.readFile(forced, 'utf8');
@@ -135,6 +152,8 @@ endmodule
     assert.deepEqual(found?.details, { interface: 'shared', members: [{ name: 'irq', outputs: ['x.signal_out', 'y.signal_out'] }] });
     assert.equal(found.chapter, 'module-2');
     const html = await fs.readFile(exported.output.data.path, 'utf8');
+    assert.match(html, /<span class="chapter-index">1\.1\.1<\/span>/u);
+    assert.match(html, /<h4 class="chapter-heading">owner<\/h4>/u);
     assert.match(html, /成员 irq 声明了多个输出端/u);
     assert.match(html, /实现桩待实现输出 · 1/u);
     assert.match(html, /href="#module-2">subsystem<\/a> · \d+ 条待复核/u);
@@ -483,12 +502,29 @@ test('端口图按声明方向归类，引脚可选择，名称中的标记按�
     assert.match(markup, /group input[^]*?data-port="data&lt;in&gt;" aria-pressed="true"[^]*?16 位/u);
     const right = markup.match(/class="module-pin-group output"[^]*?<\/section>/u)?.[0];
     assert.match(right, /data-port="ready"[^]*?data-port="flag"[^]*?<span class="module-pin-direction" role="img" aria-label="双向">↔<\/span>/u);
-    const interfaces = markup.match(/class="module-pin-group interfaces"[^]*?<\/section>/u)?.[0];
-    assert.match(interfaces, /data-port="adc"[^]*?sample_link · sink/u);
-    assert.match(interfaces, /data-port="adc_full"[^]*?sample_link · 未声明 modport/u);
-    assert.match(interfaces, /module-interface-pin master"[^>]*data-port="request"[^>]*>[^]*?class="module-interface-role">Master</u);
-    assert.match(interfaces, /module-interface-pin slave"[^>]*data-port="reply"[^>]*>[^]*?class="module-interface-role">Slave</u);
+    const inputs = markup.match(/class="module-pin-group input"[^]*?<\/section>/u)?.[0];
+    assert.match(inputs, /data-port="adc"[^]*?sample_link · sink/u);
+    assert.match(inputs, /data-port="adc_full"[^]*?sample_link · <span[^>]*>—/u);
+    assert.match(right, /module-interface-pin master"[^>]*data-port="request"[^>]*>[^]*?class="module-interface-role">Master</u);
+    assert.match(inputs, /module-interface-pin slave"[^>]*data-port="reply"[^>]*>[^]*?class="module-interface-role">Slave</u);
     const shared = markup.match(/class="module-pin-group shared"[^]*?<\/section>/u)?.[0];
     assert.match(shared, /data-port="state_ref"/u);
     assert.doesNotMatch(shared, /data-port="(?:adc|flag)"|双向/u);
+});
+
+test('时钟复位短标签与接口预览保留真实名称和未知方向', () => {
+    assert.equal(signalKind('hp_axi_aclk'), 'CLK');
+    assert.equal(signalKind('gp_clk_rst'), 'RST');
+    assert.equal(signalKind('s_axi_aresetn'), 'RST');
+    assert.equal(signalKind('ddr_init_done'), '');
+    const html = connectionPreview({ name: '<bus>', type: 'bus_if', kind: 'interface',
+        endpoints: [{ name: 's', node: 'boundary:s', port: 's' }],
+        members: [{ name: '<data>', directions: ['unknown'] }] });
+    assert.match(html, /&lt;bus&gt;/u);
+    assert.match(html, /&lt;data&gt;/u);
+    assert.match(html, /未声明 modport/u);
+    assert.match(html, /待确认/u);
+    assert.ok(!html.includes('<bus>') && !html.includes('<data>'));
+    assert.match(connectionPreview({ name: 'data', kind: 'signal',
+        endpoints: [{ node: 'boundary:data', port: 'data' }], routes: [] }), /普通信号/u);
 });

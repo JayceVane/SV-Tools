@@ -109,6 +109,11 @@
 .book-nav .toc-title + .toc-module:empty { display: none; }
 
 .book-content { min-width: 0; }
+.chapter-heading { font-size: 19px; font-weight: 600; overflow-wrap: anywhere; }
+.book-nav ol ol { margin-left: 10px; border-left: 1px solid var(--line); }
+.book-nav a { grid-template-columns: max-content minmax(0, 1fr); }
+.book-nav .toc-index { min-width: 22px; }
+.chapter-children { padding-top: 12px; }
 .chapter { border-top: 1px solid var(--line-2); padding: 28px 0 34px; scroll-margin-top: 16px; }
 .chapter:first-child { border-top: 0; padding-top: 0; }
 .chapter-lead { break-inside: avoid; }
@@ -223,20 +228,22 @@
     .book-layout { display: block; padding-top: 8px; }
     .book-nav { position: static; max-height: none; overflow: visible; padding: 6px 8px; margin-bottom: 10px; border-radius: 2px; }
     .book-nav h2 { font-size: 8pt; }
-    .book-nav ol { columns: 3; column-gap: 18px; }
+    .book-nav > ol { columns: 3; column-gap: 18px; }
+    .book-nav ol ol { columns: auto; margin-left: 6px; }
     .book-nav li { break-inside: avoid; border-top: 0; }
-    .book-nav a { padding: 2px 0; font-size: 7.5pt; grid-template-columns: 16px minmax(0, 1fr); }
+    .book-nav li:has(> ol) { break-inside: auto; }
+    .book-nav a { padding: 2px 0; font-size: 7.5pt; grid-template-columns: max-content minmax(0, 1fr); }
     .book-nav .toc-module { display: none; }
     .book-search, #no-chapters, .book-diagram-tools { display: none; }
     .chapter { padding: 10px 0 12px; border-top: 1px solid #ccc; }
     .chapter-header { margin-bottom: 8px; }
-    .chapter-header h2 { font-size: 12pt; }
+    .chapter-header .chapter-heading { font-size: 12pt; }
     .chapter-title { font-size: 8.5pt; }
     .chapter-meta { font-size: 7pt; }
     .chapter-crumbs { margin-bottom: 4px; padding-bottom: 0; border-bottom: 0; }
     .chapter-nav { display: none; }
     .section-title { font-size: 7.5pt; padding-bottom: 3px; margin-bottom: 6px; }
-    .architecture-book :is(h2, h3, h4, summary, .section-title) { break-after: avoid; }
+    .architecture-book :is(h2, h3, h4, h5, h6, summary, .section-title) { break-after: avoid; }
     .architecture-book :is(tr, .diagram-print, .diagram-figure, .handshake > div, .book-review li,
         .named-connections dl > div, .book-detail) { break-inside: avoid; }
     .architecture-book p { margin-block: 2px 5px; }

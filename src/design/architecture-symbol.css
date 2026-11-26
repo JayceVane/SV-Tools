@@ -1,4 +1,4 @@
-/* 模块端口图：数据手册式器件符号。
+/* 模块端口图：Block Design 风格的模块边界。
    视觉契约见 docs/ARCHITECTURE_VISUAL.md 第 4 节；本文件由导出与查看器在 architecture.css
    之后加载，端口图样式全部集中在这里（旧版 .module-* 规则已从 architecture.css 移除）。 */
 
@@ -39,9 +39,10 @@
 }
 .module-symbol figcaption code { padding: 0; background: none; color: inherit; font: inherit; }
 
-/* ---------- 三列：输入 / 接口束 / 输出。
+/* ---------- 两侧：输入与 Slave 类接口在左，输出与 Master 类接口在右。
    空的语义分组由渲染层直接省略，列随内容收缩，不留空列宽度。 ---------- */
-.module-pin-sides { display: flex; align-items: stretch; }
+.module-pin-sides { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: stretch; }
+.module-pin-sides:has(> :only-child) { grid-template-columns: minmax(0, 1fr); }
 .module-symbol .module-pin-group { flex: 0 1 auto; min-width: 0; padding: 0 0 8px; }
 .module-pin-sides > .module-pin-group + .module-pin-group { border-left: 1px solid var(--line); }
 .module-pin-sides > .module-pin-group:empty { display: none; }
@@ -187,6 +188,9 @@
     padding: 5px 12px;
     white-space: normal;
 }
+.module-symbol .module-pin-group.output .module-interface-pin { grid-template-columns: minmax(0, 1fr) 13px; }
+.module-symbol .module-pin-group.output .module-interface-pin .module-bus-symbol { grid-column: 2; grid-row: 1; }
+.module-symbol .module-pin-group.output .module-interface-pin .module-interface-label { grid-column: 1; grid-row: 1; text-align: right; }
 .module-symbol .module-interface-pin.master { --bus-accent: var(--bus); }
 .module-symbol .module-interface-pin.slave { --bus-accent: var(--down); }
 
@@ -234,7 +238,7 @@
     letter-spacing: .03em;
 }
 
-.module-symbol .module-pin-group.interfaces li + li > .module-interface-pin { border-top: 1px solid var(--line); }
+.module-symbol li + li > .module-interface-pin { border-top: 1px solid var(--line); }
 
 /* ---------- 共享 / 引用分组：页脚带，样式与普通引脚一致 ---------- */
 .module-symbol > .module-pin-group.shared { border-top: 1px solid var(--line); }
@@ -243,9 +247,9 @@
 .module-symbol .module-pin-group.shared .module-pin { width: auto; padding: 0 6px; }
 
 /* ---------- 窄容器：单列堆叠 ---------- */
-@container (max-width: 520px) {
+@container (max-width: 360px) {
     .module-symbol { width: 100%; }
-    .module-pin-sides { flex-direction: column; align-items: stretch; }
+    .module-pin-sides { grid-template-columns: minmax(0, 1fr); }
     .module-symbol .module-pin-group { width: 100%; }
     .module-symbol .module-pin-sides > .module-pin-group + .module-pin-group {
         border-top: 1px solid var(--line);

@@ -28,7 +28,7 @@ function panelHtml(webview, vscode, root) {
     </section><section id="interface-view" class="connection-view" aria-labelledby="connection-title" hidden>
         <button id="back" type="button">返回架构图</button><h2 id="connection-title" tabindex="-1"></h2><div id="connection-body"></div>
     </section></div></div></main>
-    <script nonce="${nonce}" src="${uri('architecture-details.js')}"></script><script nonce="${nonce}" src="${uri('architecture-client.js')}"></script></body></html>`;
+    <script nonce="${nonce}" src="${uri('interface-evidence.js')}"></script><script nonce="${nonce}" src="${uri('architecture-details.js')}"></script><script nonce="${nonce}" src="${uri('architecture-hover.js')}"></script><script nonce="${nonce}" src="${uri('architecture-client.js')}"></script></body></html>`;
 }
 
 function activateArchitectureViewer(context, { vscode, projects, openReview }) {

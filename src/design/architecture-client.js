@@ -1,10 +1,10 @@
-/* global acquireVsCodeApi, ArchitectureDetails */
+/* global acquireVsCodeApi, ArchitectureDetails, ArchitectureHover */
 (function () {
     'use strict';
 
     const api = acquireVsCodeApi();
     const { escape, code, pageName, parameterText, sourceLink, portTable, renderModuleSymbol, portDescription,
-        interfaceDetails, signalEnds, backgroundSignals } = ArchitectureDetails;
+        interfaceDetails, signalEnds, backgroundSignals, connectionPreview } = ArchitectureDetails;
     const $ = id => document.getElementById(id);
     const action = (field, id, label) => `<button class="text-action" type="button" data-${field}="${escape(id)}">${escape(label)}</button>`;
     const post = (type, fields = {}) => api.postMessage({ type, revision: book?.revision, ...fields });
@@ -14,6 +14,10 @@
     let book, page, mode, request = 0, layout, selected = null, selectedEdge = null, selectedPort = null;
     let reviewFocus;
     let chapters, nodes, links, exportBusy = false, ancestors = [], pendingFocus, fitPreference;
+    const preview = ArchitectureHover.attach(document, target => {
+        const link = links?.get(target.dataset.previewLink);
+        return link ? connectionPreview(link, { node: target.dataset.previewNode, port: target.dataset.previewPort }) : '';
+    });
 
     function site(label, module) { return sourceLink(module.source, true, label); }
     function exportButtons() {
@@ -27,9 +31,21 @@
             `<li>${escape(item.message || item)}${item.source?.path || item.source?.file ? ` <small>${escape(item.source.path || item.source.file)}:${item.source.line || 1}</small>` : ''}</li>`).join('')}</ul></details>`;
     }
 
-    function showChapter(id, path = []) {
+    function chapterNavigation(parent = null) {
+        return book.pages.filter(module => (module.parent || null) === parent).map(module => {
+            const children = chapterNavigation(module.id);
+            return `<button type="button" data-chapter="${module.id}"${module.id === page.id ? ' aria-current="page"' : ''}>${module.title ? `<span>${escape(module.title)}</span>` : ''}${code((module.number || String(book.pages.indexOf(module) + 1).padStart(2, '0')) + ' · ' + pageName(module))}</button>${children ? `<div class="chapter-nav-children">${children}</div>` : ''}`;
+        }).join('');
+    }
+
+    function showChapter(id, path) {
         page = chapters.get(id);
         if (!page) return;
+        preview.hide();
+        if (!path) {
+            path = [];
+            for (let parent = chapters.get(page.parent); parent; parent = chapters.get(parent.parent)) path.unshift(parent.id);
+        }
         // 章节按模块定义组织，递归实例会回到同一章节：截断到首次出现，路径中不保留重复章节。
         const at = path.indexOf(id);
         ancestors = (at < 0 ? path : path.slice(0, at)).filter((item, index, all) => all.indexOf(item) === index);
@@ -46,7 +62,7 @@
         $('interface-view').hidden = true;
         $('breadcrumbs').innerHTML = [...ancestors.map(parent => action('chapter', parent, chapters.get(parent).name)),
             `<span aria-current="page">${escape(page.name)}</span>`].join('<span aria-hidden="true" class="separator">›</span>');
-        $('chapters').innerHTML = `<h2>模块章节</h2>${book.pages.map((module, index) => `<button type="button" data-chapter="${module.id}"${module.id === id ? ' aria-current="page"' : ''}>${module.title ? `<span>${escape(module.title)}</span>` : ''}${code(String(index + 1).padStart(2, '0') + ' · ' + pageName(module))}</button>`).join('')}`;
+        $('chapters').innerHTML = `<h2>模块章节</h2>${chapterNavigation()}`;
         $('page-title').textContent = page.title || page.name;
         $('page-meta').innerHTML = [page.title ? code(pageName(page)) : parameterText(page.parameters) && code(parameterText(page.parameters)),
             page.empty && '实现桩', site('', page)].filter(Boolean).join(' · ');
@@ -140,7 +156,12 @@
 
     function pinInspector(module) {
         const current = module.ports.find(port => port.name === selectedPort);
-        const symbol = renderModuleSymbol(pageName(module), module.ports, { interactive: true, selected: selectedPort });
+        const targets = new Map(module.ports.flatMap(port => {
+            const attached = portConnections(port.name, module === page ? null : module);
+            return attached.length === 1 ? [[port.name, attached[0].id]] : [];
+        }));
+        const symbol = renderModuleSymbol(pageName(module), module.ports, { interactive: true, selected: selectedPort, targets,
+            owner: module === page ? undefined : module.id });
         const table = module.ports.length ? `<details class="port-details"><summary>端口明细表</summary>${portTable(module.ports, true)}</details>` : '';
         const details = current ? `<section><h4>${code(current.name)}</h4><p class="subtle">${escape(portDescription(current))} ${sourceLink(current.declaration, true, '端口声明')}</p>
             ${linkList(portConnections(current.name, module === page ? null : module)) || '<p class="subtle">当前快照无可定位的连接。</p>'}</section>` : '';
@@ -175,6 +196,7 @@
     function showLink(id, origin) {
         const link = links.get(id);
         if (!link) return;
+        preview.hide();
         pendingFocus = origin;
         $('graph-content').hidden = true;
         $('interface-view').hidden = false;
@@ -214,7 +236,7 @@
         else if (data.child) showChapter(data.child, [...ancestors, page.id]);
         else if (data.chapter) {
             const index = ancestors.indexOf(data.chapter);
-            showChapter(data.chapter, index < 0 ? [] : ancestors.slice(0, index));
+            showChapter(data.chapter, index < 0 ? undefined : ancestors.slice(0, index));
         } else if (data.edge) {
             const edge = layout?.edges.find(edge => edge.id === data.edge);
             if (edge?.links.length === 1) showLink(edge.links[0], target);

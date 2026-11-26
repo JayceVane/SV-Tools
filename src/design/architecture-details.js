@@ -1,6 +1,7 @@
 /* global module */
 (function (root) {
     'use strict';
+    const { roleScore } = typeof module === 'object' && module.exports ? require('./interface-evidence') : root.InterfaceEvidence;
 
     const escape = value => String(value).replace(/[&<>"']/gu, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]);
     const code = value => `<code>${escape(value)}</code>`;
@@ -41,7 +42,13 @@
         return [port.type, direction(port.direction), port.width == null ? '' : `${port.width} 位`].filter(Boolean).join(' · ');
     }
 
-    function renderModuleSymbol(name, ports, { interactive = false, selected, targets } = {}) {
+    function signalKind(name) {
+        if (/(?:^|_)(?:[a-z]*rstn?|[a-z]*resetn?)(?:_|$)/iu.test(name || '')) return 'RST';
+        if (/(?:^|_)(?:[a-z]*clk|clock)(?:_|$)/iu.test(name || '')) return 'CLK';
+        return '';
+    }
+
+    function renderModuleSymbol(name, ports, { interactive = false, selected, targets, owner } = {}) {
         if (!ports.length) return '<p class="subtle">没有已解析的端口。</p>';
         const groups = groupPorts(ports, 'output');
         const interfaces = groups.shared.filter(port => port.direction === 'interface');
@@ -51,7 +58,8 @@
             const tag = interactive ? 'button' : target ? 'a' : 'span';
             const attrs = interactive ? ` type="button" data-port="${escape(port.name)}" aria-pressed="${port.name === selected}"`
                 : target ? ` href="#${escape(target)}"` : '';
-            return `<${tag} class="${className}"${attrs} title="${escape(portDescription(port))}">${content}</${tag}>`;
+            const preview = target ? ` data-preview-link="${escape(target)}" data-preview-port="${escape(port.name)}"${owner ? ` data-preview-node="${escape(owner)}"` : ''}` : '';
+            return `<${tag} class="${className}"${attrs}${preview} aria-label="${escape(port.name + ' · ' + portDescription(port))}">${content}</${tag}>`;
         };
         const heading = (label, english, total) => `<h4>${label}${english ? `<span class="module-pin-group-en">${english}</span>` : ''}<span class="module-pin-count">${total}</span></h4>`;
         const pin = port => {
@@ -61,10 +69,7 @@
             const content = `<span class="module-pin-lead" data-direction="${escape(['input', 'output', 'inout', 'ref'].includes(port.direction) ? port.direction : 'unknown')}" aria-hidden="true"></span>${code(port.name)}<small class="module-pin-width">${escape(width)}${marker}</small>`;
             return `<li${bidirectional ? ' class="bidirectional"' : ''}>${control(port, content)}</li>`;
         };
-        const side = (kind, label, english) => groups[kind].length
-            ? `<section class="module-pin-group ${kind}" aria-label="${label}">${heading(label, english, groups[kind].length)}<ul>${groups[kind].map(pin).join('')}</ul></section>`
-            : '';
-        const terminals = interfaces.map(port => {
+        const terminals = new Map(interfaces.map(port => {
             const [type, role] = (port.type || '').split('.', 2);
             const roleLabel = role === 'master' ? 'Master' : role === 'slave' ? 'Slave' : '';
             const badge = roleLabel ? `<span class="module-interface-role">${roleLabel}</span>` : '';
@@ -73,18 +78,26 @@
             const subtitle = roleLabel ? escape(description) : role ? escape(detail) : `${escape(description)} · <span class="module-interface-missing" aria-hidden="true">—</span>`;
             const hint = role ? '' : ` title="${escape(detail)}"`;
             const content = `<span class="module-bus-symbol" aria-hidden="true"></span><span class="module-interface-label"><strong>${code(port.name)}${badge}</strong><small${hint}>${subtitle}</small></span>`;
-            return `<li>${control(port, content, 'module-pin module-interface-pin' + (roleLabel ? ` ${role}` : ''))}</li>`;
-        }).join('');
-        const buses = interfaces.length
-            ? `<section class="module-pin-group interfaces" aria-label="接口束">${heading('接口束', 'INTERFACES', interfaces.length)}<ul>${terminals}</ul></section>`
-            : '';
+            return [port.name, `<li>${control(port, content, 'module-pin module-interface-pin' + (roleLabel ? ` ${role}` : ''))}</li>`];
+        }));
+        const interfaceSides = { input: [], output: [] };
+        for (const port of interfaces) {
+            const score = roleScore({ modport: port.type?.split('.')[1] });
+            interfaceSides[score > 0 ? 'output' : 'input'].push(port);
+        }
+        const side = (kind, label, english) => {
+            const buses = interfaceSides[kind];
+            const count = groups[kind].length + buses.length;
+            const caption = buses.length ? groups[kind].length ? label + ' / 接口' : '接口' : label;
+            return count ? `<section class="module-pin-group ${kind}" aria-label="${caption}">${heading(caption, english, count)}<ul>${buses.map(port => terminals.get(port.name)).join('')}${groups[kind].map(pin).join('')}</ul></section>` : '';
+        };
         const outputLabel = groups.output.some(port => port.direction === 'inout') ? '输出 / 双向' : '输出';
         const sharedLabel = [...new Set(groups.shared.map(port => port.direction === 'ref' ? '引用' : '方向待确认'))].join(' / ');
         const shared = groups.shared.length
             ? `<section class="module-pin-group shared" aria-label="${sharedLabel}">${heading(sharedLabel, '', groups.shared.length)}<ul>${groups.shared.map(pin).join('')}</ul></section>`
             : '';
         return `<div class="module-symbol-frame"><figure class="module-symbol" aria-label="${escape(name)} 端口图"><figcaption>${code(name)}</figcaption>
-            <div class="module-pin-sides">${side('input', '输入', 'INPUT')}${buses}${side('output', outputLabel, 'OUTPUT')}</div>${shared}</figure></div>`;
+            <div class="module-pin-sides">${side('input', '输入', 'INPUT')}${side('output', outputLabel, 'OUTPUT')}</div>${shared}</figure></div>`;
     }
 
     function routeText(member, endpoints) {
@@ -128,6 +141,25 @@
         return link.endpoints.map(endpoint => code(endpointName(endpoint, nodes))).join(link.routes.length ? ' → ' : ' ↔ ');
     }
 
+    function connectionPreview(link, { node, port } = {}) {
+        const kind = { CLK: '时钟网络', RST: '复位网络' }[signalKind(link.name)] || '普通信号';
+        const title = `<header><strong>${escape(link.name)}</strong><span>${escape(link.type || kind)}</span></header>`;
+        if (link.kind !== 'interface') {
+            const rows = link.endpoints.map((endpoint, index) => {
+                const drives = link.routes.some(route => route.source === index);
+                const receives = link.routes.some(route => route.target === index);
+                const name = endpoint.name || (endpoint.node.startsWith('boundary:') ? endpoint.port : endpoint.node.replace(/^instance:/u, '') + '.' + endpoint.port);
+                return `<tr><td>${code(name)}</td><td>${drives && receives ? '双向' : drives ? '源端' : receives ? '接收端' : '待确认'}</td></tr>`;
+            }).join('');
+            return `${title}<table><thead><tr><th>端点</th><th>作用</th></tr></thead><tbody>${rows}</tbody></table>`;
+        }
+        const at = link.endpoints.findIndex(endpoint => (!node || endpoint.node === node) && endpoint.port === port);
+        const endpoints = at < 0 ? link.endpoints : [link.endpoints[at]];
+        const columns = endpoints.map(endpoint => `<th>${escape(endpoint.name || endpoint.port)}<small>${escape(endpoint.modport || '未声明 modport')}</small></th>`).join('');
+        const rows = link.members.map(member => `<tr><td>${code(member.name)}</td><td>${member.width ?? '待确认'}</td>${(at < 0 ? member.directions : [member.directions[at]]).map(value => `<td>${escape(direction(value))}</td>`).join('')}</tr>`).join('');
+        return `${title}<table><thead><tr><th>成员</th><th>位宽</th>${columns}</tr></thead><tbody>${rows}</tbody></table>`;
+    }
+
     function backgroundSignals(page, interactive) {
         const groups = new Map();
         for (const link of page.links.filter(link => link.labeled)) for (const name of link.names) {
@@ -143,7 +175,7 @@
     }
 
     const details = { escape, code, pageName, parameterText, sourceLink, portTable, groupPorts, portDescription, renderModuleSymbol,
-        interfaceDetails, signalEnds, backgroundSignals };
+        interfaceDetails, signalEnds, backgroundSignals, connectionPreview, signalKind };
     if (typeof module === 'object' && module.exports) module.exports = details;
     else root.ArchitectureDetails = details;
 })(globalThis);

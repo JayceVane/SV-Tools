@@ -1,6 +1,6 @@
 'use strict';
 
-const { escape, portDescription } = require('./architecture-details');
+const { escape, portDescription, signalKind } = require('./architecture-details');
 const { terminalCaption, terminalWidth, terminalSymbol } = require('../circuit/symbol-library');
 const { roleScore } = require('./interface-evidence');
 
@@ -361,9 +361,12 @@ function measureInstance(card, detailed, assignment, incident) {
         name: !multi && item.port ? item.port : item.name })));
     for (const port of card.groupPorts) {
         const matching = (incident || []).filter(item => port.edges.includes(item.id));
+        port.port = matching[0]?.port;
+        port.links = [...new Set(matching.map(item => item.link))];
         port.clock = matching.every(item => item.clock);
         port.net = [...new Set(matching.filter(item => item.clock).map(item => item.name))].join(' / ');
         if (port.clock && port.net !== port.caption) port.caption += ' · ' + port.net;
+        if (port.clock) port.caption = (signalKind(port.net) || signalKind(port.port)) + ' ' + port.caption;
     }
     const entryWidth = card.entries.length
         ? 12 + Math.max(...card.entries.map(entry => textWidth(entry.name, FONT.entryName, MONO))) + 24
@@ -466,7 +469,7 @@ function measurePad(card, assignment) {
         const port = node.ports?.[0];
         const direction = port?.direction && port.direction !== 'unknown' ? port.direction : node.direction;
         return { node, port, direction, glyph: GLYPHS[direction] || GLYPHS.other,
-            name: port?.name || node.name, meta: portMeta(port) };
+            name: port?.name || node.name, meta: [signalKind(node.name), portMeta(port)].filter(Boolean).join(' ') };
     });
     const nameMax = Math.max(0, ...card.rows.map(row => textWidth(row.name, FONT.padName, MONO)));
     const metaMax = Math.max(0, ...card.rows.map(row => textWidth(row.meta, FONT.padMeta, MONO)));
@@ -561,6 +564,7 @@ function attachPeers(cards, edges) {
 
 function guessSide(card, port) {
     const peers = card.peerPorts?.get(port.name) || [];
+    if (!peers.length && port.direction === 'interface') return roleScore({ modport: port.type?.split('.')[1] }) > 0 ? 'EAST' : 'WEST';
     let score = 0;
     for (const peer of peers) {
         if (peer.card.kind === 'pad' || peer.card.kind === 'boundary') score += peer.card.edgeSide === 'left' ? -1 : 1;
@@ -901,7 +905,7 @@ async function layoutDiagram(page, mode) {
                 if (!link) continue;
                 incident.get(side).push({ id: edge.id, peer, port: side === edge.from ? edge.fromPort : edge.toPort,
                     outgoing: side === edge.from ? edge.forward : edge.reverse,
-                    clock: edge.local, name: link.name, bus: link.kind === 'interface' });
+                    clock: edge.local, link: link.id, name: link.name, bus: link.kind === 'interface' });
             }
             // 只有一个关联连线时补一条汇总，避免非接口信号组丢掉"N 条"的规模感。
             if (!edge.links.length) incident.get(side).push({ id: edge.id, peer, name: '', bus: false });
@@ -999,6 +1003,9 @@ function renderDiagram(diagram, page, interactive) {
     const action = (field, key, title) => interactive
         ? ' data-' + field + '="' + escape(key) + '" tabindex="0" role="button" aria-label="' + escape(title) + '"' : '';
     const link = href => !href ? ['', ''] : ['<a href="#' + escape(href) + '">', '</a>'];
+    const preview = (id, node, port) => id ? ' data-preview-link="' + escape(id) + '"'
+        + (node ? ' data-preview-node="' + escape(node) + '"' : '') + (port ? ' data-preview-port="' + escape(port) + '"' : '') : '';
+    const portLink = (node, port) => page.links.find(item => item.endpoints.some(endpoint => endpoint.node === node && endpoint.port === port))?.id;
 
     const edgeMarkup = diagram.edges.map(edge => {
         const sections = (edge.sections || []).map(section => [section.startPoint, ...(section.bendPoints || []), section.endPoint])
@@ -1025,7 +1032,7 @@ function renderDiagram(diagram, page, interactive) {
                 + edge.at.width + '" height="' + edge.at.height + '" rx="2"/><text x="4" y="11">' + escape(edge.label) + '</text></g>'
             : '';
         const attrs = interactive ? action('edge', edge.id, edge.names.join('、')) : '';
-        const body = '<g class="' + className + '"' + attrs + ' data-state="normal"><title>' + escape(edge.names.join('、'))
+        const body = '<g class="' + className + '"' + attrs + preview(edge.links.length === 1 ? edge.links[0] : null) + ' data-state="normal"><title>' + escape(edge.names.join('、'))
             + '</title>' + hits + lines + arrows + label + '</g>';
         if (!interactive && edge.links.length === 1) {
             const [open, close] = link(edge.links[0]);
@@ -1052,7 +1059,7 @@ function renderDiagram(diagram, page, interactive) {
                 const attrs = action('node', row.node.id, (row.name + ' ' + (row.port ? portDescription(row.port) : '')).trim());
                 const baseline = Math.round(row.y + 4);
                 const symbolX = east ? card.width - PAD_SYM : 0;
-                return '<g class="pad-row' + (row.direction === 'interface' ? ' bus' : '') + '"' + attrs + '><title>'
+                return '<g class="pad-row' + (row.direction === 'interface' ? ' bus' : '') + '"' + attrs + preview(portLink(row.node.id, row.name), row.node.id, row.name) + '><title>'
                     + escape(row.name + ' · ' + (row.port ? portDescription(row.port) : '边界端口')) + '</title>'
                     + '<rect class="pad-row-bg" x="0" y="' + row.top + '" width="' + card.width + '" height="' + card.rowH + '"/>'
                     + '<polygon class="pad-pin-shape" points="' + row.terminal.points + '" transform="translate('
@@ -1113,7 +1120,9 @@ function renderDiagram(diagram, page, interactive) {
                 ? '<rect class="group-port-tip" x="' + (edge - 3.25) + '" y="' + (port.y - 3.25)
                     + '" width="6.5" height="6.5" rx="1"/>'
                 : '<circle class="group-port-tip" cx="' + edge + '" cy="' + port.y + '" r="2.7"/>';
-            return '<g class="group-port' + (port.bus ? ' bus' : '') + (port.clock ? ' clock' : '') + '"><title>' + escape(port.caption) + '</title>'
+            return '<g class="group-port' + (port.bus ? ' bus' : '') + (port.clock ? ' clock' : '') + '"'
+                + preview(port.links?.length === 1 ? port.links[0] : null, single ? node.id : null, single ? port.port : null)
+                + '><title>' + escape(port.caption) + '</title>'
                 + '<line class="group-port-stem" x1="' + edge + '" y1="' + port.y + '" x2="' + inner + '" y2="' + port.y + '"/>'
                 + tip
                 + '<text class="group-port-label" x="' + (west ? edge + 12 : edge - 12) + '" y="' + (port.y + 4)
@@ -1128,7 +1137,7 @@ function renderDiagram(diagram, page, interactive) {
                 : 'x1="' + card.width + '" y1="' + pin.y + '" x2="' + (card.width + 6) + '" y2="' + pin.y + '"';
             const marker = pin.bus ? busGlyph(west ? -14 : card.width + 6, pin.y)
                 : '<circle class="pin-dot" cx="' + (west ? -6 : card.width + 6) + '" cy="' + pin.y + '" r="3"/>';
-            return '<g class="schematic-pin"><title>' + escape(pin.port.name + ' · ' + portDescription(pin.port)) + '</title>'
+            return '<g class="schematic-pin"' + preview(portLink(node.id, pin.port.name), node.id, pin.port.name) + '><title>' + escape(pin.port.name + ' · ' + portDescription(pin.port)) + '</title>'
                 + '<line class="pin-stub" ' + stub + '/>' + marker + '<text class="pin-label' + (pin.bus ? ' bus' : '') + '" x="'
                 + (west ? 12 : card.width - 12) + '" y="' + (pin.y + 4) + '" text-anchor="' + (west ? 'start' : 'end') + '">'
                 + escape(pin.caption) + '</text></g>';
@@ -1152,7 +1161,7 @@ function renderDiagram(diagram, page, interactive) {
 
     const region = diagram.clockRegion;
     const clockRegion = region ? '<g class="clock-region"><rect x="' + region.x + '" y="' + region.y + '" width="' + region.width
-        + '" height="' + region.height + '" rx="5"/><text x="16" y="' + (region.y + 21) + '">时钟 / 复位 · 同名标签连接</text></g>' : '';
+        + '" height="' + region.height + '" rx="5"/><text x="16" y="' + (region.y + 21) + '">时钟 / 复位 · 同名标签连接（CLK / RST）</text></g>' : '';
     return '<svg class="architecture-svg" xmlns="http://www.w3.org/2000/svg" width="' + diagram.width + '" height="'
         + diagram.height + '" viewBox="0 0 ' + diagram.width + ' ' + diagram.height + '" role="'
         + (interactive ? 'group' : 'img') + '" aria-label="' + escape(page.name) + ' 架构图">'

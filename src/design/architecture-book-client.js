@@ -1,3 +1,4 @@
+/* global ArchitectureHover */
 'use strict';
 
 (() => {
@@ -7,6 +8,11 @@
     const links = [...navigation.querySelectorAll('ol a')];
     const chapterLinks = new Map(links.map(link => [link.getAttribute('href').slice(1), link]));
     let current, closedForPrint = [];
+    ArchitectureHover.attach(document, target => {
+        const { previewLink: link, previewNode: node, previewPort: port } = target.dataset;
+        const endpoint = port ? `:${node || 'boundary:' + port}:${port}` : '';
+        return (document.getElementById('preview-' + link + endpoint) || document.getElementById('preview-' + link))?.innerHTML || '';
+    });
 
     filter.addEventListener('input', () => {
         const query = filter.value.trim().toLowerCase();
@@ -15,6 +21,10 @@
             const matches = link.textContent.toLowerCase().includes(query);
             link.parentElement.hidden = !matches;
             found ||= matches;
+        }
+        for (const link of links) {
+            if (link.parentElement.hidden) continue;
+            for (let parent = link.parentElement.parentElement.closest('li'); parent; parent = parent.parentElement.closest('li')) parent.hidden = false;
         }
         empty.hidden = found;
     });

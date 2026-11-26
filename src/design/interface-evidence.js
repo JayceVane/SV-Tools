@@ -1,3 +1,5 @@
+/* global module */
+(function (root) {
 'use strict';
 
 /**
@@ -87,4 +89,7 @@ function connectionEvidence(endpoints, model) {
     return { members, handshake, routes, flowEvidence: routes.length ? evidence : null };
 }
 
-module.exports = { connectionEvidence, roleScore };
+const evidence = { connectionEvidence, roleScore };
+if (typeof module === 'object' && module.exports) module.exports = evidence;
+else root.InterfaceEvidence = evidence;
+})(globalThis);
