@@ -210,6 +210,42 @@ endmodule
     assert.equal((await layoutDiagram(producer, producer.auto)).width, 0);
 });
 
+test('简图折叠分组后组内连线以束清单保留，不再静默丢弃', async t => {
+    const base = await fs.realpath(os.tmpdir());
+    const workspace = await fs.mkdtemp(path.join(base, 'svtools-arch-'));
+    t.after(async () => {
+        if (await fs.realpath(workspace) === workspace && path.dirname(workspace) === base) await fs.rm(workspace, { recursive: true, force: true });
+    });
+    // ep 实例被折进同一张分组卡片，两者之间的接口必须出现在卡片脚注，而不是消失。
+    await fs.writeFile(path.join(workspace, 'grouped.sv'), `
+interface link_if;
+    logic [7:0] data;
+    logic       valid;
+    modport src (output data, output valid);
+    modport dst (input data, input valid);
+endinterface
+module leaf(link_if.src out); ... endmodule
+module sink(link_if.dst in); ... endmodule
+module top;
+    link_if inner();
+    leaf u_leaf(.out(inner));
+    sink u_sink(.in(inner));
+endmodule
+`);
+    await fs.writeFile(path.join(workspace, 'svtools.architecture.json'),
+        JSON.stringify({ groups: { top: { u_leaf: '成对通路', u_sink: '成对通路' } } }));
+    const { book } = await buildArchitectureBook(await resolveContext({ workspace, top: 'top' }));
+    const [top] = book.pages;
+    const { cards, edges } = diagramTopology(top, 'overview');
+    const card = cards.find(item => item.title === '成对通路');
+    assert.ok(card, '分组卡片必须存在');
+    assert.deepEqual(card.internal.map(item => item.name), ['inner'], '组内接口束必须记入卡片脚注');
+    assert.equal(card.internal[0].kind, 'interface');
+    assert.ok(!edges.some(edge => edge.links.some(id => top.links.find(link => link.id === id)?.name === 'inner')), '组内束不应再画成自环');
+    const svg = renderDiagram(await layoutDiagram(top, 'overview'), top, false);
+    assert.match(svg, /class="card-foot internal"[^>]*>组内束 inner</u);
+});
+
 test('端口图按声明方向归类，引脚可选择，名称中的标记按文本显示', () => {
     const markup = renderModuleSymbol('top', [
         { name: 'data<in>', direction: 'input', width: 16 },

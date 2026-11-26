@@ -25,6 +25,8 @@
 .card-chip.status.unresolved rect { stroke: var(--warn); stroke-dasharray: 3 2; }
 .card-chip.status.unresolved text { fill: var(--warn); }
 .card-foot { font-family: var(--font-mono); font-size: 10px; fill: var(--muted); }
+/* 组内束：简图折叠同一功能组后，组内实例之间的连接以清单形式留在卡片脚注。 */
+.card-foot.internal { fill: var(--bus); }
 
 /* 分组卡片成员行 */
 .node-entry .row-bg { fill: transparent; }

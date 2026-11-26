@@ -95,6 +95,13 @@ function footnoteText(labels) {
     return '≡ ' + shown.join(' · ') + (rest > 0 ? ' +' + rest : '');
 }
 
+function internalText(bundles) {
+    if (!bundles?.length) return '';
+    const shown = bundles.slice(0, TITLE_NAMES).map(bundle => bundle.name);
+    const rest = bundles.length - shown.length;
+    return '组内束 ' + shown.join(' · ') + (rest > 0 ? ' +' + rest : '');
+}
+
 function boundaryCategory(node) {
     const port = node.ports?.[0];
     const direction = port?.direction && port.direction !== 'unknown' ? port.direction : node.direction;
@@ -169,10 +176,21 @@ function diagramTopology(page, mode) {
     const pairs = new Map(), edges = [];
     // 端口排的每一行都要独立成线，才能追出接口束属于哪条连线；涉及点名的边不进入合并表。
     const padIds = new Set(cards.filter(card => card.kind === 'pad').map(card => card.id));
+    const cardOf = new Map(cards.map(card => [card.id, card]));
+    // 简图把同一功能组的实例折成一张卡片后，组内连线无法再画成线。
+    // 这些连线必须记到卡片的组内束清单里，否则读者会以为组内实例之间没有连接。
+    function noteInternal(cardId, link) {
+        const owner = cardOf.get(cardId);
+        if (!owner || owner.kind !== 'instance') return;
+        if (!owner.internal) owner.internal = [];
+        if (!owner.internal.some(item => item.id === link.id)) owner.internal.push({ id: link.id, name: link.name, kind: link.kind });
+    }
     function add(source, target, link, forward) {
         if (!source.card || !target.card || pinKey(source) === pinKey(target)) return;
-        // 简图按卡片合并后，同一分组内部的连线不应变成自环。
-        if (overview && source.card === target.card) return;
+        if (overview && source.card === target.card) {
+            noteInternal(source.card, link);
+            return;
+        }
         const merged = overview && !padIds.has(source.card) && !padIds.has(target.card);
         const key = [source.card, target.card].sort().join('/') + '|' + link.kind;
         let edge = merged && pairs.get(key);
@@ -188,7 +206,11 @@ function diagramTopology(page, mode) {
     for (const link of drawn) {
         const refs = link.endpoints.map(endpoint => ({ card: locations.get(endpoint.node), port: endpoint.port }));
         const endpoints = [...new Map(refs.filter(ref => ref.card).map(ref => [pinKey(ref), ref])).values()];
-        if (endpoints.length < 2) continue;
+        if (endpoints.length < 2) {
+            // 折进同一张卡片后两端合成一个锚点：把这条连线记成组内束，不能静默丢弃。
+            if (overview && endpoints.length === 1) noteInternal(endpoints[0].card, link);
+            continue;
+        }
         if (link.routes.length && endpoints.length === 2) {
             for (const route of link.routes) add(refs[route.source], refs[route.target], link, true);
         } else if (endpoints.length === 2) {
@@ -293,7 +315,11 @@ function measureInstance(card, detailed, assignment, incident) {
         ? 12 + Math.max(...card.entries.map(entry => textWidth(entry.name, FONT.entryName, MONO))) + 24
             + Math.max(...card.entries.map(entry => textWidth(entry.type, FONT.entryType, MONO))) + 12 : 0;
     card.footnote = footnoteText(card.labels);
-    const footWidth = card.footnote ? 24 + Math.min(NOTE_MAX, textWidth(card.footnote, FONT.foot, MONO)) : 0;
+    // 组内束单独占一行，避免和标签网络混在一起（前者是组内实例之间的连接，后者是时钟复位这类同名网络）。
+    card.internalText = internalText(card.internal);
+    const footWidth = card.footnote || card.internalText
+        ? 24 + Math.max(card.footnote ? Math.min(NOTE_MAX, textWidth(card.footnote, FONT.foot, MONO)) : 0,
+            card.internalText ? Math.min(NOTE_MAX, textWidth(card.internalText, FONT.foot, MONO)) : 0) : 0;
     card.pins = detailed && card.nodes.length === 1 && (node?.ports || []).length ? buildPins(card, assignment) : [];
     let westMax = 0, eastMax = 0;
     for (const pin of card.pins) {
@@ -331,7 +357,8 @@ function measureInstance(card, detailed, assignment, incident) {
     card.entries.forEach((entry, index) => { entry.y = bodyTop + index * ENTRY_ROW; });
     const body = card.pins.length ? scalarRows * PIN_PITCH + gap + busRows * PIN_PITCH + BODY_PAD * 2 : 0;
     const content = card.entries.length ? card.entries.length * ENTRY_ROW : body;
-    card.height = bodyTop + content + (card.footnote ? FOOT : 0);
+    const footLines = (card.footnote ? 1 : 0) + (card.internalText ? 1 : 0);
+    card.height = bodyTop + content + footLines * FOOT;
     let x = card.width - 12;
     for (let index = card.chips.length - 1; index >= 0; index--) {
         const chip = card.chips[index];
@@ -700,6 +727,16 @@ const overlaps = (a, b, gap = 0) => a.x < b.x + b.w + gap && a.x + a.w + gap > b
 
 function placeLabels(edges, cards, width, height) {
     const obstacles = cards.map(card => ({ x: card.x - 2, y: card.y - 2, w: card.width + 4, h: card.height + 4 }));
+    // 其它连线也是障碍：名字虽然带白边，压在别的线上仍然读不清。只取正交段的外接矩形（2px 宽）。
+    const wires = [];
+    for (const edge of edges) for (const section of edge.sections || []) {
+        const points = [section.startPoint, ...(section.bendPoints || []), section.endPoint];
+        for (let step = 1; step < points.length; step++) {
+            const from = points[step - 1], to = points[step];
+            wires.push({ edge: edge.id, x: Math.min(from.x, to.x) - 1, y: Math.min(from.y, to.y) - 1,
+                w: Math.abs(to.x - from.x) + 2, h: Math.abs(to.y - from.y) + 2 });
+        }
+    }
     const placed = [];
     for (const edge of edges) {
         edge.at = undefined;
@@ -725,6 +762,7 @@ function placeLabels(edges, cards, width, height) {
                 if (x < 8 || x + labelWidth > width - 8) continue;
                 const rect = { x, y: candidate.y - LABEL_H / 2, w: labelWidth, h: LABEL_H };
                 if (obstacles.some(item => overlaps(rect, item, 2))) continue;
+                if (wires.some(item => item.edge !== edge.id && overlaps(rect, item, 1))) continue;
                 if (placed.some(item => overlaps(rect, item, 2))) continue;
                 spot = rect;
                 break;
@@ -944,9 +982,14 @@ function renderDiagram(diagram, page, interactive) {
                 + (west ? 12 : card.width - 12) + '" y="' + (pin.y + 4) + '" text-anchor="' + (west ? 'start' : 'end') + '">'
                 + escape(pin.caption) + '</text></g>';
         }).join('');
-        const foot = card.footnote
-            ? '<line class="card-rule" x1="0" y1="' + (card.height - FOOT) + '" x2="' + card.width + '" y2="' + (card.height - FOOT)
-                + '"/><text class="card-foot" x="12" y="' + (card.height - 6) + '">' + escape(card.footnote) + '</text>' : '';
+        const footLines = [
+            card.internalText ? '<text class="card-foot internal" x="12" y="0">' + escape(card.internalText) + '</text>' : '',
+            card.footnote ? '<text class="card-foot" x="12" y="0">' + escape(card.footnote) + '</text>' : '',
+        ].filter(Boolean);
+        const footTop = card.height - footLines.length * FOOT;
+        const foot = footLines.length
+            ? '<line class="card-rule" x1="0" y1="' + footTop + '" x2="' + card.width + '" y2="' + footTop + '"/>'
+                + footLines.map((line, index) => line.replace('y="0"', 'y="' + (footTop + 14 + index * FOOT) + '"')).join('') : '';
         return open + '<g class="diagram-card instance' + status + '" ' + translate + attrs + '><title>'
             + escape([card.title, node?.type].filter(Boolean).join(' · ')) + '</title>'
             + '<rect class="card-bg" width="' + card.width + '" height="' + card.height + '" rx="5"/>'
