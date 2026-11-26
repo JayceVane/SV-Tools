@@ -85,7 +85,9 @@ test('报文汇聚简图保留独立实例、标签网络和架构握手证据�
     const forced = await exportArchitecture(loaded, 'html', { out: 'architecture-detailed.html', modes: { [top.id]: 'detailed' } });
     const forcedHtml = await fs.readFile(forced, 'utf8');
     assert.ok(pinCount(forcedHtml) > pinCount(html));
-    assert.match(forcedHtml, /<g class="diagram-card pad left"[^>]*><title>[^<]*模块边界[^<]*<\/title><rect class="card-bg"/u);
+    // 图2 式边界端口：不带外框，直接是端口符号 + 名称。
+    assert.match(forcedHtml, /<g class="diagram-card pad left"[^>]*><title>[^<]*模块边界[^<]*<\/title><g class="pad-row/u);
+    assert.match(forcedHtml, /class="pad-pin-shape"/u);
     assert.match(forcedHtml, /<text class="pad-name"[^>]*>clk<\/text>/u);
     const anchors = new Set([...forcedHtml.matchAll(/\sid="([^"]+)"/gu)].map(([, id]) => id));
     const missing = [...forcedHtml.matchAll(/\shref="#([^"]+)"/gu)].map(([, id]) => id).filter(id => !anchors.has(id));
@@ -290,6 +292,139 @@ endmodule
     assert.equal(irqs.members.length, 2);
     const unknown = top.links.filter(link => link.kind === 'interface' && !link.routes.length);
     assert.deepEqual(unknown.map(link => link.name), [], '所有接口束都应有可解释的流向');
+});
+
+test('简图分组卡片按 BD 式画法只排对外接口端口，不再罗列组内实例', async t => {
+    const base = await fs.realpath(os.tmpdir());
+    const workspace = await fs.mkdtemp(path.join(base, 'svtools-arch-ports-'));
+    t.after(async () => {
+        if (await fs.realpath(workspace) === workspace && path.dirname(workspace) === base) await fs.rm(workspace, { recursive: true, force: true });
+    });
+    // 组内实例清单对读者没有信息量：关心的是这一组对外接了哪些通道。
+    // 这里 deliberately 让「数据通路」组对外连一条 status 总线和一个使能信号。
+    await fs.writeFile(path.join(workspace, 'ports.sv'), `
+interface link_if;
+    logic [7:0] data;
+    modport src (output data);
+    modport dst (input data);
+endinterface
+module producer(link_if.src out, input clk, output logic [3:0] status); ... endmodule
+module consumer(link_if.dst in, input clk); ... endmodule
+module observer(input logic [3:0] status, input logic enable); ... endmodule
+module top(input clk, input enable);
+    link_if inner();
+    wire [3:0] status;
+    producer u_producer(.out(inner), .clk(clk), .status(status));
+    consumer u_consumer(.in(inner), .clk(clk));
+    observer u_observer(.status(status), .enable(enable));
+endmodule
+`);
+    await fs.writeFile(path.join(workspace, 'svtools.architecture.json'), JSON.stringify({ groups: { top: {
+        u_producer: '数据通路', u_consumer: '数据通路', u_observer: '外部观察' } } }));
+    const { book } = await buildArchitectureBook(await resolveContext({ workspace, top: 'top' }));
+    const [top] = book.pages;
+    const diagram = await layoutDiagram(top, 'overview');
+    const card = diagram.cards.find(item => item.title === '数据通路');
+    assert.ok(card, '分组卡片必须存在');
+    assert.equal(card.nodes.length > 1, true, '两张实例应折进同一张分组卡片');
+    assert.equal(card.groupPorts.length > 0, true, '分组卡片必须列出对外端口');
+    assert.equal(card.entries.length, 0, '分组卡片不再保留组内实例清单');
+    const svg = renderDiagram(diagram, top, false);
+    assert.match(svg, /class="group-port-label"/u, '分组卡片要画出对外端口');
+    assert.equal(/class="node-entry"/u.test(svg), false, '分组卡片不再罗列组内实例');
+});
+
+test('简图以可追溯的同名标签保留时钟复位，详细图保留端到端走线', async t => {
+    const base = await fs.realpath(os.tmpdir());
+    const workspace = await fs.mkdtemp(path.join(base, 'svtools-arch-clock-'));
+    t.after(async () => {
+        if (await fs.realpath(workspace) === workspace && path.dirname(workspace) === base) await fs.rm(workspace, { recursive: true, force: true });
+    });
+    // 时钟/复位曾被当作 labeled 网络整体从简图过滤，导致 clkrst 卡片零连线，
+    // 看起来像时钟域没接。它们必须画成可见的时钟域通道。
+    await fs.writeFile(path.join(workspace, 'clock.sv'), `
+module clkrst(input ref_clk, output gp_clk, output gp_rst);
+    assign gp_clk = ref_clk;
+    assign gp_rst = ref_clk;
+endmodule
+module worker(input gp_clk, input gp_rst); ... endmodule
+module filler(input gp_clk, input gp_rst); ... endmodule
+module top(input ref_clk);
+    wire gp_clk, gp_rst;
+    clkrst u_clkrst(.ref_clk(ref_clk), .gp_clk(gp_clk), .gp_rst(gp_rst));
+    worker u_worker(.gp_clk(gp_clk), .gp_rst(gp_rst));
+    filler u_filler(.gp_clk(gp_clk), .gp_rst(gp_rst));
+endmodule
+`);
+    await fs.writeFile(path.join(workspace, 'svtools.architecture.json'),
+        JSON.stringify({ groups: { top: { u_clkrst: '时钟分发', u_worker: '业务通路', u_filler: '业务通路' } } }));
+    const { book } = await buildArchitectureBook(await resolveContext({ workspace, top: 'top' }));
+    const [top] = book.pages;
+    const clockLinks = top.links.filter(link => link.labeled);
+    assert.equal(clockLinks.length > 0, true, 'fixture 必须含时钟/复位网络');
+    const { cards, edges } = diagramTopology(top, 'overview');
+    const clock = edges.filter(edge => edge.clock);
+    assert.equal(clock.length > 0, true, '时钟网络必须画成可见的时钟域边');
+    const clkrst = cards.find(item => item.title === '时钟分发');
+    assert.equal(clock.some(edge => edge.from === clkrst.id || edge.to === clkrst.id), true,
+        '时钟分发卡片必须有时钟边相连，不能是孤岛');
+    const between = clock.filter(edge => [edge.from, edge.to].includes(clkrst.id));
+    const covered = new Set(between.flatMap(edge => edge.links));
+    assert.ok(clockLinks.every(link => covered.has(link.id)), '标签须保留每个时钟/复位网络的身份');
+    const diagram = await layoutDiagram(top, 'overview');
+    assert.ok(diagram.clockRegion, '仅依赖时钟的模块应集中显示');
+    assert.ok(diagram.edges.every(edge => !edge.local || edge.sections.length === 2), '同名标签的两端都要有接线');
+    const svg = renderDiagram(diagram, top, false);
+    assert.match(svg, /class="diagram-edge clock"/u, '时钟域边要有独立样式');
+    assert.match(svg, /时钟 \/ 复位 · 同名标签连接/u);
+    const detailed = await layoutDiagram(top, 'detailed');
+    assert.ok(detailed.edges.every(edge => !edge.local), '详细连线保持端到端接线');
+    assert.ok(!detailed.clockRegion);
+});
+
+test('简图将输入输出接口分置边界两侧，每条接口在模块上有独立落点', async t => {
+    const base = await fs.realpath(os.tmpdir());
+    const workspace = await fs.mkdtemp(path.join(base, 'svtools-arch-anchors-'));
+    t.after(() => fs.rm(workspace, { recursive: true, force: true }));
+    await fs.writeFile(path.join(workspace, 'ports.sv'), `
+interface channel;
+    logic [7:0] data;
+    modport master(output data);
+    modport slave(input data);
+endinterface
+module core(channel.master out0, channel.master out1, channel.slave in0, channel.slave in1,
+            channel.master mid0, channel.master mid1);
+    ...
+endmodule
+module sink(channel.slave in0, channel.slave in1); ... endmodule
+module top(channel.master out0, channel.master out1, channel.slave in0, channel.slave in1);
+    channel mid0();
+    channel mid1();
+    core child(.out0(out0), .out1(out1), .in0(in0), .in1(in1), .mid0(mid0), .mid1(mid1));
+    sink receiver(.in0(mid0), .in1(mid1));
+endmodule
+`);
+    const { book } = await buildArchitectureBook(await resolveContext({ workspace, top: 'top' }));
+    const [top] = book.pages;
+    const diagram = await layoutDiagram(top, 'overview');
+    const core = diagram.cards.find(card => card.nodes.some(node => node.name === 'child'));
+    assert.equal(core.groupLayout.length, 6);
+    const anchors = new Set(core.groupLayout.map(port => `${port.x},${port.y}`));
+    assert.equal(anchors.size, 6, '不同接口不可叠在同一个接线点');
+    const receiver = diagram.cards.find(card => card.nodes.some(node => node.name === 'receiver'));
+    const internal = diagram.edges.filter(edge => edge.from === core.id && edge.to === receiver.id);
+    assert.equal(internal.length, 2, '模块间的不同接口束应各自落到具名端口');
+    for (const card of diagram.cards.filter(card => card.kind === 'pad')) {
+        for (const node of card.nodes) {
+            assert.equal(card.edgeSide, node.ports[0].type.endsWith('.master') ? 'right' : 'left');
+        }
+    }
+    for (const edge of diagram.edges) {
+        assert.equal(edge.forward, true, '布局归一后仍应保留真实主流向');
+        const first = edge.sections[0].startPoint;
+        const last = edge.sections.at(-1).endPoint;
+        assert.ok(first.x < last.x);
+    }
 });
 
 test('端口图按声明方向归类，引脚可选择，名称中的标记按文本显示', () => {

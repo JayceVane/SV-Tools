@@ -28,6 +28,46 @@
 /* 组内束：简图折叠同一功能组后，组内实例之间的连接以清单形式留在卡片脚注。 */
 .card-foot.internal { fill: var(--bus); }
 
+/* 分组卡片的对外端口：端点贴卡片边线，7px 短线向卡内引出，名称在卡内。
+   形状与 Block Design 原理图一致——信号是实心圆点，接口/总线是实心方块。 */
+.group-port-stem { stroke: var(--wire); stroke-width: 1.15; }
+.group-port-tip { fill: var(--wire); }
+.group-port-label { font-family: var(--font-mono); font-size: 10.5px; fill: var(--ink-2); }
+.group-port.bus .group-port-stem { stroke: var(--bus); stroke-width: 1.9; }
+.group-port.bus .group-port-tip { fill: var(--bus); }
+.group-port.bus .group-port-label { fill: var(--bus); }
+.group-port.clock .group-port-stem { stroke-dasharray: 3 2; }
+.group-port.clock .group-port-label { fill: var(--muted); }
+.group-port.clock .group-port-tip { fill: var(--panel); stroke: var(--wire); stroke-width: 1; }
+.clock-region rect { fill: var(--sunk); }
+.clock-region text { font-family: var(--font-ui); font-size: 11px; fill: var(--muted); }
+
+/* BD 式分组块：虚线层级框 + 浅色底，不画标题带和分隔线。
+   它表示"一组实例构成的子系统"，不是单个模块卡片。 */
+.diagram-card.instance.bd-block .card-bg { fill: color-mix(in srgb, var(--bus) 4%, var(--panel)); }
+.diagram-card.instance.bd-block .card-frame { stroke: var(--line-2); stroke-dasharray: 5 4; }
+.diagram-card.instance.bd-block .card-title { fill: var(--ink-2); font-size: 11.5px; }
+
+/* 图2 式边界端口：没有外框、表头和分隔线，只有端口符号 + 名称 + 类型。 */
+.diagram-card.pad .card-bg, .pad-frame, .pad-spine, .pad-eyebrow, .pad-count, .pad-title,
+.pad-row-state, .pad-row-rule, .pad-glyph { display: none; }
+.diagram-card.pad .pad-row-bg { fill: transparent; }
+.diagram-card.pad .pad-row:hover .pad-row-bg, .diagram-card.pad .pad-row:focus-visible .pad-row-bg { fill: var(--sunk-2); }
+.pad-pin-shape {
+    fill: color-mix(in srgb, var(--wire) 10%, var(--panel));
+    stroke: var(--wire);
+    stroke-width: 1.15;
+}
+.pad-row.bus .pad-pin-shape {
+    fill: color-mix(in srgb, var(--bus) 10%, var(--panel));
+    stroke: var(--bus);
+    stroke-width: 1.9;
+}
+.diagram-card.pad .pad-name { font-family: var(--font-mono); font-size: 10.5px; fill: var(--ink-2); }
+.diagram-card.pad .pad-row.bus .pad-name { fill: var(--bus); }
+.diagram-card.pad .pad-meta { font-family: var(--font-mono); font-size: 9.5px; fill: var(--faint); }
+.diagram-card.pad .pad-row:hover .pad-pin-shape { stroke: var(--focus); }
+
 /* 分组卡片成员行 */
 .node-entry .row-bg { fill: transparent; }
 .node-entry:hover .row-bg, .node-entry:focus-visible .row-bg { fill: var(--sunk); }
@@ -43,26 +83,8 @@
 .pin-label.bus { fill: var(--bus); }
 .pin-split { stroke: var(--line); stroke-width: 1; }
 
-/* ---------- 边界端口条（与实例卡片区分：浅底、细边、内侧脊线） ---------- */
-.diagram-card.pad .card-bg { fill: var(--sunk); }
-.pad-frame { fill: none; stroke: var(--line); stroke-width: 1; }
-.pad-spine { stroke: var(--line-2); stroke-width: 2; stroke-linecap: butt; }
-.pad-eyebrow {
-    font-family: var(--font-ui);
-    font-size: 9.5px;
-    letter-spacing: .08em;
-    fill: var(--faint);
-}
-.pad-title { font-family: var(--font-ui); font-size: 12px; font-weight: 600; fill: var(--ink); }
-.pad-count { font-family: var(--font-mono); font-size: 10px; fill: var(--faint); }
-.pad-row-bg { fill: transparent; }
-.pad-row-state { fill: transparent; }
-.pad-row:hover .pad-row-bg, .pad-row:focus-visible .pad-row-bg { fill: var(--sunk-2); }
-.pad-row-rule { stroke: var(--line); stroke-width: 1; opacity: .45; }
-.pad-glyph { font-family: var(--font-mono); font-size: 10.5px; fill: var(--muted); }
-.pad-glyph.bus { fill: var(--bus); }
-.pad-name { font-family: var(--font-mono); font-size: 10.5px; fill: var(--ink-2); }
-.pad-meta { font-family: var(--font-mono); font-size: 9.5px; fill: var(--faint); }
+/* ---------- 边界端口条（图2 式：无框，见文件上部 .diagram-card.pad 规则） ---------- */
+/* 形状与配色统一在上面的「图2 式边界端口」段落里定义，这里不再重复。 */
 
 /* ---------- 边界旗标（同方向端口不超过两个） ---------- */
 .boundary-symbol { fill: var(--sunk-2); stroke: var(--line-2); stroke-width: 1; }
@@ -85,6 +107,10 @@
 }
 .diagram-edge.bus .edge-line { stroke: var(--bus); stroke-width: 2.2; }
 .diagram-edge.unknown .edge-line { stroke-dasharray: 4 3; }
+/* 时钟/复位域：虚线 + 弱化色，和数据通路区分开，但必须看得见——
+   藏掉的话读者会以为时钟域根本没接。 */
+.diagram-edge.clock .edge-line { stroke: var(--faint); stroke-width: 1.1; stroke-dasharray: 5 4; opacity: .85; }
+.diagram-edge.clock .edge-arrow { fill: var(--faint); }
 .edge-arrow { stroke: none; fill: var(--wire); }
 .diagram-edge.bus .edge-arrow { fill: var(--bus); }
 .wire-label rect { fill: var(--panel); stroke: var(--line); stroke-width: 1; }

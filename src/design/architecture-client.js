@@ -80,7 +80,7 @@
         const upstream = new Set(), downstream = new Set(), shared = new Set();
         const tags = new Map();
         for (const link of page.links) {
-            if (link.labeled || !link.endpoints.some(endpoint => endpoint.node === id)) continue;
+            if (!link.endpoints.some(endpoint => endpoint.node === id)) continue;
             let before = false, after = false;
             for (const route of link.routes) {
                 const from = link.endpoints[route.source].node, to = link.endpoints[route.target].node;

@@ -1,7 +1,8 @@
 'use strict';
 
-const { escape, groupPorts, portDescription } = require('./architecture-details');
+const { escape, portDescription } = require('./architecture-details');
 const { terminalCaption, terminalWidth, terminalSymbol } = require('../circuit/symbol-library');
+const { roleScore } = require('./interface-evidence');
 
 /* ---------- 版式常量（px） ----------
    卡片：标题带 34（每多一行 +17）、副标题 24、引脚行距 18、共享网络脚注 20；
@@ -12,8 +13,10 @@ const SUB = 24;
 const PIN_PITCH = 18;
 const BODY_PAD = 2;
 const FOOT = 20;
-const PAD_HEAD = 40;
 const PAD_ROW = 18;
+// 图2 边界端口符号：沿用 BD terminalSymbol 的尺寸（宽 20、高 12）。
+const PAD_SYM = 20;
+const PAD_SYM_H = 12;
 const CORNER = 4;
 const LABEL_H = 16;
 const ARROW = 6;
@@ -21,6 +24,8 @@ const TITLE_MAX = 316;
 const NOTE_MAX = 316;
 const TITLE_NAMES = 3;
 const ENTRY_ROW = 22;
+// 分组卡片的对外端口行高：一行一个端口，名称 + 端点符号。
+const GROUP_PORT_ROW = 22;
 
 const FONT = {
     title: 12.5, subtitle: 10.5, chip: 9.5, pin: 10.5, foot: 10, label: 10,
@@ -30,8 +35,8 @@ const MONO = 0.6;
 const UI = 0.55;
 
 const PAD_TITLES = { input: '输入端口', output: '输出端口', inout: '双向端口', interface: '接口束', other: '待确认端口' };
-const PAD_ORDER = ['input', 'interface', 'inout', 'other', 'output'];
 const GLYPHS = { input: '→', output: '→', inout: '◆', interface: '≡', other: '·' };
+const clockPort = /(?:^|_)(?:[a-z]*clk|clock|[a-z]*rstn?|[a-z]*resetn?)(?:_|$)/i;
 let elk;
 
 const isWide = character => character.codePointAt(0) > 255;
@@ -102,6 +107,23 @@ function internalText(bundles) {
     return '组内束 ' + shown.join(' · ') + (rest > 0 ? ' +' + rest : '');
 }
 
+/**
+ * 分组卡片沿边缘排的对外端口清单。同名连线合成一个端口：一组对外的
+ * 同名连接本来就是同一条逻辑通道，重复画只会让边缘堆满同一个名字。
+ * @param {Array<{id:string, peer:string, name?:string, bus?:boolean}>} incident 该卡片的关联边。
+ * @returns {Array<{caption:string, bus:boolean, edges:string[]}>}
+ */
+function groupEdgePorts(incident) {
+    const ports = new Map();
+    for (const item of incident || []) {
+        const caption = item.name || item.caption;
+        if (!caption) continue;
+        if (!ports.has(caption)) ports.set(caption, { caption, bus: Boolean(item.bus), edges: [] });
+        ports.get(caption).edges.push(item.id);
+    }
+    return [...ports.values()];
+}
+
 function boundaryCategory(node) {
     const port = node.ports?.[0];
     const direction = port?.direction && port.direction !== 'unknown' ? port.direction : node.direction;
@@ -122,7 +144,10 @@ function portMeta(port) {
 /** 把页面投影成卡片与连线；简图按功能分组折叠实例，边界端口合并为端口排。 */
 function diagramTopology(page, mode) {
     const overview = mode === 'overview';
-    const drawn = overview ? page.links.filter(link => !link.labeled) : page.links;
+    // 简图按同名标签呈现时钟/复位，保留两端的连接与方向；详细图保留完整走线。
+    const clockLinks = new Map(page.links.filter(link => link.labeled || link.kind === 'signal' &&
+        [...link.names || [link.name], ...link.endpoints.map(endpoint => endpoint.port || '')].some(name => clockPort.test(name))).map(link => [link.id, true]));
+    const drawn = page.links;
     const wired = new Set(drawn.filter(link => link.endpoints.length > 1).flatMap(link => link.endpoints.map(endpoint => endpoint.node)));
     const labels = new Map();
     for (const link of page.links.filter(link => link.labeled)) for (const endpoint of link.endpoints) {
@@ -150,13 +175,18 @@ function diagramTopology(page, mode) {
         card.nodes.push(node);
         locations.set(node.id, card.id);
     }
-    const byCategory = new Map(PAD_ORDER.map(category => [category, []]));
-    for (const node of boundary) byCategory.get(boundaryCategory(node)).push(node);
+    const byCategory = new Map();
+    for (const node of boundary) {
+        const category = boundaryCategory(node);
+        const role = category === 'interface' ? roleScore({ modport: node.ports?.[0]?.type?.split('.')[1] }) : 0;
+        const side = category === 'output' || role > 0 ? 'right' : 'left';
+        const key = side + ':' + category;
+        if (!byCategory.has(key)) byCategory.set(key, []);
+        byCategory.get(key).push(node);
+    }
     const padBoundary = boundary.length > 2;
-    for (const category of PAD_ORDER) {
-        const nodes = byCategory.get(category);
-        if (!nodes.length) continue;
-        const edgeSide = category === 'output' ? 'right' : 'left';
+    for (const [key, nodes] of byCategory) {
+        const [edgeSide, category] = key.split(':');
         if (padBoundary) {
             const card = { id: 'pad-' + cards.length, kind: 'pad', title: PAD_TITLES[category], category, edgeSide, nodes,
                 nodePeers: new Map(nodes.map(node => [node.id, [...neighbour.get(node.id) || []]])) };
@@ -169,9 +199,6 @@ function diagramTopology(page, mode) {
             cards.push(card);
             locations.set(node.id, card.id);
         }
-    }
-    if (overview) for (const card of cards) {
-        if (card.kind === 'instance') card.labels = [...new Set(card.nodes.flatMap(node => [...labels.get(node.id) || []]))];
     }
     const pairs = new Map(), edges = [];
     // 端口排的每一行都要独立成线，才能追出接口束属于哪条连线；涉及点名的边不进入合并表。
@@ -191,12 +218,14 @@ function diagramTopology(page, mode) {
             noteInternal(source.card, link);
             return;
         }
-        const merged = overview && !padIds.has(source.card) && !padIds.has(target.card);
-        const key = [source.card, target.card].sort().join('/') + '|' + link.kind;
+        const clock = clockLinks.has(link.id);
+        // 同名标签需要保留各网络身份，普通通路仍按模块对合并。
+        const merged = overview && !clock && link.kind !== 'interface' && !padIds.has(source.card) && !padIds.has(target.card);
+        const key = [source.card, target.card].sort().join('/') + '|' + (clock ? '\u0000clock' : link.kind);
         let edge = merged && pairs.get(key);
         if (!edge) {
             edge = { id: 'edge-' + edges.length, from: source.card, to: target.card, fromPort: source.port, toPort: target.port,
-                forward: false, reverse: false, links: [] };
+                forward: false, reverse: false, clock, local: overview && clock, links: [] };
             edges.push(edge);
             if (merged) pairs.set(key, edge);
         }
@@ -246,9 +275,21 @@ function diagramTopology(page, mode) {
         edge.names = edge.links.map(id => links.get(id).name);
         // 端口排行名与引脚名一致时不再重复标注，只保留名称不同或汇聚的连线标签。
         const sameEnds = edge.links.length === 1 && edge.fromPort && edge.fromPort === edge.toPort;
-        edge.label = mode === 'detailed' && !sameEnds
-            ? edge.links.length === 1 ? clipText(edge.names[0], 156, FONT.label, MONO) : edge.links.length + ' 条连接'
-            : '';
+        // 简图里的时钟域通道必须自解释：读者要能看出这条虚线是时钟/复位，而不是普通数据。
+        edge.label = edge.clock
+            ? clipText(edge.names.length === 1 ? edge.names[0] : edge.names.length + ' 个时钟/复位', 156, FONT.label, MONO)
+            : mode === 'detailed' && !sameEnds
+                ? edge.links.length === 1 ? clipText(edge.names[0], 156, FONT.label, MONO) : edge.links.length + ' 条连接'
+                : '';
+    }
+    if (overview) {
+        // 时钟域已画成可见虚线，卡片不再重复挂 ≡ 脚注；只有连时钟边都没落上的
+        // 卡片（例如整组时钟都在组内）才保留脚注，避免信息丢失。
+        const onClockEdge = new Set(edges.flatMap(edge => edge.clock ? [edge.from, edge.to] : []));
+        for (const card of cards) {
+            if (card.kind !== 'instance' || onClockEdge.has(card.id)) continue;
+            card.labels = [...new Set(card.nodes.flatMap(node => [...labels.get(node.id) || []]))];
+        }
     }
     return { cards, edges };
 }
@@ -295,10 +336,13 @@ function buildPins(card, assignment) {
 
 function measureInstance(card, detailed, assignment, incident) {
     const multi = card.nodes.length > 1;
+    // 简图里的分组卡片按 BD 式画法：不列组内实例，只沿边缘排对外的接口端口。
+    // 读者关心的是这一组对外提供/消费了什么，而不是组里装了哪些实例。
+    const grouped = multi && !detailed;
     const node = card.nodes[0];
     const title = card.title || node?.name || '';
     card.subH = SUB;
-    card.subtitleName = multi ? card.nodes.length + ' 个实例' : node?.name && node.name !== title ? node.name : '';
+    card.subtitleName = grouped ? '' : multi ? card.nodes.length + ' 个实例' : node?.name && node.name !== title ? node.name : '';
     card.chips = [];
     if (!multi && node) {
         if (node.type) card.chips.push({ kind: 'type', text: clipText(node.type, 160, FONT.chip, MONO) });
@@ -309,11 +353,27 @@ function measureInstance(card, detailed, assignment, incident) {
     const subtitleWidth = card.subtitleName || card.chips.length
         ? 12 + textWidth(card.subtitleName, FONT.subtitle, MONO) + (card.subtitleName && card.chips.length ? 10 : 0)
             + card.chips.reduce((sum, chip) => sum + chip.width + 6, 0) : 0;
-    card.entries = multi ? card.nodes.map(entryNode => ({ node: entryNode, name: entryNode.name,
+    card.entries = multi && !grouped ? card.nodes.map(entryNode => ({ node: entryNode, name: entryNode.name,
         type: entryNode.type || '未解析', y: 0 })) : [];
+    // 简图在落点标明实际端口，分组卡片以对外网络名命名。
+    card.groupPorts = detailed ? [] : groupEdgePorts((incident || []).map(item => ({ ...item,
+        name: !multi && item.port ? item.port : item.name })));
+    for (const port of card.groupPorts) {
+        const matching = (incident || []).filter(item => port.edges.includes(item.id));
+        port.clock = matching.every(item => item.clock);
+        port.net = [...new Set(matching.filter(item => item.clock).map(item => item.name))].join(' / ');
+        if (port.clock && port.net !== port.caption) port.caption += ' · ' + port.net;
+    }
     const entryWidth = card.entries.length
         ? 12 + Math.max(...card.entries.map(entry => textWidth(entry.name, FONT.entryName, MONO))) + 24
             + Math.max(...card.entries.map(entry => textWidth(entry.type, FONT.entryType, MONO))) + 12 : 0;
+    const sidePorts = { WEST: [], EAST: [] };
+    for (const port of card.groupPorts) {
+        port.side = assignment?.get(card.id)?.get(port.edges[0]) || 'WEST';
+        sidePorts[port.side].push(port);
+    }
+    const columnWidth = ports => Math.max(0, ...ports.map(port => textWidth(port.caption, FONT.pin, MONO)));
+    const portWidth = card.groupPorts.length ? 36 + columnWidth(sidePorts.WEST) + columnWidth(sidePorts.EAST) : 0;
     card.footnote = footnoteText(card.labels);
     // 组内束单独占一行，避免和标签网络混在一起（前者是组内实例之间的连接，后者是时钟复位这类同名网络）。
     card.internalText = internalText(card.internal);
@@ -330,9 +390,10 @@ function measureInstance(card, detailed, assignment, incident) {
     const pinWidth = card.pins.length ? 12 + westMax + (eastMax ? 20 + eastMax : 0) + 12 : 0;
     // 单侧引脚时按引脚列宽收窄卡片，标题允许三行，避免标题把卡片撑出大片空白。
     const compact = card.pins.length > 0 && (westMax > 0) !== (eastMax > 0);
-    const base = Math.max(152, subtitleWidth, entryWidth, footWidth, pinWidth, compact ? 196 : 0);
-    const titleMax = compact ? Math.max(160, Math.min(TITLE_MAX, base - 24)) : TITLE_MAX;
-    card.titleLines = wrapTitle(title, titleMax, compact ? 3 : 2);
+    const base = Math.max(152, subtitleWidth, entryWidth, portWidth, footWidth, pinWidth, compact ? 196 : 0);
+    let titleMax = 232;
+    if (detailed) titleMax = compact ? Math.max(160, Math.min(TITLE_MAX, base - 24)) : TITLE_MAX;
+    card.titleLines = wrapTitle(title, titleMax, detailed && !compact ? 2 : 3);
     const titleWidth = Math.max(0, ...card.titleLines.map(line => textWidth(line, FONT.title, UI)));
     card.headH = HEAD + (card.titleLines.length - 1) * HEAD_LINE;
     card.width = Math.ceil(Math.max(base, titleWidth + 24) / 4) * 4;
@@ -356,7 +417,8 @@ function measureInstance(card, detailed, assignment, incident) {
     });
     card.entries.forEach((entry, index) => { entry.y = bodyTop + index * ENTRY_ROW; });
     const body = card.pins.length ? scalarRows * PIN_PITCH + gap + busRows * PIN_PITCH + BODY_PAD * 2 : 0;
-    const content = card.entries.length ? card.entries.length * ENTRY_ROW : body;
+    const portsHeight = card.groupPorts.length ? BODY_PAD * 2 + card.groupPorts.length * GROUP_PORT_ROW : 0;
+    const content = card.entries.length ? card.entries.length * ENTRY_ROW : card.groupPorts.length ? portsHeight : body;
     const footLines = (card.footnote ? 1 : 0) + (card.internalText ? 1 : 0);
     card.height = bodyTop + content + footLines * FOOT;
     let x = card.width - 12;
@@ -368,25 +430,28 @@ function measureInstance(card, detailed, assignment, incident) {
         x -= 6;
     }
     card.portIndex = new Map(card.nodes[0]?.ports?.map((port, index) => [port.name, index]) || []);
-    // 简图没有引脚：在标题带以下的主体区间放 1–3 个束锚点，箭头落在侧边而不是标题带上。
+    // 简图的通路锚点与具名端口共用坐标。
     card.bodyAnchors = [];
     card.edgeAnchorIds = new Map();
     if (!detailed) {
-        const sides = assignment?.get(card.id);
-        const bandTop = card.headH + 4;
-        const bandHeight = Math.max(0, card.height - 8 - bandTop);
-        for (const side of ['WEST', 'EAST']) {
-            const list = (incident || []).filter(item => sides?.get(item.id) === side);
-            if (!list.length) continue;
-            const slots = bandHeight < 24 || list.length === 1 ? 1 : 2;
-            const prefix = card.id + '-anchor-' + side.toLowerCase() + '-';
-            // 每条边一个独立端口（坐标按 1..slots 均分），避免 ELK 把共享端口当成强约束而拉大层距。
-            list.forEach((item, index) => {
-                const id = prefix + 'edge-' + index;
-                const y = Math.round((bandTop + (index % slots + 1) * bandHeight / (slots + 1)) * 10) / 10;
-                card.bodyAnchors.push({ id, side, x: side === 'WEST' ? 0 : card.width, y });
-                card.edgeAnchorIds.set(item.id, id);
-            });
+        if (card.groupPorts.length) {
+            // 分组卡片按端口定位：每个端口占一行，连线锚点就是端口本身，
+            // 读者从连线落点就能看出这一组对外接的是哪条通道。
+            card.groupLayout = [];
+            let westRow = 0, eastRow = 0;
+            for (const side of ['WEST', 'EAST']) {
+                for (const port of sidePorts[side]) {
+                    const row = side === 'WEST' ? westRow++ : eastRow++;
+                    port.y = bodyTop + BODY_PAD + row * GROUP_PORT_ROW + GROUP_PORT_ROW / 2;
+                    port.x = side === 'WEST' ? 0 : card.width;
+                    port.id = card.id + '-group-' + side.toLowerCase() + '-' + row;
+                    card.groupLayout.push(port);
+                    card.bodyAnchors.push({ id: port.id, side, x: port.x, y: port.y });
+                    for (const edgeId of port.edges) card.edgeAnchorIds.set(edgeId, port.id);
+                }
+            }
+            card.height = bodyTop + BODY_PAD * 2 + Math.max(westRow, eastRow) * GROUP_PORT_ROW + footLines * FOOT;
+            return;
         }
     }
 }
@@ -402,26 +467,22 @@ function measurePad(card, assignment) {
         return { node, port, direction, glyph: GLYPHS[direction] || GLYPHS.other,
             name: port?.name || node.name, meta: portMeta(port) };
     });
-    const title = card.title || '';
-    const count = String(card.rows.length);
-    const eyebrow = '模块边界';
-    const eyebrowWidth = textWidth(eyebrow, 9.5, UI) + [...eyebrow].length * 0.8;
-    const headerWidth = Math.max(12 + eyebrowWidth + 16 + textWidth(count, 10, MONO) + 12,
-        12 + textWidth(title, FONT.padTitle, UI) + 12);
     const nameMax = Math.max(0, ...card.rows.map(row => textWidth(row.name, FONT.padName, MONO)));
     const metaMax = Math.max(0, ...card.rows.map(row => textWidth(row.meta, FONT.padMeta, MONO)));
-    const rowWidth = 12 + 14 + 8 + nameMax + 16 + metaMax + 12;
-    card.width = Math.ceil(Math.max(172, headerWidth, rowWidth) / 4) * 4;
-    card.eyebrow = eyebrow;
-    card.rowH = card.rows.length > 10 ? 16 : PAD_ROW;
-    card.height = PAD_HEAD + card.rows.length * card.rowH;
+    // 图2 风格：没有表头与方框，宽度 = 端口符号 + 名称 + 类型小字。
+    card.width = Math.ceil(Math.max(120, PAD_SYM + 8 + nameMax + 16 + metaMax + 8) / 4) * 4;
+    card.eyebrow = '';
+    card.rowH = card.rows.length > 10 ? 18 : PAD_ROW;
+    card.height = card.rows.length * card.rowH;
     card.padSide = card.edgeSide === 'left' ? 'EAST' : 'WEST';
     card.rows.forEach((row, index) => {
-        row.y = PAD_HEAD + index * card.rowH + card.rowH / 2;
+        row.y = index * card.rowH + card.rowH / 2;
         row.side = card.padSide;
         row.x = card.padSide === 'EAST' ? card.width : 0;
         row.id = card.id + '-row-' + index;
-        row.top = PAD_HEAD + index * card.rowH;
+        row.top = index * card.rowH;
+        // 每行一个 20×12 的终端符号：尖端朝图面外侧（接线方向），平边贴名称一侧。
+        row.terminal = terminalSymbol(PAD_SYM, PAD_SYM_H, row.side, row.direction);
     });
 }
 
@@ -516,7 +577,13 @@ function initialAssignment(cards, detailed, incident) {
             for (const item of incident.get(card.id) || []) {
                 const peer = byId.get(item.peer);
                 const left = peer && (peer.kind === 'pad' || peer.kind === 'boundary') ? peer.edgeSide === 'left' : true;
-                sides.set(item.id, left ? 'WEST' : 'EAST');
+                const direction = card.nodes.length === 1 && card.nodes[0].ports.find(port => port.name === item.port)?.direction;
+                let side = left ? 'WEST' : 'EAST';
+                if (item.clock) {
+                    if (direction === 'output' || !direction && item.outgoing) side = 'EAST';
+                    else if (direction === 'input') side = 'WEST';
+                }
+                sides.set(item.id, side);
             }
             assignment.set(card.id, sides);
             continue;
@@ -571,7 +638,8 @@ function deriveAssignment(cards, layout, assignment, detailed, incident) {
             const sides = new Map();
             for (const item of incident.get(card.id) || []) {
                 const peer = positions.get(item.peer);
-                const side = peer ? peer.x + peer.width / 2 < center ? 'WEST' : 'EAST' : previous?.get(item.id) || 'WEST';
+                const side = item.clock ? previous?.get(item.id) || 'WEST'
+                    : peer ? peer.x + peer.width / 2 < center ? 'WEST' : 'EAST' : previous?.get(item.id) || 'WEST';
                 sides.set(item.id, side);
             }
             next.set(card.id, sides);
@@ -693,7 +761,12 @@ async function runLayout(cards, edges, detailed) {
         elk = new Engine();
     }
     const byId = cardsById(cards);
-    return elk.layout({
+    const linked = new Set(edges.filter(edge => !edge.local).flatMap(edge => [edge.from, edge.to]));
+    const local = new Set(edges.filter(edge => edge.local).flatMap(edge => [edge.from, edge.to]));
+    // 只接时钟/复位的模块靠近同名边界标签放置，避免占据主数据通路的分层。
+    const support = cards.filter(card => local.has(card.id) && !linked.has(card.id));
+    const primary = cards.filter(card => !support.includes(card));
+    const layout = await elk.layout({
         id: 'diagram',
         layoutOptions: {
             'elk.algorithm': 'layered',
@@ -711,13 +784,37 @@ async function runLayout(cards, edges, detailed) {
             ...(detailed ? {} : { 'elk.layered.layering.strategy': 'LONGEST_PATH' }),
             'elk.padding': detailed ? '[top=24,left=24,bottom=24,right=24]' : '[top=16,left=12,bottom=16,right=12]',
         },
-        children: elkChildren(cards),
-        edges: edges.map(edge => ({
+        children: elkChildren(primary),
+        edges: edges.filter(edge => !edge.local).map(edge => ({
             id: edge.id,
             sources: [anchorFor(byId.get(edge.from), edge.fromPort, edge.id) || edge.from],
             targets: [anchorFor(byId.get(edge.to), edge.toPort, edge.id) || edge.to],
         })),
     });
+    if (support.length) {
+        const gap = 28, padding = 16, heading = 34;
+        const top = layout.height + 20;
+        const width = Math.max(layout.width, 700);
+        let x = padding, y = top + heading, rowHeight = 0;
+        const ordered = [...support].sort((left, right) => {
+            const rank = card => edgeSide(card) === 'left' ? 0 : edgeSide(card) === 'right' ? 2 : 1;
+            return rank(left) - rank(right);
+        });
+        for (const card of ordered) {
+            if (x > padding && x + card.width > width - padding) {
+                x = padding;
+                y += rowHeight + gap;
+                rowHeight = 0;
+            }
+            layout.children.push({ id: card.id, x, y, width: card.width, height: card.height });
+            x += card.width + gap;
+            rowHeight = Math.max(rowHeight, card.height);
+        }
+        layout.width = Math.max(width, x - gap + padding);
+        layout.height = y + rowHeight + padding;
+        layout.clockRegion = { x: 0, y: top, width: layout.width, height: layout.height - top };
+    }
+    return layout;
 }
 
 /* ---------- 标签避让 ---------- */
@@ -785,8 +882,20 @@ async function layoutDiagram(page, mode) {
     attachPeers(cards, edges);
     const incident = new Map(cards.map(card => [card.id, []]));
     for (const edge of edges) {
-        if (incident.has(edge.from)) incident.get(edge.from).push({ id: edge.id, peer: edge.to });
-        if (edge.to !== edge.from && incident.has(edge.to)) incident.get(edge.to).push({ id: edge.id, peer: edge.from });
+        // 分组卡片按连线名排端口。接口束必须逐条列出真实名字——合并成"N 条连接"
+        // 后读者无从知道这一束接的是什么，也就失去了 BD 式端口的意义。
+        for (const [side, peer] of [[edge.from, edge.to], [edge.to, edge.from]]) {
+            if (!incident.has(side) || side === peer) continue;
+            for (const id of edge.links) {
+                const link = page.links.find(item => item.id === id);
+                if (!link) continue;
+                incident.get(side).push({ id: edge.id, peer, port: side === edge.from ? edge.fromPort : edge.toPort,
+                    outgoing: side === edge.from ? edge.forward : edge.reverse,
+                    clock: edge.local, name: link.name, bus: link.kind === 'interface' });
+            }
+            // 只有一个关联连线时补一条汇总，避免非接口信号组丢掉"N 条"的规模感。
+            if (!edge.links.length) incident.get(side).push({ id: edge.id, peer, name: '', bus: false });
+        }
     }
     let assignment = initialAssignment(cards, detailed, incident);
     let layout, stable = false;
@@ -809,9 +918,21 @@ async function layoutDiagram(page, mode) {
         card.y = Math.round(info?.y || 0);
     }
     const width = Math.ceil(layout.width), height = Math.ceil(layout.height);
-    for (const edge of edges) edge.sections = routed.get(edge.id)?.sections || [];
+    for (const edge of edges) {
+        edge.sections = routed.get(edge.id)?.sections || [];
+        if (!edge.local) continue;
+        for (const [id, port] of [[edge.from, edge.fromPort], [edge.to, edge.toPort]]) {
+            const card = cards.find(card => card.id === id);
+            const key = anchorFor(card, port, edge.id);
+            const anchor = [...card.bodyAnchors || [], ...card.rows || [], card.terminalPort].filter(Boolean).find(item => item.id === key);
+            if (!anchor) continue;
+            const point = { x: card.x + anchor.x, y: card.y + anchor.y };
+            const end = { x: point.x + (anchor.side === 'EAST' ? 10 : -10), y: point.y };
+            edge.sections.push(id === edge.from ? { startPoint: point, endPoint: end } : { startPoint: end, endPoint: point });
+        }
+    }
     placeLabels(edges, cards, width, height);
-    return { width, height, cards, edges };
+    return { width, height, cards, edges, clockRegion: layout.clockRegion };
 }
 
 /* ---------- 渲染 ---------- */
@@ -873,7 +994,8 @@ function renderDiagram(diagram, page, interactive) {
             .filter(points => points.length > 1);
         if (!sections.length) return '';
         const unknown = !edge.forward && !edge.reverse;
-        const className = 'diagram-edge ' + (edge.links.some(id => kinds.get(id) === 'interface') ? 'bus' : 'signal')
+        const className = 'diagram-edge ' + (edge.clock ? 'clock'
+            : edge.links.some(id => kinds.get(id) === 'interface') ? 'bus' : 'signal')
             + (unknown ? ' unknown' : '');
         const hits = interactive ? sections.map(points => '<path class="edge-hit" d="' + orthogonalPath(points) + '"/>').join('') : '';
         const lines = sections.map(points => '<path class="edge-line" d="' + orthogonalPath(points) + '"/>').join('');
@@ -911,31 +1033,28 @@ function renderDiagram(diagram, page, interactive) {
                 + '" text-anchor="' + terminal.anchor + '">' + escape(card.title) + '</text></g>';
         }
         if (card.kind === 'pad') {
-            const rows = card.rows.map((row, index) => {
+            // 图2 风格：不画外框、表头和分隔线，每行就是「端口符号 + 名称 + 类型」。
+            // 符号复用 terminalSymbol()：信号是外侧收尖的五边形，bus/interface 是纯矩形。
+            // 读者看到的是端口，而不是一个装着端口清单的盒子。
+            const east = card.padSide === 'EAST';
+            const rows = card.rows.map(row => {
                 const attrs = action('node', row.node.id, (row.name + ' ' + (row.port ? portDescription(row.port) : '')).trim());
-                const glyphClass = row.direction === 'interface' ? 'pad-glyph bus' : 'pad-glyph';
-                const baseline = row.top + Math.round(card.rowH / 2 + 4);
-                return '<g class="pad-row"' + attrs + '><title>' + escape(row.name + ' · ' + (row.port ? portDescription(row.port) : '边界端口'))
-                    + '</title><rect class="pad-row-bg" x="0" y="' + row.top + '" width="' + card.width + '" height="' + card.rowH + '"/>'
-                    + '<rect class="pad-row-state" x="' + (card.edgeSide === 'left' ? 0 : card.width - 2) + '" y="' + row.top
-                    + '" width="2" height="' + card.rowH + '"/>'
-                    + (index ? '<line class="pad-row-rule" x1="8" y1="' + row.top + '" x2="' + (card.width - 8) + '" y2="' + row.top + '"/>' : '')
-                    + '<text class="' + glyphClass + '" x="12" y="' + baseline + '">' + escape(row.glyph) + '</text>'
-                    + '<text class="pad-name" x="28" y="' + baseline + '">' + escape(row.name) + '</text>'
-                    + '<text class="pad-meta" x="' + (card.width - 12) + '" y="' + baseline + '" text-anchor="end">'
-                    + escape(row.meta) + '</text></g>';
+                const baseline = Math.round(row.y + 4);
+                const symbolX = east ? card.width - PAD_SYM : 0;
+                return '<g class="pad-row' + (row.direction === 'interface' ? ' bus' : '') + '"' + attrs + '><title>'
+                    + escape(row.name + ' · ' + (row.port ? portDescription(row.port) : '边界端口')) + '</title>'
+                    + '<rect class="pad-row-bg" x="0" y="' + row.top + '" width="' + card.width + '" height="' + card.rowH + '"/>'
+                    + '<polygon class="pad-pin-shape" points="' + row.terminal.points + '" transform="translate('
+                    + symbolX + ',' + (row.y - PAD_SYM_H / 2) + ')"/>'
+                    + '<text class="pad-name" x="' + (east ? 12 : PAD_SYM + 8) + '" y="' + baseline
+                    + '">' + escape(row.name) + '</text>'
+                    + '<text class="pad-meta" x="' + (east ? card.width - PAD_SYM - 8 : card.width - 4) + '" y="' + baseline
+                    + '" text-anchor="' + (east ? 'end' : 'end') + '">' + escape(row.meta) + '</text></g>';
             }).join('');
-            const spineX = card.edgeSide === 'left' ? card.width - 2.5 : 2.5;
-            // 端口条属于当前章节的模块边界，悬停标题里写明所属模块，避免被读成独立子模块。
+            // 端口排属于当前章节的模块边界，悬停标题里写明所属模块，避免被读成独立子模块。
             const owner = page.name + ' 的模块边界 · ' + card.title + '（' + card.rows.length + ' 个端口）';
             return '<g class="diagram-card pad ' + card.edgeSide + '" ' + translate + '><title>' + escape(owner)
-                + '</title><rect class="card-bg" width="' + card.width
-                + '" height="' + card.height + '" rx="4"/>'
-                + '<text class="pad-eyebrow" x="12" y="15">' + escape(card.eyebrow) + '</text>'
-                + '<text class="pad-count" x="' + (card.width - 12) + '" y="15" text-anchor="end">' + card.rows.length + '</text>'
-                + '<text class="pad-title" x="12" y="33">' + escape(card.title) + '</text>' + rows
-                + '<line class="pad-spine" x1="' + spineX + '" x2="' + spineX + '" y1="2" y2="' + (card.height - 2) + '"/>'
-                + '<rect class="pad-frame" width="' + card.width + '" height="' + card.height + '" rx="4"/></g>';
+                + '</title>' + rows + '</g>';
         }
         if (card.kind === 'junction') {
             const [open, close] = link(card.link || null);
@@ -952,7 +1071,11 @@ function renderDiagram(diagram, page, interactive) {
         const single = card.nodes.length === 1;
         const status = single && node.implementation === 'stub' ? ' stub' : single && node.implementation === 'unresolved' ? ' unresolved' : '';
         const attrs = single ? action('node', node.id, [node.name, node.type].filter(Boolean).join(' ')) : '';
-        const [open, close] = single ? link(node.chapter) : ['', ''];
+        // 分组卡也要能点进子模块章节：取组内第一个带章节的实例作为落点，
+        // 否则读者看到一张能展开所有连接的卡片却点不动。
+        const chapterOf = single ? node.chapter
+            : card.nodes.map(item => item.chapter).find(Boolean);
+        const [open, close] = chapterOf ? link(chapterOf) : ['', ''];
         const titles = card.titleLines.map((line, index) => '<text class="card-title" x="12" y="' + (22 + index * HEAD_LINE)
             + '">' + escape(line) + '</text>').join('');
         const subtitle = card.subtitleName ? '<text class="card-subtitle" x="12" y="' + (card.headH + 16) + '">'
@@ -969,6 +1092,25 @@ function renderDiagram(diagram, page, interactive) {
                 + '<text class="entry-type" x="' + (card.width - 12) + '" y="' + (entry.y + 15) + '" text-anchor="end">'
                 + escape(entry.type) + '</text></g>' + rowClose;
         }).join('');
+        // 分组卡片的对外端口：一行一个通道名，端点用 BD 的实心 tip（信号圆点、束方块），
+        // 名称朝卡内，读者从边缘就能看出这一组对外接了哪些通道。
+        const groupPortMarkup = (card.groupLayout || []).map(port => {
+            const west = port.side === 'WEST';
+            const edge = west ? 0 : card.width;
+            const inner = west ? edge + 7 : edge - 7;
+            const tip = port.bus
+                ? '<rect class="group-port-tip" x="' + (edge - 3.25) + '" y="' + (port.y - 3.25)
+                    + '" width="6.5" height="6.5" rx="1"/>'
+                : '<circle class="group-port-tip" cx="' + edge + '" cy="' + port.y + '" r="2.7"/>';
+            return '<g class="group-port' + (port.bus ? ' bus' : '') + (port.clock ? ' clock' : '') + '"><title>' + escape(port.caption) + '</title>'
+                + '<line class="group-port-stem" x1="' + edge + '" y1="' + port.y + '" x2="' + inner + '" y2="' + port.y + '"/>'
+                + tip
+                + '<text class="group-port-label" x="' + (west ? edge + 12 : edge - 12) + '" y="' + (port.y + 4)
+                + '" text-anchor="' + (west ? 'start' : 'end') + '">'
+                + escape(clipText(port.caption, card.width - 24, FONT.pin, MONO)) + '</text></g>';
+        }).join('');
+        // BD 式分组卡：无标题带、虚线层级框，标题浮在框内左上角，端口沿边框排。
+        const grouped = !single && card.groupPorts.length > 0;
         const split = card.pinSplit
             ? '<line class="pin-split" x1="12" y1="' + card.pinSplit + '" x2="' + (card.width - 12) + '" y2="' + card.pinSplit + '"/>' : '';
         const pins = card.pins.map(pin => {
@@ -990,19 +1132,22 @@ function renderDiagram(diagram, page, interactive) {
         const foot = footLines.length
             ? '<line class="card-rule" x1="0" y1="' + footTop + '" x2="' + card.width + '" y2="' + footTop + '"/>'
                 + footLines.map((line, index) => line.replace('y="0"', 'y="' + (footTop + 14 + index * FOOT) + '"')).join('') : '';
-        return open + '<g class="diagram-card instance' + status + '" ' + translate + attrs + '><title>'
+        return open + '<g class="diagram-card instance' + status + (grouped ? ' bd-block' : '') + '" ' + translate + attrs + '><title>'
             + escape([card.title, node?.type].filter(Boolean).join(' · ')) + '</title>'
             + '<rect class="card-bg" width="' + card.width + '" height="' + card.height + '" rx="5"/>'
-            + '<path class="card-head" d="' + headPath(card.width, card.headH) + '"/>'
-            + '<line class="card-rule" x1="0" y1="' + card.headH + '" x2="' + card.width + '" y2="' + card.headH + '"/>'
-            + titles + subtitle + chips + entries + split + pins + foot
+            + (grouped ? '' : '<path class="card-head" d="' + headPath(card.width, card.headH) + '"/>'
+                + '<line class="card-rule" x1="0" y1="' + card.headH + '" x2="' + card.width + '" y2="' + card.headH + '"/>')
+            + titles + subtitle + chips + entries + groupPortMarkup + split + pins + foot
             + '<rect class="card-frame" width="' + card.width + '" height="' + card.height + '" rx="5"/></g>' + close;
     }).join('');
 
+    const region = diagram.clockRegion;
+    const clockRegion = region ? '<g class="clock-region"><rect x="' + region.x + '" y="' + region.y + '" width="' + region.width
+        + '" height="' + region.height + '" rx="5"/><text x="16" y="' + (region.y + 21) + '">时钟 / 复位 · 同名标签连接</text></g>' : '';
     return '<svg class="architecture-svg" xmlns="http://www.w3.org/2000/svg" width="' + diagram.width + '" height="'
         + diagram.height + '" viewBox="0 0 ' + diagram.width + ' ' + diagram.height + '" role="'
         + (interactive ? 'group' : 'img') + '" aria-label="' + escape(page.name) + ' 架构图">'
-        + edgeMarkup + cardMarkup + '</svg>';
+        + clockRegion + edgeMarkup + cardMarkup + '</svg>';
 }
 
 module.exports = { diagramTopology, layoutDiagram, renderDiagram, escape };
