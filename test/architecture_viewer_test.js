@@ -52,13 +52,18 @@ test('报文汇聚简图保留独立实例、标签网络和架构握手证据�
     assert.ok(!diagramTopology(withIdle, 'overview').cards.some(card => card.nodes.includes(idle)));
     assert.ok(diagramTopology(withIdle, 'detailed').cards.some(card => card.nodes.includes(idle)));
     const detailedLayout = await layoutDiagram(top, 'detailed');
-    const clock = detailedLayout.cards.find(card => card.nodes[0]?.name === 'clk');
-    assert(clock.terminal.labelX < clock.terminal.left);
-    const clockEdges = detailedLayout.edges.filter(edge => edge.from === clock.id);
-    assert(clockEdges.length > 1);
-    for (const edge of clockEdges) {
-        assert.deepEqual(edge.sections[0].startPoint, { x: clock.x + clock.terminal.right, y: clock.y + clock.terminal.centerY });
+    // 详细连接把边界端口合并成端口排：每个端口是排里的一行，连线从行锚点出发。
+    const clockPad = detailedLayout.cards.find(card => card.kind === 'pad' && card.rows.some(row => row.node.name === 'clk'));
+    assert.ok(clockPad, '详细连线应把边界端口收进端口排');
+    assert.equal(clockPad.edgeSide, 'left');
+    const clockRow = clockPad.rows.find(row => row.node.name === 'clk');
+    const padEdges = detailedLayout.edges.filter(edge => edge.from === clockPad.id);
+    assert(padEdges.length > 1);
+    const rowStarts = new Set(clockPad.rows.map(row => JSON.stringify({ x: clockPad.x + row.x, y: clockPad.y + row.y })));
+    for (const edge of padEdges) {
+        assert.ok(rowStarts.has(JSON.stringify(edge.sections[0].startPoint)), '端口排连线必须从行锚点出发');
     }
+    assert.ok(padEdges.some(edge => edge.sections[0].startPoint.y === clockPad.y + clockRow.y), 'clk 行必须接线');
     const svg = renderDiagram(await layoutDiagram(top, top.auto), top, true);
     assert.match(svg, /data-node="instance:u_fifo"/u);
     assert.match(svg, /data-edge=.+?arbitrated/u);
@@ -80,7 +85,8 @@ test('报文汇聚简图保留独立实例、标签网络和架构握手证据�
     const forced = await exportArchitecture(loaded, 'html', { out: 'architecture-detailed.html', modes: { [top.id]: 'detailed' } });
     const forcedHtml = await fs.readFile(forced, 'utf8');
     assert.ok(pinCount(forcedHtml) > pinCount(html));
-    assert.match(forcedHtml, /<polygon class="boundary-symbol"[^>]*\/><text class="boundary-caption"[^>]*>clk<\/text>/u);
+    assert.match(forcedHtml, /<g class="diagram-card pad left"[^>]*><title>[^<]*模块边界[^<]*<\/title><rect class="card-bg"/u);
+    assert.match(forcedHtml, /<text class="pad-name"[^>]*>clk<\/text>/u);
     const anchors = new Set([...forcedHtml.matchAll(/\sid="([^"]+)"/gu)].map(([, id]) => id));
     const missing = [...forcedHtml.matchAll(/\shref="#([^"]+)"/gu)].map(([, id]) => id).filter(id => !anchors.has(id));
     assert.deepEqual(missing, [], '完整连线导出的图内跳转必须有目标');

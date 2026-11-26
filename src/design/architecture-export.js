@@ -14,11 +14,17 @@ const { create } = require('./workflow-files');
 
 const stubOutput = (page, item) => page.empty && item.code === 'UNDRIVEN_OUTPUT';
 const diagnosticItems = items => items.map(item => `<li>${item.code ? code(item.code) + ' ' : ''}${escape(item.message || item)}</li>`).join('');
+const pad = value => String(value).padStart(2, '0');
+const section = (title, body, count) => body
+    ? `<section class="chapter-section"><h3 class="section-title"><span>${title}</span>${count === undefined ? '' : `<span class="section-count">${count}</span>`}</h3>${body}</section>`
+    : '';
 
 async function renderArchitectureBook(book, modes, { print = false } = {}) {
     const byId = new Map(book.pages.map(page => [page.id, page]));
-    const [sharedCss, bookCss, script] = await Promise.all([
+    const [sharedCss, diagramCss, symbolCss, bookCss, script] = await Promise.all([
         fs.readFile(path.join(__dirname, 'architecture.css'), 'utf8'),
+        fs.readFile(path.join(__dirname, 'architecture-diagram.css'), 'utf8'),
+        fs.readFile(path.join(__dirname, 'architecture-symbol.css'), 'utf8'),
         fs.readFile(path.join(__dirname, 'architecture-book.css'), 'utf8'),
         fs.readFile(path.join(__dirname, 'architecture-book-client.js'), 'utf8')
     ]);
@@ -32,27 +38,44 @@ async function renderArchitectureBook(book, modes, { print = false } = {}) {
         const diagram = renderDiagram(await layoutDiagram(page, mode), page, false);
         const nodes = new Map(page.nodes.map(node => [node.id, node]));
         const instances = page.nodes.filter(node => node.kind === 'instance');
-        const instanceTable = instances.length ? `<h3>子模块</h3><table><thead><tr><th scope="col">实例</th><th scope="col">模块</th><th scope="col">源码</th></tr></thead><tbody>${instances.map(node =>
-            `<tr><th scope="row">${code(node.name)}</th><td>${node.chapter ? `<a href="#${node.chapter}">${escape(pageName(byId.get(node.chapter)))}</a>` : `${code(node.type)} · 未解析`}${node.implementation === 'stub' ? ' · 实现桩' : ''}</td><td>${sourceLink(node.source, false)}</td></tr>`).join('')}</tbody></table>` : '';
+        const instanceTable = instances.length ? `<div class="table-scroll"><table><thead><tr><th scope="col">实例</th><th scope="col">模块</th><th scope="col">源码</th></tr></thead><tbody>${instances.map(node =>
+            `<tr><th scope="row">${code(node.name)}</th><td>${node.chapter ? `<a href="#${node.chapter}">${escape(pageName(byId.get(node.chapter)))}</a>` : `${code(node.type)} · 未解析`}${node.implementation === 'stub' ? ' · 实现桩' : ''}</td><td>${sourceLink(node.source, false)}</td></tr>`).join('')}</tbody></table></div>` : '';
         const interfaces = page.links.filter(link => link.kind === 'interface');
         const targets = new Map(interfaces.flatMap(link => link.endpoints.filter(endpoint => endpoint.boundary).map(endpoint => [endpoint.port, link.id])));
         const signals = page.links.filter(link => link.kind === 'signal' && (mode === 'detailed' || !link.labeled));
-        const signalTable = signals.length ? `<h3>普通信号</h3><table><thead><tr><th scope="col">信号</th><th scope="col">端点</th><th scope="col">位宽</th></tr></thead><tbody>${signals.map(link =>
-            `<tr id="${link.id}"><th scope="row">${code(link.name)}</th><td>${signalEnds(link, nodes)}</td><td>${link.width ?? '—'}</td></tr>`).join('')}</tbody></table>` : '';
+        const signalTable = signals.length ? `<div class="table-scroll"><table><thead><tr><th scope="col">信号</th><th scope="col">端点</th><th scope="col">位宽</th></tr></thead><tbody>${signals.map(link =>
+            `<tr id="${link.id}"><th scope="row">${code(link.name)}</th><td>${signalEnds(link, nodes)}</td><td>${link.width ?? '—'}</td></tr>`).join('')}</tbody></table></div>` : '';
         const diagnostics = page.checks.filter(item => !stubOutput(page, item));
         const stubs = page.checks.filter(item => stubOutput(page, item));
-        chapters.push(`<section class="chapter" id="${page.id}"><div class="chapter-lead"><header><a href="#contents">目录</a>${index ? ` <a href="#${book.pages[0].id}">顶层</a>` : ''}
-            <h2>${index + 1}. ${escape(pageName(page))}</h2>${page.title ? `<p class="module-title">${escape(page.title)}</p>` : ''}
-            <p class="subtle">${sourceLink(page.source, false)}${page.empty ? ' · 实现桩' : ''}</p></header>
-            ${diagnostics.length ? `<aside class="book-review"><h3>本章待复核 · ${diagnostics.length}</h3><ul>${diagnosticItems(diagnostics)}</ul></aside>` : ''}
-            ${diagram ? `${print ? '' : '<div class="book-diagram-tools"><button type="button" data-zoom aria-pressed="false">原始尺寸</button></div>'}<div class="diagram-print" tabindex="0" aria-label="架构图">${diagram}</div>` : ''}</div>
+        const figure = page.hasStructure
+            ? `<figure class="diagram-figure">
+                <div class="diagram-toolbar book-diagram-tools">${print ? '' : '<button type="button" data-zoom aria-pressed="false">原始尺寸</button>'}</div>
+                <div class="diagram-print" tabindex="0" aria-label="架构图">${diagram}</div>
+                <figcaption class="diagram-caption">图 ${pad(index + 1)} · 结构连线（${mode === 'overview' ? '简图：功能分组，边界端口单列成排' : '完整连线，落到具体引脚'}）</figcaption>
+            </figure>`
+            : `<p class="diagram-empty">本章是叶子模块，没有内部实例；下方是模块边界端口图。</p>`;
+        const counts = [page.ports.length ? page.ports.length + ' 个端口' : '', instances.length ? instances.length + ' 个子模块' : '', interfaces.length ? interfaces.length + ' 个接口' : '']
+            .filter(Boolean).join(' · ');
+        chapters.push(`<section class="chapter" id="${page.id}">
+            <div class="chapter-lead">
+                <header class="chapter-header">
+                    <div class="chapter-crumbs"><span class="chapter-index">${pad(index + 1)}</span><span class="chapter-nav"><a href="#contents">目录</a>${index ? ` · <a href="#${book.pages[0].id}">返回顶层</a>` : ''}</span></div>
+                    <h2>${escape(page.title || pageName(page))}</h2>
+                    <p class="chapter-title">${code(pageName(page))}${page.title ? '' : '（未命名模块职责）'}</p>
+                    <p class="chapter-meta">${sourceLink(page.source, false)}${page.empty ? ' · 实现桩' : ''}${counts ? ' · ' + counts : ''}</p>
+                </header>
+                ${diagnostics.length ? `<aside class="book-review"><h3>本章待复核 · ${diagnostics.length}</h3><ul>${diagnosticItems(diagnostics)}</ul></aside>` : ''}
+                ${figure}
+            </div>
+            ${section('模块端口图', renderModuleSymbol(pageName(page), page.ports, { targets }), page.ports.length ? page.ports.length + ' 个端口' : '')}
+            ${page.ports.length ? `<details class="book-detail" data-print-open${opened}><summary>端口明细 · ${page.ports.length}</summary>${portTable(page.ports, false)}</details>` : ''}
             ${backgroundSignals(page, !print)}
-            <h3>模块端口图</h3>${renderModuleSymbol(pageName(page), page.ports, { targets })}
-            ${page.ports.length ? `<details class="book-detail" data-print-open${opened}><summary>端口明细 · ${page.ports.length}</summary>${portTable(page.ports, false)}</details>` : ''}${instanceTable}
-            ${interfaces.length ? `<h3>接口目录</h3><ul class="interface-index">${interfaces.map(link => `<li><a href="#${link.id}">${escape(link.name)} · ${escape(link.type)}</a></li>`).join('')}</ul>` : ''}
-            ${signalTable}
-            ${interfaces.map(link => `<details class="interface-section book-detail" data-print-open id="${link.id}"${opened}><summary><strong>${escape(link.name)}</strong> <span>${escape(link.type)} · ${link.members.length} 个成员</span></summary>${interfaceDetails(link, nodes, false)}</details>`).join('')}
-            ${stubs.length ? `<details class="book-detail book-stubs" data-print-open${opened}><summary>实现桩待实现输出 · ${stubs.length}</summary><ul>${diagnosticItems(stubs)}</ul></details>` : ''}</section>`);
+            ${section('子模块', instanceTable, instances.length)}
+            ${interfaces.length ? section('接口目录', `<ul class="interface-index">${interfaces.map(link => `<li><a href="#${link.id}">${escape(link.name)} · ${escape(link.type)}</a></li>`).join('')}</ul>`, interfaces.length) : ''}
+            ${section('普通信号', signalTable, signals.length)}
+            ${section('接口详情', interfaces.map(link => `<details class="interface-section book-detail" data-print-open id="${link.id}"${opened}><summary><strong>${escape(link.name)}</strong> <span>${escape(link.type)} · ${link.members.length} 个成员</span></summary>${interfaceDetails(link, nodes, false)}</details>`).join(''), interfaces.length)}
+            ${stubs.length ? `<details class="book-detail book-stubs" data-print-open${opened}><summary>实现桩待实现输出 · ${stubs.length}</summary><ul>${diagnosticItems(stubs)}</ul></details>` : ''}
+        </section>`);
     }
     const summary = [
         [book.pages.length, '模块章节'], [interfaceCount, '接口条目'],
@@ -63,15 +86,18 @@ async function renderArchitectureBook(book, modes, { print = false } = {}) {
         ? `<section class="book-review" aria-labelledby="review-title"><h2 id="review-title">复核索引</h2>
             <ul>${diagnosticItems([...book.diagnostics, ...book.issues])}${highlights.map(page => `<li><a href="#${page.id}">${escape(pageName(page))}</a> · ${page.checks.filter(item => !stubOutput(page, item)).length} 条待复核</li>`).join('')}</ul></section>` : '';
     const title = book.pages[0].title || book.top;
+    const nav = book.pages.map((page, index) => `<li><a href="#${page.id}"><span class="toc-index">${pad(index + 1)}</span><span class="toc-title">${escape(page.title || page.name)}</span><span class="toc-module">${page.title ? code(pageName(page)) : ''}</span></a></li>`).join('');
     return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-        <title>${escape(title)} · 架构设计</title><style>${sharedCss}\n${bookCss}</style></head>
-        <body class="architecture-book"><header class="book-header" id="contents"><h1>${escape(title)}</h1>
-        <p class="subtle">${code(book.top)} · 结构快照 ${escape(book.revision.slice(0, 12))}</p>
-        <ul class="book-summary" aria-label="报告概况">${summary.map(([count, label]) => `<li><strong>${count}</strong> ${label}</li>`).join('')}</ul>
-        <p class="subtle">方向来自伪 SystemVerilog 端口和 modport 声明。功能、时序与握手行为需结合验证结果。</p>${print ? overview : ''}</header>
-        <div class="book-layout"><nav class="book-nav" aria-label="章节目录"><h2>章节目录</h2>
+        <title>${escape(title)} · 架构设计</title><style>${sharedCss}\n${diagramCss}\n${symbolCss}\n${bookCss}</style></head>
+        <body class="architecture-book"><header class="book-header" id="contents">
+        <p class="book-eyebrow">架构设计 · Architecture</p>
+        <h1>${escape(title)}</h1>
+        <p class="book-meta"><span>${code(book.top)}</span><span>结构快照 ${escape(book.revision.slice(0, 12))}</span><span>源级投影</span></p>
+        <ul class="book-summary" aria-label="报告概况">${summary.map(([count, label]) => `<li><strong>${count}</strong><span>${label}</span></li>`).join('')}</ul>
+        <p class="book-note">方向来自伪 SystemVerilog 端口和 modport 声明。功能、时序与握手行为需结合验证结果。</p>${print ? overview : ''}</header>
+        <div class="book-layout"><nav class="book-nav" aria-label="章节目录"><h2>模块章节</h2>
         ${print ? '' : '<label class="book-search">筛选章节<input type="search" id="chapter-filter" placeholder="模块名或职责"></label><p id="no-chapters" hidden role="status">没有匹配的章节</p>'}
-        <ol>${book.pages.map(page => `<li><a href="#${page.id}">${page.title ? `<span>${escape(page.title)}</span>` : ''}${code(pageName(page))}</a></li>`).join('')}</ol></nav>
+        <ol>${nav}</ol></nav>
         <main class="book-content">${print ? '' : overview}${chapters.join('')}</main></div>${print ? '' : `<script>${script}</script>`}</body></html>`;
 }
 

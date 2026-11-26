@@ -46,7 +46,7 @@
         $('interface-view').hidden = true;
         $('breadcrumbs').innerHTML = [...ancestors.map(parent => action('chapter', parent, chapters.get(parent).name)),
             `<span aria-current="page">${escape(page.name)}</span>`].join('<span aria-hidden="true" class="separator">›</span>');
-        $('chapters').innerHTML = `<h2>模块章节</h2>${book.pages.map(module => `<button type="button" data-chapter="${module.id}"${module.id === id ? ' aria-current="page"' : ''}>${module.title ? `<span>${escape(module.title)}</span>` : ''}${code(pageName(module))}</button>`).join('')}`;
+        $('chapters').innerHTML = `<h2>模块章节</h2>${book.pages.map((module, index) => `<button type="button" data-chapter="${module.id}"${module.id === id ? ' aria-current="page"' : ''}>${module.title ? `<span>${escape(module.title)}</span>` : ''}${code(String(index + 1).padStart(2, '0') + ' · ' + pageName(module))}</button>`).join('')}`;
         $('page-title').textContent = page.title || page.name;
         $('page-meta').innerHTML = [page.title ? code(pageName(page)) : parameterText(page.parameters) && code(parameterText(page.parameters)),
             page.empty && '实现桩', site('', page)].filter(Boolean).join(' · ');

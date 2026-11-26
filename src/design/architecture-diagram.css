@@ -1,0 +1,127 @@
+/* 架构连线图样式（architecture-diagram.js）。
+   规范见 docs/ARCHITECTURE_VISUAL.md 第 3 节；只使用 architecture.css 中的设计令牌。 */
+
+.architecture-svg { font-family: var(--font-ui); }
+.architecture-svg text { fill: var(--ink); user-select: none; }
+.architecture-svg a { color: inherit; cursor: pointer; text-decoration: none; }
+.architecture-svg [role=button], .architecture-svg a { cursor: pointer; outline: none; }
+
+/* ---------- 实例卡片 ---------- */
+.card-bg { fill: var(--panel); }
+.card-frame { fill: none; stroke: var(--line-2); stroke-width: 1; }
+.diagram-card.stub .card-frame { stroke-dasharray: 4 3; }
+.diagram-card.unresolved .card-frame { stroke: var(--warn); stroke-dasharray: 4 3; }
+.card-head { fill: var(--sunk); }
+.card-rule { stroke: var(--line); stroke-width: 1; }
+.card-title {
+    font-family: var(--font-ui);
+    font-size: 12.5px;
+    font-weight: 600;
+    fill: var(--ink);
+}
+.card-subtitle { font-family: var(--font-mono); font-size: 10.5px; fill: var(--muted); }
+.card-chip rect { fill: var(--sunk-2); stroke: var(--line); stroke-width: 1; }
+.card-chip text { font-family: var(--font-mono); font-size: 9.5px; fill: var(--muted); }
+.card-chip.status.unresolved rect { stroke: var(--warn); stroke-dasharray: 3 2; }
+.card-chip.status.unresolved text { fill: var(--warn); }
+.card-foot { font-family: var(--font-mono); font-size: 10px; fill: var(--muted); }
+
+/* 分组卡片成员行 */
+.node-entry .row-bg { fill: transparent; }
+.node-entry:hover .row-bg, .node-entry:focus-visible .row-bg { fill: var(--sunk); }
+.entry-name { font-family: var(--font-mono); font-size: 11px; fill: var(--ink-2); }
+.entry-type { font-family: var(--font-mono); font-size: 10px; fill: var(--faint); }
+.entry-rule { stroke: var(--line); stroke-width: 1; }
+
+/* ---------- 引脚 ---------- */
+.pin-stub { stroke: var(--wire); stroke-width: 1.1; }
+.pin-dot { fill: var(--panel); stroke: var(--wire); stroke-width: 1.2; }
+.pin-bus { fill: none; stroke: var(--bus); stroke-width: 1.2; }
+.pin-label { font-family: var(--font-mono); font-size: 10.5px; fill: var(--ink-2); }
+.pin-label.bus { fill: var(--bus); }
+.pin-split { stroke: var(--line); stroke-width: 1; }
+
+/* ---------- 边界端口条（与实例卡片区分：浅底、细边、内侧脊线） ---------- */
+.diagram-card.pad .card-bg { fill: var(--sunk); }
+.pad-frame { fill: none; stroke: var(--line); stroke-width: 1; }
+.pad-spine { stroke: var(--line-2); stroke-width: 2; stroke-linecap: butt; }
+.pad-eyebrow {
+    font-family: var(--font-ui);
+    font-size: 9.5px;
+    letter-spacing: .08em;
+    fill: var(--faint);
+}
+.pad-title { font-family: var(--font-ui); font-size: 12px; font-weight: 600; fill: var(--ink); }
+.pad-count { font-family: var(--font-mono); font-size: 10px; fill: var(--faint); }
+.pad-row-bg { fill: transparent; }
+.pad-row-state { fill: transparent; }
+.pad-row:hover .pad-row-bg, .pad-row:focus-visible .pad-row-bg { fill: var(--sunk-2); }
+.pad-row-rule { stroke: var(--line); stroke-width: 1; opacity: .45; }
+.pad-glyph { font-family: var(--font-mono); font-size: 10.5px; fill: var(--muted); }
+.pad-glyph.bus { fill: var(--bus); }
+.pad-name { font-family: var(--font-mono); font-size: 10.5px; fill: var(--ink-2); }
+.pad-meta { font-family: var(--font-mono); font-size: 9.5px; fill: var(--faint); }
+
+/* ---------- 边界旗标（同方向端口不超过两个） ---------- */
+.boundary-symbol { fill: var(--sunk-2); stroke: var(--line-2); stroke-width: 1; }
+.boundary-caption { font-family: var(--font-mono); font-size: 10.5px; fill: var(--ink-2); }
+
+/* ---------- 汇聚节点 ---------- */
+.diagram-card.junction .card-frame { stroke: var(--line-2); stroke-dasharray: 4 3; }
+.junction-title { font-family: var(--font-mono); font-size: 10.5px; fill: var(--ink-2); }
+.junction-chip rect { fill: var(--sunk-2); stroke: var(--line); stroke-width: 1; }
+.junction-chip text { font-family: var(--font-mono); font-size: 9.5px; fill: var(--muted); }
+
+/* ---------- 连线与标签 ---------- */
+.edge-hit { fill: none; stroke: transparent; stroke-width: 14; }
+.edge-line {
+    fill: none;
+    stroke: var(--wire);
+    stroke-width: 1.1;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+.diagram-edge.bus .edge-line { stroke: var(--bus); stroke-width: 2.2; }
+.diagram-edge.unknown .edge-line { stroke-dasharray: 4 3; }
+.edge-arrow { stroke: none; fill: var(--wire); }
+.diagram-edge.bus .edge-arrow { fill: var(--bus); }
+.wire-label rect { fill: var(--panel); stroke: var(--line); stroke-width: 1; }
+.wire-label text { font-family: var(--font-mono); font-size: 10px; fill: var(--ink-2); }
+
+/* ---------- 悬停与键盘焦点 ---------- */
+.architecture-svg [data-node]:is(:hover, :focus-visible) > .card-frame { stroke: var(--focus); stroke-width: 2; }
+.architecture-svg [data-node]:is(:hover, :focus-visible) > .boundary-symbol { stroke: var(--focus); stroke-width: 2; }
+.architecture-svg [data-edge]:is(:hover, :focus-visible) .edge-line { stroke: var(--focus); stroke-width: 2.4; }
+.architecture-svg .diagram-edge.unknown[data-edge]:is(:hover, :focus-visible) .edge-line { stroke-dasharray: 4 3; }
+
+/* ---------- 选中/上下游/共享状态（查看器设置 data-state） ---------- */
+.architecture-svg [data-state=dimmed] { opacity: .26; }
+.architecture-svg [data-state=dimmed]:is(:hover, :focus-visible) { opacity: 1; }
+.architecture-svg [data-state=selected] { --active: var(--focus); }
+.architecture-svg [data-state=upstream] { --active: var(--up); }
+.architecture-svg [data-state=downstream] { --active: var(--down); }
+.architecture-svg [data-state=related], .architecture-svg [data-state=both] { --active: var(--weak); }
+.architecture-svg [data-state]:not([data-state=normal], [data-state=dimmed]) > .card-frame {
+    stroke: var(--active);
+    stroke-width: 2;
+    stroke-dasharray: none;
+}
+.architecture-svg [data-state]:not([data-state=normal], [data-state=dimmed]) > .boundary-symbol {
+    stroke: var(--active);
+    stroke-width: 2;
+}
+.architecture-svg [data-state]:not([data-state=normal], [data-state=dimmed]) .pad-row-bg {
+    fill: color-mix(in srgb, var(--active) 12%, var(--panel));
+}
+.architecture-svg [data-state]:not([data-state=normal], [data-state=dimmed]) .pad-row-state { fill: var(--active); }
+.architecture-svg [data-state]:not([data-state=normal], [data-state=dimmed]) .pad-glyph,
+.architecture-svg [data-state]:not([data-state=normal], [data-state=dimmed]) .pad-name { fill: var(--active); }
+.architecture-svg [data-state]:not([data-state=normal], [data-state=dimmed]) .entry-name { fill: var(--ink); }
+.architecture-svg .diagram-edge[data-state]:not([data-state=normal], [data-state=dimmed]) .edge-line {
+    stroke: var(--active);
+    stroke-width: 2.8;
+}
+.architecture-svg .diagram-edge[data-state]:not([data-state=normal], [data-state=dimmed]) .edge-arrow { fill: var(--active); }
+.architecture-svg .diagram-edge.unknown[data-state]:not([data-state=normal], [data-state=dimmed]) .edge-line {
+    stroke-dasharray: 4 3;
+}

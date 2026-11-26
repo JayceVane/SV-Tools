@@ -12,7 +12,7 @@ function panelHtml(webview, vscode, root) {
     const nonce = randomBytes(24).toString('base64');
     return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
     <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource}; script-src 'nonce-${nonce}';">
-    <title>架构查看器</title><link rel="stylesheet" href="${uri('architecture.css')}"></head>
+    <title>架构查看器</title><link rel="stylesheet" href="${uri('architecture.css')}"><link rel="stylesheet" href="${uri('architecture-diagram.css')}"><link rel="stylesheet" href="${uri('architecture-symbol.css')}"></head>
     <body class="architecture-view"><header class="viewer-header"><div><h1>架构查看器</h1><p id="snapshot" class="subtle"></p></div>
     <div class="tools"><button id="refresh" type="button">重新读取</button><button id="export-html" type="button" disabled>导出 HTML</button><button id="export-pdf" type="button" disabled>导出 PDF</button></div></header>
     <p id="status" class="status" role="status" aria-live="polite">正在读取工程…</p>
@@ -21,7 +21,7 @@ function panelHtml(webview, vscode, root) {
     <div class="work-area"><section id="graph-content" aria-labelledby="page-title">
         <header class="page-header"><div><h2 id="page-title"></h2><p id="page-meta" class="subtle"></p></div>
             <div id="graph-tools" class="tools" aria-label="架构图模式"><button id="overview" type="button" aria-pressed="false">简图</button><button id="detailed" type="button" aria-pressed="false">完整连线</button><button id="fit" type="button" aria-pressed="true">适应宽度</button></div></header>
-        <div id="graph-legend" class="legend" hidden><span><i class="forward"></i>上游</span><span><i class="reverse"></i>下游</span><span><i class="neutral"></i>共享 / 方向待确认</span><span>点击实例或连线查看详情</span></div>
+        <div id="graph-legend" class="legend" hidden><span><i class="bus"></i>接口束</span><span><i class="signal"></i>普通信号</span><span><i class="neutral"></i>方向待确认</span><span class="legend-gap"><i class="forward"></i>上游</span><span><i class="reverse"></i>下游</span><span class="legend-hint">点击实例或连线查看详情</span></div>
         <div class="diagram-scroll fitted" id="graph" tabindex="0" aria-label="架构连线图"></div><div id="labels"></div>
         <section id="inspector" class="inspector" aria-label="模块和连接详情"></section>
         <div id="page-checks"></div>

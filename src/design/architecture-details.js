@@ -53,34 +53,38 @@
                 : target ? ` href="#${escape(target)}"` : '';
             return `<${tag} class="${className}"${attrs} title="${escape(portDescription(port))}">${content}</${tag}>`;
         };
-        const side = (kind, label) => {
-            if (!groups[kind].length) return '';
-            const pins = groups[kind].map(port => {
-                const bidirectional = port.direction === 'inout';
-                const width = port.width == null ? '' : `${port.width} 位`;
-                const description = kind === 'shared' ? [port.type, direction(port.direction), width].filter(Boolean).join(' · ')
-                    : width || '位宽待确认';
-                const marker = bidirectional ? '<span class="module-pin-direction" role="img" aria-label="双向">↔</span>' : '';
-                const content = `${code(port.name)}<small>${escape(description)}</small>${marker}`;
-                return `<li${bidirectional ? ' class="bidirectional"' : ''}>${control(port, content)}</li>`;
-            }).join('');
-            return `<section class="module-pin-group ${kind}" aria-label="${label}"><h4>${label}</h4><ul>${pins}</ul></section>`;
+        const heading = (label, english, total) => `<h4>${label}${english ? `<span class="module-pin-group-en">${english}</span>` : ''}<span class="module-pin-count">${total}</span></h4>`;
+        const pin = port => {
+            const bidirectional = port.direction === 'inout';
+            const width = port.width == null ? '—' : `${port.width} 位`;
+            const marker = bidirectional ? '<span class="module-pin-direction" role="img" aria-label="双向">↔</span>' : '';
+            const content = `<span class="module-pin-lead" data-direction="${escape(['input', 'output', 'inout', 'ref'].includes(port.direction) ? port.direction : 'unknown')}" aria-hidden="true"></span>${code(port.name)}<small class="module-pin-width">${escape(width)}${marker}</small>`;
+            return `<li${bidirectional ? ' class="bidirectional"' : ''}>${control(port, content)}</li>`;
         };
+        const side = (kind, label, english) => groups[kind].length
+            ? `<section class="module-pin-group ${kind}" aria-label="${label}">${heading(label, english, groups[kind].length)}<ul>${groups[kind].map(pin).join('')}</ul></section>`
+            : '';
         const terminals = interfaces.map(port => {
             const [type, role] = (port.type || '').split('.', 2);
             const roleLabel = role === 'master' ? 'Master' : role === 'slave' ? 'Slave' : '';
             const badge = roleLabel ? `<span class="module-interface-role">${roleLabel}</span>` : '';
             const description = type || '类型待确认';
-            const subtitle = roleLabel ? description : `${description} · ${role || '未声明 modport'}`;
-            const content = `<span class="module-bus-symbol" aria-hidden="true"></span><span class="module-interface-label">
-                <strong>${code(port.name)}${badge}</strong><small>${escape(subtitle)}</small></span>`;
+            const detail = `${description} · ${role || '未声明 modport'}`;
+            const subtitle = roleLabel ? escape(description) : role ? escape(detail) : `${escape(description)} · <span class="module-interface-missing" aria-hidden="true">—</span>`;
+            const hint = role ? '' : ` title="${escape(detail)}"`;
+            const content = `<span class="module-bus-symbol" aria-hidden="true"></span><span class="module-interface-label"><strong>${code(port.name)}${badge}</strong><small${hint}>${subtitle}</small></span>`;
             return `<li>${control(port, content, 'module-pin module-interface-pin' + (roleLabel ? ` ${role}` : ''))}</li>`;
         }).join('');
-        const buses = terminals ? `<section class="module-pin-group interfaces" aria-label="接口束"><h4>接口束</h4><ul>${terminals}</ul></section>` : '';
+        const buses = interfaces.length
+            ? `<section class="module-pin-group interfaces" aria-label="接口束">${heading('接口束', 'INTERFACES', interfaces.length)}<ul>${terminals}</ul></section>`
+            : '';
         const outputLabel = groups.output.some(port => port.direction === 'inout') ? '输出 / 双向' : '输出';
         const sharedLabel = [...new Set(groups.shared.map(port => port.direction === 'ref' ? '引用' : '方向待确认'))].join(' / ');
-        return `<figure class="module-symbol" aria-label="${escape(name)} 端口图"><figcaption>${code(name)}</figcaption>
-            <div class="module-pin-sides">${side('input', '输入')}${buses}${side('output', outputLabel)}</div>${side('shared', sharedLabel)}</figure>`;
+        const shared = groups.shared.length
+            ? `<section class="module-pin-group shared" aria-label="${sharedLabel}">${heading(sharedLabel, '', groups.shared.length)}<ul>${groups.shared.map(pin).join('')}</ul></section>`
+            : '';
+        return `<div class="module-symbol-frame"><figure class="module-symbol" aria-label="${escape(name)} 端口图"><figcaption>${code(name)}</figcaption>
+            <div class="module-pin-sides">${side('input', '输入', 'INPUT')}${buses}${side('output', outputLabel, 'OUTPUT')}</div>${shared}</figure></div>`;
     }
 
     function routeText(member, endpoints) {
