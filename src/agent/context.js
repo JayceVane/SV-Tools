@@ -144,6 +144,10 @@ async function resolveContext(input = {}, { requireVirtualWorkspace = false } = 
             } finally { await handle.close(); }
         }
     }));
+    // 并发读取的完成顺序不稳定；按文件集顺序重排，避免解析顺序、模型顺序和哈希随 I/O 竞速变化。
+    const orderedContents = new Map(ordered.filter(file => contents.has(file)).map(file => [file, contents.get(file)]));
+    contents.clear();
+    for (const [file, item] of orderedContents) contents.set(file, item);
     // Vivado允许不显式加入工程的字面量include；这些依赖也必须参与身份和隔离输入。
     const known=new Set([...contents.keys()].map(keyOf)), queue=[...contents.keys()];
     for(let cursor=0;cursor<queue.length;cursor++) {
