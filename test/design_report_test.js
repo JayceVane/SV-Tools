@@ -101,8 +101,21 @@ endmodule
     const svg = await fsp.readFile(path.join(directory, svgFile.path), 'utf8');
     assert.match(svg, /class="card-head"/u);
     assert.match(svg, /class="schematic-pin/u);
-    assert.match(svg, /#2f6db3/u, '接口束沿用查看器的蓝色');
+    assert.equal(response.output.data.evidence.layout.theme, 'mono');
     assert.ok(!svg.includes('var(--'), '独立 SVG 中的配色已解析，PNG 栅格化不依赖宿主主题');
+    assert.ok(!svg.includes('color-mix('), '独立 SVG 内不得保留 color-mix');
+    // 独立文档图必须是灰阶：R=G=B，不得出现品牌蓝、状态色或渐变。
+    const styled = svg.replace(/<metadata[\s\S]*?<\/metadata>/gu, '').replace(/url\(#[^)]*\)/gu, '');
+    let colored = 0;
+    for (const match of styled.matchAll(/#([0-9a-fA-F]{3,8})/gu)) {
+        const raw = match[1];
+        if (![3, 4, 6, 8].includes(raw.length)) continue;
+        const digits = raw.length <= 4 ? [...raw.slice(0, 3)].map(char => char + char).join('') : raw.slice(0, 6);
+        assert.equal(digits.slice(0, 2), digits.slice(2, 4), 'document 必须 R=G：#' + raw);
+        assert.equal(digits.slice(2, 4), digits.slice(4, 6), 'document 必须 G=B：#' + raw);
+        colored += 1;
+    }
+    assert.ok(colored > 20, '灰阶检查应覆盖内联样式与文字颜色：' + colored);
     assert.equal((svg.match(/id="svtools-evidence"/gu) || []).length, 1);
     const leaf = await run(['design', 'render', '--workspace', directory, '--top', 'host', '--out', 'leaf']);
     assert.equal(leaf.exitCode, 0, JSON.stringify(leaf.output.diagnostics));

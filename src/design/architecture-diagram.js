@@ -26,11 +26,14 @@ const TITLE_NAMES = 3;
 const ENTRY_ROW = 22;
 // 分组卡片的对外端口行高：一行一个端口，名称 + 端点符号。
 const GROUP_PORT_ROW = 22;
+// 卡底时钟/复位脚注：两行、行高 14px，标签列宽 28px。
+const CLOCK_ROW = 14;
+const CLOCK_LABEL = 28;
 const OVERVIEW_MAX_WIDTH = 1400;
 
 const FONT = {
     title: 12.5, subtitle: 10.5, chip: 9.5, pin: 10.5, foot: 10, label: 10,
-    padTitle: 12, padName: 10.5, padMeta: 9.5, entryName: 11, entryType: 10, junction: 10.5,
+    padTitle: 12, padName: 10.5, padMeta: 9.5, entryName: 11, entryType: 10, junction: 10.5, clock: 10,
 };
 const MONO = 0.6;
 const UI = 0.55;
@@ -123,6 +126,27 @@ function groupEdgePorts(incident) {
         ports.get(caption).edges.push(item.id);
     }
     return [...ports.values()];
+}
+
+/**
+ * 时钟/复位网络收成卡底两行：CLK / RST 各一行，按首次出现顺序去重。
+ * 每个网络保留所属连线 id，渲染成独立 tspan 以便逐网悬浮查源端/接收端。
+ * @param {Array<{net?:string, caption:string, links?:string[]}>} ports
+ * @returns {Array<{label:'CLK'|'RST', items:Array<{name:string, link?:string}>}>}
+ */
+function clockRowItems(ports) {
+    const groups = { CLK: [], RST: [] };
+    const seen = { CLK: new Set(), RST: new Set() };
+    for (const port of ports) {
+        const names = String(port.net || port.caption || '').split(' / ').map(name => name.trim()).filter(Boolean);
+        for (const name of names.length ? names : [port.caption || '']) {
+            const label = signalKind(name) === 'RST' ? 'RST' : 'CLK';
+            if (seen[label].has(name)) continue;
+            seen[label].add(name);
+            groups[label].push({ name, link: port.links?.[0] });
+        }
+    }
+    return ['CLK', 'RST'].filter(label => groups[label].length).map(label => ({ label, items: groups[label] }));
 }
 
 function boundaryCategory(node) {
@@ -368,6 +392,20 @@ function measureInstance(card, detailed, assignment, incident) {
         if (port.clock && port.net !== port.caption) port.caption += ' · ' + port.net;
         if (port.clock) port.caption = (signalKind(port.net) || signalKind(port.port)) + ' ' + port.caption;
     }
+    // 时钟/复位不占左右列：统一折到卡底两行（CLK / RST），每行 14px。
+    // 它们本来就没有跨模块示意线（同名标签连接），按端口行排只会白占卡片高度。
+    card.clockRows = [];
+    if (!detailed) {
+        const clockPorts = card.groupPorts.filter(port => port.clock);
+        if (clockPorts.length) {
+            card.groupPorts = card.groupPorts.filter(port => !port.clock);
+            card.clockRows = clockRowItems(clockPorts);
+        }
+    }
+    const clockIdeal = card.clockRows.length
+        ? 12 + CLOCK_LABEL + Math.min(TITLE_MAX, card.clockRows
+            .map(row => row.items.slice(0, 3).reduce((sum, item, index) => sum + (index ? 3 : 0)
+                + textWidth(item.name, FONT.clock, MONO), 0)).reduce((max, width) => Math.max(max, width), 0)) + 12 : 0;
     const entryWidth = card.entries.length
         ? 12 + Math.max(...card.entries.map(entry => textWidth(entry.name, FONT.entryName, MONO))) + 24
             + Math.max(...card.entries.map(entry => textWidth(entry.type, FONT.entryType, MONO))) + 12 : 0;
@@ -394,13 +432,32 @@ function measureInstance(card, detailed, assignment, incident) {
     const pinWidth = card.pins.length ? 12 + westMax + (eastMax ? 20 + eastMax : 0) + 12 : 0;
     // 单侧引脚时按引脚列宽收窄卡片，标题允许三行，避免标题把卡片撑出大片空白。
     const compact = card.pins.length > 0 && (westMax > 0) !== (eastMax > 0);
-    const base = Math.max(152, subtitleWidth, entryWidth, portWidth, footWidth, pinWidth, compact ? 196 : 0);
+    const base = Math.max(152, subtitleWidth, entryWidth, portWidth, footWidth, pinWidth, clockIdeal, compact ? 196 : 0);
     let titleMax = 232;
     if (detailed) titleMax = compact ? Math.max(160, Math.min(TITLE_MAX, base - 24)) : TITLE_MAX;
     card.titleLines = wrapTitle(title, titleMax, detailed && !compact ? 2 : 3);
     const titleWidth = Math.max(0, ...card.titleLines.map(line => textWidth(line, FONT.title, UI)));
     card.headH = HEAD + (card.titleLines.length - 1) * HEAD_LINE;
     card.width = Math.ceil(Math.max(base, titleWidth + 24) / 4) * 4;
+    // 单行省略：能放下几个网络就放几个，其余用 +N 收尾（悬浮仍可按 tspan 查任意一个已显示网络）。
+    for (const row of card.clockRows) {
+        const avail = card.width - 12 - CLOCK_LABEL - 12;
+        let used = 0;
+        row.shown = [];
+        for (let index = 0; index < row.items.length; index++) {
+            const item = row.items[index];
+            const rest = row.items.length - index - 1;
+            const more = rest > 0 ? textWidth(' +' + rest, FONT.clock, MONO) : 0;
+            const width = textWidth(item.name, FONT.clock, MONO);
+            const sep = row.shown.length ? textWidth(' · ', FONT.clock, MONO) : 0;
+            if (row.shown.length && used + sep + width + more > avail) break;
+            const name = width + more > avail ? clipText(item.name, Math.max(24, avail - more - sep), FONT.clock, MONO) : item.name;
+            row.shown.push({ name, link: item.link });
+            used += sep + textWidth(name, FONT.clock, MONO);
+        }
+        row.rest = row.items.length - row.shown.length;
+    }
+    card.clockHeight = card.clockRows.length * CLOCK_ROW;
     const bodyTop = card.headH + card.subH;
     const scalars = { WEST: [], EAST: [] }, buses = { WEST: [], EAST: [] };
     for (const pin of card.pins) (pin.bus ? buses : scalars)[pin.side].push(pin);
@@ -424,7 +481,8 @@ function measureInstance(card, detailed, assignment, incident) {
     const portsHeight = card.groupPorts.length ? BODY_PAD * 2 + card.groupPorts.length * GROUP_PORT_ROW : 0;
     const content = card.entries.length ? card.entries.length * ENTRY_ROW : card.groupPorts.length ? portsHeight : body;
     const footLines = (card.footnote ? 1 : 0) + (card.internalText ? 1 : 0);
-    card.height = bodyTop + content + footLines * FOOT;
+    card.clockTop = bodyTop + content;
+    card.height = card.clockTop + card.clockHeight + footLines * FOOT;
     let x = card.width - 12;
     for (let index = card.chips.length - 1; index >= 0; index--) {
         const chip = card.chips[index];
@@ -454,7 +512,8 @@ function measureInstance(card, detailed, assignment, incident) {
                     for (const edgeId of port.edges) card.edgeAnchorIds.set(edgeId, port.id);
                 }
             }
-            card.height = bodyTop + BODY_PAD * 2 + Math.max(westRow, eastRow) * GROUP_PORT_ROW + footLines * FOOT;
+            card.clockTop = bodyTop + BODY_PAD * 2 + Math.max(westRow, eastRow) * GROUP_PORT_ROW;
+            card.height = card.clockTop + card.clockHeight + footLines * FOOT;
             return;
         }
     }
@@ -808,8 +867,9 @@ async function runLayout(cards, edges, detailed, wrapped = false) {
     if (support.length) {
         const gap = 28, padding = 16, heading = 34;
         const top = layout.height + 20;
+        // 换行宽度仍以主图宽度为上限，带宽最后再按内容 bbox 收窄。
         const width = Math.max(layout.width, 700);
-        let x = padding, y = top + heading, rowHeight = 0;
+        let x = padding, y = top + heading, rowHeight = 0, contentRight = padding;
         const ordered = [...support].sort((left, right) => {
             const rank = card => edgeSide(card) === 'left' ? 0 : edgeSide(card) === 'right' ? 2 : 1;
             return rank(left) - rank(right);
@@ -821,12 +881,17 @@ async function runLayout(cards, edges, detailed, wrapped = false) {
                 rowHeight = 0;
             }
             layout.children.push({ id: card.id, x, y, width: card.width, height: card.height });
+            contentRight = Math.max(contentRight, x + card.width);
             x += card.width + gap;
             rowHeight = Math.max(rowHeight, card.height);
         }
-        layout.width = Math.max(width, x - gap + padding);
-        layout.height = y + rowHeight + padding;
-        layout.clockRegion = { x: 0, y: top, width: layout.width, height: layout.height - top };
+        // 带宽按带内卡片/端子的实际 bbox 收窄，右侧不再铺满画布；底部与画布对齐。
+        const contentBottom = y + rowHeight;
+        const headingText = '时钟 / 复位 · 同名标签连接（CLK / RST）';
+        const regionWidth = Math.max(contentRight + padding, 16 + textWidth(headingText, 11, UI) + padding, 320);
+        layout.clockRegion = { x: 0, y: top, width: regionWidth, height: contentBottom + padding - top };
+        layout.width = Math.max(layout.width, regionWidth);
+        layout.height = contentBottom + padding;
     }
     return layout;
 }
@@ -936,11 +1001,22 @@ async function layoutDiagram(page, mode) {
     for (const edge of edges) {
         edge.sections = routed.get(edge.id)?.sections || [];
         if (!edge.local) continue;
+        // 时钟/复位收进卡底脚注后，同名标签仍要在两端各留一小段接线：
+        // 接点放在对应行（CLK / RST）的竖直中点，保证可点、可悬浮。
         for (const [id, port] of [[edge.from, edge.fromPort], [edge.to, edge.toPort]]) {
-            const card = cards.find(card => card.id === id);
-            const key = anchorFor(card, port, edge.id);
-            const anchor = [...card.bodyAnchors || [], ...card.rows || [], card.terminalPort].filter(Boolean).find(item => item.id === key);
-            if (!anchor) continue;
+            const card = cards.find(item => item.id === id);
+            if (!card) continue;
+            const side = id === edge.from ? 'EAST' : 'WEST';
+            let anchor;
+            if (card.clockRows?.length) {
+                const row = signalKind(edge.names?.[0]) === 'RST' && card.clockRows.length > 1 ? 1 : 0;
+                anchor = { side, x: side === 'EAST' ? card.width : 0, y: card.clockTop + row * CLOCK_ROW + CLOCK_ROW / 2 };
+            } else {
+                const key = anchorFor(card, port, edge.id);
+                anchor = [...card.bodyAnchors || [], ...card.rows || [], card.terminalPort].filter(Boolean)
+                    .find(item => item.id === key);
+            }
+            if (!anchor) anchor = { side, x: side === 'EAST' ? card.width : 0, y: card.height / 2 };
             const point = { x: card.x + anchor.x, y: card.y + anchor.y };
             const end = { x: point.x + (anchor.side === 'EAST' ? 10 : -10), y: point.y };
             edge.sections.push(id === edge.from ? { startPoint: point, endPoint: end } : { startPoint: end, endPoint: point });
@@ -1034,12 +1110,27 @@ function renderDiagram(diagram, page, interactive) {
         const attrs = interactive ? action('edge', edge.id, edge.names.join('、')) : '';
         const body = '<g class="' + className + '"' + attrs + preview(edge.links.length === 1 ? edge.links[0] : null) + ' data-state="normal"><title>' + escape(edge.names.join('、'))
             + '</title>' + hits + lines + arrows + label + '</g>';
-        if (!interactive && edge.links.length === 1) {
+        // 同名标签网络（时钟/复位等）没有独立的连接详情章节，不能包成 <a>，
+        // 否则导出文档里会出现指向不存在锚点的死链接；悬停预览仍然保留。
+        if (!interactive && edge.links.length === 1 && !edge.clock) {
             const [open, close] = link(edge.links[0]);
             return open + body + close;
         }
         return body;
     }).join('');
+
+    // 边界端子列的小标：写明这些端口属于当前章节模块，而不是独立子模块。
+    // 只挂在每列最上面那一排，避免同一列重复出现。
+    const padColumnLabel = new Map();
+    const region = diagram.clockRegion;
+    for (const side of ['left', 'right']) {
+        // 时钟带里的端子排已经有带标题，不再重复挂归属小标（否则会压住带标题）。
+        const pads = diagram.cards.filter(card => card.kind === 'pad' && card.edgeSide === side
+            && !(region && card.y >= region.y - 2))
+            .sort((a, b) => a.y - b.y || a.x - b.x);
+        if (!pads.length) continue;
+        padColumnLabel.set(pads[0].id, side === 'left' ? page.name + ' · 模块边界' : '模块边界');
+    }
 
     const cardMarkup = diagram.cards.map(card => {
         const translate = 'transform="translate(' + card.x + ',' + card.y + ')"';
@@ -1071,8 +1162,12 @@ function renderDiagram(diagram, page, interactive) {
             }).join('');
             // 端口排属于当前章节的模块边界，悬停标题里写明所属模块，避免被读成独立子模块。
             const owner = page.name + ' 的模块边界 · ' + card.title + '（' + card.rows.length + ' 个端口）';
+            const column = padColumnLabel.get(card.id);
+            const columnLabel = column
+                ? '<text class="pad-column-label" x="' + (card.edgeSide === 'left' ? 0 : 12) + '" y="-8">' + escape(column) + '</text>'
+                : '';
             return '<g class="diagram-card pad ' + card.edgeSide + '" ' + translate + '><title>' + escape(owner)
-                + '</title>' + rows + '</g>';
+                + '</title>' + columnLabel + rows + '</g>';
         }
         if (card.kind === 'junction') {
             const [open, close] = link(card.link || null);
@@ -1129,6 +1224,15 @@ function renderDiagram(diagram, page, interactive) {
                 + '" text-anchor="' + (west ? 'start' : 'end') + '">'
                 + escape(clipText(port.caption, card.width - 24, FONT.pin, MONO)) + '</text></g>';
         }).join('');
+        // 卡底 CLK / RST 脚注：每个网络一个 tspan，悬浮可查源端与接收端。
+        const clockFoot = (card.clockRows || []).map((row, index) => {
+            const baseline = round(card.clockTop + index * CLOCK_ROW + 10.5);
+            const nets = row.shown.map((item, position) => (position ? '<tspan class="clock-sep"> · </tspan>' : '')
+                + '<tspan class="clock-net"' + (item.link ? preview(item.link) : '') + '>' + escape(item.name) + '</tspan>').join('');
+            const more = row.rest ? '<tspan class="clock-sep"> +' + row.rest + '</tspan>' : '';
+            return '<text class="clock-foot" x="12" y="' + baseline + '"><tspan class="clock-tag">' + row.label + '</tspan>'
+                + '<tspan class="clock-start" x="' + (12 + CLOCK_LABEL) + '">' + nets + more + '</tspan></text>';
+        }).join('');
         const split = card.pinSplit
             ? '<line class="pin-split" x1="12" y1="' + card.pinSplit + '" x2="' + (card.width - 12) + '" y2="' + card.pinSplit + '"/>' : '';
         const pins = card.pins.map(pin => {
@@ -1155,11 +1259,10 @@ function renderDiagram(diagram, page, interactive) {
             + '<rect class="card-bg" width="' + card.width + '" height="' + card.height + '" rx="5"/>'
             + '<path class="card-head" d="' + headPath(card.width, card.headH) + '"/>'
             + '<line class="card-rule" x1="0" y1="' + card.headH + '" x2="' + card.width + '" y2="' + card.headH + '"/>'
-            + titles + subtitle + chips + entries + groupPortMarkup + split + pins + foot
+            + titles + subtitle + chips + entries + groupPortMarkup + clockFoot + split + pins + foot
             + '<rect class="card-frame" width="' + card.width + '" height="' + card.height + '" rx="5"/></g>' + close;
     }).join('');
 
-    const region = diagram.clockRegion;
     const clockRegion = region ? '<g class="clock-region"><rect x="' + region.x + '" y="' + region.y + '" width="' + region.width
         + '" height="' + region.height + '" rx="5"/><text x="16" y="' + (region.y + 21) + '">时钟 / 复位 · 同名标签连接（CLK / RST）</text></g>' : '';
     return '<svg class="architecture-svg" xmlns="http://www.w3.org/2000/svg" width="' + diagram.width + '" height="'

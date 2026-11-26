@@ -42,6 +42,13 @@
 .clock-region rect { fill: var(--sunk); }
 .clock-region text { font-family: var(--font-ui); font-size: 11px; fill: var(--muted); }
 
+/* 卡底时钟/复位脚注：CLK / RST 两行，每行 14px；网络名逐条可悬浮。 */
+.clock-foot { font-family: var(--font-mono); font-size: 10px; fill: var(--ink-2); }
+.clock-tag { font-family: var(--font-ui); font-size: 9px; letter-spacing: .08em; fill: var(--faint); }
+.clock-sep { fill: var(--faint); }
+.clock-net { cursor: help; }
+.clock-net:hover { fill: var(--focus); }
+
 /* 图2 式边界端口：没有外框、表头和分隔线，只有端口符号 + 名称 + 类型。 */
 .diagram-card.pad .card-bg, .pad-frame, .pad-spine, .pad-eyebrow, .pad-count, .pad-title,
 .pad-row-state, .pad-row-rule, .pad-glyph { display: none; }
@@ -61,6 +68,8 @@
 .diagram-card.pad .pad-row.bus .pad-name { fill: var(--bus); }
 .diagram-card.pad .pad-meta { font-family: var(--font-mono); font-size: 9.5px; fill: var(--faint); }
 .diagram-card.pad .pad-row:hover .pad-pin-shape { stroke: var(--focus); }
+/* 端子列小标：说明这一列属于当前模块的边界。 */
+.pad-column-label { font-family: var(--font-ui); font-size: 9.5px; letter-spacing: .08em; fill: var(--faint); }
 
 /* 分组卡片成员行 */
 .node-entry .row-bg { fill: transparent; }

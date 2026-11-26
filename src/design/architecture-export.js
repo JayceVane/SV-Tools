@@ -46,7 +46,7 @@ async function renderArchitectureBook(book, modes, { print = false } = {}) {
         const layout = await layoutDiagram(page, mode);
         const diagram = renderDiagram(layout, page, false);
         const diagramDescription = mode === 'detailed' ? '完整连线，落到具体引脚'
-            : layout.wrapped ? '简图：分行展示，沿箭头追踪跨行接口' : '简图：功能分组，边界端口单列成排';
+            : layout.wrapped ? '简图：分行展示，沿箭头追踪跨行接口' : '简图：功能分组，边界端口独立成列';
         const nodes = new Map(page.nodes.map(node => [node.id, node]));
         if (!print) for (const link of page.links) {
             previews.push(`<template id="preview-${link.id}">${connectionPreview(link)}</template>`);

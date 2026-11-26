@@ -151,9 +151,12 @@
 
 ## 6. 独立 SVG（`architecture-image.js` / `svg.js`，`design render/report`）
 
-- 结构解析器（`struct`）的默认 `document` 接口图共用第 3 节的 Block Design 渲染器、布局和配色，
-  SVG 内解析主题令牌，保证浏览器和 PNG 栅格化结果一致。叶子模块同样绘制左右端口的模块符号。
-- 信号级展开、折叠边界、束聚合及 Yosys 投影沿用 `svg.js` 的明细渲染规则，`document` 主题为灰阶。
+- 结构解析器（`struct`）的默认 `document` 接口图共用第 3 节的 Block Design 渲染器与布局，
+  但**配色强制灰阶**：`architecture-image.js` 用 `MONO_TOKENS` 覆盖主题令牌，
+  所有颜色必须是 R=G=B，接口束与普通信号靠线宽（2.2 / 1.1）区分，不靠颜色。
+  SVG 内解析令牌并禁止残留 `var(--…)` / `color-mix(…)`，保证浏览器与 PNG 栅格化一致。
+  叶子模块同样绘制左右端口的模块符号。HTML／PDF 报告仍沿用查看器的彩色令牌。
+- 信号级展开、折叠边界、束聚合及 Yosys 投影沿用 `svg.js` 的明细渲染规则，`document` 主题同样为灰阶。
 - 以下约束适用于 `svg.js` 的明细渲染：
 - 实例盒：44px 标题带（浅灰）→ 13px 标题 → 11px 模块类型 → 右上角实现状态 chip；
   端口标签与标题带同宽排布，接口束端口画总线端头 `≡`。
