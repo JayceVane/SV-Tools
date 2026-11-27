@@ -89,13 +89,17 @@ function placeBoundaryColumns(cards, edges, layout) {
             card.x = x;
             card.y = Math.max(y, cursor);
             cursor = card.y + card.height + 12;
-            layout.children.push({ id: card.id, x: card.x, y: card.y, width: card.width, height: card.height });
+            // 端口卡本来就是 ELK 的 child：就地改坐标，避免 children 里同时留旧位置和新位置。
+            const child = layout.children.find(item => item.id === card.id);
+            if (child) { child.x = card.x; child.y = card.y; }
+            else layout.children.push({ id: card.id, x: card.x, y: card.y, width: card.width, height: card.height });
         }
     };
     place(left, 12);
     place(right, maxX + 16);
     layout.width = Math.max(layout.width, ...pads.map(card => card.x + card.width + 12));
-    layout.height = Math.max(layout.height, maxBottom + 16);
+    // 端口排可能比主体更高（折行后主体变矮），高度 bbox 也要把它们算进来，否则会落到 viewBox 之外。
+    layout.height = Math.max(layout.height, maxBottom + 16, ...pads.map(card => card.y + card.height + 16));
 }
 
 async function runLayout(cards, edges, detailed, wrapped = false) {
