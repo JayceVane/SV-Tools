@@ -247,12 +247,13 @@ interface link_if;
     modport src (output data, output valid);
     modport dst (input data, input valid);
 endinterface
-module leaf(link_if.src out); ... endmodule
-module sink(link_if.dst in); ... endmodule
+module leaf(link_if.src out, output logic done); ... endmodule
+module sink(link_if.dst in, input logic done); ... endmodule
 module top;
     link_if inner();
-    leaf u_leaf(.out(inner));
-    sink u_sink(.in(inner));
+    logic done;
+    leaf u_leaf(.out(inner), .done(done));
+    sink u_sink(.in(inner), .done(done));
 endmodule
 `);
     await fs.writeFile(path.join(workspace, 'svtools.architecture.json'),
@@ -262,11 +263,19 @@ endmodule
     const { cards, edges } = diagramTopology(top, 'overview');
     const card = cards.find(item => item.title === '成对通路');
     assert.ok(card, '分组卡片必须存在');
-    assert.deepEqual(card.internal.map(item => item.name), ['inner'], '组内接口束必须记入卡片脚注');
-    assert.equal(card.internal[0].kind, 'interface');
+    assert.deepEqual(card.internal.map(item => item.name).sort(), ['done', 'inner'], '组内连接必须记入卡片');
+    assert.equal(card.internal.find(item => item.name === 'inner').kind, 'interface');
+    assert.equal(card.internal.find(item => item.name === 'done').kind, 'signal');
+    assert.ok(card.internal.every(item => item.ends.length === 2), '每条连接记下两个端点实例');
     assert.ok(!edges.some(edge => edge.links.some(id => top.links.find(link => link.id === id)?.name === 'inner')), '组内束不应再画成自环');
     const svg = renderDiagram(await layoutDiagram(top, 'overview'), top, false);
-    assert.match(svg, /class="card-foot internal"[^>]*>组内束 inner</u);
+    assert.match(svg, /class="card-foot internal" data-expand="[^"]+"[^>]*>[^]*?组内连接 2 条/u);
+    assert.match(svg, /class="expand-panel" data-panel="[^"]+"/u);
+    assert.match(svg, /class="expand-member"[^>]*>u_leaf</u);
+    assert.match(svg, /class="expand-member"[^>]*>u_sink</u);
+    assert.equal((svg.match(/class="expand-chip bundle"/gu) || []).length, 2, '接口束在两端各出现一次');
+    assert.equal((svg.match(/class="expand-chip signal"/gu) || []).length, 2, '信号在两端各出现一次');
+    assert.doesNotMatch(svg, /\+[0-9]+</u, '不再用 +N 截断');
 });
 
 test('全双工接口按 modport 角色名与驱动位宽判定主流向，多端共享束逐成员连线', async t => {

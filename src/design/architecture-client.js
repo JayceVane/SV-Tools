@@ -216,6 +216,19 @@
     }
 
     $('viewer').addEventListener('click', event => {
+        const expand = event.target.closest('[data-expand]');
+        if (expand) {
+            event.preventDefault();
+            const svg = expand.closest('svg.architecture-svg');
+            const panel = svg?.querySelector('.expand-panel[data-panel="' + expand.getAttribute('data-expand') + '"]');
+            if (panel) {
+                const open = panel.classList.toggle('open');
+                expand.setAttribute('aria-expanded', String(open));
+                for (const other of svg.querySelectorAll('.expand-panel.open')) if (other !== panel) other.classList.remove('open');
+                for (const node of svg.querySelectorAll('[data-expand][aria-expanded=true]')) if (node !== expand) node.setAttribute('aria-expanded', 'false');
+            }
+            return;
+        }
         const target = event.target.closest('[data-node],[data-edge],[data-link],[data-port],[data-child],[data-chapter],[data-source],[data-clear],[data-review-node],[data-review-link]');
         if (!target || !page) return;
         const data = target.dataset;

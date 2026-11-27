@@ -12,9 +12,8 @@ function footnoteText(labels) {
 
 function internalText(bundles) {
     if (!bundles?.length) return '';
-    const shown = bundles.slice(0, TITLE_NAMES).map(bundle => bundle.name);
-    const rest = bundles.length - shown.length;
-    return '组内束 ' + shown.join(' · ') + (rest > 0 ? ' +' + rest : '');
+    // 折叠卡只显示条数，完整清单在同名同色面板里展开，避免把名字挤成一行 +N。
+    return '组内连接 ' + bundles.length + ' 条';
 }
 
 /**
@@ -141,7 +140,9 @@ function diagramTopology(page, mode) {
         const owner = cardOf.get(cardId);
         if (!owner || owner.kind !== 'instance') return;
         if (!owner.internal) owner.internal = [];
-        if (!owner.internal.some(item => item.id === link.id)) owner.internal.push({ id: link.id, name: link.name, kind: link.kind });
+        if (!owner.internal.some(item => item.id === link.id)) {
+            owner.internal.push({ id: link.id, name: link.name, kind: link.kind, ends: link.endpoints.map(endpoint => endpoint.node) });
+        }
     }
     function add(source, target, link, forward) {
         if (!source.card || !target.card || pinKey(source) === pinKey(target)) return;

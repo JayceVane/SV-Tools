@@ -38,7 +38,24 @@
         current = next;
     }
 
+    function toggleGroup(trigger) {
+        const svg = trigger.closest('svg.architecture-svg');
+        const panel = svg?.querySelector('.expand-panel[data-panel="' + trigger.getAttribute('data-expand') + '"]');
+        if (!panel) return;
+        const open = panel.classList.toggle('open');
+        trigger.setAttribute('aria-expanded', String(open));
+        for (const other of svg.querySelectorAll('.expand-panel.open')) if (other !== panel) other.classList.remove('open');
+        for (const node of svg.querySelectorAll('[data-expand][aria-expanded=true]')) if (node !== trigger) node.setAttribute('aria-expanded', 'false');
+    }
+
     document.addEventListener('click', event => {
+        const expand = event.target.closest?.('[data-expand]');
+        if (expand) {
+            event.preventDefault();
+            event.stopPropagation();
+            toggleGroup(expand);
+            return;
+        }
         const link = event.target.closest?.('a[href^="#"]');
         if (link && !event.ctrlKey && !event.metaKey && !event.shiftKey && !event.altKey) reveal(link.getAttribute('href').slice(1));
         const zoom = event.target.closest?.('[data-zoom]');
@@ -47,6 +64,13 @@
             zoom.setAttribute('aria-pressed', String(fullSize));
             zoom.textContent = fullSize ? '适应宽度' : '原始尺寸';
         }
+    });
+    document.addEventListener('keydown', event => {
+        if (!['Enter', ' '].includes(event.key)) return;
+        const expand = event.target.closest?.('[data-expand]');
+        if (!expand) return;
+        event.preventDefault();
+        toggleGroup(expand);
     });
     window.addEventListener('hashchange', () => reveal(location.hash.slice(1)));
     reveal(location.hash.slice(1));
