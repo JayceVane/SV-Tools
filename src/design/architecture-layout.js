@@ -118,12 +118,12 @@ async function layoutDiagram(page, mode) {
             const side = id === edge.from ? 'EAST' : 'WEST';
             let anchor;
             if (card.clockPins?.length) {
-                // 时钟/复位是正经端口：按网络名找到它自己的行，再定这一侧的贴边点。
+                // 时钟/复位按列排：行号取所在列的序号，贴边点跟着端口自己的一侧。
                 const name = edge.names?.[0] || '';
                 const pin = card.clockPins.find(item => item.name === name) || card.clockPins[0];
-                pin.side = side;
-                anchor = { side, x: side === 'EAST' ? card.width : 0,
-                    y: card.clockTop + card.clockPins.indexOf(pin) * CLOCK_ROW + CLOCK_ROW / 2 };
+                const column = pin.side === 'EAST' ? card.clockEast : card.clockWest;
+                anchor = { side: pin.side, x: pin.side === 'EAST' ? card.width : 0,
+                    y: card.clockTop + Math.max(0, column.indexOf(pin)) * CLOCK_ROW + CLOCK_ROW / 2 };
             } else {
                 const key = anchorFor(card, port, edge.id);
                 anchor = [...card.bodyAnchors || [], ...card.rows || [], card.terminalPort].filter(Boolean)

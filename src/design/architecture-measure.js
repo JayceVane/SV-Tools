@@ -74,8 +74,8 @@ function measureInstance(card, detailed, assignment, incident) {
         if (port.clock && port.net !== port.caption) port.caption += ' · ' + port.net;
         if (port.clock) port.caption = (signalKind(port.net) || signalKind(port.port)) + ' ' + port.caption;
     }
-    // 时钟/复位不占左右列：统一折到卡底两行（CLK / RST），每行 14px。
-    // 它们不画跨模块长线（同名标签连接，只在两端留接点），按端口行排只会白占卡片高度。
+    // 时钟/复位是卡边端口，按方向分两列：出去的排右列、进来的排左列。
+    // 两列并排后卡片宽一点就能放下名字，不会像单列那样右对齐出大片空白。
     card.clockRows = [];
     if (!detailed) {
         const clockPorts = card.groupPorts.filter(port => port.clock);
@@ -84,10 +84,23 @@ function measureInstance(card, detailed, assignment, incident) {
             card.clockRows = clockRowItems(clockPorts);
         }
     }
-    // 不再截断：卡片至少要能放下最长的单个网络名，其余按行折行。
-    const clockIdeal = card.clockRows.length
-        ? 12 + CLOCK_LABEL + Math.min(TITLE_MAX, Math.max(...card.clockRows
-            .flatMap(row => row.items.map(item => textWidth(item.name, FONT.clock, MONO))))) + 12 : 0;
+    card.clockPins = [];
+    for (const row of card.clockRows) {
+        for (const item of row.items) card.clockPins.push({ name: item.name, link: item.link, kind: row.label });
+    }
+    const clockIncident = (incident || []).filter(item => item.clock);
+    for (const pin of card.clockPins) {
+        const hit = clockIncident.find(item => item.name === pin.name);
+        pin.side = hit && hit.outgoing ? 'EAST' : 'WEST';
+    }
+    card.clockWest = card.clockPins.filter(pin => pin.side === 'WEST');
+    card.clockEast = card.clockPins.filter(pin => pin.side === 'EAST');
+    const clockColumnWidth = pins => pins.length
+        ? CLOCK_LABEL + Math.max(...pins.map(pin => textWidth(pin.name, FONT.clock, MONO))) : 0;
+    const clockWestWidth = clockColumnWidth(card.clockWest);
+    const clockEastWidth = clockColumnWidth(card.clockEast);
+    const clockIdeal = card.clockPins.length
+        ? 12 + clockWestWidth + (clockEastWidth ? 20 + clockEastWidth : 0) + 12 : 0;
     const entryWidth = card.entries.length
         ? 12 + Math.max(...card.entries.map(entry => textWidth(entry.name, FONT.entryName, MONO))) + 24
             + Math.max(...card.entries.map(entry => textWidth(entry.type, FONT.entryType, MONO))) + 12 : 0;
@@ -121,12 +134,7 @@ function measureInstance(card, detailed, assignment, incident) {
     const titleWidth = Math.max(0, ...card.titleLines.map(line => textWidth(line, FONT.title, UI)));
     card.headH = HEAD + (card.titleLines.length - 1) * HEAD_LINE;
     card.width = Math.ceil(Math.max(base, titleWidth + 24) / 4) * 4;
-    // 每个时钟/复位网络单独一行，做成卡边端口（贴边圆点 + 名称），不再是折行的标签清单。
-    card.clockPins = [];
-    for (const row of card.clockRows) {
-        for (const item of row.items) card.clockPins.push({ name: item.name, link: item.link, kind: row.label, side: 'WEST' });
-    }
-    card.clockHeight = card.clockPins.length * CLOCK_ROW;
+    card.clockHeight = Math.max(card.clockWest.length, card.clockEast.length) * CLOCK_ROW;
     const bodyTop = card.headH + SUB;
     const scalars = { WEST: [], EAST: [] }, buses = { WEST: [], EAST: [] };
     for (const pin of card.pins) (pin.bus ? buses : scalars)[pin.side].push(pin);
