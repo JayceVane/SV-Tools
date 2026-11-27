@@ -62,6 +62,15 @@ function routeBoundaryEdges(cards, edges) {
     const fallback = body.length ? Math.min(...body.map(card => card.y)) - 12 : 0;
     const laneAt = makeGapLanes();
     const lanes = new Map();
+    // 同一张卡片同一侧的多个端口，离开卡片的距离也要错开，否则几根竖线会叠在同一条 x 上。
+    const exits = new Map();
+    const exitPoint = (card, point) => {
+        const away = awayFromCard(card, point);
+        const key = card.id + ':' + away;
+        const count = exits.get(key) || 0;
+        exits.set(key, count + 1);
+        return { x: point.x + away * (12 + count * 14), y: point.y };
+    };
     for (const edge of edges) {
         if (edge.clockOnly) continue;
         const fromPad = ['pad', 'boundary'].includes(byId.get(edge.from)?.kind);
@@ -79,7 +88,7 @@ function routeBoundaryEdges(cards, edges) {
         const lane = (lanes.get(pad.id) || 0) + 1;
         lanes.set(pad.id, lane);
         const channel = (pad.edgeSide === 'right' ? pad.x - 8 : pad.x + pad.width + 8) + (lane - 1) * 14;
-        const exit = { x: other.x + awayFromCard(card, other) * 12, y: other.y };
+        const exit = exitPoint(card, other);
         // 端口和端口行离得近时直接走「出一小段 → 竖直 → 进端口行」，不必绕到行间隙去。
         const direct = Math.abs(padPoint.y - other.y) <= 160;
         const directPoints = fromPad
@@ -90,9 +99,14 @@ function routeBoundaryEdges(cards, edges) {
             : [other, exit, { x: exit.x, y: lane }, { x: channel, y: lane }, { x: channel, y: padPoint.y }, padPoint];
         const clear = points => !body.some(item => item.id !== edge.from && item.id !== edge.to
             && points.slice(1).some((point, index) => segmentHits(item, points[index], point)));
-        const staggered = gapPoints(laneAt(gapY));
-        const points = direct && clear(directPoints) ? directPoints
-            : clear(staggered) ? staggered : gapPoints(gapY);
+        const pick = build => {
+            for (const offset of [0, -20, 20, -40, 40]) {
+                const candidate = build(gapY + offset);
+                if (clear(candidate)) return candidate;
+            }
+            return build(gapY);
+        };
+        const points = direct && clear(directPoints) ? directPoints : pick(lane => gapPoints(lane));
         edge.sections = [{ startPoint: points[0], bendPoints: points.slice(1, -1), endPoint: points[points.length - 1] }];
     }
 }
