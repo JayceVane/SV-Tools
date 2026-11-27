@@ -43,11 +43,24 @@ function awayFromCard(card, point) {
     return point.x < card.x + card.width / 2 ? -1 : 1;
 }
 
+// 同一条行间隙里并行多条线时按 12px 上下错开，避免几条线粘成一块。
+function makeGapLanes() {
+    const used = new Map();
+    const offsets = [0, -20, 20, -40, 40];
+    return gapY => {
+        const key = Math.round(gapY);
+        const count = used.get(key) || 0;
+        used.set(key, count + 1);
+        return gapY + offsets[count % offsets.length];
+    };
+}
+
 function routeBoundaryEdges(cards, edges) {
     const byId = new Map(cards.map(card => [card.id, card]));
     const body = cards.filter(card => card.kind !== 'pad' && card.kind !== 'boundary');
     const gaps = rowGaps(body);
     const fallback = body.length ? Math.min(...body.map(card => card.y)) - 12 : 0;
+    const laneAt = makeGapLanes();
     const lanes = new Map();
     for (const edge of edges) {
         if (edge.clockOnly) continue;
@@ -65,19 +78,21 @@ function routeBoundaryEdges(cards, edges) {
         // 同一端口的多条线分道，避免竖线叠成一条粗线。
         const lane = (lanes.get(pad.id) || 0) + 1;
         lanes.set(pad.id, lane);
-        const channel = (pad.edgeSide === 'right' ? pad.x - 8 : pad.x + pad.width + 8) + (lane - 1) * 6;
+        const channel = (pad.edgeSide === 'right' ? pad.x - 8 : pad.x + pad.width + 8) + (lane - 1) * 14;
         const exit = { x: other.x + awayFromCard(card, other) * 12, y: other.y };
         // 端口和端口行离得近时直接走「出一小段 → 竖直 → 进端口行」，不必绕到行间隙去。
         const direct = Math.abs(padPoint.y - other.y) <= 160;
         const directPoints = fromPad
             ? [padPoint, { x: channel, y: padPoint.y }, { x: channel, y: exit.y }, exit, other]
             : [other, exit, { x: exit.x, y: padPoint.y }, { x: channel, y: padPoint.y }, padPoint];
-        const gapPoints = fromPad
-            ? [padPoint, { x: channel, y: padPoint.y }, { x: channel, y: gapY }, { x: exit.x, y: gapY }, exit, other]
-            : [other, exit, { x: exit.x, y: gapY }, { x: channel, y: gapY }, { x: channel, y: padPoint.y }, padPoint];
+        const gapPoints = lane => fromPad
+            ? [padPoint, { x: channel, y: padPoint.y }, { x: channel, y: lane }, { x: exit.x, y: lane }, exit, other]
+            : [other, exit, { x: exit.x, y: lane }, { x: channel, y: lane }, { x: channel, y: padPoint.y }, padPoint];
         const clear = points => !body.some(item => item.id !== edge.from && item.id !== edge.to
             && points.slice(1).some((point, index) => segmentHits(item, points[index], point)));
-        const points = direct && clear(directPoints) ? directPoints : gapPoints;
+        const staggered = gapPoints(laneAt(gapY));
+        const points = direct && clear(directPoints) ? directPoints
+            : clear(staggered) ? staggered : gapPoints(gapY);
         edge.sections = [{ startPoint: points[0], bendPoints: points.slice(1, -1), endPoint: points[points.length - 1] }];
     }
 }
@@ -117,6 +132,7 @@ function routeLongEdges(cards, edges) {
     const pads = new Set(cards.filter(card => card.kind === 'pad' || card.kind === 'boundary').map(card => card.id));
     const gaps = rowGaps(body);
     if (!gaps.length) return;
+    const laneAt = makeGapLanes();
     for (const edge of edges) {
         if (edge.clockOnly || pads.has(edge.from) || pads.has(edge.to)) continue;
         const flat = (edge.sections || []).flatMap(section => [section.startPoint, ...(section.bendPoints || []), section.endPoint])
@@ -131,18 +147,22 @@ function routeLongEdges(cards, edges) {
         if (length < direct * 1.6 + 80) continue;
         const startExit = { x: start.x + awayFromCard(byId.get(edge.from), start) * 12, y: start.y };
         const endExit = { x: end.x + awayFromCard(byId.get(edge.to), end) * 12, y: end.y };
-        const gap1 = nearestGap(gaps, start.y, start.y);
-        const gap2 = nearestGap(gaps, end.y, end.y);
-        // 两个端口行靠得近时走同一条行间隙；否则在两条间隙之间找一条列间隙做竖直通道，
-        // 让长竖线走在卡片之间，而不是贴着某张卡的边框。
-        const channel = gap1 === gap2 ? null : freeColumn(body, Math.min(gap1, gap2), Math.max(gap1, gap2), (startExit.x + endExit.x) / 2);
-        const points = channel === null
-            ? [start, startExit, { x: startExit.x, y: gap1 }, { x: endExit.x, y: gap1 }, endExit, end]
-            : [start, startExit, { x: startExit.x, y: gap1 }, { x: channel, y: gap1 }, { x: channel, y: gap2 },
-                { x: endExit.x, y: gap2 }, endExit, end];
-        const blocked = body.some(card => card.id !== edge.from && card.id !== edge.to
+        const base1 = nearestGap(gaps, start.y, start.y);
+        const base2 = nearestGap(gaps, end.y, end.y);
+        const build = (gap1, gap2) => {
+            // 两个端口行靠得近时走同一条行间隙；否则在两条间隙之间找一条列间隙做竖直通道，
+            // 让长竖线走在卡片之间，而不是贴着某张卡的边框。
+            const channel = gap1 === gap2 ? null : freeColumn(body, Math.min(gap1, gap2), Math.max(gap1, gap2), (startExit.x + endExit.x) / 2);
+            return channel === null
+                ? [start, startExit, { x: startExit.x, y: gap1 }, { x: endExit.x, y: gap1 }, endExit, end]
+                : [start, startExit, { x: startExit.x, y: gap1 }, { x: channel, y: gap1 }, { x: channel, y: gap2 },
+                    { x: endExit.x, y: gap2 }, endExit, end];
+        };
+        const clear = points => !body.some(card => card.id !== edge.from && card.id !== edge.to
             && points.slice(1).some((point, index) => segmentHits(card, points[index], point)));
-        if (blocked) continue;
+        const staggered = build(laneAt(base1), laneAt(base2));
+        const points = clear(staggered) ? staggered : build(base1, base2);
+        if (!clear(points)) continue;
         edge.sections = [{ startPoint: points[0], bendPoints: points.slice(1, -1), endPoint: points[points.length - 1] }];
     }
 }
