@@ -172,6 +172,28 @@ for (const [name, source, literal] of [
 const realDeclarations = 'logic real_short;\nlogic [7:0] real_longer;\n';
 const realAssignments = 'assign a=signal;\nassign longname=signal;\n';
 
+test('具名 generate 分支中的连续赋值保持多维下标贴合信号名', () => {
+    const source = [
+        'module demo;',
+        'wire [1:0][1:0] G;',
+        'generate',
+        'if (1) begin : gen_merge',
+        "assign G[0][0] = 1'b1;",
+        'end',
+        'else begin : gen_keep',
+        "assign G[0][0] = 1'b0;",
+        "assign G[0][1] = 1'b1;",
+        'end',
+        'endgenerate',
+        'endmodule',
+        ''
+    ].join('\n');
+
+    const formatted = formatStable(source);
+    assert.match(formatted, /else begin : gen_keep\n[ \t]+assign G\[0\]\[0\] = 1'b0;/u);
+    assert.equal(formatStable(source.replace("assign G[0][0] = 1'b0;", "assign G [0][0] = 1'b0;")), formatted);
+});
+
 /** 验证真实声明仍排齐名称列，保护词法区域不能使整个声明组跳过布局。 */
 function assertRealDeclarationAlignment(formatted) {
     const lines = formatted.split('\n');

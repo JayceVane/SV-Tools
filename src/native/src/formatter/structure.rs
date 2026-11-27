@@ -129,10 +129,11 @@ impl Engine {
         }
 
         // Identify block_state
-        if self.block_state.is_none() {
-            if w == "assign" {
-                self.block_state = BlockState::Assign;
-            } else if w.starts_with("always") {
+        // 具名 generate 分支的块头已进入 Text 状态，随后的 assign 仍是连续赋值。
+        if w == "assign" && matches!(self.block_state, BlockState::None | BlockState::Text) {
+            self.block_state = BlockState::Assign;
+        } else if self.block_state.is_none() {
+            if w.starts_with("always") {
                 self.block_state = BlockState::Always {
                     always_state: AlwaysState::None,
                 };
