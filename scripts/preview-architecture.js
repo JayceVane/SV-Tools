@@ -3,7 +3,7 @@
 // 用法：
 //   node scripts/preview-architecture.js --workspace <伪SV目录> --top <top> --page <模块名|top> --mode overview|detailed --out shot.png
 //   node scripts/preview-architecture.js --workspace <伪SV目录> --top <top> --all --out-dir <目录>
-//   node scripts/preview-architecture.js --workspace <伪SV目录> --top <top> --book --out report.png
+//   node scripts/preview-architecture.js --workspace <伪SV目录> --top <top> --book [--print] --out report.png
 const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
@@ -56,7 +56,11 @@ async function screenshot(htmlPath, out, width, height, browser) {
 
 /** @param {string} body @returns {Promise<string>} 带全部样式的一次性 HTML。 */
 async function pageHtml(body) {
-    const sheets = await Promise.all(CSS.map(name => fs.readFile(path.join(__dirname, '..', 'src', 'design', name), 'utf8').catch(() => '')));
+    // 样式表缺一个就报错：静默吞掉会产出"截图成功但完全没样式"的假结果。
+    const sheets = await Promise.all(CSS.map(async name => {
+        try { return await fs.readFile(path.join(__dirname, '..', 'src', 'design', name), 'utf8'); }
+        catch (error) { throw new Error('缺少样式表 ' + name + '：' + error.message); }
+    }));
     return '<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><style>' + sheets.join('\n')
         + '\nhtml,body{margin:0;padding:0;background:#fff;}'
         + '\n.diagram-print{border:0;padding:0;max-height:none;overflow:visible;background:#fff;display:block;}'

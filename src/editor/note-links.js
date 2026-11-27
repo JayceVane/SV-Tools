@@ -15,6 +15,8 @@ function activateNoteLinks(context, vscode) {
     const { window, workspace, languages, commands, Uri, Range, MarkdownString, Hover, ThemeColor } = vscode;
     const decoration = window.createTextEditorDecorationType({ after: { color: new ThemeColor('editorCodeLens.foreground'), margin: '0 0 0 1em' } });
     const cache = new Map();
+    // findFiles 的结果按工作区缓存，只在源码增删/重命名时失效；扫描本身改由保存触发。
+    const files = new Map();
     let pending;
     let generation = 0;
     let disposed = false;
@@ -33,7 +35,11 @@ function activateNoteLinks(context, vscode) {
             const rows = (await notes.inventory(root)).filter(note => note.anchor);
             if (current !== generation) return;
             if (!rows.length) continue;
-            const paths = await workspace.findFiles(new vscode.RelativePattern(folder, SOURCE_GLOB), SOURCE_EXCLUDE_GLOB);
+            let paths = files.get(root);
+            if (!paths) {
+                paths = await workspace.findFiles(new vscode.RelativePattern(folder, SOURCE_GLOB), SOURCE_EXCLUDE_GLOB);
+                files.set(root, paths);
+            }
             const overrides = new Map(workspace.textDocuments.filter(doc => doc.uri.scheme === 'file' && doc.isDirty &&
                 workspace.getWorkspaceFolder(doc.uri)?.uri.toString() === folder.uri.toString() && anchors.HDL.test(doc.fileName))
                 .map(doc => [relative(root, doc.uri.fsPath), doc.getText()]));
@@ -98,10 +104,13 @@ function activateNoteLinks(context, vscode) {
     const watcher = workspace.createFileSystemWatcher('**/docs/design-notes/*.svnote.*');
     const sources = workspace.createFileSystemWatcher(SOURCE_GLOB);
     const sourceChanged = uri => { if (!isExcludedSourcePath(uri.fsPath)) schedule(); };
+    // 源码文件增删/重命名会改变 findFiles 结果：先失效缓存再重扫。
+    const sourceListChanged = uri => { files.clear(); sourceChanged(uri); };
     context.subscriptions.push(decoration, watcher, watcher.onDidChange(schedule), watcher.onDidCreate(schedule), watcher.onDidDelete(schedule),
-        sources, sources.onDidCreate(sourceChanged), sources.onDidDelete(sourceChanged), sources.onDidChange(sourceChanged),
-        window.onDidChangeVisibleTextEditors(schedule), workspace.onDidRenameFiles(schedule),
-        workspace.onDidChangeTextDocument(({ document }) => { if (anchors.HDL.test(document.fileName)) schedule(); }),
+        sources, sources.onDidCreate(sourceListChanged), sources.onDidDelete(sourceListChanged), sources.onDidChange(sourceChanged),
+        window.onDidChangeVisibleTextEditors(schedule), workspace.onDidRenameFiles(() => { files.clear(); schedule(); }),
+        // 锚点只依赖已保存文本（未保存文档另有 overrides），保存时重扫即可，不再每次击键扫全工作区。
+        workspace.onDidSaveTextDocument(document => { if (anchors.HDL.test(document.fileName)) schedule(); }),
         commands.registerCommand('svtools.note.linkSelection', () => create(false)),
         commands.registerCommand('svtools.note.linkBlock', () => create(true)),
         commands.registerCommand(OPEN, async (uri, id) => {

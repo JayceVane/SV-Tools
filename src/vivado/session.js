@@ -150,8 +150,9 @@ class VivadoSession {
 
     touch() {
         clearTimeout(this.idleTimer);
-        if (!this.idleMs) return;
-        this.idleTimer = setTimeout(() => { void this.close('空闲退出'); }, this.idleMs);
+        const idle = typeof this.idleMs === 'function' ? this.idleMs() : this.idleMs;
+        if (!idle) return;
+        this.idleTimer = setTimeout(() => { void this.close('空闲退出'); }, idle);
         this.idleTimer.unref?.();
     }
 
@@ -184,7 +185,7 @@ async function stampOf(file) {
 
 /**
  * 单实例会话：同一时间只服务一个工程，动作串行执行。
- * @param {{log?:Function, idleMs?:number, platform?:string}} [options]
+ * @param {{log?:Function, idleMs?:number|Function, platform?:string}} [options]
  */
 function createVivadoSessions({ log = () => {}, idleMs = DEFAULT_IDLE_MS, platform = process.platform, verify } = {}) {
     let session = null, queue = Promise.resolve();

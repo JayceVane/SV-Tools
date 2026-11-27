@@ -61,7 +61,8 @@ function activateVivado(context, deps) {
     const retainedRuns = () => vscode.workspace.getConfiguration('svtools.tasks').get('retainedRuns', 5);
     const output = createBufferedOutput(out), tasks = createToolTaskManager({ retention: { keep: retainedRuns }, onChange(job) { projectTree?.setRunning(job.finished ? null : job.state); } });
     const sessionIdleMs = () => Math.max(1, vscode.workspace.getConfiguration('svtools.vivado').get('sessionIdleMinutes', 10)) * 60000;
-    const sessions = createVivadoSessions({ log, idleMs: sessionIdleMs(), verify: verifyVivadoVersion });
+    // 传取值函数而不是快照：改设置后下一次重置空闲计时立即生效，不必重载窗口。
+    const sessions = createVivadoSessions({ log, idleMs: () => sessionIdleMs(), verify: verifyVivadoVersion });
     const projectSelection = deps?.projectSelection || createProjectSelection({ workspace: vscode.workspace, state: context.workspaceState });
 
     let running = null;      // { job, scriptPath }，准备阶段也可停止。

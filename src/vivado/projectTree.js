@@ -439,7 +439,7 @@ function activateProjectTree(context, deps) {
         vscode.commands.registerCommand('svtools.vivado.tree.implement', guarded('布局布线', n => launchRun('impl_1', 'route_design', '布局布线', n))),
         vscode.commands.registerCommand('svtools.vivado.tree.bitstream', guarded('生成 Bitstream', n => launchRun('impl_1', 'write_bitstream', 'Bitstream 生成', n))),
         vscode.commands.registerCommand('svtools.vivado.tree.reportSynth', n => vscode.commands.executeCommand('svtools.vivado.summary', n, 'utilization')),
-        vscode.commands.registerCommand('svtools.vivado.tree.reportImpl', n => vscode.commands.executeCommand('svtools.vivado.summary', n, 'utilization')),
+        vscode.commands.registerCommand('svtools.vivado.tree.reportImpl', n => vscode.commands.executeCommand('svtools.vivado.summary', n, 'timing')),
         vscode.commands.registerCommand('svtools.vivado.tree.reportImplUtil', n => vscode.commands.executeCommand('svtools.vivado.summary', n, 'utilization')),
         vscode.commands.registerCommand('svtools.vivado.tree.reportTiming', n => vscode.commands.executeCommand('svtools.vivado.summary', n, 'timing')),
         vscode.commands.registerCommand('svtools.vivado.tree.expandAll', expandAll)

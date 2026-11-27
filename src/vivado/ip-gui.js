@@ -33,7 +33,7 @@ set ::sv::dir ""
 set ::sv::iproot ""
 set ::sv::missing [dict create]
 set ::sv::values [dict create]
-set ::sv::file {__FILE__}
+set ::sv::file __FILE__
 __VALUES__
 
 proc ::sv::token {type} {
@@ -310,17 +310,25 @@ if {$::sv::entry eq ""} {
 
 const tclWord = text => '"' + String(text).replace(/[\\"$[\]]/gu, match => '\\' + match) + '"';
 
+/** Tcl 花括号字面量：路径只作为取值传递；含花括号时直接报错，不拼进脚本。 */
+function tclBrace(value) {
+    const text = String(value).replaceAll('\\', '/');
+    if (/[{}]/u.test(text)) throw new Error('Tcl 路径包含无法安全传递的花括号：' + text);
+    return '{' + text + '}';
+}
+
 /** 生成 dump 脚本正文：由调用方写入临时文件后交给 Vivado 执行。 */
 function dumpScript(file, values = {}) {
     const lines = Object.entries(values).map(([name, value]) =>
         'dict set ::sv::values [list ' + tclWord(name) + '] [list ' + tclWord(value) + ']').join('\n');
-    return DUMP.replace('__VALUES__', lines).replace('__FILE__', file.replaceAll('\\', '/'));
+    // 路径走 brace()：含花括号时直接报错，不让它破坏 Tcl 字面量或变成脚本。
+    return DUMP.replace('__VALUES__', lines).replace('__FILE__', tclBrace(file));
 }
 
 /** 生成持久会话里的执行行：独立子解释器执行，避免覆盖命令泄漏到工程会话。 */
 function sessionLines(scriptPath) {
     return [
-        'set ::svtools_gui_script {' + scriptPath.replaceAll('\\', '/') + '}',
+        'set ::svtools_gui_script ' + tclBrace(scriptPath),
         'interp create ::svtools_gui',
         'catch {interp eval ::svtools_gui [list source $::svtools_gui_script]} ::svtools_gui_error',
         'if {[info exists ::svtools_gui_error]} { puts "SVGUI CHILD_ERROR: $::svtools_gui_error"; unset ::svtools_gui_error }',

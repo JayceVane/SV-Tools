@@ -4,6 +4,7 @@ const path = require('node:path');
 const { fail, result } = require('./protocol');
 const { resolveContext } = require('./context');
 const { directory } = require('./storage');
+const { createContainedDirectories } = require('../design/scaffold-paths');
 const { runProcess } = require('../toolchains/process');
 const { processSucceeded } = require('../toolchains/result');
 const iverilog = require('../toolchains/iverilog');
@@ -114,6 +115,15 @@ async function simulate(input, { signal } = {}) {
     const top = input.top || firstModuleName(await fs.readFile(entry, 'utf8'));
     if (!top) fail('INVALID_ARGUMENT', '无法从入口文件推断顶层模块，请用 --top 指定');
     const base = input.out ? path.resolve(options.workspace, input.out) : await directory(options.workspace, 'runs');
+    // 与 design render/report 同一安全模型：--out 必须留在工作区内，且不得经符号链接逃逸。
+    try {
+        await createContainedDirectories(base, options.workspace);
+    } catch (error) {
+        if (error.code === 'OUTSIDE_WORKSPACE') {
+            fail('INVALID_ARGUMENT', 'simulate 的 --out 通过符号链接逃逸出工作区', { out: input.out || null });
+        }
+        fail('INVALID_ARGUMENT', 'simulate 的 --out 必须是工作区内的目录：' + (input.out || 'runs'), { out: input.out || null });
+    }
     const workDir = await mkdtemp(base);
     const runner = engine === 'xsim' ? xsimSimulate : icarusSimulate;
     const data = await runner({ options, context, entry, top, workDir, signal });
