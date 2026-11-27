@@ -131,7 +131,8 @@ async function layoutDiagram(page, mode) {
             }
             if (!anchor) anchor = { side, x: side === 'EAST' ? card.width : 0, y: card.height / 2 };
             const point = { x: card.x + anchor.x, y: card.y + anchor.y };
-            const end = { x: point.x + (anchor.side === 'EAST' ? 10 : -10), y: point.y };
+            // 引线拉长到 24px：同名标签的联动靠这条短线指回端口，太短看不出「这一行接出去了」。
+            const end = { x: point.x + (anchor.side === 'EAST' ? 24 : -24), y: point.y };
             edge.sections.push(id === edge.from ? { startPoint: point, endPoint: end } : { startPoint: end, endPoint: point });
         }
     }

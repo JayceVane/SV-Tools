@@ -195,7 +195,10 @@ function renderDiagram(diagram, page, interactive) {
                 + '>' + escape(edge.label) + '</text></g>'
             : '';
         const attrs = interactive ? action('edge', edge.id, edge.names.join('、')) : '';
-        const body = '<g class="' + className + '"' + attrs + preview(edge.links.length === 1 ? edge.links[0] : null) + ' data-state="normal"><title>' + escape(edge.names.join('、'))
+        // 时钟/复位连线带上网络名，悬停同名网络时整条引线一起高亮。
+        const clockAttr = edge.clock && edge.names.length === 1 ? ' data-clock="' + escape(edge.names[0]) + '"' : '';
+        const body = '<g class="' + className + '"' + attrs + preview(edge.links.length === 1 ? edge.links[0] : null)
+            + clockAttr + ' data-state="normal"><title>' + escape(edge.names.join('、'))
             + '</title>' + hits + lines + arrows + label + '</g>';
         // 同名标签网络（时钟/复位等）没有独立的连接详情章节，不能包成 <a>，
         // 否则导出文档里会出现指向不存在锚点的死链接；悬停预览仍然保留。

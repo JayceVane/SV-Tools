@@ -76,9 +76,13 @@
 .clock-net { cursor: help; }
 .clock-net:hover { fill: var(--focus); }
 /* 时钟/复位联动：悬停一个网络名，同名网络与使用它的卡片一起高亮。 */
-.clock-net.is-linked { fill: var(--focus); }
-.diagram-card.instance.has-linked-clock .card-frame { stroke: var(--focus); }
+.clock-net.is-linked { fill: var(--focus); font-weight: 700; }
+.diagram-card.instance.has-linked-clock .card-frame { stroke: var(--focus); stroke-width: 2; }
+.diagram-card.instance.has-linked-clock .card-bg { fill: var(--focus); fill-opacity: .07; }
 .wire-label text.is-linked { fill: var(--focus); }
+/* 联动期间压暗无关卡片，突出「谁用了这个时钟」。 */
+.architecture-svg.is-clock-linked .diagram-card.instance:not(.has-linked-clock) { opacity: .45; }
+.architecture-svg.is-clock-linked .diagram-card.instance:not(.has-linked-clock) .clock-net { opacity: .6; }
 
 /* 图2 式边界端口：没有外框、表头和分隔线，只有端口符号 + 名称 + 类型。 */
 .diagram-card.pad .pad-row-bg { fill: transparent; }
@@ -140,8 +144,11 @@
 .diagram-edge.unknown .edge-line { stroke-dasharray: 4 3; }
 /* 时钟/复位域：虚线 + 弱化色，和数据通路区分开，但必须看得见——
    藏掉的话读者会以为时钟域根本没接。 */
-.diagram-edge.clock .edge-line { stroke: var(--faint); stroke-width: 1.1; stroke-dasharray: 5 4; opacity: .85; }
-.diagram-edge.clock .edge-arrow { fill: var(--faint); }
+.diagram-edge.clock .edge-line { stroke: var(--wire); stroke-width: 1.2; stroke-dasharray: 5 4; }
+.diagram-edge.clock .edge-arrow { fill: var(--wire); }
+.diagram-edge.clock.is-linked .edge-line { stroke: var(--focus); stroke-width: 2; }
+.diagram-edge.clock.is-linked .edge-arrow { fill: var(--focus); }
+.diagram-card.instance.has-linked-clock .clock-pin { fill: var(--focus); }
 .edge-arrow { stroke: none; fill: var(--wire); }
 .diagram-edge.bus .edge-arrow { fill: var(--bus); }
 .wire-label rect { fill: var(--panel); stroke: var(--line); stroke-width: 1; }

@@ -43,11 +43,16 @@
             const svg = clock.closest?.('svg');
             if (!svg) return;
             const name = clock.getAttribute('data-clock');
+            let hit = false;
             for (const node of svg.querySelectorAll('[data-clock]')) {
                 if (node.getAttribute('data-clock') !== name) continue;
+                hit = true;
                 node.classList.toggle('is-linked', on);
                 node.closest('.diagram-card.instance')?.classList.toggle('has-linked-clock', on);
             }
+            // 联动时压暗无关卡片，让「谁用了这个时钟」一眼看出来。
+            if (on && hit) svg.classList.add('is-clock-linked');
+            else if (!on) svg.classList.remove('is-clock-linked');
         }
         document.addEventListener('pointerover', event => {
             const edge = edgeOf(event.target);
