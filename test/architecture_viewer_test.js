@@ -480,8 +480,9 @@ endmodule
     assert.ok(diagram.edges.every(edge => !edge.local || edge.sections.length === 2), '同名标签的两端都要有接线');
     const svg = renderDiagram(diagram, top, false);
     assert.match(svg, /class="diagram-edge clock"/u, '时钟域边要有独立样式');
+    assert.match(svg, /class="edge-hit clock-hit"/u, 'HTML 导出的短引线也可在笔画之外响应悬浮');
     assert.match(svg, /时钟 \/ 复位 · 同名标签连接/u);
-    assert.match(svg, /class="clock-net" data-clock="/u, '时钟网络带联动标记');
+    assert.match(svg, /class="clock-row" data-clock="/u, '时钟网络带联动标记');
     const detailed = await layoutDiagram(top, 'detailed');
     assert.ok(detailed.edges.every(edge => !edge.local), '详细连线保持端到端接线');
     assert.ok(!detailed.clockRegion);

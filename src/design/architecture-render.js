@@ -61,8 +61,10 @@ function renderDiagram(diagram, page, interactive, { groupActions = true } = {})
         const className = 'diagram-edge ' + (edge.clock ? 'clock'
             : edge.links.some(id => kinds.get(id) === 'interface') ? 'bus' : 'signal')
             + (unknown ? ' unknown' : '');
-        const hits = interactive ? sections.map(points => '<path class="edge-hit" d="' + orthogonalPath(points) + '"/>').join('') : '';
-        const lines = sections.map(points => '<path class="edge-line" d="' + orthogonalPath(points) + '"/>').join('');
+        const paths = sections.map(points => orthogonalPath(points));
+        const hitClass = edge.clockOnly ? 'edge-hit clock-hit' : 'edge-hit';
+        const hits = interactive || edge.clockOnly ? paths.map(d => '<path class="' + hitClass + '" d="' + d + '"/>').join('') : '';
+        const lines = paths.map(d => '<path class="edge-line" d="' + d + '"/>').join('');
         const first = sections[0], last = sections[sections.length - 1];
         let arrows = '';
         // 汇聚节点不是方向终点：箭头只画在真正的模块端口上，避免三条束线"扎"进方框。
@@ -230,21 +232,23 @@ function renderDiagram(diagram, page, interactive, { groupActions = true } = {})
         // 卡底 CLK / RST 脚注：每个网络一个 tspan，悬浮可查源端与接收端。
         // 时钟/复位网络是卡边端口：一行一个网络，贴边实心圆点 + 名称，可直接接线。
         // 时钟/复位端口分左右两列：进的排左列、出的排右列，名字各自贴着自己那一侧，中间不留空档。
-        const clockColumn = (pins, east) => (pins || []).map((pin, index) => {
+        const clockColumn = (pins = [], east) => pins.map((pin, index) => {
             const top = card.clockTop + index * CLOCK_ROW;
             const baseline = round(top + 10.5);
             const groupStart = index === 0 || pins[index - 1].kind !== pin.kind;
             const tag = groupStart ? '<tspan class="clock-tag">' + pin.kind + '</tspan>' : '';
-            const attrs = ' class="clock-net" data-clock="' + escape(pin.name) + '"' + (pin.link ? preview(pin.link) : '');
-            const net = '<tspan' + attrs + (east && tag ? ' dx="8"' : '') + '>' + escape(pin.name) + '</tspan>';
+            const net = '<tspan class="clock-net"' + (east && tag ? ' dx="8"' : '') + '>' + escape(pin.name) + '</tspan>';
             const dot = '<circle class="clock-pin" cx="' + (east ? card.width : 0) + '" cy="'
                 + round(top + CLOCK_ROW / 2) + '" r="2.7"/>';
-            if (east) {
-                return '<text class="clock-foot" x="' + round(card.width - 12) + '" y="' + baseline
-                    + '" text-anchor="end">' + tag + net + '</text>' + dot;
-            }
-            return '<text class="clock-foot" x="12" y="' + baseline + '">' + tag
-                + '<tspan class="clock-start" x="' + (12 + CLOCK_LABEL) + '">' + net + '</tspan></text>' + dot;
+            const text = east
+                ? '<text class="clock-foot" x="' + round(card.width - 12) + '" y="' + baseline + '" text-anchor="end">' + tag + net + '</text>'
+                : '<text class="clock-foot" x="12" y="' + baseline + '">' + tag
+                    + '<tspan class="clock-start" x="' + (12 + CLOCK_LABEL) + '">' + net + '</tspan></text>';
+            // 命中区覆盖端头到网络名的空隙，高度与行距一致，每行独立响应。
+            const width = Math.min(card.width, round(18 + CLOCK_LABEL + textWidth(pin.name, FONT.clock, MONO)));
+            const hit = '<rect class="clock-row-hit" x="' + (east ? round(card.width - width) : 0) + '" y="' + top
+                + '" width="' + width + '" height="' + CLOCK_ROW + '"/>';
+            return '<g class="clock-row" data-clock="' + escape(pin.name) + '"' + preview(pin.link) + '>' + hit + text + dot + '</g>';
         }).join('');
         const clockFoot = clockColumn(card.clockWest, false) + clockColumn(card.clockEast, true);
         const split = card.pinSplit

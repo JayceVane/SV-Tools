@@ -8,7 +8,7 @@
 
 /* ---------- 实例卡片 ---------- */
 .card-bg { fill: var(--panel); }
-.card-frame { fill: none; stroke: var(--line-2); stroke-width: 1; }
+.card-frame { fill: none; stroke: var(--line-2); stroke-width: 1; pointer-events: none; }
 .diagram-card.stub .card-frame { stroke-dasharray: 4 3; }
 .diagram-card.unresolved .card-frame { stroke: var(--warn); stroke-dasharray: 4 3; }
 .card-head { fill: var(--sunk); }
@@ -51,10 +51,10 @@
 .clock-tag { font-family: var(--font-ui); font-size: 9px; letter-spacing: .08em; fill: var(--faint); }
 .clock-sep { fill: var(--faint); }
 .clock-pin { fill: var(--wire); }
-.clock-net { cursor: help; }
-.clock-net:hover { fill: var(--focus); }
+.clock-row { cursor: help; }
+.clock-row-hit { fill: transparent; }
 /* 时钟/复位联动：悬停一个网络名，同名网络与使用它的卡片一起高亮。 */
-.clock-net.is-linked { fill: var(--focus); font-weight: 700; }
+.clock-row.is-linked .clock-net { fill: var(--focus); font-weight: 700; }
 .diagram-card.instance.has-linked-clock .card-frame { stroke: var(--focus); stroke-width: 2; }
 .diagram-card.instance.has-linked-clock .card-bg { fill: var(--focus); fill-opacity: .07; }
 .wire-label text.is-linked { fill: var(--focus); }
@@ -111,6 +111,7 @@
 
 /* ---------- 连线与标签 ---------- */
 .edge-hit { fill: none; stroke: transparent; stroke-width: 14; }
+.edge-hit.clock-hit { stroke-width: 12; stroke-linecap: round; pointer-events: stroke; }
 .edge-line {
     fill: none;
     stroke: var(--wire);
