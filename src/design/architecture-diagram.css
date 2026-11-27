@@ -139,6 +139,11 @@
 .architecture-svg [data-node]:is(:hover, :focus-visible) > .boundary-symbol { stroke: var(--focus); stroke-width: 2; }
 .architecture-svg [data-edge]:is(:hover, :focus-visible) .edge-line { stroke: var(--focus); stroke-width: 2.4; }
 .architecture-svg .diagram-edge.unknown[data-edge]:is(:hover, :focus-visible) .edge-line { stroke-dasharray: 4 3; }
+/* 连线悬浮只高亮当前连线；端口/引脚悬浮才弹表格预览。 */
+.diagram-edge.is-hovered .edge-line { stroke: var(--focus); stroke-width: 2.4; }
+.diagram-edge.is-hovered.bus .edge-line { stroke-width: 2.8; }
+.diagram-edge.is-hovered.unknown .edge-line { stroke-dasharray: 4 3; }
+.diagram-edge.is-hovered .edge-arrow { fill: var(--focus); }
 
 /* ---------- 选中/上下游/共享状态（查看器设置 data-state） ---------- */
 .architecture-svg [data-state=dimmed] { opacity: .26; }

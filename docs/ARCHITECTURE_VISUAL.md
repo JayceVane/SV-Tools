@@ -117,8 +117,10 @@
 - 保留 `data-node`、`data-edge`、`data-link`、`.edge-hit`、`.architecture-svg`、
   `[data-state=dimmed|selected|upstream|downstream|related|both]` 契约，
   选中态用 2px `--up/--down` 描边 + `--panel` 遮罩变淡，不做发光。
-- 接口引脚与单束连线通过 `data-preview-link` 关联表格预览；具体引脚额外保留节点与端口身份。
+- 端口 / 引脚 / 边界端子悬浮弹出表格预览（`data-preview-link` 到接口详情）；具体引脚额外保留节点与端口身份。
   预览展示成员、位宽及 modport 声明方向，宽度 ≤ 640px、高度 ≤ 430px，限制在视口内，长表滚动。
+- 连线悬浮不弹表格，只高亮当前连线：`--focus` 描边、2.4px（接口束 2.8px），箭头同色；
+  虚线连线保持 `4 3` 虚线，不因高亮变成实线。
 - 端口 / 引脚 / 边界端子点击跳到该连接的「接口详情」（`data-link` → `#<link.id>`），
   不跳到卡片所属章节：分组卡片的章节是组内第一个成员，端口未必在那里。
 

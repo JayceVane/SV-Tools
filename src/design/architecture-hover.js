@@ -35,15 +35,21 @@
             popup.style.top = Math.max(12, Math.min(top, viewport.clientHeight - popup.offsetHeight - 12)) + 'px';
         }
 
+        // 连线悬浮只高亮，不弹表格；端口/引脚/边界端子保留预览。
+        const edgeOf = target => target.closest?.('.diagram-edge');
         document.addEventListener('pointerover', event => {
+            const edge = edgeOf(event.target);
+            if (edge && !edge.contains(event.relatedTarget)) edge.classList.add('is-hovered');
             const target = event.target.closest?.('[data-preview-link]');
-            if (!target || target === active || target.contains(event.relatedTarget)) return;
+            if (!target || edgeOf(target) || target === active || target.contains(event.relatedTarget)) return;
             clearTimeout(timer);
             timer = setTimeout(() => show(target), 180);
         });
         document.addEventListener('pointerout', event => {
+            const edge = edgeOf(event.target);
+            if (edge && !edge.contains(event.relatedTarget)) edge.classList.remove('is-hovered');
             const target = event.target.closest?.('[data-preview-link]');
-            if (!target || target.contains(event.relatedTarget) || popup.contains(event.relatedTarget)) return;
+            if (!target || edgeOf(target) || target.contains(event.relatedTarget) || popup.contains(event.relatedTarget)) return;
             clearTimeout(timer);
             timer = setTimeout(hide, 150);
         });
@@ -51,7 +57,7 @@
         popup.addEventListener('pointerleave', hide);
         document.addEventListener('focusin', event => {
             const target = event.target.closest?.('[data-preview-link]');
-            if (target) show(target);
+            if (target && !edgeOf(target)) show(target);
         });
         document.addEventListener('focusout', event => {
             if (!popup.contains(event.relatedTarget) && event.target.closest?.('[data-preview-link]')) hide();
