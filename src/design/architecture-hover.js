@@ -37,19 +37,35 @@
 
         // 连线悬浮只高亮，不弹表格；端口/引脚/边界端子保留预览。
         const edgeOf = target => target.closest?.('.diagram-edge');
+        // 同名时钟/复位联动：悬停一个网络名，高亮同一张图里所有同名网络与使用它的卡片。
+        const clockOf = target => target.closest?.('[data-clock]');
+        function linkClock(clock, on) {
+            const svg = clock.closest?.('svg');
+            if (!svg) return;
+            const name = clock.getAttribute('data-clock');
+            for (const node of svg.querySelectorAll('[data-clock]')) {
+                if (node.getAttribute('data-clock') !== name) continue;
+                node.classList.toggle('is-linked', on);
+                node.closest('.diagram-card.instance')?.classList.toggle('has-linked-clock', on);
+            }
+        }
         document.addEventListener('pointerover', event => {
             const edge = edgeOf(event.target);
             if (edge && !edge.contains(event.relatedTarget)) edge.classList.add('is-hovered');
+            const clock = clockOf(event.target);
+            if (clock && !clock.contains(event.relatedTarget)) linkClock(clock, true);
             const target = event.target.closest?.('[data-preview-link]');
-            if (!target || edgeOf(target) || target === active || target.contains(event.relatedTarget)) return;
+            if (!target || edgeOf(target) || clockOf(target) || target === active || target.contains(event.relatedTarget)) return;
             clearTimeout(timer);
             timer = setTimeout(() => show(target), 180);
         });
         document.addEventListener('pointerout', event => {
             const edge = edgeOf(event.target);
             if (edge && !edge.contains(event.relatedTarget)) edge.classList.remove('is-hovered');
+            const clock = clockOf(event.target);
+            if (clock && !clock.contains(event.relatedTarget)) linkClock(clock, false);
             const target = event.target.closest?.('[data-preview-link]');
-            if (!target || edgeOf(target) || target.contains(event.relatedTarget) || popup.contains(event.relatedTarget)) return;
+            if (!target || edgeOf(target) || clockOf(target) || target.contains(event.relatedTarget) || popup.contains(event.relatedTarget)) return;
             clearTimeout(timer);
             timer = setTimeout(hide, 150);
         });

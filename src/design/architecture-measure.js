@@ -84,10 +84,10 @@ function measureInstance(card, detailed, assignment, incident) {
             card.clockRows = clockRowItems(clockPorts);
         }
     }
+    // 不再截断：卡片至少要能放下最长的单个网络名，其余按行折行。
     const clockIdeal = card.clockRows.length
-        ? 12 + CLOCK_LABEL + Math.min(TITLE_MAX, card.clockRows
-            .map(row => row.items.slice(0, 3).reduce((sum, item, index) => sum + (index ? 3 : 0)
-                + textWidth(item.name, FONT.clock, MONO), 0)).reduce((max, width) => Math.max(max, width), 0)) + 12 : 0;
+        ? 12 + CLOCK_LABEL + Math.min(TITLE_MAX, Math.max(...card.clockRows
+            .flatMap(row => row.items.map(item => textWidth(item.name, FONT.clock, MONO))))) + 12 : 0;
     const entryWidth = card.entries.length
         ? 12 + Math.max(...card.entries.map(entry => textWidth(entry.name, FONT.entryName, MONO))) + 24
             + Math.max(...card.entries.map(entry => textWidth(entry.type, FONT.entryType, MONO))) + 12 : 0;
@@ -121,25 +121,22 @@ function measureInstance(card, detailed, assignment, incident) {
     const titleWidth = Math.max(0, ...card.titleLines.map(line => textWidth(line, FONT.title, UI)));
     card.headH = HEAD + (card.titleLines.length - 1) * HEAD_LINE;
     card.width = Math.ceil(Math.max(base, titleWidth + 24) / 4) * 4;
-    // 单行省略：能放下几个网络就放几个，其余用 +N 收尾（悬浮仍可按 tspan 查任意一个已显示网络）。
+    // 一行放不下就折行，不再用 +N 省略：时钟/复位清单必须是完整的。
+    const sepWidth = textWidth(' · ', FONT.clock, MONO);
     for (const row of card.clockRows) {
         const avail = card.width - 12 - CLOCK_LABEL - 12;
-        let used = 0;
-        row.shown = [];
-        for (let index = 0; index < row.items.length; index++) {
-            const item = row.items[index];
-            const rest = row.items.length - index - 1;
-            const more = rest > 0 ? textWidth(' +' + rest, FONT.clock, MONO) : 0;
+        row.lines = [];
+        let line = [], used = 0;
+        for (const item of row.items) {
             const width = textWidth(item.name, FONT.clock, MONO);
-            const sep = row.shown.length ? textWidth(' · ', FONT.clock, MONO) : 0;
-            if (row.shown.length && used + sep + width + more > avail) break;
-            const name = width + more > avail ? clipText(item.name, Math.max(24, avail - more - sep), FONT.clock, MONO) : item.name;
-            row.shown.push({ name, link: item.link });
-            used += sep + textWidth(name, FONT.clock, MONO);
+            if (line.length && used + sepWidth + width > avail) { row.lines.push(line); line = []; used = 0; }
+            line.push(item);
+            used += (line.length > 1 ? sepWidth : 0) + width;
         }
-        row.rest = row.items.length - row.shown.length;
+        if (line.length) row.lines.push(line);
     }
-    card.clockHeight = card.clockRows.length * CLOCK_ROW;
+    card.clockLines = card.clockRows.reduce((total, row) => total + row.lines.length, 0);
+    card.clockHeight = card.clockLines * CLOCK_ROW;
     const bodyTop = card.headH + SUB;
     const scalars = { WEST: [], EAST: [] }, buses = { WEST: [], EAST: [] };
     for (const pin of card.pins) (pin.bus ? buses : scalars)[pin.side].push(pin);

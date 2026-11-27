@@ -74,6 +74,10 @@
 .clock-sep { fill: var(--faint); }
 .clock-net { cursor: help; }
 .clock-net:hover { fill: var(--focus); }
+/* 时钟/复位联动：悬停一个网络名，同名网络与使用它的卡片一起高亮。 */
+.clock-net.is-linked { fill: var(--focus); }
+.diagram-card.instance.has-linked-clock .card-frame { stroke: var(--focus); }
+.wire-label text.is-linked { fill: var(--focus); }
 
 /* 图2 式边界端口：没有外框、表头和分隔线，只有端口符号 + 名称 + 类型。 */
 .diagram-card.pad .pad-row-bg { fill: transparent; }

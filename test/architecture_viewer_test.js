@@ -466,9 +466,35 @@ endmodule
     const svg = renderDiagram(diagram, top, false);
     assert.match(svg, /class="diagram-edge clock"/u, '时钟域边要有独立样式');
     assert.match(svg, /时钟 \/ 复位 · 同名标签连接/u);
+    assert.match(svg, /class="clock-net" data-clock="/u, '时钟网络带联动标记');
     const detailed = await layoutDiagram(top, 'detailed');
     assert.ok(detailed.edges.every(edge => !edge.local), '详细连线保持端到端接线');
     assert.ok(!detailed.clockRegion);
+});
+
+test('时钟/复位清单不截断：超宽折行，每个网络带联动标记', async t => {
+    const base = await fs.realpath(os.tmpdir());
+    const workspace = await fs.mkdtemp(path.join(base, 'svtools-arch-clocks-'));
+    t.after(async () => {
+        if (await fs.realpath(workspace) === workspace && path.dirname(workspace) === base) await fs.rm(workspace, { recursive: true, force: true });
+    });
+    await fs.writeFile(path.join(workspace, 'many.sv'), `
+module sink(input clk_alpha, input clk_beta, input clk_gamma, input clk_delta, input clk_epsilon,
+            input clk_zeta, input rst_alpha, input rst_beta); ... endmodule
+module top(input clk_alpha, input clk_beta, input clk_gamma, input clk_delta, input clk_epsilon,
+           input clk_zeta, input rst_alpha, input rst_beta);
+    sink u_sink(.clk_alpha(clk_alpha), .clk_beta(clk_beta), .clk_gamma(clk_gamma), .clk_delta(clk_delta),
+        .clk_epsilon(clk_epsilon), .clk_zeta(clk_zeta), .rst_alpha(rst_alpha), .rst_beta(rst_beta));
+endmodule`);
+    const { book } = await buildArchitectureBook(await resolveContext({ workspace, top: 'top' }));
+    const [top] = book.pages;
+    const svg = renderDiagram(await layoutDiagram(top, 'overview'), top, false);
+    assert.doesNotMatch(svg, /\+[0-9]+<\/tspan>/u, '不再用 +N 截断');
+    const lines = (svg.match(/class="clock-foot"/gu) || []).length;
+    assert.ok(lines > 2, 'CLK/RST 超过一行时要折行：' + lines);
+    for (const name of ['clk_alpha', 'clk_zeta', 'rst_alpha', 'rst_beta']) {
+        assert.match(svg, new RegExp('data-clock="' + name + '"', 'u'), name + ' 必须完整出现');
+    }
 });
 
 test('简图将输入输出接口分置边界两侧，每条接口在模块上有独立落点', async t => {

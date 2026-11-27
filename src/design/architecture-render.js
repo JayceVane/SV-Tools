@@ -1,7 +1,7 @@
 'use strict';
 
 const { HEAD_LINE, FOOT, PAD_SYM, PAD_SYM_H, CORNER, ARROW, ENTRY_ROW, CLOCK_ROW, CLOCK_LABEL, FONT, MONO, CLOCK_BAND_TITLE, round, clipText, textWidth } = require('./architecture-metrics');
-const { escape, portDescription } = require('./architecture-details');
+const { escape, portDescription, signalKind } = require('./architecture-details');
 /* ---------- 渲染 ---------- */
 
 function orthogonalPath(points, radius = CORNER) {
@@ -190,7 +190,9 @@ function renderDiagram(diagram, page, interactive) {
         }
         const label = edge.at
             ? '<g class="wire-label" transform="translate(' + round(edge.at.x) + ',' + round(edge.at.y) + ')"><rect width="'
-                + edge.at.width + '" height="' + edge.at.height + '" rx="2"/><text x="4" y="11">' + escape(edge.label) + '</text></g>'
+                + edge.at.width + '" height="' + edge.at.height + '" rx="2"/><text x="4" y="11"'
+                + (edge.clock && edge.names.length === 1 ? ' data-clock="' + escape(edge.names[0]) + '"' : '')
+                + '>' + escape(edge.label) + '</text></g>'
             : '';
         const attrs = interactive ? action('edge', edge.id, edge.names.join('、')) : '';
         const body = '<g class="' + className + '"' + attrs + preview(edge.links.length === 1 ? edge.links[0] : null) + ' data-state="normal"><title>' + escape(edge.names.join('、'))
@@ -242,8 +244,9 @@ function renderDiagram(diagram, page, interactive) {
                     + '<rect class="pad-row-bg" x="0" y="' + row.top + '" width="' + card.width + '" height="' + card.rowH + '"/>'
                     + '<polygon class="pad-pin-shape" points="' + row.terminal.points + '" transform="translate('
                     + symbolX + ',' + (row.y - PAD_SYM_H / 2) + ')"/>'
-                    + '<text class="pad-name" x="' + (east ? 12 : PAD_SYM + 8) + '" y="' + baseline
-                    + '">' + escape(row.name) + '</text>'
+                    + '<text class="pad-name" x="' + (east ? 12 : PAD_SYM + 8) + '" y="' + baseline + '"'
+                    + (row.direction !== 'interface' && signalKind(row.name) ? ' data-clock="' + escape(row.name) + '"' : '')
+                    + '>' + escape(row.name) + '</text>'
                     + '<text class="pad-meta" x="' + (east ? card.width - PAD_SYM - 8 : card.width - 4) + '" y="' + baseline
                     + '" text-anchor="' + 'end' + '">' + escape(row.meta) + '</text></g>';
             }).join('');
@@ -334,13 +337,20 @@ function renderDiagram(diagram, page, interactive) {
                 + escape(clipText(port.caption, card.width - 24, FONT.pin, MONO)) + '</text></g>';
         }).join('');
         // 卡底 CLK / RST 脚注：每个网络一个 tspan，悬浮可查源端与接收端。
-        const clockFoot = (card.clockRows || []).map((row, index) => {
-            const baseline = round(card.clockTop + index * CLOCK_ROW + 10.5);
-            const nets = row.shown.map((item, position) => (position ? '<tspan class="clock-sep"> · </tspan>' : '')
-                + '<tspan class="clock-net"' + (item.link ? preview(item.link) : '') + '>' + escape(item.name) + '</tspan>').join('');
-            const more = row.rest ? '<tspan class="clock-sep"> +' + row.rest + '</tspan>' : '';
-            return '<text class="clock-foot" x="12" y="' + baseline + '"><tspan class="clock-tag">' + row.label + '</tspan>'
-                + '<tspan class="clock-start" x="' + (12 + CLOCK_LABEL) + '">' + nets + more + '</tspan></text>';
+        // 时钟/复位清单不截断：一行放不下就折行；每个网络带 data-clock，供联动高亮。
+        let clockOffset = 0;
+        const clockFoot = (card.clockRows || []).map(row => {
+            const start = clockOffset;
+            clockOffset += row.lines.length;
+            return row.lines.map((line, index) => {
+                const baseline = round(card.clockTop + (start + index) * CLOCK_ROW + 10.5);
+                const nets = line.map((item, position) => (position ? '<tspan class="clock-sep"> · </tspan>' : '')
+                    + '<tspan class="clock-net" data-clock="' + escape(item.name) + '"'
+                    + (item.link ? preview(item.link) : '') + '>' + escape(item.name) + '</tspan>').join('');
+                const tag = index === 0 ? '<tspan class="clock-tag">' + row.label + '</tspan>' : '';
+                return '<text class="clock-foot" x="12" y="' + baseline + '">' + tag
+                    + '<tspan class="clock-start" x="' + (12 + CLOCK_LABEL) + '">' + nets + '</tspan></text>';
+            }).join('');
         }).join('');
         const split = card.pinSplit
             ? '<line class="pin-split" x1="12" y1="' + card.pinSplit + '" x2="' + (card.width - 12) + '" y2="' + card.pinSplit + '"/>' : '';
