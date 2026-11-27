@@ -139,11 +139,13 @@ function renderDiagram(diagram, page, interactive) {
         const lines = sections.map(points => '<path class="edge-line" d="' + orthogonalPath(points) + '"/>').join('');
         const first = sections[0], last = sections[sections.length - 1];
         let arrows = '';
-        if (edge.forward) {
+        // 汇聚节点不是方向终点：箭头只画在真正的模块端口上，避免三条束线"扎"进方框。
+        const kindOf = id => diagram.cards.find(item => item.id === id)?.kind;
+        if (edge.forward && kindOf(edge.to) !== 'junction') {
             const from = last[last.length - 2], to = last[last.length - 1];
             arrows += '<path class="edge-arrow" d="' + arrowPath(to, to.x - from.x, to.y - from.y) + '"/>';
         }
-        if (edge.reverse) {
+        if (edge.reverse && kindOf(edge.from) !== 'junction') {
             const from = first[1], to = first[0];
             arrows += '<path class="edge-arrow" d="' + arrowPath(to, to.x - from.x, to.y - from.y) + '"/>';
         }
@@ -194,7 +196,9 @@ function renderDiagram(diagram, page, interactive) {
                 const attrs = action('node', row.node.id, (row.name + ' ' + (row.port ? portDescription(row.port) : '')).trim());
                 const baseline = Math.round(row.y + 4);
                 const symbolX = east ? card.width - PAD_SYM : 0;
-                return '<g class="pad-row' + (row.direction === 'interface' ? ' bus' : '') + '"' + attrs + preview(portLink(row.node.id, row.name), row.node.id, row.name) + '><title>'
+                const rowLink = portLink(row.node.id, row.name);
+                return '<g class="pad-row' + (row.direction === 'interface' ? ' bus' : '') + '"' + (rowLink ? ' data-link="' + escape(rowLink) + '"' : '')
+                    + attrs + preview(rowLink, row.node.id, row.name) + '><title>'
                     + escape(row.name + ' · ' + (row.port ? portDescription(row.port) : '边界端口')) + '</title>'
                     + '<rect class="pad-row-bg" x="0" y="' + row.top + '" width="' + card.width + '" height="' + card.rowH + '"/>'
                     + '<polygon class="pad-pin-shape" points="' + row.terminal.points + '" transform="translate('
@@ -219,9 +223,23 @@ function renderDiagram(diagram, page, interactive) {
             const chip = card.chip
                 ? '<g class="junction-chip" transform="translate(' + (card.width - 12 - card.chipWidth) + ',8)"><rect width="'
                     + card.chipWidth + '" height="15" rx="3"/><text x="5" y="11">' + escape(card.chip) + '</text></g>' : '';
+            // 三条以上的束线汇到同一张卡时，沿入线一侧画一根总线竖条把它们收成一个节点，
+            // 读者能看出这是"一条束的多个端点"，而不是三根线扎进一个方框。
+            const entries = [];
+            for (const edge of diagram.edges) {
+                const sections = edge.sections || [];
+                if (!sections.length) continue;
+                if (edge.from === card.id) entries.push(sections[0].startPoint);
+                if (edge.to === card.id) entries.push(sections[sections.length - 1].endPoint);
+            }
+            const local = entries.map(point => ({ x: point.x - card.x, y: point.y - card.y }));
+            const west = local.length ? local.reduce((sum, point) => sum + point.x, 0) / local.length <= card.width / 2 : true;
+            const busBar = local.length ? '<line class="junction-bus" x1="' + (west ? 0 : card.width) + '" y1="'
+                + round(Math.max(0, Math.min(...local.map(point => point.y)) - 2)) + '" x2="' + (west ? 0 : card.width)
+                + '" y2="' + round(Math.min(card.height, Math.max(...local.map(point => point.y)) + 2)) + '"/>' : '';
             return open + '<g class="diagram-card junction" ' + translate + attrs + '><title>' + escape(card.title)
                 + '（' + (card.chip || '汇聚') + '）</title><rect class="card-bg" width="' + card.width + '" height="' + card.height + '" rx="5"/>'
-                + '<rect class="card-frame" width="' + card.width + '" height="' + card.height + '" rx="5"/>'
+                + '<rect class="card-frame" width="' + card.width + '" height="' + card.height + '" rx="5"/>' + busBar
                 + '<text class="junction-title" x="12" y="20">' + escape(card.titleLines[0]) + '</text>' + chip + '</g>' + close;
         }
         const node = card.nodes[0];
@@ -259,8 +277,10 @@ function renderDiagram(diagram, page, interactive) {
                 ? '<rect class="group-port-tip" x="' + (edge - 3.25) + '" y="' + (port.y - 3.25)
                     + '" width="6.5" height="6.5" rx="1"/>'
                 : '<circle class="group-port-tip" cx="' + edge + '" cy="' + port.y + '" r="2.7"/>';
+            const portLinkId = port.links?.length === 1 ? port.links[0] : null;
             return '<g class="group-port' + (port.bus ? ' bus' : '') + (port.clock ? ' clock' : '') + '"'
-                + preview(port.links?.length === 1 ? port.links[0] : null, single ? node.id : null, single ? port.port : null)
+                + (portLinkId ? ' data-link="' + escape(portLinkId) + '"' : '')
+                + preview(portLinkId, single ? node.id : null, single ? port.port : null)
                 + '><title>' + escape(port.caption) + '</title>'
                 + '<line class="group-port-stem" x1="' + edge + '" y1="' + port.y + '" x2="' + inner + '" y2="' + port.y + '"/>'
                 + tip
@@ -288,7 +308,9 @@ function renderDiagram(diagram, page, interactive) {
                 ? '<rect class="pin-bus" x="' + round(west ? -3.25 : card.width - 3.25) + '" y="' + round(pin.y - 3.25)
                     + '" width="6.5" height="6.5" rx="1"/>'
                 : '<circle class="pin-dot" cx="' + round(west ? 0 : card.width) + '" cy="' + round(pin.y) + '" r="2.7"/>';
-            return '<g class="schematic-pin"' + preview(portLink(node.id, pin.port.name), node.id, pin.port.name) + '><title>' + escape(pin.port.name + ' · ' + portDescription(pin.port)) + '</title>'
+            const pinLink = portLink(node.id, pin.port.name);
+            return '<g class="schematic-pin"' + (pinLink ? ' data-link="' + escape(pinLink) + '"' : '')
+                + preview(pinLink, node.id, pin.port.name) + '><title>' + escape(pin.port.name + ' · ' + portDescription(pin.port)) + '</title>'
                 + '<line class="pin-stub' + (pin.bus ? ' bus' : '') + '" ' + stub + '/>' + marker + '<text class="pin-label' + (pin.bus ? ' bus' : '') + '" x="'
                 + (west ? 12 : card.width - 12) + '" y="' + (pin.y + 4) + '" text-anchor="' + (west ? 'start' : 'end') + '">'
                 + escape(pin.caption) + '</text></g>';

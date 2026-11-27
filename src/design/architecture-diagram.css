@@ -108,7 +108,8 @@
 .boundary-caption { font-family: var(--font-mono); font-size: 10.5px; fill: var(--ink-2); }
 
 /* ---------- 汇聚节点 ---------- */
-.diagram-card.junction .card-frame { stroke: var(--line-2); stroke-dasharray: 4 3; }
+.diagram-card.junction .card-frame { stroke: var(--line-2); }
+.junction-bus { stroke: var(--bus); stroke-width: 2; stroke-linecap: round; }
 .junction-title { font-family: var(--font-mono); font-size: 10.5px; fill: var(--ink-2); }
 .junction-chip rect { fill: var(--sunk-2); stroke: var(--line); stroke-width: 1; }
 .junction-chip text { font-family: var(--font-mono); font-size: 9.5px; fill: var(--muted); }

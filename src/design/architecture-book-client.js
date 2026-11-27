@@ -56,6 +56,20 @@
             toggleGroup(expand);
             return;
         }
+        // 端口/引脚带 data-link：跳到该连接的接口详情，而不是卡片所属章节（否则端口对不上）。
+        const detail = event.target.closest?.('[data-link]');
+        if (detail && !event.ctrlKey && !event.metaKey && !event.shiftKey && !event.altKey) {
+            const id = detail.getAttribute('data-link');
+            const target = document.getElementById(id);
+            if (target) {
+                event.preventDefault();
+                event.stopPropagation();
+                reveal(id);
+                target.scrollIntoView({ block: 'center' });
+                history.replaceState(null, '', '#' + id);
+                return;
+            }
+        }
         const link = event.target.closest?.('a[href^="#"]');
         if (link && !event.ctrlKey && !event.metaKey && !event.shiftKey && !event.altKey) reveal(link.getAttribute('href').slice(1));
         const zoom = event.target.closest?.('[data-zoom]');
