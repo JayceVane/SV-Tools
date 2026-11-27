@@ -11,7 +11,6 @@ const os = require('node:os');
 const { spawn } = require('node:child_process');
 const { batchInvocation } = require('../toolchains/process');
 
-const PROJECT_CACHE = new Map();
 const TOOL_CACHE = new Map();
 
 /** 从 XPR 文本读取创建工具版本；缺失时返回 undefined。 */
@@ -20,22 +19,15 @@ function parseProjectVersion(text) {
     return match ? match[1] : undefined;
 }
 
-/** 读取 XPR 的创建版本，按文件时间戳缓存。 */
+/** 只读取 XPR 的头部。快速保存可能沿用时间戳，版本核验须使用当前内容。 */
 async function projectVersion(xpr) {
     if (!xpr) return undefined;
-    const stat = await fs.stat(xpr);
-    const hit = PROJECT_CACHE.get(xpr);
-    if (hit && hit.mtimeMs === stat.mtimeMs) return hit.version;
     const handle = await fs.open(xpr, 'r');
-    let text;
     try {
         const buffer = Buffer.alloc(16384);
         const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
-        text = buffer.subarray(0, bytesRead).toString('utf8');
+        return parseProjectVersion(buffer.subarray(0, bytesRead).toString('utf8'));
     } finally { await handle.close(); }
-    const version = parseProjectVersion(text);
-    PROJECT_CACHE.set(xpr, { mtimeMs: stat.mtimeMs, version });
-    return version;
 }
 
 function readToolVersion(binDir) {

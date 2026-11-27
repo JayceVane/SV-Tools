@@ -22,15 +22,16 @@ test('版本比对要求完全一致', () => {
     assert.equal(same('2022.1', undefined), false);
 });
 
-test('projectVersion 读取并缓存 XPR 文件', async () => {
+test('projectVersion 读取同大小、同时间戳的 XPR 更新', async () => {
     const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'svtools-version-'));
     const file = path.join(directory, 'demo.xpr');
+    const timestamp = new Date('2024-01-01T00:00:00Z');
     try {
-        await fs.writeFile(file, '<?xml version="1.0" encoding="UTF-8"?>\n'
-            + '<!-- Product Version: Vivado v2023.2 (64-bit) -->\n<Project Version="7"/>');
+        await fs.writeFile(file, '<!-- Product Version: Vivado v2023.2 (64-bit) -->\n<Project/>');
+        await fs.utimes(file, timestamp, timestamp);
         assert.equal(await projectVersion(file), '2023.2');
-        // 文件未变化时命中缓存。
         await fs.writeFile(file, '<!-- Product Version: Vivado v2024.1 (64-bit) -->\n<Project/>');
+        await fs.utimes(file, timestamp, timestamp);
         assert.equal(await projectVersion(file), '2024.1');
     } finally {
         await fs.rm(directory, { recursive: true, force: true });
