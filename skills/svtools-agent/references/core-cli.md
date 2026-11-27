@@ -16,7 +16,7 @@ node src/cli/main.js lint --workspace D:/project --file src/top.sv --top top
 
 ## 工程上下文
 
-`--workspace` 默认是进程当前目录，与编辑器当前文件无关。CLI 发现工作区的 XPR 和 `.svtools/projects/*.json`；存在多个工程时返回候选，必须用 `--project` 消除歧义。编辑器工程树里的"选择工程"和"刷新"只是编辑器状态，CLI 一律用 `--project` 显式指定，不跟随编辑器的活动工程。无工程时扫描工作区 HDL，排除 `.git`、`.svtools`、`.Xil`、依赖和构建目录。
+`--workspace` 默认是进程当前目录。CLI 从工作区发现 XPR 和 `.svtools/projects/*.json`，有多个候选时用 `--project` 指定目标。编辑器工程树的「选择工程」和「刷新」作用于编辑器。无工程时扫描工作区 HDL，排除 `.git`、`.svtools`、`.Xil`、依赖和构建目录。
 
 默认使用唯一的设计文件集；`--fileset` 可明确选择仿真文件集。仿真文件集包含唯一设计文件集的源码；有多个候选设计文件集时拒绝猜测。`--file` 必须属于所选工程。Icarus 目标来自明确的文件/top、工程 top，或唯一静态模块声明；不使用编辑器中另一个工程的 top。
 

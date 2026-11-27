@@ -38,6 +38,7 @@ function activateNoteLinks(context, vscode) {
             let paths = files.get(root);
             if (!paths) {
                 paths = await workspace.findFiles(new vscode.RelativePattern(folder, SOURCE_GLOB), SOURCE_EXCLUDE_GLOB);
+                if (current !== generation) return;
                 files.set(root, paths);
             }
             const overrides = new Map(workspace.textDocuments.filter(doc => doc.uri.scheme === 'file' && doc.isDirty &&

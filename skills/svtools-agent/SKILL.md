@@ -37,6 +37,6 @@ RTL 修改后运行 `lint --file <path> --top <module>`。这属于编译/详细
 
 ## 编辑器专属能力（CLI 无对应）
 
-重复/对齐/插入文件头、波形查看器（打开波形、从文本生成、按文本查看）、电路查看器、设计讲解与评审面板、笔记历史与评审定版、Vivado 工程树的展开与工程追踪，都只能在编辑器的命令面板执行。CLI 覆盖的是数据面：`format`（含 `alignComma`/`headerTemplate` 配置）、`wave export`、`circuit trace`、`note export --final`。遇到这些需求先说明入口在编辑器，不要用 CLI 命令硬凑。
+重复、插入文件头、波形和电路的交互查看、设计讲解与评审面板、笔记历史操作，以及 Vivado 工程树的展开与工程追踪使用编辑器入口。CLI 可用 `format`（支持 `alignComma`）、`wave export`、`circuit trace` 和 `note export --final`。文件头模板 `headerTemplate` 用于编辑器的插入文件头命令。
 
 通用配置、退出码和分页字段见[通用 CLI 参考](references/core-cli.md)。按任务查[命令索引](references/cli.md)。

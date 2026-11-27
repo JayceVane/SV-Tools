@@ -321,8 +321,8 @@ function tclBrace(value) {
 function dumpScript(file, values = {}) {
     const lines = Object.entries(values).map(([name, value]) =>
         'dict set ::sv::values [list ' + tclWord(name) + '] [list ' + tclWord(value) + ']').join('\n');
-    // 路径走 brace()：含花括号时直接报错，不让它破坏 Tcl 字面量或变成脚本。
-    return DUMP.replace('__VALUES__', lines).replace('__FILE__', tclBrace(file));
+    const filename = tclBrace(file);
+    return DUMP.replace(/__FILE__|__VALUES__/gu, token => token === '__FILE__' ? filename : lines);
 }
 
 /** 生成持久会话里的执行行：独立子解释器执行，避免覆盖命令泄漏到工程会话。 */

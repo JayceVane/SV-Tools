@@ -34,6 +34,12 @@ test('dumpScript 内嵌目标文件与参数值，sessionLines 在子解释器�
     assert.ok(lines.some(line => line.includes('interp delete ::svtools_gui')));
 });
 
+test('dumpScript 保留 Tcl 路径和参数里的替换符与模板占位符', () => {
+    const script = dumpScript('C:/repo/$&/ip.tcl', { TEXT: '$& __FILE__' });
+    assert.ok(script.includes('set ::sv::file {C:/repo/$&/ip.tcl}'));
+    assert.ok(script.includes('dict set ::sv::values [list "TEXT"] [list "\\$& __FILE__"]'));
+});
+
 test('visible false 的页面/分组/参数进入隐藏集合', () => {
     const stdout = [
         'SVGUI_ROW\tpage#1\tpage\t\tAXI 页面\t\t\t\t\t\tfalse',

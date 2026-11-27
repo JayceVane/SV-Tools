@@ -39,7 +39,7 @@ svtools-agent.cmd note export --workspace <工作区> --topic <主题> --format 
 - `note list` 返回 `notes[]{id,path,title,topic,sha256,etag,anchor}`，按 ID 排序；`--topic` 精确过滤。
 - `note search` 与 `list` 是同一份清单：`--query` 按空白分词，每个词都要在 ID、主题、锚点路径或正文中命中（全部命中才算）。
 - `note export` 用 `--note` 或 `--topic` 选中（省略时导出全部，最多 64 篇）；`--format md|html|pdf`（默认 html），`--out` 默认 `docs/design-note-export`，目录必须不存在（已有目录返回 `EXPORT_EXISTS`）。正文合计超过 8 MiB 返回 `SOURCE_LIMIT`。
-- 定版导出加 `--final`：先把每篇笔记的版本固定到历史，再要求所有锚点已 `resolved`（否则 `EVIDENCE_STALE`），并核对评审证据；产物 `notes.md`、`notes.html`/`notes.pdf` 与 `manifest.json`（`notes[].sha256/revision/verification`、`artifacts[].sha256`、`evidence[].sha256`）。普通导出只是快照，不能当作评审证据。
+- 定版导出用 `--final`。先核验已绑定的侧车锚点（未定位返回 `EVIDENCE_STALE`）及关联的评审证据，再记录各笔记的历史版本。所有格式都输出 `notes.md` 与 `manifest.json`，HTML 和 PDF 格式还输出 `notes.html`，PDF 格式另输出 `notes.pdf`。提交时使用包含 `notes[].sha256/revision/verification`、`artifacts[].sha256` 和 `evidence[].sha256` 的定版清单。
 
 ## 架构报告
 
