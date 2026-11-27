@@ -35,11 +35,20 @@ function nearestGap(gaps, y, fallback) {
 }
 
 // 边界端口的连线改走「贴卡边 → 最近的行间隙 → 外缘通道 → 端口行」。
+// 端口在卡片哪一侧，就从那一侧向外让 12px 再拐弯，避免竖线和卡片边框/引脚叠在一起。
+function awayFromCard(card, point) {
+    if (!card) return 0;
+    if (point.x <= card.x + 0.5) return -1;
+    if (point.x >= card.x + card.width - 0.5) return 1;
+    return point.x < card.x + card.width / 2 ? -1 : 1;
+}
+
 function routeBoundaryEdges(cards, edges) {
     const byId = new Map(cards.map(card => [card.id, card]));
     const body = cards.filter(card => card.kind !== 'pad' && card.kind !== 'boundary');
     const gaps = rowGaps(body);
     const fallback = body.length ? Math.min(...body.map(card => card.y)) - 12 : 0;
+    const lanes = new Map();
     for (const edge of edges) {
         if (edge.clockOnly) continue;
         const fromPad = ['pad', 'boundary'].includes(byId.get(edge.from)?.kind);
@@ -51,11 +60,24 @@ function routeBoundaryEdges(cards, edges) {
             .filter(Boolean);
         if (!flat.length) continue;
         const other = fromPad ? flat[flat.length - 1] : flat[0];
+        const card = byId.get(fromPad ? edge.to : edge.from);
         const gapY = nearestGap(gaps, other.y, fallback);
-        const channel = pad.edgeSide === 'right' ? pad.x - 8 : pad.x + pad.width + 8;
-        const points = fromPad
-            ? [padPoint, { x: channel, y: padPoint.y }, { x: channel, y: gapY }, { x: other.x, y: gapY }, other]
-            : [other, { x: other.x, y: gapY }, { x: channel, y: gapY }, { x: channel, y: padPoint.y }, padPoint];
+        // 同一端口的多条线分道，避免竖线叠成一条粗线。
+        const lane = (lanes.get(pad.id) || 0) + 1;
+        lanes.set(pad.id, lane);
+        const channel = (pad.edgeSide === 'right' ? pad.x - 8 : pad.x + pad.width + 8) + (lane - 1) * 6;
+        const exit = { x: other.x + awayFromCard(card, other) * 12, y: other.y };
+        // 端口和端口行离得近时直接走「出一小段 → 竖直 → 进端口行」，不必绕到行间隙去。
+        const direct = Math.abs(padPoint.y - other.y) <= 160;
+        const directPoints = fromPad
+            ? [padPoint, { x: channel, y: padPoint.y }, { x: channel, y: exit.y }, exit, other]
+            : [other, exit, { x: exit.x, y: padPoint.y }, { x: channel, y: padPoint.y }, padPoint];
+        const gapPoints = fromPad
+            ? [padPoint, { x: channel, y: padPoint.y }, { x: channel, y: gapY }, { x: exit.x, y: gapY }, exit, other]
+            : [other, exit, { x: exit.x, y: gapY }, { x: channel, y: gapY }, { x: channel, y: padPoint.y }, padPoint];
+        const clear = points => !body.some(item => item.id !== edge.from && item.id !== edge.to
+            && points.slice(1).some((point, index) => segmentHits(item, points[index], point)));
+        const points = direct && clear(directPoints) ? directPoints : gapPoints;
         edge.sections = [{ startPoint: points[0], bendPoints: points.slice(1, -1), endPoint: points[points.length - 1] }];
     }
 }
@@ -73,7 +95,24 @@ function segmentHits(card, from, to) {
     return card.y - pad < y && y < card.y + card.height + pad && low < card.x + card.width && high > card.x;
 }
 
+// 在 [low, high] 这段高度里找一条没有卡片挡住的竖直通道（列间隙），尽量靠近 near。
+function freeColumn(cards, low, high, near) {
+    const spans = cards.filter(card => card.y < high - 4 && card.y + card.height > low + 4)
+        .map(card => [card.x - 10, card.x + card.width + 10]).sort((left, right) => left[0] - right[0]);
+    let cursor = -Infinity, best = null, bestGap = Infinity;
+    const consider = value => {
+        if (Math.abs(value - near) < bestGap) { bestGap = Math.abs(value - near); best = value; }
+    };
+    for (const [left, right] of spans) {
+        if (left - cursor > 8) consider(cursor === -Infinity ? left - 12 : (cursor + left) / 2);
+        cursor = Math.max(cursor, right);
+    }
+    if (cursor !== -Infinity) consider(cursor + 12);
+    return best;
+}
+
 function routeLongEdges(cards, edges) {
+    const byId = new Map(cards.map(card => [card.id, card]));
     const body = cards.filter(card => card.kind !== 'pad' && card.kind !== 'boundary');
     const pads = new Set(cards.filter(card => card.kind === 'pad' || card.kind === 'boundary').map(card => card.id));
     const gaps = rowGaps(body);
@@ -90,8 +129,17 @@ function routeLongEdges(cards, edges) {
         const start = flat[0], end = flat[flat.length - 1];
         const direct = Math.abs(end.x - start.x) + Math.abs(end.y - start.y);
         if (length < direct * 1.6 + 80) continue;
-        const gapY = nearestGap(gaps, (start.y + end.y) / 2, start.y);
-        const points = [start, { x: start.x, y: gapY }, { x: end.x, y: gapY }, end];
+        const startExit = { x: start.x + awayFromCard(byId.get(edge.from), start) * 12, y: start.y };
+        const endExit = { x: end.x + awayFromCard(byId.get(edge.to), end) * 12, y: end.y };
+        const gap1 = nearestGap(gaps, start.y, start.y);
+        const gap2 = nearestGap(gaps, end.y, end.y);
+        // 两个端口行靠得近时走同一条行间隙；否则在两条间隙之间找一条列间隙做竖直通道，
+        // 让长竖线走在卡片之间，而不是贴着某张卡的边框。
+        const channel = gap1 === gap2 ? null : freeColumn(body, Math.min(gap1, gap2), Math.max(gap1, gap2), (startExit.x + endExit.x) / 2);
+        const points = channel === null
+            ? [start, startExit, { x: startExit.x, y: gap1 }, { x: endExit.x, y: gap1 }, endExit, end]
+            : [start, startExit, { x: startExit.x, y: gap1 }, { x: channel, y: gap1 }, { x: channel, y: gap2 },
+                { x: endExit.x, y: gap2 }, endExit, end];
         const blocked = body.some(card => card.id !== edge.from && card.id !== edge.to
             && points.slice(1).some((point, index) => segmentHits(card, points[index], point)));
         if (blocked) continue;
