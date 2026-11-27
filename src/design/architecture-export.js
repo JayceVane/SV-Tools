@@ -8,6 +8,7 @@ const { resolveContext, buildArchitectureBook, assertBookCurrent } = require('./
 const { hash } = require('../agent/context');
 const { fail, result } = require('../agent/protocol');
 const { layoutDiagram, renderDiagram } = require('./architecture-diagram');
+const { renderGroupDiagrams } = require('./architecture-group');
 const { escape, code, pageName, chapterNumber, sourceLink, portTable, renderModuleSymbol, interfaceDetails, signalEnds, connectionPreview } = require('./architecture-details');
 const { walkthrough, clockNetworks } = require('./architecture-reading');
 const { printPdf } = require('./note-export');
@@ -22,12 +23,13 @@ const section = (title, body, count) => body
 
 async function renderArchitectureBook(book, modes, { print = false } = {}) {
     const byId = new Map(book.pages.map(page => [page.id, page]));
-    const [sharedCss, diagramCss, symbolCss, bookCss, hoverScript, script] = await Promise.all([
+    const [sharedCss, diagramCss, symbolCss, bookCss, hoverScript, groupScript, script] = await Promise.all([
         fs.readFile(path.join(__dirname, 'architecture.css'), 'utf8'),
         fs.readFile(path.join(__dirname, 'architecture-diagram.css'), 'utf8'),
         fs.readFile(path.join(__dirname, 'architecture-symbol.css'), 'utf8'),
         fs.readFile(path.join(__dirname, 'architecture-book.css'), 'utf8'),
         fs.readFile(path.join(__dirname, 'architecture-hover.js'), 'utf8'),
+        fs.readFile(path.join(__dirname, 'architecture-group-popup.js'), 'utf8'),
         fs.readFile(path.join(__dirname, 'architecture-book-client.js'), 'utf8')
     ]);
     const opened = print ? ' open' : '';
@@ -45,7 +47,10 @@ async function renderArchitectureBook(book, modes, { print = false } = {}) {
     for (const [index, page] of book.pages.entries()) {
         const mode = ['overview', 'detailed'].includes(modes?.[page.id]) ? modes[page.id] : page.auto;
         const layout = await layoutDiagram(page, mode);
-        const diagram = renderDiagram(layout, page, false);
+        const diagram = renderDiagram(layout, page, false, { groupActions: !print });
+        if (!print) for (const [id, group] of Object.entries(await renderGroupDiagrams(layout, page, false))) {
+            previews.push(`<template id="group-${page.id}-${id}" data-title="${escape(group.title)}" data-instances="${group.instances}" data-connections="${group.connections}">${group.html}</template>`);
+        }
         const diagramDescription = mode === 'detailed' ? '完整连线，落到具体引脚'
             : layout.wrapped ? '简图：分行展示，沿箭头追踪跨行接口' : '简图：功能分组，边界端口独立成列';
         const nodes = new Map(page.nodes.map(node => [node.id, node]));
@@ -148,7 +153,7 @@ async function renderArchitectureBook(book, modes, { print = false } = {}) {
         <main class="book-content">${roots.map(chapterContent).join('')}${print ? '' : overview}</main></div>
         ${print ? '' : `<aside class="connection-panel" aria-labelledby="connection-panel-title" hidden>
             <header><h2 id="connection-panel-title" tabindex="-1"></h2><button type="button" data-close-connection aria-label="关闭接口详情">关闭</button></header>
-            <div class="connection-panel-body"></div></aside>${previews.join('')}<script>${hoverScript}</script><script>${script}</script>`}</body></html>`;
+            <div class="connection-panel-body"></div></aside>${previews.join('')}<script>${hoverScript}</script><script>${groupScript}</script><script>${script}</script>`}</body></html>`;
 }
 
 async function exportArchitecture(loaded, format, { out, browser, modes } = {}) {

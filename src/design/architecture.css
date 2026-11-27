@@ -96,6 +96,20 @@ button:focus-visible, a:focus-visible, .diagram-scroll:focus-visible, .diagram-p
 .architecture-preview :is(th, td) { padding: 3px 7px; white-space: nowrap; }
 @media print { .architecture-preview { display: none !important; } }
 
+.architecture-group-popup { position: fixed; display: flex; flex-direction: column; z-index: 30;
+    max-width: min(1100px, calc(100vw - 28px)); max-height: calc(100vh - 28px); background: var(--panel);
+    border: 1px solid var(--line-2); border-radius: var(--radius-2); box-shadow: 0 6px 24px #0003; }
+.architecture-group-popup[hidden] { display: none; }
+.architecture-group-popup > header { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between;
+    gap: 6px 12px; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+.architecture-group-popup h2 { font-size: 14px; }
+.architecture-group-popup header p { margin: 2px 0 0; color: var(--muted); font-size: 11px; }
+.group-popup-tools { display: flex; flex-wrap: wrap; gap: 6px; }
+.group-popup-diagram { min-height: 0; padding: 8px; overflow: auto; }
+.group-popup-diagram > svg { display: block; max-width: 100%; height: auto; }
+.group-popup-diagram.original-size > svg { max-width: none; }
+@media print { .architecture-group-popup { display: none !important; } }
+
 /* ---------- 查看器外壳 ---------- */
 .viewer-header {
     display: flex;

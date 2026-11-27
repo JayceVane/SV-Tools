@@ -4,6 +4,7 @@ const { randomBytes } = require('node:crypto');
 const fs = require('node:fs/promises');
 const { resolveContext, buildArchitectureBook, assertBookCurrent, resolveReviewFocus } = require('./architecture-model');
 const { layoutDiagram, renderDiagram } = require('./architecture-diagram');
+const { renderGroupDiagrams } = require('./architecture-group');
 const { exportArchitecture } = require('./architecture-export');
 const { loadReview, verifiedFile } = require('./review-model');
 
@@ -28,7 +29,7 @@ function panelHtml(webview, vscode, root) {
     </section><section id="interface-view" class="connection-view" aria-labelledby="connection-title" hidden>
         <button id="back" type="button">返回架构图</button><h2 id="connection-title" tabindex="-1"></h2><div id="connection-body"></div>
     </section></div></div></main>
-    <script nonce="${nonce}" src="${uri('interface-evidence.js')}"></script><script nonce="${nonce}" src="${uri('architecture-details.js')}"></script><script nonce="${nonce}" src="${uri('architecture-hover.js')}"></script><script nonce="${nonce}" src="${uri('architecture-client.js')}"></script></body></html>`;
+    <script nonce="${nonce}" src="${uri('interface-evidence.js')}"></script><script nonce="${nonce}" src="${uri('architecture-details.js')}"></script><script nonce="${nonce}" src="${uri('architecture-hover.js')}"></script><script nonce="${nonce}" src="${uri('architecture-group-popup.js')}"></script><script nonce="${nonce}" src="${uri('architecture-client.js')}"></script></body></html>`;
 }
 
 function activateArchitectureViewer(context, { vscode, projects, openReview }) {
@@ -143,13 +144,17 @@ function activateArchitectureViewer(context, { vscode, projects, openReview }) {
                     const page = loaded.book.pages.find(item => item.id === message.page);
                     if (!page || !['overview', 'detailed'].includes(message.mode) || !Number.isSafeInteger(message.request)) return;
                     const key = page.id + ':' + message.mode;
-                    if (!layouts.has(key)) layouts.set(key, layoutDiagram(page, message.mode));
-                    let diagram;
-                    try { diagram = await layouts.get(key); }
+                    if (!layouts.has(key)) layouts.set(key, (async () => {
+                        const diagram = await layoutDiagram(page, message.mode);
+                        return { diagram, groups: await renderGroupDiagrams(diagram, page, true) };
+                    })());
+                    let rendered;
+                    try { rendered = await layouts.get(key); }
                     catch (error) { layouts.delete(key); throw error; }
                     if (loaded !== current) return;
+                    const { diagram, groups } = rendered;
                     await post({ type: 'layout', request: message.request, revision: loaded.book.revision, page: page.id,
-                        html: renderDiagram(diagram, page, true), edges: diagram.edges.map(edge => ({ id: edge.id, links: edge.links, from: edge.from, to: edge.to })),
+                        html: renderDiagram(diagram, page, true), groups, edges: diagram.edges.map(edge => ({ id: edge.id, links: edge.links, from: edge.from, to: edge.to })),
                         cards: diagram.cards.map(card => ({ id: card.id, nodes: card.nodes.map(node => node.id), link: card.link })) });
                 } else if (message.type === 'review') {
                     const page = loaded.book.pages.find(item => item.id === message.page);

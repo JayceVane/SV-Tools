@@ -25,34 +25,12 @@
 .card-chip.status.unresolved rect { stroke: var(--warn); stroke-dasharray: 3 2; }
 .card-chip.status.unresolved text { fill: var(--warn); }
 .card-foot { font-family: var(--font-mono); font-size: 10px; fill: var(--muted); }
-/* 组内连接：简图折叠同一功能组后，脚注只显示条数；点开面板按「同名同色」列出两端。 */
 .card-foot.internal { fill: var(--bus); cursor: pointer; }
-.card-foot.internal:hover text { fill: var(--ink); }
+.card-foot.internal:is(:hover, :focus-visible) text { fill: var(--ink); text-decoration: underline; }
 .expand-caret { font-family: var(--font-mono); font-size: 9px; fill: var(--faint); }
 
-/* ---------- 组内连接面板：覆盖层，不参与布局（PDF/PNG 默认折叠） ---------- */
-.expand-panel { display: none; }
-.expand-panel.open { display: block; filter: drop-shadow(0 6px 16px rgba(0, 0, 0, .16)); }
-@media print { .expand-panel { display: none !important; } }
-.expand-bg { fill: var(--panel); stroke: var(--line-2); stroke-width: 1; }
-.expand-title { font-family: var(--font-ui); font-size: 12px; font-weight: 600; fill: var(--ink); }
-.expand-count, .expand-hint { font-family: var(--font-mono); font-size: 9.5px; fill: var(--faint); }
-.expand-rule { stroke: var(--line); stroke-width: 1; }
-.expand-member { font-family: var(--font-mono); font-size: 10px; font-weight: 600; fill: var(--ink-2); }
-.expand-chip rect { fill: var(--sunk); stroke-width: 1; }
-.expand-chip text { font-family: var(--font-mono); font-size: 9.5px; }
-.expand-chip.bundle rect { stroke: var(--bus); }
-.expand-chip.bundle text { fill: var(--bus); }
-.expand-chip.signal rect { stroke: var(--line-2); }
-.expand-chip.signal text { fill: var(--ink-2); }
-
-/* ---------- 分组卡成员清单：副标题「N 个实例」点开，逐行链到各自章节 ---------- */
 .card-members { cursor: pointer; }
-.card-members:hover .card-subtitle, .card-members[aria-expanded=true] .card-subtitle { fill: var(--ink); }
-.member-row .row-bg { fill: transparent; }
-.member-row:hover .row-bg, .member-row:focus-visible .row-bg { fill: var(--sunk); }
-.member-name { font-family: var(--font-mono); font-size: 10px; fill: var(--ink-2); }
-.member-type { font-family: var(--font-mono); font-size: 9.5px; fill: var(--faint); }
+.card-members:is(:hover, :focus-visible, [aria-expanded=true]) .card-subtitle { fill: var(--ink); text-decoration: underline; }
 
 /* 分组卡片的对外端口：端点贴卡片边线，7px 短线向卡内引出，名称在卡内。
    形状与 Block Design 原理图一致——信号是实心圆点，接口/总线是实心方块。 */

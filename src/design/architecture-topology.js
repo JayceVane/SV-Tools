@@ -69,6 +69,25 @@ function portMeta(port) {
     return '[' + port.width + ']';
 }
 
+/** 只投影组内实例之间的连接，保持原始连接 ID 与可证实的方向。 */
+function groupLinks(links, nodes) {
+    const ids = new Set(nodes.map(node => node.id));
+    return links.flatMap(link => {
+        const indices = new Map();
+        const endpoints = link.endpoints.filter((endpoint, index) => {
+            if (!ids.has(endpoint.node)) return false;
+            indices.set(index, indices.size);
+            return true;
+        });
+        if (new Set(endpoints.map(endpoint => endpoint.node)).size < 2) return [];
+        const routes = link.routes.filter(({ source, target }) => indices.has(source) && indices.has(target))
+            .map(({ source, target }) => ({ source: indices.get(source), target: indices.get(target) }));
+        // 两个接收端可能共用组外源。没有组内驱动关系时不应互相连一根线。
+        if (link.routes.length && !routes.length) return [];
+        return [{ ...link, endpoints, routes }];
+    });
+}
+
 /* ---------- 拓扑 ---------- */
 
 /** 把页面投影成卡片与连线；简图按功能分组折叠实例，边界端口合并为端口排。 */
@@ -133,26 +152,12 @@ function diagramTopology(page, mode) {
     const pairs = new Map(), edges = [];
     // 端口排的每一行都要独立成线，才能追出接口束属于哪条连线；涉及点名的边不进入合并表。
     const padIds = new Set(cards.filter(card => card.kind === 'pad').map(card => card.id));
-    const cardOf = new Map(cards.map(card => [card.id, card]));
-    // 简图把同一功能组的实例折成一张卡片后，组内连线无法再画成线。
-    // 这些连线必须记到卡片的组内束清单里，否则读者会以为组内实例之间没有连接。
-    function noteInternal(cardId, link) {
-        const owner = cardOf.get(cardId);
-        if (!owner || owner.kind !== 'instance') return;
-        if (!owner.internal) owner.internal = [];
-        if (!owner.internal.some(item => item.id === link.id)) {
-            owner.internal.push({ id: link.id, name: link.name, kind: link.kind, ends: link.endpoints.map(endpoint => endpoint.node) });
-        }
-    }
     function add(source, target, link, forward) {
         if (!source.card || !target.card || pinKey(source) === pinKey(target)) return;
-        if (overview && source.card === target.card) {
-            noteInternal(source.card, link);
-            return;
-        }
+        if (overview && source.card === target.card) return;
         const clock = clockLinks.has(link.id);
         // 同名标签需要保留各网络身份，普通通路仍按模块对合并。
-        const merged = overview && !clock && link.kind !== 'interface' && !padIds.has(source.card) && !padIds.has(target.card);
+        const merged = overview && !page.groupDetail && !clock && link.kind !== 'interface' && !padIds.has(source.card) && !padIds.has(target.card);
         const key = [source.card, target.card].sort().join('/') + '|' + (clock ? '\u0000clock' : link.kind);
         let edge = merged && pairs.get(key);
         if (!edge) {
@@ -167,11 +172,8 @@ function diagramTopology(page, mode) {
     for (const link of drawn) {
         const refs = link.endpoints.map(endpoint => ({ card: locations.get(endpoint.node), port: endpoint.port }));
         const endpoints = [...new Map(refs.filter(ref => ref.card).map(ref => [pinKey(ref), ref])).values()];
-        if (endpoints.length < 2) {
-            // 折进同一张卡片后两端合成一个锚点：把这条连线记成组内束，不能静默丢弃。
-            if (overview && endpoints.length === 1) noteInternal(endpoints[0].card, link);
-            continue;
-        }
+        if (endpoints.length < 2) continue;
+        if (overview && endpoints.every(endpoint => endpoint.card === endpoints[0].card)) continue;
         if (link.routes.length && endpoints.length === 2) {
             for (const route of link.routes) add(refs[route.source], refs[route.target], link, true);
         } else if (endpoints.length === 2) {
@@ -210,7 +212,7 @@ function diagramTopology(page, mode) {
         // 简图里的时钟域通道必须自解释：读者要能看出这条虚线是时钟/复位，而不是普通数据。
         edge.label = edge.clock
             ? clipText(edge.names[0], 156, FONT.label, MONO)
-            : mode === 'detailed' && !sameEnds
+            : (mode === 'detailed' || page.groupDetail) && !sameEnds
                 ? edge.links.length === 1 ? clipText(edge.names[0], 156, FONT.label, MONO) : edge.links.length + ' 条连接'
                 : '';
     }
@@ -219,8 +221,10 @@ function diagramTopology(page, mode) {
         // 卡片（例如整组时钟都在组内）才保留脚注，避免信息丢失。
         const onClockEdge = new Set(edges.flatMap(edge => edge.clock ? [edge.from, edge.to] : []));
         for (const card of cards) {
-            if (card.kind !== 'instance' || onClockEdge.has(card.id)) continue;
-            card.labels = [...new Set(card.nodes.flatMap(node => [...labels.get(node.id) || []]))];
+            if (card.kind !== 'instance') continue;
+            if (card.nodes.length > 1) card.internal = groupLinks(drawn, card.nodes)
+                .map(({ id, name, kind, endpoints }) => ({ id, name, kind, ends: endpoints.map(endpoint => endpoint.node) }));
+            if (!onClockEdge.has(card.id)) card.labels = [...new Set(card.nodes.flatMap(node => [...labels.get(node.id) || []]))];
         }
     }
     return { cards, edges };
@@ -229,4 +233,4 @@ function diagramTopology(page, mode) {
 const pinKey = ({ card, port }) => JSON.stringify([card, port]);
 const edgeSide = card => card && (card.kind === 'pad' || card.kind === 'boundary') ? card.edgeSide : undefined;
 
-module.exports = { footnoteText, internalText, groupEdgePorts, clockRowItems, boundaryCategory, portMeta, diagramTopology, pinKey, edgeSide };
+module.exports = { footnoteText, internalText, groupEdgePorts, clockRowItems, boundaryCategory, portMeta, diagramTopology, groupLinks, pinKey, edgeSide };

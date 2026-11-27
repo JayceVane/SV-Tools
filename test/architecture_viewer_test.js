@@ -11,6 +11,7 @@ const { buildArchitectureBook, resolveContext, assertBookCurrent } = require('..
 const { diagramTopology, layoutDiagram, renderDiagram } = require('../src/design/architecture-diagram');
 const { analyzeStructure, interfaceEvidence } = require('../src/design/struct');
 const { exportArchitecture, renderArchitectureBook } = require('../src/design/architecture-export');
+const { renderGroupDiagrams } = require('../src/design/architecture-group');
 const { renderModuleSymbol, connectionPreview, signalKind, isClockLike } = require('../src/design/architecture-details');
 
 test('报文汇聚简图保留独立实例、标签网络和架构握手证据，导出按章节跳转', async t => {
@@ -247,7 +248,7 @@ endmodule
     assert.equal((await layoutDiagram(producer, producer.auto)).width, 0);
 });
 
-test('简图折叠分组后组内连线以束清单保留，不再静默丢弃', async t => {
+test('简图展开分组后按实例绘制真实的组内连线', async t => {
     const base = await fs.realpath(os.tmpdir());
     const workspace = await fs.mkdtemp(path.join(base, 'svtools-arch-'));
     t.after(async () => {
@@ -282,14 +283,16 @@ endmodule
     assert.equal(card.internal.find(item => item.name === 'done').kind, 'signal');
     assert.ok(card.internal.every(item => item.ends.length === 2), '每条连接记下两个端点实例');
     assert.ok(!edges.some(edge => edge.links.some(id => top.links.find(link => link.id === id)?.name === 'inner')), '组内束不应再画成自环');
-    const svg = renderDiagram(await layoutDiagram(top, 'overview'), top, false);
+    const overview = await layoutDiagram(top, 'overview');
+    const svg = renderDiagram(overview, top, false);
     assert.match(svg, /class="card-foot internal" data-expand="[^"]+"[^>]*>[^]*?组内连接 2 条/u);
-    assert.match(svg, /class="expand-panel" data-panel="[^"]+"/u);
-    assert.match(svg, /class="expand-member"[^>]*>u_leaf</u);
-    assert.match(svg, /class="expand-member"[^>]*>u_sink</u);
-    assert.equal((svg.match(/class="expand-chip bundle"/gu) || []).length, 2, '接口束在两端各出现一次');
-    assert.equal((svg.match(/class="expand-chip signal"/gu) || []).length, 2, '信号在两端各出现一次');
-    assert.doesNotMatch(svg, /\+[0-9]+</u, '不再用 +N 截断');
+    const group = (await renderGroupDiagrams(overview, top, false))[card.id];
+    assert.equal(group.connections, 2);
+    assert.equal((group.html.match(/class="diagram-card instance/g) || []).length, 2);
+    assert.match(group.html, /class="diagram-edge bus"[^>]*><title>inner<\/title>/u);
+    assert.match(group.html, /class="diagram-edge signal"[^>]*><title>done<\/title>/u);
+    const html = await renderArchitectureBook({ ...book, pages: [{ ...top, auto: 'overview' }, ...book.pages.slice(1)] });
+    assert.ok(html.includes(`<template id="group-${top.id}-${card.id}" data-title="成对通路" data-instances="2" data-connections="2">`));
 });
 
 test('全双工接口按 modport 角色名与驱动位宽判定主流向，多端共享束逐成员连线', async t => {
@@ -384,14 +387,12 @@ endmodule
     assert.equal(card.entries.length, 0, '分组卡片不再保留组内实例清单');
     const svg = renderDiagram(diagram, top, false);
     assert.match(svg, /class="group-port-label"/u, '分组卡片要画出对外端口');
-    assert.match(svg, /class="card-members" data-members="[^"]+"[^>]*>[^]*?2 个实例/u, '副标题是成员清单开关');
+    assert.match(svg, /class="card-members" data-members="[^"]+"[^>]*>[^]*?2 个实例/u, '副标题打开组内互联图');
     assert.equal(/class="node-entry"/u.test(svg), false, '分组卡片卡体不再罗列组内实例');
-    assert.match(svg, /class="expand-panel member-panel" data-panel="[^"]+"[^>]*aria-label="数据通路 成员"/u);
-    assert.match(svg, /class="member-name"[^>]*>u_producer</u);
-    assert.match(svg, /class="member-name"[^>]*>u_consumer</u);
-    assert.match(svg, /class="member-type"[^>]*>producer</u);
-    const panel = svg.match(/class="expand-panel member-panel"[^]*?<\/g>/u)?.[0] || '';
-    assert.match(panel, /<a href="#module-\d+"><g class="member-row">/u, '成员行链到各自章节');
+    const group = (await renderGroupDiagrams(diagram, top, false))[card.id];
+    assert.equal(group.connections, 1, '组外驱动两个接收端的共享时钟不会伪装为组内连接');
+    assert.doesNotMatch(group.html, />u_observer</u, '组外实例不会出现在局部图内');
+    assert.match(group.html, /<a href="#module-\d+"><g class="diagram-card instance/u, '实例卡链到各自章节');
     const groupStart = svg.lastIndexOf('<g class="diagram-card instance', svg.indexOf('2 个实例'));
     assert.equal(svg.slice(Math.max(0, groupStart - 40), groupStart).includes('<a href'), false, '分组卡不再包成第一个成员的章节链接');
 });

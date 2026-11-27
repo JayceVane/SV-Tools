@@ -1,4 +1,4 @@
-/* global ArchitectureHover */
+/* global ArchitectureHover, ArchitectureGroupPopup */
 'use strict';
 
 (() => {
@@ -11,10 +11,18 @@
     const panelTitle = document.getElementById('connection-panel-title');
     const panelBody = panel.querySelector('.connection-panel-body');
     let current, selection, closedForPrint = [], hiddenForPrint = [];
-    ArchitectureHover.attach(document, target => {
+    const preview = ArchitectureHover.attach(document, target => {
         const { previewLink: link, previewNode: node, previewPort: port } = target.dataset;
         const endpoint = port ? `:${node || 'boundary:' + port}:${port}` : '';
         return (document.getElementById('preview-' + link + endpoint) || document.getElementById('preview-' + link))?.innerHTML || '';
+    });
+    const groups = ArchitectureGroupPopup.attach(document, {
+        resolve(target, id) {
+            const template = document.getElementById(`group-${target.closest('.chapter')?.id}-${id}`);
+            return template && { title: template.dataset.title, instances: template.dataset.instances,
+                connections: template.dataset.connections, html: template.innerHTML };
+        },
+        onOpen() { closePanel(); preview.hide(); },
     });
 
     filter.addEventListener('input', () => {
@@ -93,6 +101,8 @@
     }
 
     function openPanel(entry, origin) {
+        if (groups.popup.contains(origin)) origin = groups.trigger;
+        groups.close();
         closePanel();
         const chapter = entry.closest('.chapter');
         reveal(chapter);
@@ -111,6 +121,7 @@
     }
 
     function syncLocation() {
+        groups.close();
         const target = document.getElementById(location.hash.slice(1));
         if (target?.matches('.interface-section')) {
             const chapter = target.closest('.chapter');
@@ -121,17 +132,6 @@
             closePanel();
             reveal(target || document.querySelector('.chapter'));
         }
-    }
-
-    function toggleGroup(trigger) {
-        const svg = trigger.closest('svg.architecture-svg');
-        const id = trigger.getAttribute('data-expand') || trigger.getAttribute('data-members');
-        const panel = svg?.querySelector('.expand-panel[data-panel="' + id + '"]');
-        if (!panel) return;
-        const open = panel.classList.toggle('open');
-        trigger.setAttribute('aria-expanded', String(open));
-        for (const other of svg.querySelectorAll('.expand-panel.open')) if (other !== panel) other.classList.remove('open');
-        for (const node of svg.querySelectorAll('[data-expand][aria-expanded=true]')) if (node !== trigger) node.setAttribute('aria-expanded', 'false');
     }
 
     document.addEventListener('click', event => {
@@ -147,13 +147,6 @@
         }
         if (event.target.closest?.('[data-close-connection]')) {
             closePanel({ restore: true });
-            return;
-        }
-        const expand = event.target.closest?.('[data-expand],[data-members]');
-        if (expand) {
-            event.preventDefault();
-            event.stopPropagation();
-            toggleGroup(expand);
             return;
         }
         // 优先打开引脚对应的接口，卡片外层链接仍可进入子章节。
@@ -178,11 +171,6 @@
     });
     document.addEventListener('keydown', event => {
         if (event.key === 'Escape' && selection) closePanel({ restore: true });
-        if (!['Enter', ' '].includes(event.key)) return;
-        const expand = event.target.closest?.('[data-expand],[data-members]');
-        if (!expand) return;
-        event.preventDefault();
-        toggleGroup(expand);
     });
     window.addEventListener('hashchange', syncLocation);
     syncLocation();

@@ -1,4 +1,4 @@
-/* global acquireVsCodeApi, ArchitectureDetails, ArchitectureHover */
+/* global acquireVsCodeApi, ArchitectureDetails, ArchitectureHover, ArchitectureGroupPopup */
 (function () {
     'use strict';
 
@@ -17,6 +17,10 @@
     const preview = ArchitectureHover.attach(document, target => {
         const link = links?.get(target.dataset.previewLink);
         return link ? connectionPreview(link, { node: target.dataset.previewNode, port: target.dataset.previewPort }) : '';
+    });
+    const groups = ArchitectureGroupPopup.attach(document, {
+        resolve: (_, id) => layout?.groups?.[id],
+        onOpen: preview.hide,
     });
 
     function site(label, module) { return sourceLink(module.source, true, label); }
@@ -41,6 +45,7 @@
     function showChapter(id, path) {
         page = chapters.get(id);
         if (!page) return;
+        groups.close();
         preview.hide();
         if (!path) {
             path = [];
@@ -78,6 +83,7 @@
     }
 
     function draw() {
+        groups.close();
         for (const id of ['overview', 'detailed']) $(id).setAttribute('aria-pressed', String(mode === id));
         graph.textContent = '正在布局…';
         graph.hidden = false;
@@ -195,6 +201,8 @@
     function showLink(id, origin) {
         const link = links.get(id);
         if (!link) return;
+        if (groups.popup.contains(origin)) origin = groups.trigger;
+        groups.close();
         preview.hide();
         pendingFocus = origin;
         $('graph-content').hidden = true;
@@ -215,23 +223,12 @@
         pendingFocus = undefined;
     }
 
-    $('viewer').addEventListener('click', event => {
-        const expand = event.target.closest('[data-expand],[data-members]');
-        if (expand) {
-            event.preventDefault();
-            const svg = expand.closest('svg.architecture-svg');
-            const id = expand.getAttribute('data-expand') || expand.getAttribute('data-members');
-            const panel = svg?.querySelector('.expand-panel[data-panel="' + id + '"]');
-            if (panel) {
-                const open = panel.classList.toggle('open');
-                expand.setAttribute('aria-expanded', String(open));
-                for (const other of svg.querySelectorAll('.expand-panel.open')) if (other !== panel) other.classList.remove('open');
-                for (const node of svg.querySelectorAll('[data-expand][aria-expanded=true]')) if (node !== expand) node.setAttribute('aria-expanded', 'false');
-            }
-            return;
-        }
+    document.addEventListener('click', event => {
+        const inGroup = groups.popup.contains(event.target);
+        if (!inGroup && !$('viewer').contains(event.target)) return;
         const target = event.target.closest('[data-node],[data-edge],[data-link],[data-port],[data-child],[data-chapter],[data-source],[data-clear],[data-review-node],[data-review-link]');
         if (!target || !page) return;
+        if (inGroup) event.preventDefault();
         const data = target.dataset;
         if (data.reviewNode || data.reviewLink) post('review', { page: page.id, node: data.reviewNode, link: data.reviewLink });
         else if (data.source) post('source', { source: data.source });
@@ -269,8 +266,9 @@
             updateInspector();
         }
     });
-    graph.addEventListener('keydown', event => {
-        if (!['Enter', ' '].includes(event.key) || !event.target.matches('[role=button]')) return;
+    document.addEventListener('keydown', event => {
+        if (!graph.contains(event.target) && !groups.popup.contains(event.target)) return;
+        if (!['Enter', ' '].includes(event.key) || !event.target.matches('svg [role=button]')) return;
         event.preventDefault();
         event.target.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
@@ -329,6 +327,7 @@
             applyHighlight();
             centerSelected();
         } else if (message.type === 'loading') {
+            groups.close();
             book = undefined;
             $('viewer').hidden = true;
             exportButtons();

@@ -87,7 +87,7 @@ async function blockDesignImage(snapshot, arch, image, { style, detail, bundle }
         ...image.evidence.layout, renderer: 'block-design', theme: 'mono', revision: loaded.book.revision,
     }, export: { ...image.evidence.export, width, height } };
     const title = evidence.export.title;
-    const drawing = renderDiagram(layout, display, false).replace(/<a\b[^>]*>|<\/a>/gu, '');
+    const drawing = renderDiagram(layout, display, false, { groupActions: false }).replace(/<a\b[^>]*>|<\/a>/gu, '');
     const body = `<metadata id="svtools-evidence">${escape(JSON.stringify(evidence))}</metadata>
         <style>${resolveStyles(shared, diagram, MONO_TOKENS)}</style>
         <text x="16" y="26" fill="${MONO_INK}" font-family="Segoe UI, Microsoft YaHei UI, sans-serif" font-size="17">${escape(title)}</text>
