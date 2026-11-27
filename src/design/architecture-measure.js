@@ -121,22 +121,12 @@ function measureInstance(card, detailed, assignment, incident) {
     const titleWidth = Math.max(0, ...card.titleLines.map(line => textWidth(line, FONT.title, UI)));
     card.headH = HEAD + (card.titleLines.length - 1) * HEAD_LINE;
     card.width = Math.ceil(Math.max(base, titleWidth + 24) / 4) * 4;
-    // 一行放不下就折行，不再用 +N 省略：时钟/复位清单必须是完整的。
-    const sepWidth = textWidth(' · ', FONT.clock, MONO);
+    // 每个时钟/复位网络单独一行，做成卡边端口（贴边圆点 + 名称），不再是折行的标签清单。
+    card.clockPins = [];
     for (const row of card.clockRows) {
-        const avail = card.width - 12 - CLOCK_LABEL - 12;
-        row.lines = [];
-        let line = [], used = 0;
-        for (const item of row.items) {
-            const width = textWidth(item.name, FONT.clock, MONO);
-            if (line.length && used + sepWidth + width > avail) { row.lines.push(line); line = []; used = 0; }
-            line.push(item);
-            used += (line.length > 1 ? sepWidth : 0) + width;
-        }
-        if (line.length) row.lines.push(line);
+        for (const item of row.items) card.clockPins.push({ name: item.name, link: item.link, kind: row.label, side: 'WEST' });
     }
-    card.clockLines = card.clockRows.reduce((total, row) => total + row.lines.length, 0);
-    card.clockHeight = card.clockLines * CLOCK_ROW;
+    card.clockHeight = card.clockPins.length * CLOCK_ROW;
     const bodyTop = card.headH + SUB;
     const scalars = { WEST: [], EAST: [] }, buses = { WEST: [], EAST: [] };
     for (const pin of card.pins) (pin.bus ? buses : scalars)[pin.side].push(pin);

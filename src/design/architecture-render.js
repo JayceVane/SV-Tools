@@ -337,20 +337,26 @@ function renderDiagram(diagram, page, interactive) {
                 + escape(clipText(port.caption, card.width - 24, FONT.pin, MONO)) + '</text></g>';
         }).join('');
         // 卡底 CLK / RST 脚注：每个网络一个 tspan，悬浮可查源端与接收端。
-        // 时钟/复位清单不截断：一行放不下就折行；每个网络带 data-clock，供联动高亮。
-        let clockOffset = 0;
-        const clockFoot = (card.clockRows || []).map(row => {
-            const start = clockOffset;
-            clockOffset += row.lines.length;
-            return row.lines.map((line, index) => {
-                const baseline = round(card.clockTop + (start + index) * CLOCK_ROW + 10.5);
-                const nets = line.map((item, position) => (position ? '<tspan class="clock-sep"> · </tspan>' : '')
-                    + '<tspan class="clock-net" data-clock="' + escape(item.name) + '"'
-                    + (item.link ? preview(item.link) : '') + '>' + escape(item.name) + '</tspan>').join('');
-                const tag = index === 0 ? '<tspan class="clock-tag">' + row.label + '</tspan>' : '';
-                return '<text class="clock-foot" x="12" y="' + baseline + '">' + tag
-                    + '<tspan class="clock-start" x="' + (12 + CLOCK_LABEL) + '">' + nets + '</tspan></text>';
-            }).join('');
+        // 时钟/复位网络是卡边端口：一行一个网络，贴边实心圆点 + 名称，可直接接线。
+        const clockFoot = (card.clockPins || []).map((pin, index) => {
+            const top = card.clockTop + index * CLOCK_ROW;
+            const baseline = round(top + 10.5);
+            const groupStart = index === 0 || (card.clockPins[index - 1] || {}).kind !== pin.kind;
+            const dot = '<circle class="clock-pin" cx="' + (pin.side === 'EAST' ? card.width : 0) + '" cy="'
+                + round(top + CLOCK_ROW / 2) + '" r="2.7"/>';
+            const net = '<tspan class="clock-net" data-clock="' + escape(pin.name) + '"'
+                + (pin.link ? preview(pin.link) : '') + '>' + escape(pin.name) + '</tspan>';
+            // 端口在右边缘时名称右对齐，和普通引脚的方向感一致。
+            if (pin.side === 'EAST') {
+                const tag = groupStart ? '<text class="clock-foot" x="'
+                    + round(card.width - 12 - textWidth(pin.name, FONT.clock, MONO) - 8) + '" y="' + baseline
+                    + '" text-anchor="end"><tspan class="clock-tag">' + pin.kind + '</tspan></text>' : '';
+                return tag + '<text class="clock-foot" x="' + round(card.width - 12) + '" y="' + baseline
+                    + '" text-anchor="end">' + net + '</text>' + dot;
+            }
+            return '<text class="clock-foot" x="12" y="' + baseline + '">'
+                + (groupStart ? '<tspan class="clock-tag">' + pin.kind + '</tspan>' : '')
+                + '<tspan class="clock-start" x="' + (12 + CLOCK_LABEL) + '">' + net + '</tspan></text>' + dot;
         }).join('');
         const split = card.pinSplit
             ? '<line class="pin-split" x1="12" y1="' + card.pinSplit + '" x2="' + (card.width - 12) + '" y2="' + card.pinSplit + '"/>' : '';

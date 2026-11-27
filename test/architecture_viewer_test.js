@@ -472,7 +472,7 @@ endmodule
     assert.ok(!detailed.clockRegion);
 });
 
-test('时钟/复位清单不截断：超宽折行，每个网络带联动标记', async t => {
+test('时钟/复位每个网络是一行端口：不截断、贴边圆点、带联动标记', async t => {
     const base = await fs.realpath(os.tmpdir());
     const workspace = await fs.mkdtemp(path.join(base, 'svtools-arch-clocks-'));
     t.after(async () => {
@@ -490,8 +490,9 @@ endmodule`);
     const [top] = book.pages;
     const svg = renderDiagram(await layoutDiagram(top, 'overview'), top, false);
     assert.doesNotMatch(svg, /\+[0-9]+<\/tspan>/u, '不再用 +N 截断');
-    const lines = (svg.match(/class="clock-foot"/gu) || []).length;
-    assert.ok(lines > 2, 'CLK/RST 超过一行时要折行：' + lines);
+    const rows = (svg.match(/class="clock-foot"/gu) || []).length;
+    assert.equal(rows, 8, '每个时钟/复位网络占一行端口：' + rows);
+    assert.equal((svg.match(/class="clock-pin"/gu) || []).length, 8, '每个网络一个贴边圆点');
     for (const name of ['clk_alpha', 'clk_zeta', 'rst_alpha', 'rst_beta']) {
         assert.match(svg, new RegExp('data-clock="' + name + '"', 'u'), name + ' 必须完整出现');
     }

@@ -72,6 +72,7 @@
 .clock-foot { font-family: var(--font-mono); font-size: 10px; fill: var(--ink-2); }
 .clock-tag { font-family: var(--font-ui); font-size: 9px; letter-spacing: .08em; fill: var(--faint); }
 .clock-sep { fill: var(--faint); }
+.clock-pin { fill: var(--wire); }
 .clock-net { cursor: help; }
 .clock-net:hover { fill: var(--focus); }
 /* 时钟/复位联动：悬停一个网络名，同名网络与使用它的卡片一起高亮。 */

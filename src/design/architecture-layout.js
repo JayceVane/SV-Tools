@@ -5,7 +5,6 @@ const { diagramTopology } = require('./architecture-topology');
 const { measureCards } = require('./architecture-measure');
 const { attachPeers, initialAssignment, deriveAssignment } = require('./architecture-assign');
 const { anchorFor, runLayout } = require('./architecture-elk');
-const { signalKind } = require('./architecture-details');
 /* ---------- 标签避让 ---------- */
 
 const overlaps = (a, b, gap = 0) => a.x < b.x + b.w + gap && a.x + a.w + gap > b.x
@@ -118,9 +117,13 @@ async function layoutDiagram(page, mode) {
             if (!card) continue;
             const side = id === edge.from ? 'EAST' : 'WEST';
             let anchor;
-            if (card.clockRows?.length) {
-                const row = signalKind(edge.names?.[0]) === 'RST' && card.clockRows.length > 1 ? 1 : 0;
-                anchor = { side, x: side === 'EAST' ? card.width : 0, y: card.clockTop + row * CLOCK_ROW + CLOCK_ROW / 2 };
+            if (card.clockPins?.length) {
+                // 时钟/复位是正经端口：按网络名找到它自己的行，再定这一侧的贴边点。
+                const name = edge.names?.[0] || '';
+                const pin = card.clockPins.find(item => item.name === name) || card.clockPins[0];
+                pin.side = side;
+                anchor = { side, x: side === 'EAST' ? card.width : 0,
+                    y: card.clockTop + card.clockPins.indexOf(pin) * CLOCK_ROW + CLOCK_ROW / 2 };
             } else {
                 const key = anchorFor(card, port, edge.id);
                 anchor = [...card.bodyAnchors || [], ...card.rows || [], card.terminalPort].filter(Boolean)
