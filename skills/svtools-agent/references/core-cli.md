@@ -16,7 +16,7 @@ node src/cli/main.js lint --workspace D:/project --file src/top.sv --top top
 
 ## 工程上下文
 
-`--workspace` 默认是进程当前目录，与编辑器当前文件无关。CLI 发现工作区的 XPR 和 `.svtools/projects/*.json`；存在多个工程时返回候选，必须用 `--project` 消除歧义。无工程时扫描工作区 HDL，排除 `.git`、`.svtools`、`.Xil`、依赖和构建目录。
+`--workspace` 默认是进程当前目录，与编辑器当前文件无关。CLI 发现工作区的 XPR 和 `.svtools/projects/*.json`；存在多个工程时返回候选，必须用 `--project` 消除歧义。编辑器工程树里的"选择工程"和"刷新"只是编辑器状态，CLI 一律用 `--project` 显式指定，不跟随编辑器的活动工程。无工程时扫描工作区 HDL，排除 `.git`、`.svtools`、`.Xil`、依赖和构建目录。
 
 默认使用唯一的设计文件集；`--fileset` 可明确选择仿真文件集。仿真文件集包含唯一设计文件集的源码；有多个候选设计文件集时拒绝猜测。`--file` 必须属于所选工程。Icarus 目标来自明确的文件/top、工程 top，或唯一静态模块声明；不使用编辑器中另一个工程的 top。
 
@@ -64,7 +64,7 @@ node src/cli/main.js circuit trace --workspace D:/project --file src/top.sv --to
 
 `simulate` 依次编译、详细化并运行 testbench。`--engine iverilog` 使用 Icarus（注入其 Cygwin 运行环境），`--engine xsim` 使用 xvlog/xelab/xsim。`--source` 补充源文件，`--include`/`--define`/`--standard` 覆盖上下文。返回编译/详细化/运行日志、波形路径（VCD/FST 或 xsim 产物）和 `workDir`；编译、详细化、运行失败分别返回 `SIM_COMPILE_FAILED`、`SIM_ELABORATE_FAILED`、`SIM_FAILED`。
 
-`elaborate` 只做 xvlog + xelab 的静态详细化。`rtl` 复用扩展的原生生成器（需要 `bin/svtools.<platform>.node`），默认不修改源码，只有 `--out` 才写文件。`circuit trace` 用静态 RTL 网表追踪顶层模块内信号的 drivers/loads，输出 `nets/cells/selections/boundaries`；子模块内部信号需要层次路径，当前只解析顶层模块。
+`elaborate` 只做 xvlog + xelab 的静态详细化，没有快速/完整之分：编辑器里的「顶层详细化」与「详细化」在 CLI 是同一条命令。`rtl` 复用扩展的原生生成器（需要 `bin/svtools.<platform>.node`），默认不修改源码，只有 `--out` 才写文件。`circuit trace` 用静态 RTL 网表追踪顶层模块内信号的 drivers/loads，输出 `nets/cells/selections/boundaries`；子模块内部信号需要层次路径，当前只解析顶层模块。
 
 ## 后台任务
 

@@ -26,7 +26,20 @@ svtools-agent.cmd note get --workspace <工作区> --note <返回的ID>
 svtools-agent.cmd note check --workspace <工作区> --note <返回的ID>
 ```
 
-移动或改名后用 `note check` 核验侧车锚点是否仍唯一定位。出现 `stale` 或 `ambiguous` 时，先确认源码位置，再用 `note get` 返回的 `etag` 作为 `--expect` 调用 `note reanchor`。更新笔记正文时，同样用 `etag` 调用 `note update`。只有源码注释绑定的笔记在 `note check` 中显示为 `unbound`，可在标记行悬停确认正文。
+移动或改名后用 `note check` 核验侧车锚点是否仍唯一定位。出现 `stale` 或 `ambiguous` 时，先确认源码位置，再用 `note get` 返回的 `etag` 作为 `--expect` 调用 `note reanchor`。更新笔记正文时，同样用 `etag` 调用 `note update`。只有源码注释绑定的笔记在 `note check` 中显示为 `unbound`，可在标记行悬停确认正文。`note check` 只要有一篇 `stale` 或 `ambiguous` 就以 `failed` 结束，逐条 `status` 才是定位依据。
+
+## 检索与导出
+
+```powershell
+svtools-agent.cmd note list --workspace <工作区> [--topic <主题>]
+svtools-agent.cmd note search --workspace <工作区> --query "<关键词>"
+svtools-agent.cmd note export --workspace <工作区> --topic <主题> --format pdf --out docs/notes-export
+```
+
+- `note list` 返回 `notes[]{id,path,title,topic,sha256,etag,anchor}`，按 ID 排序；`--topic` 精确过滤。
+- `note search` 与 `list` 是同一份清单：`--query` 按空白分词，每个词都要在 ID、主题、锚点路径或正文中命中（全部命中才算）。
+- `note export` 用 `--note` 或 `--topic` 选中（省略时导出全部，最多 64 篇）；`--format md|html|pdf`（默认 html），`--out` 默认 `docs/design-note-export`，目录必须不存在（已有目录返回 `EXPORT_EXISTS`）。正文合计超过 8 MiB 返回 `SOURCE_LIMIT`。
+- 定版导出加 `--final`：先把每篇笔记的版本固定到历史，再要求所有锚点已 `resolved`（否则 `EVIDENCE_STALE`），并核对评审证据；产物 `notes.md`、`notes.html`/`notes.pdf` 与 `manifest.json`（`notes[].sha256/revision/verification`、`artifacts[].sha256`、`evidence[].sha256`）。普通导出只是快照，不能当作评审证据。
 
 ## 架构报告
 
