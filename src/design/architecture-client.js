@@ -216,11 +216,12 @@
     }
 
     $('viewer').addEventListener('click', event => {
-        const expand = event.target.closest('[data-expand]');
+        const expand = event.target.closest('[data-expand],[data-members]');
         if (expand) {
             event.preventDefault();
             const svg = expand.closest('svg.architecture-svg');
-            const panel = svg?.querySelector('.expand-panel[data-panel="' + expand.getAttribute('data-expand') + '"]');
+            const id = expand.getAttribute('data-expand') || expand.getAttribute('data-members');
+            const panel = svg?.querySelector('.expand-panel[data-panel="' + id + '"]');
             if (panel) {
                 const open = panel.classList.toggle('open');
                 expand.setAttribute('aria-expanded', String(open));

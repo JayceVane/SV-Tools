@@ -40,7 +40,8 @@
 
     function toggleGroup(trigger) {
         const svg = trigger.closest('svg.architecture-svg');
-        const panel = svg?.querySelector('.expand-panel[data-panel="' + trigger.getAttribute('data-expand') + '"]');
+        const id = trigger.getAttribute('data-expand') || trigger.getAttribute('data-members');
+        const panel = svg?.querySelector('.expand-panel[data-panel="' + id + '"]');
         if (!panel) return;
         const open = panel.classList.toggle('open');
         trigger.setAttribute('aria-expanded', String(open));
@@ -49,7 +50,7 @@
     }
 
     document.addEventListener('click', event => {
-        const expand = event.target.closest?.('[data-expand]');
+        const expand = event.target.closest?.('[data-expand],[data-members]');
         if (expand) {
             event.preventDefault();
             event.stopPropagation();
@@ -81,7 +82,7 @@
     });
     document.addEventListener('keydown', event => {
         if (!['Enter', ' '].includes(event.key)) return;
-        const expand = event.target.closest?.('[data-expand]');
+        const expand = event.target.closest?.('[data-expand],[data-members]');
         if (!expand) return;
         event.preventDefault();
         toggleGroup(expand);

@@ -46,6 +46,14 @@
 .expand-chip.signal rect { stroke: var(--line-2); }
 .expand-chip.signal text { fill: var(--ink-2); }
 
+/* ---------- 分组卡成员清单：副标题「N 个实例」点开，逐行链到各自章节 ---------- */
+.card-members { cursor: pointer; }
+.card-members:hover .card-subtitle, .card-members[aria-expanded=true] .card-subtitle { fill: var(--ink); }
+.member-row .row-bg { fill: transparent; }
+.member-row:hover .row-bg, .member-row:focus-visible .row-bg { fill: var(--sunk); }
+.member-name { font-family: var(--font-mono); font-size: 10px; fill: var(--ink-2); }
+.member-type { font-family: var(--font-mono); font-size: 9.5px; fill: var(--faint); }
+
 /* 分组卡片的对外端口：端点贴卡片边线，7px 短线向卡内引出，名称在卡内。
    形状与 Block Design 原理图一致——信号是实心圆点，接口/总线是实心方块。 */
 .group-port-stem { stroke: var(--wire); stroke-width: 1.15; }

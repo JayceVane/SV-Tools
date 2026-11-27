@@ -117,6 +117,45 @@ function expandPanel(card, diagram) {
         + '</g>';
 }
 
+// 分组卡成员面板：副标题「N 个实例」点开，逐行列出成员并链到各自章节。
+// 与组内连接面板一样是覆盖层，不参与布局。
+function memberPanel(card, diagram, interactive) {
+    const nodes = card.nodes || [];
+    if (nodes.length < 2) return '';
+    const nameWidth = Math.max(...nodes.map(node => textWidth(node.name, FONT.foot, MONO)));
+    const typeWidth = Math.max(...nodes.map(node => textWidth(node.type || '', FONT.chip, MONO)));
+    const width = Math.max(280, Math.min(460, 24 + nameWidth + 16 + typeWidth + 16));
+    const head = 30, rowHeight = 20, tail = 8;
+    const height = head + nodes.length * rowHeight + tail;
+    const gap = 12;
+    let x = card.x, y = card.y + card.height + gap;
+    if (y + height > diagram.height - 8) y = card.y - height - gap;
+    if (y < 8) {
+        x = card.x + card.width + gap;
+        y = Math.max(8, Math.min(card.y, diagram.height - height - 8));
+    }
+    x = Math.max(8, Math.min(x, diagram.width - width - 8));
+    const rows = nodes.map((node, index) => {
+        const top = head + index * rowHeight;
+        const body = '<rect class="row-bg" x="0" y="' + top + '" width="' + round(width) + '" height="' + rowHeight + '"/>'
+            + '<text class="member-name" x="12" y="' + (top + 14) + '">' + escape(node.name) + '</text>'
+            + '<text class="member-type" x="' + round(width - 12) + '" y="' + (top + 14) + '" text-anchor="end">'
+            + escape(node.type || '') + '</text>';
+        const inner = '<g class="member-row">' + '<title>' + escape([node.name, node.type].filter(Boolean).join(' · ')) + '</title>'
+            + body + '</g>';
+        if (interactive) return '<g class="member-row" data-node="' + escape(node.id) + '" role="button" tabindex="0">'
+            + '<title>' + escape([node.name, node.type].filter(Boolean).join(' · ')) + '</title>' + body + '</g>';
+        return node.chapter ? '<a href="#' + escape(node.chapter) + '">' + inner + '</a>' : inner;
+    }).join('');
+    return '<g class="expand-panel member-panel" data-panel="' + escape(card.id + '-members') + '" transform="translate('
+        + round(x) + ',' + round(y) + ')" role="dialog" aria-label="' + escape(card.title + ' 成员') + '">'
+        + '<rect class="expand-bg" width="' + round(width) + '" height="' + round(height) + '" rx="6"/>'
+        + '<text class="expand-title" x="12" y="19">' + escape(card.title) + '</text>'
+        + '<text class="expand-count" x="' + round(width - 12) + '" y="19" text-anchor="end">' + nodes.length + ' 个实例</text>'
+        + '<line class="expand-rule" x1="0" y1="' + head + '" x2="' + round(width) + '" y2="' + head + '"/>'
+        + rows + '</g>';
+}
+
 function renderDiagram(diagram, page, interactive) {
     if (!diagram.width) return '';
     const kinds = new Map(page.links.map(item => [item.id, item.kind]));
@@ -246,15 +285,21 @@ function renderDiagram(diagram, page, interactive) {
         const single = card.nodes.length === 1;
         const status = single && node.implementation === 'stub' ? ' stub' : single && node.implementation === 'unresolved' ? ' unresolved' : '';
         const attrs = single ? action('node', node.id, [node.name, node.type].filter(Boolean).join(' ')) : '';
-        // 分组卡也要能点进子模块章节：取组内第一个带章节的实例作为落点，
-        // 否则读者看到一张能展开所有连接的卡片却点不动。
-        const chapterOf = single ? node.chapter
-            : card.nodes.map(item => item.chapter).find(Boolean);
+        // 分组卡不再跳「组内第一个成员的章节」：那里只有该成员的实例，端口和数量都对不上。
+        // 成员清单改由副标题「N 个实例」点开（memberPanel）。
+        const chapterOf = single ? node.chapter : undefined;
         const [open, close] = chapterOf ? link(chapterOf) : ['', ''];
         const titles = card.titleLines.map((line, index) => '<text class="card-title" x="12" y="' + (22 + index * HEAD_LINE)
             + '">' + escape(line) + '</text>').join('');
-        const subtitle = card.subtitleName ? '<text class="card-subtitle" x="12" y="' + (card.headH + 16) + '">'
-            + escape(card.subtitleName) + '</text>' : '';
+        const subtitle = card.subtitleName
+            ? (single
+                ? '<text class="card-subtitle" x="12" y="' + (card.headH + 16) + '">' + escape(card.subtitleName) + '</text>'
+                : '<g class="card-members" data-members="' + escape(card.id + '-members') + '" role="button" tabindex="0" aria-expanded="false">'
+                    + '<title>展开成员清单（' + card.nodes.length + ' 个实例）</title>'
+                    + '<text class="card-subtitle" x="12" y="' + (card.headH + 16) + '">' + escape(card.subtitleName) + '</text>'
+                    + '<text class="expand-caret" x="' + round(12 + textWidth(card.subtitleName, FONT.foot, MONO) + 5) + '" y="'
+                    + (card.headH + 16) + '">▸</text></g>')
+            : '';
         const chips = card.chips.map(chip => '<g class="card-chip ' + chip.kind + '" transform="translate(' + chip.x + ','
             + chip.y + ')"><rect width="' + chip.width + '" height="15" rx="3"/><text x="5" y="11">' + escape(chip.text) + '</text></g>').join('');
         const entries = card.entries.map((entry, index) => {
@@ -344,7 +389,9 @@ function renderDiagram(diagram, page, interactive) {
     return '<svg class="architecture-svg" xmlns="http://www.w3.org/2000/svg" width="' + diagram.width + '" height="'
         + diagram.height + '" viewBox="0 0 ' + diagram.width + ' ' + diagram.height + '" role="'
         + (interactive ? 'group' : 'img') + '" aria-label="' + escape(page.name) + ' 架构图">'
-        + clockRegion + edgeMarkup + cardMarkup + expandMarkup + '</svg>';
+        + clockRegion + edgeMarkup + cardMarkup + expandMarkup
+        + diagram.cards.filter(card => card.kind === 'instance' && card.nodes.length > 1)
+            .map(card => memberPanel(card, diagram, interactive)).join('') + '</svg>';
 }
 
 module.exports = { orthogonalPath, arrowPath, headPath, renderDiagram };

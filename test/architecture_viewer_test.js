@@ -370,8 +370,16 @@ endmodule
     assert.equal(card.entries.length, 0, '分组卡片不再保留组内实例清单');
     const svg = renderDiagram(diagram, top, false);
     assert.match(svg, /class="group-port-label"/u, '分组卡片要画出对外端口');
-    assert.match(svg, /class="card-subtitle"[^>]*>2 个实例</u);
-    assert.equal(/class="node-entry"/u.test(svg), false, '分组卡片不再罗列组内实例');
+    assert.match(svg, /class="card-members" data-members="[^"]+"[^>]*>[^]*?2 个实例/u, '副标题是成员清单开关');
+    assert.equal(/class="node-entry"/u.test(svg), false, '分组卡片卡体不再罗列组内实例');
+    assert.match(svg, /class="expand-panel member-panel" data-panel="[^"]+"[^>]*aria-label="数据通路 成员"/u);
+    assert.match(svg, /class="member-name"[^>]*>u_producer</u);
+    assert.match(svg, /class="member-name"[^>]*>u_consumer</u);
+    assert.match(svg, /class="member-type"[^>]*>producer</u);
+    const panel = svg.match(/class="expand-panel member-panel"[^]*?<\/g>/u)?.[0] || '';
+    assert.match(panel, /<a href="#module-\d+"><g class="member-row">/u, '成员行链到各自章节');
+    const groupStart = svg.lastIndexOf('<g class="diagram-card instance', svg.indexOf('2 个实例'));
+    assert.equal(svg.slice(Math.max(0, groupStart - 40), groupStart).includes('<a href'), false, '分组卡不再包成第一个成员的章节链接');
 });
 
 test('超宽流水通路自动折行并保留完整连接模式', async t => {
