@@ -93,6 +93,9 @@ test('报文汇聚简图保留独立实例、标签网络和架构握手证据�
     assert.match(html, /<figure class="module-symbol" aria-label="packet_fifo #\(DEPTH=32\) 端口图"/u);
     assert.match(html, /<a class="module-pin module-interface-pin" href="#module-\d+-link-\d+"[^>]*><span class="module-bus-symbol"[^>]*><\/span>\s*<span class="module-interface-label">\s*<strong><code>enqueue<\/code>/u);
     assert.match(html, /id="chapter-filter"/u);
+    assert.match(html, /data-interface-filter/u);
+    assert.match(html, /class="connection-panel"[^>]* hidden/u);
+    assert.doesNotMatch(html, />接口目录</u);
     assert.ok(html.includes(`data-print-open id="${link.id}"><summary>`));
     const printed = await renderArchitectureBook(loaded.book, undefined, { print: true });
     assert.ok(printed.includes(`data-print-open id="${link.id}" open><summary>`));
@@ -154,11 +157,10 @@ endmodule
     assert.equal(found.chapter, 'module-2');
     const html = await fs.readFile(exported.output.data.path, 'utf8');
     assert.match(html, /<span class="chapter-index">1\.1\.1<\/span>/u);
-    assert.match(html, /<h4 class="chapter-heading">（未命名模块职责）<\/h4>/u);
-    assert.match(html, /<p class="chapter-title"><code>owner<\/code><\/p>/u);
+    assert.match(html, /<h4 class="chapter-heading">owner<\/h4>/u);
     assert.match(html, /成员 irq 声明了多个输出端/u);
     assert.match(html, /实现桩待实现输出 · 1/u);
-    assert.match(html, /href="#module-2">subsystem<\/a> · \d+ 条待复核/u);
+    assert.match(html, /href="#module-2-checks">subsystem<\/a> · \d+ 条待复核/u);
     const invalid = await run([...args, '--format', 'pdf', '--out', 'review.html']);
     assert.equal(invalid.output.diagnostics[0].code, 'INVALID_ARGUMENT');
     await fs.writeFile(path.join(workspace, 'hardware.xpr'), 'invalid fixture');

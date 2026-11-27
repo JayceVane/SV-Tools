@@ -8,7 +8,7 @@ const { resolveContext, buildArchitectureBook, assertBookCurrent } = require('./
 const { hash } = require('../agent/context');
 const { fail, result } = require('../agent/protocol');
 const { layoutDiagram, renderDiagram } = require('./architecture-diagram');
-const { escape, code, pageName, chapterNumber, chapterTitle, sourceLink, portTable, renderModuleSymbol, interfaceDetails, signalEnds, backgroundSignals, connectionPreview } = require('./architecture-details');
+const { escape, code, pageName, chapterNumber, sourceLink, portTable, renderModuleSymbol, interfaceDetails, signalEnds, backgroundSignals, connectionPreview } = require('./architecture-details');
 const { printPdf } = require('./note-export');
 const { create } = require('./workflow-files');
 
@@ -65,35 +65,47 @@ async function renderArchitectureBook(book, modes, { print = false } = {}) {
             `<tr id="${link.id}"><th scope="row">${code(link.name)}</th><td>${signalEnds(link, nodes)}</td><td>${link.width ?? '—'}</td></tr>`).join('')}</tbody></table></div>` : '';
         const diagnostics = page.checks.filter(item => !stubOutput(page, item));
         const stubs = page.checks.filter(item => stubOutput(page, item));
+        const root = index === 0;
+        const checksId = page.id + '-checks';
+        const checksTitle = `待复核 · ${diagnostics.length}`;
+        const checkList = diagnostics.length ? `<ul>${diagnosticItems(diagnostics)}</ul>` : '';
+        const checks = checkList && (print
+            ? `<aside class="book-review" id="${checksId}"><h3>${checksTitle}</h3>${checkList}</aside>`
+            : `<details class="book-detail book-review" id="${checksId}" data-print-open><summary>${checksTitle}</summary>${checkList}</details>`);
         const figure = page.hasStructure
             ? `<figure class="diagram-figure">
                 <div class="diagram-toolbar book-diagram-tools">${print ? '' : '<button type="button" data-zoom aria-pressed="false">原始尺寸</button>'}</div>
                 <div class="diagram-print" tabindex="0" aria-label="架构图">${diagram}</div>
                 <figcaption class="diagram-caption">图 ${pad(index + 1)} · 结构连线（${diagramDescription}）</figcaption>
             </figure>`
-            : `<p class="diagram-empty">本章是叶子模块，没有内部实例；下方是模块边界端口图。</p>`;
+            : '';
+        const symbol = page.ports.length ? section('模块端口图', renderModuleSymbol(pageName(page), page.ports, { targets }), page.ports.length + ' 个端口') : '';
+        const interfaceEntries = interfaces.map(link => `<details class="interface-section book-detail" data-print-open id="${link.id}"${opened}><summary><strong>${escape(link.name)}</strong> <span>${escape(link.type)} · ${link.members.length} 个成员</span></summary><div class="interface-body">${interfaceDetails(link, nodes, false, { chapterLinks: !print })}</div></details>`).join('');
+        const interfaceSection = interfaces.length ? `<details class="book-detail chapter-reference" data-interfaces data-print-open${opened}>
+            <summary>接口 · ${interfaces.length}</summary>
+            ${print ? '' : '<label class="book-search">筛选接口<input type="search" data-interface-filter placeholder="接口名或类型"></label><p data-no-interfaces hidden role="status">没有匹配的接口</p>'}
+            ${interfaceEntries}</details>` : '';
         const counts = [page.ports.length ? page.ports.length + ' 个端口' : '', instances.length ? instances.length + ' 个子模块' : '', interfaces.length ? interfaces.length + ' 个接口' : '']
             .filter(Boolean).join(' · ');
         const heading = 'h' + Math.min(6, (page.depth || 0) + 2);
         const parent = byId.get(page.parent);
         chapterHtml.set(page.id, `<section class="chapter" id="${page.id}">
             <div class="chapter-lead">
-                <header class="chapter-header">
+                <header class="chapter-header${root ? ' chapter-header-root' : ''}">
                     <div class="chapter-crumbs"><span class="chapter-index">${chapterNumber(page, index)}</span><span class="chapter-nav"><a href="#contents">目录</a>${parent ? ` · <a href="#${parent.id}">返回 ${escape(parent.name)}</a>` : ''}</span></div>
-                    <${heading} class="chapter-heading">${escape(chapterTitle(page))}</${heading}>
-                    <p class="chapter-title">${code(pageName(page))}</p>
-                    <p class="chapter-meta">${sourceLink(page.source, false)}${page.empty ? ' · 实现桩' : ''}${counts ? ' · ' + counts : ''}</p>
+                    ${root && !print ? '' : `<${heading} class="chapter-heading">${escape(page.title || pageName(page))}</${heading}>`}
+                    ${page.title && (!root || print) ? `<p class="chapter-title">${code(pageName(page))}</p>` : ''}
+                    <p class="chapter-meta">${sourceLink(page.source, false)}${page.empty ? ' · 实现桩' : ''}${counts ? ' · ' + counts : ''}${checkList && !print ? ` · <a class="review-count" href="#${checksId}">${checksTitle}</a>` : ''}</p>
                 </header>
-                ${diagnostics.length ? `<aside class="book-review"><h3>本章待复核 · ${diagnostics.length}</h3><ul>${diagnosticItems(diagnostics)}</ul></aside>` : ''}
-                ${figure}
+                ${print ? checks : ''}
+                ${figure || symbol || '<p class="subtle">没有已解析的端口或子实例。</p>'}
             </div>
-            ${section('模块端口图', renderModuleSymbol(pageName(page), page.ports, { targets }), page.ports.length ? page.ports.length + ' 个端口' : '')}
-            ${page.ports.length ? `<details class="book-detail" data-print-open${opened}><summary>端口明细 · ${page.ports.length}</summary>${portTable(page.ports, false)}</details>` : ''}
-            ${backgroundSignals(page, !print)}
             ${section('子模块', instanceTable, instances.length)}
-            ${interfaces.length ? section('接口目录', `<ul class="interface-index">${interfaces.map(link => `<li><a href="#${link.id}">${escape(link.name)} · ${escape(link.type)}</a></li>`).join('')}</ul>`, interfaces.length) : ''}
-            ${section('普通信号', signalTable, signals.length)}
-            ${section('接口详情', interfaces.map(link => `<details class="interface-section book-detail" data-print-open id="${link.id}"${opened}><summary><strong>${escape(link.name)}</strong> <span>${escape(link.type)} · ${link.members.length} 个成员</span></summary>${interfaceDetails(link, nodes, false)}</details>`).join(''), interfaces.length)}
+            ${interfaceSection}
+            ${page.ports.length ? `<details class="book-detail chapter-reference" data-print-open${opened}><summary>模块边界 · ${page.ports.length} 个端口</summary>${figure ? symbol : ''}${portTable(page.ports, false)}</details>` : ''}
+            ${backgroundSignals(page, !print)}
+            ${signals.length ? `<details class="book-detail chapter-reference" data-print-open${opened}><summary>普通信号 · ${signals.length}</summary>${signalTable}</details>` : ''}
+            ${print ? '' : checks}
             ${stubs.length ? `<details class="book-detail book-stubs" data-print-open${opened}><summary>实现桩待实现输出 · ${stubs.length}</summary><ul>${diagnosticItems(stubs)}</ul></details>` : ''}
             <!--chapter-children-->
         </section>`);
@@ -104,8 +116,8 @@ async function renderArchitectureBook(book, modes, { print = false } = {}) {
     ];
     const highlights = book.pages.filter(page => page.checks.some(item => !stubOutput(page, item)));
     const overview = highlights.length || book.diagnostics.length || book.issues.length
-        ? `<section class="book-review" aria-labelledby="review-title"><h2 id="review-title">复核索引</h2>
-            <ul>${diagnosticItems([...book.diagnostics, ...book.issues])}${highlights.map(page => `<li><a href="#${page.id}">${escape(pageName(page))}</a> · ${page.checks.filter(item => !stubOutput(page, item)).length} 条待复核</li>`).join('')}</ul></section>` : '';
+        ? `<details class="book-detail book-review book-review-index" id="review-index" data-print-open${opened}><summary>复核索引</summary>
+            <ul>${diagnosticItems([...book.diagnostics, ...book.issues])}${highlights.map(page => `<li><a href="#${page.id}-checks">${escape(pageName(page))}</a> · ${page.checks.filter(item => !stubOutput(page, item)).length} 条待复核</li>`).join('')}</ul></details>` : '';
     const title = book.pages[0].title || book.top;
     function chapterContent(page) {
         const descendants = (children.get(page.id) || []).map(chapterContent).join('');
@@ -113,22 +125,26 @@ async function renderArchitectureBook(book, modes, { print = false } = {}) {
     }
     function chapterNav(page) {
         const descendants = (children.get(page.id) || []).map(chapterNav).join('');
-        return `<li><a href="#${page.id}"><span class="toc-index">${chapterNumber(page, book.pages.indexOf(page))}</span><span class="toc-title">${escape(chapterTitle(page))}</span><span class="toc-module">${code(pageName(page))}</span></a>${descendants ? `<ol>${descendants}</ol>` : ''}</li>`;
+        const toggle = descendants && !print ? `<button class="toc-toggle" type="button" aria-label="${escape(page.name)} 子章节" aria-expanded="${!page.parent}" aria-controls="toc-${page.id}"></button>` : '';
+        return `<li><div class="toc-row">${toggle}<a href="#${page.id}"><span class="toc-index">${chapterNumber(page, book.pages.indexOf(page))}</span><span class="toc-title">${escape(page.title || pageName(page))}</span>${page.title ? `<span class="toc-module">${code(pageName(page))}</span>` : ''}</a></div>${descendants ? `<ol id="toc-${page.id}">${descendants}</ol>` : ''}</li>`;
     }
     const roots = children.get(null) || [];
     const nav = roots.map(chapterNav).join('');
     return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
         <title>${escape(title)} · 架构设计</title><style>${sharedCss}\n${diagramCss}\n${symbolCss}\n${bookCss}</style></head>
-        <body class="architecture-book"><header class="book-header" id="contents">
+        <body class="architecture-book${print ? '' : ' reading-book'}"><header class="book-header" id="contents">
         <p class="book-eyebrow">架构设计 · Architecture</p>
         <h1>${escape(title)}</h1>
         <p class="book-meta"><span>${code(book.top)}</span><span>结构快照 ${escape(book.revision.slice(0, 12))}</span><span>源级投影</span></p>
-        <ul class="book-summary" aria-label="报告概况">${summary.map(([count, label]) => `<li><strong>${count}</strong><span>${label}</span></li>`).join('')}</ul>
-        <p class="book-note">方向来自伪 SystemVerilog 端口和 modport 声明。功能、时序与握手行为需结合验证结果。</p>${print ? overview : ''}</header>
+        <ul class="book-summary" aria-label="报告概况">${summary.filter(([count]) => print || count).map(([count, label]) => `<li><strong>${count}</strong><span>${label}</span></li>`).join('')}${!print && overview ? '<li><a href="#review-index">复核索引</a></li>' : ''}</ul>
+        ${print ? '<p class="book-note">方向来自伪 SystemVerilog 端口和 modport 声明。功能、时序与握手行为需结合验证结果。</p>' + overview : ''}</header>
         <div class="book-layout"><nav class="book-nav" aria-label="章节目录"><h2>模块章节</h2>
         ${print ? '' : '<label class="book-search">筛选章节<input type="search" id="chapter-filter" placeholder="模块名或职责"></label><p id="no-chapters" hidden role="status">没有匹配的章节</p>'}
         <ol>${nav}</ol></nav>
-        <main class="book-content">${print ? '' : overview}${roots.map(chapterContent).join('')}</main></div>${print ? '' : `${previews.join('')}<script>${hoverScript}</script><script>${script}</script>`}</body></html>`;
+        <main class="book-content">${roots.map(chapterContent).join('')}${print ? '' : overview}</main></div>
+        ${print ? '' : `<aside class="connection-panel" aria-labelledby="connection-panel-title" hidden>
+            <header><h2 id="connection-panel-title" tabindex="-1"></h2><button type="button" data-close-connection aria-label="关闭接口详情">关闭</button></header>
+            <div class="connection-panel-body"></div></aside>${previews.join('')}<script>${hoverScript}</script><script>${script}</script>`}</body></html>`;
 }
 
 async function exportArchitecture(loaded, format, { out, browser, modes } = {}) {

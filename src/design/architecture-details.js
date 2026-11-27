@@ -144,12 +144,17 @@
         return `<p class="subtle flow-evidence">流向依据：${EVIDENCE[link.flowEvidence] || '待确认'} · ${detail}</p>`;
     }
 
-    function interfaceDetails(link, nodes, interactive) {
+    function interfaceDetails(link, nodes, interactive, { chapterLinks = false } = {}) {
         const endpoints = link.endpoints.map(endpoint => endpointName(endpoint, nodes));
         const signals = [link.members.find(member => member.name === 'valid'), link.members.find(member => member.name === 'ready')];
         const summary = link.handshake ? `<div class="handshake">${signals.map((signal, index) =>
             `<div class="${signal.flow}"><strong>${index ? '反向回压' : '正向数据与有效信号'}</strong><span>${routeText(signal, endpoints)}</span><span>${link.members.filter(member => member.flow === signal.flow).map(member => code(member.name)).join(' · ')}</span></div>`).join('')}</div>` : '';
-        const evidence = link.endpoints.map((endpoint, index) => `<tr><th scope="row">${code(endpoints[index])}</th><td>${code(endpoint.type)}</td><td>${endpoint.boundary ? '模块边界' : '子实例'}${endpoint.invalid ? ' · modport 不匹配' : ''}</td><td>${[sourceLink(endpoint.declaration, interactive, '端口声明'), sourceLink(endpoint.modportSource, interactive, 'modport'), sourceLink(endpoint.binding, interactive, '例化连接')].filter(Boolean).join(' · ')}</td></tr>`).join('');
+        const evidence = link.endpoints.map((endpoint, index) => {
+            const chapter = chapterLinks && nodes.get(endpoint.node)?.chapter;
+            const name = code(endpoints[index]);
+            const target = chapter ? `<a href="#${escape(chapter)}">${name}</a>` : name;
+            return `<tr><th scope="row">${target}</th><td>${code(endpoint.type)}</td><td>${endpoint.boundary ? '模块边界' : '子实例'}${endpoint.invalid ? ' · modport 不匹配' : ''}</td><td>${[sourceLink(endpoint.declaration, interactive, '端口声明'), sourceLink(endpoint.modportSource, interactive, 'modport'), sourceLink(endpoint.binding, interactive, '例化连接')].filter(Boolean).join(' · ')}</td></tr>`;
+        }).join('');
         const members = link.members.map(member => `<tr><th scope="row">${member.declaration && interactive ? sourceLink(member.declaration, true, member.name) : code(member.name)}</th><td>${member.width ?? '待确认'}</td>${member.directions.map(value => `<td>${direction(value)}</td>`).join('')}<td class="${member.flow}">${flowNames[member.flow]}${member.proven ? `<br>${routeText(member, endpoints)}` : ''}</td></tr>`).join('');
         return `<p class="connection-type">${code(link.type)} · ${sourceLink(link.definition, interactive, '接口定义')} · ${sourceLink(link.declaration, interactive, '连接声明')}</p>${summary}
             ${evidenceLine(link, endpoints)}

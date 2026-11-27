@@ -20,7 +20,7 @@
 
 Agent 可在单独的伪 SystemVerilog 工作区用 `design export --workspace <目录> --top <模块> --format html|pdf --out <文件>` 生成同样的分层文档。[架构 CLI](../skills/svtools-design/references/cli.md)
 
-导出的 HTML 支持筛选章节、展开接口或端口明细，并可按原始尺寸查看复杂架构图。报告开头的复核索引跳转到涉及的章节，实现桩输出单独计数。PDF 展开接口和端口表，按内容分页并重复跨页表头。
+导出的 HTML 将主图和子模块入口排在章节前面，目录可按分支折叠和筛选。悬浮接口预览成员，点击可在图旁固定详情并高亮关联端口，详情中的实例名可进入子章节。章节下方的「接口」支持按名称或类型筛选。报告开头的复核索引跳到各章诊断，实现桩输出单独计数。PDF 展开接口和端口表，按内容分页并重复跨页表头。
 
 修改渲染代码后先用 `node scripts/preview-architecture.js --workspace <伪SV目录> --top <top> --page <模块> --mode overview|detailed --out <png>` 出图核对，再跑架构相关测试。
 
