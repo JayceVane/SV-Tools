@@ -43,12 +43,6 @@ function headPath(width, height) {
         + width + ',' + radius + ' L' + width + ',' + height + ' Z';
 }
 
-function busGlyph(x, y) {
-    const right = x + 8;
-    return '<path class="pin-bus" d="M' + x + ',' + (y - 3) + 'H' + right + ' M' + x + ',' + (y + 3) + 'H' + right
-        + ' M' + right + ',' + (y - 3) + 'V' + (y + 3) + '"/>';
-}
-
 // 组内连接面板：折叠卡里放不下的组内连接，点脚注后就地展开成成员行 + 同名同色标签。
 // 面板是覆盖层，不参与布局，卡片高度和整图尺寸都不变；PDF/PNG 保持折叠。
 function expandPanel(card, diagram) {
@@ -289,10 +283,13 @@ function renderDiagram(diagram, page, interactive) {
             const west = pin.side === 'WEST';
             const stub = west ? 'x1="0" y1="' + pin.y + '" x2="-6" y2="' + pin.y + '"'
                 : 'x1="' + card.width + '" y1="' + pin.y + '" x2="' + (card.width + 6) + '" y2="' + pin.y + '"';
-            const marker = pin.bus ? busGlyph(west ? -14 : card.width + 6, pin.y)
-                : '<circle class="pin-dot" cx="' + (west ? -6 : card.width + 6) + '" cy="' + pin.y + '" r="3"/>';
+            // 与 group-port / 端口图同一套端头：接口束是贴边实心方块 + 粗总线，信号是实心圆点。
+            const marker = pin.bus
+                ? '<rect class="pin-bus" x="' + round(west ? -3.25 : card.width - 3.25) + '" y="' + round(pin.y - 3.25)
+                    + '" width="6.5" height="6.5" rx="1"/>'
+                : '<circle class="pin-dot" cx="' + round(west ? 0 : card.width) + '" cy="' + round(pin.y) + '" r="2.7"/>';
             return '<g class="schematic-pin"' + preview(portLink(node.id, pin.port.name), node.id, pin.port.name) + '><title>' + escape(pin.port.name + ' · ' + portDescription(pin.port)) + '</title>'
-                + '<line class="pin-stub" ' + stub + '/>' + marker + '<text class="pin-label' + (pin.bus ? ' bus' : '') + '" x="'
+                + '<line class="pin-stub' + (pin.bus ? ' bus' : '') + '" ' + stub + '/>' + marker + '<text class="pin-label' + (pin.bus ? ' bus' : '') + '" x="'
                 + (west ? 12 : card.width - 12) + '" y="' + (pin.y + 4) + '" text-anchor="' + (west ? 'start' : 'end') + '">'
                 + escape(pin.caption) + '</text></g>';
         }).join('');
@@ -328,4 +325,4 @@ function renderDiagram(diagram, page, interactive) {
         + clockRegion + edgeMarkup + cardMarkup + expandMarkup + '</svg>';
 }
 
-module.exports = { orthogonalPath, arrowPath, headPath, busGlyph, renderDiagram };
+module.exports = { orthogonalPath, arrowPath, headPath, renderDiagram };

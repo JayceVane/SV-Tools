@@ -123,7 +123,8 @@ endmodule
     assert.equal(leaf.output.data.evidence.layout.renderer, 'block-design');
     const leafSvg = await fsp.readFile(leaf.output.artifacts[0].path, 'utf8');
     assert.equal((leafSvg.match(/class="card-head"/gu) || []).length, 1, '叶子模块仍应绘出自己的模块框');
-    assert.match(leafSvg, /class="pin-label bus"[^>]*text-anchor="end">≡ m<\/text>/u, 'Master 接口放在模块右侧');
+    assert.match(leafSvg, /class="pin-label bus"[^>]*text-anchor="end">m<\/text>/u, 'Master 接口放在模块右侧，端头用实心方块而不是 ≡ 前缀');
+    assert.match(leafSvg, /class="pin-bus"[^>]*width="6.5"/u, '接口引脚端头是实心方块');
     const markdown = await fsp.readFile(path.join(directory, 'rep', 'architecture.md'), 'utf8');
     // 两端都驱动成员：角色名 master/slave 判定主流向，这条连接应写成 o 而不是 bus。
     const connectionSection = markdown.slice(markdown.indexOf('## 接口连接'));

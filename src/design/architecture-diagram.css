@@ -96,8 +96,9 @@
 
 /* ---------- 引脚 ---------- */
 .pin-stub { stroke: var(--wire); stroke-width: 1.1; }
-.pin-dot { fill: var(--panel); stroke: var(--wire); stroke-width: 1.2; }
-.pin-bus { fill: none; stroke: var(--bus); stroke-width: 1.2; }
+.pin-stub.bus { stroke: var(--bus); stroke-width: 2; }
+.pin-dot { fill: var(--wire); }
+.pin-bus { fill: var(--bus); }
 .pin-label { font-family: var(--font-mono); font-size: 10.5px; fill: var(--ink-2); }
 .pin-label.bus { fill: var(--bus); }
 .pin-split { stroke: var(--line); stroke-width: 1; }

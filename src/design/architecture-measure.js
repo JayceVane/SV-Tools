@@ -6,8 +6,9 @@ const { signalKind } = require('./architecture-details');
 const { terminalCaption, terminalWidth, terminalSymbol } = require('../circuit/symbol-library');
 /* ---------- 卡片度量 ---------- */
 
+// 接口引脚名称不再加 ≡ 前缀：端头已经用实心方块表示接口束（与 group-port / 端口图一致）。
 function pinCaption(port) {
-    return (port.direction === 'interface' ? '≡ ' : '') + port.name;
+    return port.name;
 }
 
 function roleKey(port) {
