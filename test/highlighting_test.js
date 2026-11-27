@@ -4,6 +4,8 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const { test } = require('node:test');
 const grammar = require('../syntaxes/systemverilog.tmLanguage.json');
+const tcl = require('../syntaxes/tcl.tmLanguage.json');
+const xdc = require('../syntaxes/xdc.tmLanguage.json');
 const { inactiveRanges, activateConditionalHighlighting } = require('../src/editor/conditional-highlighting');
 const literals = ["'0", "'1", "'x", "'X", "'z", "'Z"];
 const numericMatches = source => grammar.repository.numbers.patterns.flatMap(rule =>
@@ -88,8 +90,18 @@ test('编辑器自动按当前工程中的头文件更新可见模块的分支�
     assert.deepEqual(await waitForUpdate(3), ['inout [15:0] dq,', 'inout [31:0] dq,']);
 });
 
-// 复用本机编辑器的真实TextMate/Oniguruma；CI无编辑器时仍运行上面的词法合同。
-test('真实TextMate保证常量全宽着色，并保留注释、字符串、强转及赋值模式上下文', {
+test('Tcl 和 XDC 通过独立语言模式加载共用语法与括号配置', () => {
+    const { languages, grammars } = require('../package.json').contributes;
+    for (const language of [tcl, xdc]) {
+        const id = language.scopeName.split('.')[1];
+        assert.deepEqual(languages.find(entry => entry.id === id).extensions, ['.' + id]);
+        assert.equal(grammars.find(entry => entry.language === id).scopeName, language.scopeName);
+    }
+    assert.deepEqual(xdc.patterns, [{ include: tcl.scopeName }]);
+});
+
+// 复用本机编辑器的真实 TextMate/Oniguruma。
+test('真实 TextMate 保留 SystemVerilog 常量上下文并高亮 Tcl 和 XDC', {
     skip: !process.env.SVTOOLS_EDITOR_APP_ROOT
 }, async () => {
     const modules = path.join(process.env.SVTOOLS_EDITOR_APP_ROOT, 'node_modules');
@@ -100,7 +112,7 @@ test('真实TextMate保证常量全宽着色，并保留注释、字符串、强
     const registry = new textmate.Registry({
         onigLib: Promise.resolve({ createOnigScanner: patterns => new oniguruma.OnigScanner(patterns),
             createOnigString: value => new oniguruma.OnigString(value) }),
-        loadGrammar: async scope => scope === grammar.scopeName ? grammar : null
+        loadGrammar: async scope => [grammar, tcl, xdc].find(entry => entry.scopeName === scope)
     });
     try {
         const loaded = await registry.loadGrammar(grammar.scopeName);
@@ -115,5 +127,19 @@ test('真实TextMate保证常量全宽着色，并保留注释、字符串、强
         for (const source of ['// q=\'0;', '/* q=\'1; */', 'string s="\'x";', "int'(value)", "'{default:0}"]) {
             assert.ok(!tokens(source).some(token => token.scopes.includes('constant.numeric.unbased.systemverilog')), source);
         }
+        const constraints = await registry.loadGrammar(xdc.scopeName);
+        const line = 'set_property IOSTANDARD LVCMOS33 [get_ports {led[0]}]; # bus pin';
+        const tokensOf = constraints.tokenizeLine(line).tokens;
+        for (const [word, scope] of [['set_property', 'support.function.vivado.tcl'], ['IOSTANDARD', 'constant.other.constraint-property.tcl'],
+            ['get_ports', 'support.function.vivado.tcl'], ['[0]', 'meta.bus-index.tcl'], ['bus pin', 'comment.line.number-sign.tcl']]) {
+            const start = line.indexOf(word);
+            assert.ok(tokensOf.some(token => token.startIndex <= start && token.endIndex >= start + word.length && token.scopes.includes(scope)), word);
+        }
+        const embedded = tokensOf.filter(token => token.scopes.includes('punctuation.section.embedded.end.tcl'));
+        assert.deepEqual(embedded.map(token => token.startIndex), [line.lastIndexOf(']')]);
+        const script = await registry.loadGrammar(tcl.scopeName);
+        const quoted = script.tokenizeLine('puts "# ${value}"').tokens.flatMap(token => token.scopes);
+        assert.ok(quoted.includes('variable.other.tcl'));
+        assert.ok(!quoted.includes('comment.line.number-sign.tcl'));
     } finally { registry.dispose(); }
 });

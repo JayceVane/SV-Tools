@@ -79,19 +79,20 @@ async function listProjects(workspace) {
     return candidates;
 }
 
-async function resolveContext(input = {}) {
+async function resolveContext(input = {}, { requireVirtualWorkspace = false } = {}) {
     const { options, configPath, configHash } = await readOptions(input), { workspace } = options;
     // 文本类预算由配置驱动（默认沿用64MiB/8MiB）；二进制输入使用独立预算，见 vivado-inputs。
     const budgetBlock = options.budget || {};
     const fileCap = (Number.isSafeInteger(budgetBlock.textFileMiB) ? budgetBlock.textFileMiB : 8) * 1024 * 1024;
     const totalCap = (Number.isSafeInteger(budgetBlock.textMiB) ? budgetBlock.textMiB : 64) * 1024 * 1024;
-    let project;
-    if (options.project) project = { kind: /\.xpr$/i.test(options.project) ? 'vivado' : 'svtools', path: path.resolve(workspace, options.project) };
-    else {
-        const candidates = await listProjects(workspace);
-        if (candidates.length > 1) fail('AMBIGUOUS_PROJECT', '工作区存在多个工程，请显式指定--project', { candidates });
-        project = candidates[0];
+    const candidates = options.project
+        ? [{ kind: /\.xpr$/i.test(options.project) ? 'vivado' : 'svtools', path: path.resolve(workspace, options.project) }]
+        : await listProjects(workspace);
+    if (requireVirtualWorkspace && candidates.some(candidate => candidate.kind === 'vivado')) {
+        fail('INVALID_ARGUMENT', '架构文档需要独立的伪 SystemVerilog 工作区，请用 --workspace 指向架构模型目录。');
     }
+    if (candidates.length > 1) fail('AMBIGUOUS_PROJECT', '工作区存在多个工程，请显式指定--project', { candidates });
+    const project = candidates[0];
     const snapshot = project ? await readProjectSnapshot(project, { workspaceRoot: workspace, withDocument:true }) : null;
     const sets = snapshot?.sets.filter(set => ['DesignSrcs','SimulationSrcs'].includes(set.type)) || [];
     let selected;
@@ -143,6 +144,10 @@ async function resolveContext(input = {}) {
             } finally { await handle.close(); }
         }
     }));
+    // 并发读取的完成顺序不稳定；按文件集顺序重排，避免解析顺序、模型顺序和哈希随 I/O 竞速变化。
+    const orderedContents = new Map(ordered.filter(file => contents.has(file)).map(file => [file, contents.get(file)]));
+    contents.clear();
+    for (const [file, item] of orderedContents) contents.set(file, item);
     // Vivado允许不显式加入工程的字面量include；这些依赖也必须参与身份和隔离输入。
     const known=new Set([...contents.keys()].map(keyOf)), queue=[...contents.keys()];
     for(let cursor=0;cursor<queue.length;cursor++) {

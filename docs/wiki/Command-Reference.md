@@ -29,6 +29,7 @@
 | Vivado: 仿真当前文件 (xsim) | — | `svtools.vivado.simulate` |
 | 仿真… | — | `svtools.simulate.pick` |
 | Vivado：OOC 报告（资源占用 + 逻辑级数） | — | `svtools.vivado.reports` |
+| Vivado：工程概览（运行状态） | — | `svtools.vivado.summary` |
 | 刷新工程树 | — | `svtools.vivado.tree.refresh` |
 | 添加文件到工程 | — | `svtools.vivado.tree.addFile` |
 | 从工程移除文件 | — | `svtools.vivado.tree.removeFile` |

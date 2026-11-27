@@ -19,14 +19,15 @@ function createWaveLinkHost({ send, initialized, closed, onAction, timeoutMs = 1
         } catch (error) { send({type:'link-notice',message:error.message}); }
         return true;
     }
-    async function reveal({ keys, text }) {
-        if (!Array.isArray(keys) || !keys.length || keys.length > 2000 || keys.some(key => typeof key !== 'string' || key.length > 131072)) throw new Error('波形定位行超出预算或身份无效');
+    async function reveal({ keys, text, at }) {
+        if (!Array.isArray(keys) || (!keys.length && at === undefined) || keys.length > 2000 || keys.some(key => typeof key !== 'string' || key.length > 131072)) throw new Error('波形定位行超出预算或身份无效');
+        if (at !== undefined && (!Number.isSafeInteger(at) || at < 0)) throw new Error('波形定位时间无效');
         const ready = await initialized;
         if (!ready || closed()) throw new Error('波形页面尚未就绪或已经关闭');
         if (pending.size >= MAX_REVEALS) throw new Error('波形定位请求过于频繁');
         return new Promise((resolve,reject) => {
             const token = ++sequence, timer = setTimeout(() => {pending.delete(token);reject(new Error('波形页面未确认定位，请重新打开波形'));},timeoutMs);
-            pending.set(token,{resolve,reject,timer}); send({type:'link-reveal',token,keys,text});
+            pending.set(token,{resolve,reject,timer}); send({type:'link-reveal',token,keys,text, ...(at === undefined ? {} : { at })});
         });
     }
     return { receive,reveal,notify,reportState(){if(state)send({type:'circuit-link-state',state});},

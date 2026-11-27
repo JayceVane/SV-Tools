@@ -41,6 +41,21 @@ test('非法行和超预算定位不部分添加；右键追踪冻结单信号�
     assert.ok(h.contextMenu('tb.b').items.find(item=>item.id==='circuit-trace').submenu.every(item=>item.disabled));
 });
 
+test('设计讲解定位实际采样点并添加信号，越界不移动光标', async () => {
+    const h = clientHarness();
+    await h.flush();
+    h.windowListeners.message({ data: { type: 'link-reveal', token: 1, keys: ['tb.a'], at: 20 } });
+    await h.flush();
+    assert.ok(h.state.selected.includes('tb.a'));
+    assert.equal(h.state.cursorA, 20);
+    assert.ok(h.messages.some(message => message.token === 1 && message.ok === true));
+    const selected = [...h.state.selected];
+    h.windowListeners.message({ data: { type: 'link-reveal', token: 2, keys: ['tb.b'], at: 200000 } });
+    assert.equal(h.state.cursorA, 20);
+    assert.deepEqual([...h.state.selected], selected);
+    assert.equal(h.messages.at(-1).ok, false);
+});
+
 test('波形定位使用独立token，忽略伪造确认，关闭会话会拒绝正在等待的页面确认', async () => {
     const sent = [], host = createWaveLinkHost({send:message=>sent.push(message),initialized:Promise.resolve({signals:1}),closed:()=>false});
     const pending = host.reveal({keys:['tb.a']}); await new Promise(resolve=>setImmediate(resolve));

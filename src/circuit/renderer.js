@@ -6,7 +6,6 @@
     'use strict';
     const SVG_NS = 'http://www.w3.org/2000/svg';
     const POLARITY_RADIUS = 4;
-    const PORT_KINDS = new Set(['input', 'output', 'inout']);
     const KINDS = new Set(['input', 'output', 'inout', 'constant', 'register', 'mux', 'arithmetic', 'logic', 'memory', 'instance', 'unknown', 'junction', 'bus']);
     const finite = (value, fallback = 0) => Number.isFinite(value) ? value : fallback;
 
@@ -83,7 +82,7 @@
         if (isBundle) {
             pin.appendChild(element(document, 'path', { d: `M ${boundary} ${y} L ${width / 2} ${y}`, class: `busTap${port.bits.length > 1 ? ' bus' : ''}` }));
         }
-        if (port.label && height >= 70 && width >= 110 && !geometry.isGate && (!isBundle || port.bitPositions)) {
+        if (port.label && height >= 70 && width >= 110 && !geometry.isGate && !geometry.terminal && (!isBundle || port.bitPositions)) {
             const unknownPolarity = ['clock', 'control'].includes(port.role) && ![0, 1].includes(port.polarity);
             const label = isBundle ? port.bits.length === 1 && port.bitPositions.every(positions => positions.length === 1) ? port.label : port.wireLabel || port.label
                 : port.label + (unknownPolarity ? '?' : '');
@@ -97,19 +96,26 @@
     function appendNode(document, layer, node, nodes, ports, traceDirection) {
         const kind = KINDS.has(node.kind) ? node.kind : 'unknown';
         const width = Math.max(2, finite(node.width, 120)), height = Math.max(2, finite(node.height, 56));
-        const bitCount = PORT_KINDS.has(kind) ? node.ports?.[0]?.bits?.length || 0 : 0;
+        const geometry = symbols.geometry(node), terminal = geometry.terminal;
+        const bitCount = terminal ? node.ports?.[0]?.bits?.length || 0 : 0;
         const group = element(document, 'g', { class: `cell kind-${kind}${bitCount > 1 ? ' busPort' : ''}`, transform: `translate(${finite(node.x)} ${finite(node.y)})`, 'data-node-id': node.id, role: 'button', tabindex: '0', 'aria-label': `${node.label || node.id}${node.moduleId ? '，模块实例，可进入' : ''}` });
         if (node.traceNew) group.classList.add('traceNew');
         if (kind === 'bus' && (traceDirection === 'drivers' || traceDirection === 'loads')) group.classList.add(traceDirection === 'drivers' ? 'isDriver' : 'isLoad');
         group.appendChild(element(document, 'title', {}, [node.label || node.id, node.toolName, node.detail, node.description].filter(Boolean).join('\n')));
         group.appendChild(nodeBody(document, node, width, height));
-        const geometry = symbols.geometry(node);
         // 总线无可见盒体，选中/搜索态由主干和分支着色表达，不画矩形外框。
         if (kind !== 'bus') {
-            group.appendChild(outlineElement(document, symbols.bodyShape(node, width, height), 'selectionOutline'));
-            group.appendChild(element(document, 'path', { d: `M 0 8 L 0 0 L 8 0 M ${width - 8} 0 L ${width} 0 L ${width} 8 M 0 ${height - 8} L 0 ${height} L 8 ${height} M ${width - 8} ${height} L ${width} ${height} L ${width} ${height - 8}`, class: 'searchCorners' }));
+            const shape = symbols.bodyShape(node, width, height);
+            group.appendChild(outlineElement(document, shape, 'selectionOutline'));
+            if (terminal) group.appendChild(outlineElement(document, shape, 'searchCorners'));
+            else group.appendChild(element(document, 'path', { d: `M 0 8 L 0 0 L 8 0 M ${width - 8} 0 L ${width} 0 L ${width} 8 M 0 ${height - 8} L 0 ${height} L 8 ${height} M ${width - 8} ${height} L ${width} ${height} L ${width} ${height - 8}`, class: 'searchCorners' }));
         }
-        if (kind === 'bus') {
+        if (terminal) {
+            const { labelX: x, centerY, anchor, labelWidth } = terminal;
+            const label = symbols.terminalCaption(node.label, labelWidth).text;
+            group.appendChild(element(document, 'text', { x, y: centerY + (bitCount > 1 ? -2 : 4), 'text-anchor': anchor, class: 'cellLabel terminalCaption' }, label));
+            if (bitCount > 1) group.appendChild(element(document, 'text', { x, y: centerY + 12, 'text-anchor': anchor, class: 'portWidth terminalCaption' }, `${bitCount} bit`));
+        } else if (kind === 'bus') {
             group.appendChild(element(document, 'text', { x: width / 2, y: -10, 'text-anchor': 'middle', class: 'cellLabel' }, shorten(node.label, width)));
         } else if (geometry.isGate) {
             group.appendChild(element(document, 'text', { x: width / 2, y: height - 3, 'text-anchor': 'middle', class: 'cellLabel' }, shorten(node.label, width + 20)));
@@ -120,8 +126,7 @@
         } else if (width >= 35) {
             const label = kind === 'constant' && node.ports?.[0]?.bits?.length === 1 && /^c:[01xz]$/i.test(node.ports[0].originalBits?.[0] || node.ports[0].bits[0])
                 ? `1'b${(node.ports[0].originalBits?.[0] || node.ports[0].bits[0]).slice(2)}` : node.label;
-            group.appendChild(element(document, 'text', { x: 10, y: height / 2 + (bitCount > 1 ? -3 : 4), class: 'cellLabel' }, shorten(label, width - 20)));
-            if (bitCount > 1) group.appendChild(element(document, 'text', { x: 10, y: height / 2 + 12, class: 'portWidth' }, `${bitCount} bit`));
+            group.appendChild(element(document, 'text', { x: 10, y: height / 2 + 4, class: 'cellLabel' }, shorten(label, width - 20)));
         }
         for (const port of node.ports || []) {
             const portGroup = appendPin(document, group, port, node);

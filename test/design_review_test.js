@@ -148,7 +148,7 @@ test('DDR 接口表端到端保留双向DQ行和其余独立引脚', async t => 
     assert.equal(dq[0].interface.label,'ddr_dq');
     const image=renderArchitectureSvg(arch,result);
     assert.equal(image.evidence.export.boundaryTableCount,1);
-    for (const label of ['Signal','Dir','Bits','io','o','ddr_addr','ddr_dq']) assert.ok(image.svg.includes('>'+label+'</text>'),label);
+    for (const label of ['SIGNAL','DIR','BITS','io','o','ddr_addr','ddr_dq']) assert.ok(image.svg.includes('>'+label+'</text>'),label);
     assert.ok(image.svg.includes('data-boundary-id="boundary:ddr_dq"'));
     assert.ok(image.svg.includes('>ddr_addr[14]</text>'), '单侧名称按实际列宽显示，不因对半分栏而过早截断');
     const second=renderArchitectureSvg(arch,await layoutArchitecture(arch,{detail:'signals'}));

@@ -1,0 +1,326 @@
+/* 架构报告（HTML/PDF）排版。规范：docs/ARCHITECTURE_VISUAL.md 第 5 节。 */
+
+.architecture-book { max-width: 1620px; margin: 0 auto; padding: 30px clamp(16px, 3vw, 40px) 44px; }
+
+/* ---------- 页首 ---------- */
+.book-header { border-top: 2px solid var(--accent); border-bottom: 1px solid var(--line-2); padding: 20px 0 18px; }
+.book-eyebrow {
+    margin: 0 0 7px;
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: .16em;
+    text-transform: uppercase;
+    color: var(--accent);
+}
+.book-header h1 { font-size: 26px; max-width: 64ch; }
+.book-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 16px;
+    margin: 10px 0 0;
+    color: var(--muted);
+    font-family: var(--font-mono);
+    font-size: 11px;
+}
+.book-summary {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0;
+    padding: 0;
+    margin: 18px 0 0;
+    list-style: none;
+    border-top: 1px solid var(--line);
+}
+.book-summary li {
+    padding: 11px 24px 0 0;
+    margin-right: 24px;
+    border-right: 1px solid var(--line);
+}
+.book-summary li:last-child { border-right: 0; margin-right: 0; }
+.book-summary strong { display: block; font-size: 19px; font-weight: 600; letter-spacing: -.01em; }
+.book-summary span { font-size: 11px; color: var(--muted); }
+.book-note { margin: 14px 0 0; font-size: 11.5px; color: var(--muted); }
+
+/* ---------- 版式 ---------- */
+.book-layout {
+    display: grid;
+    grid-template-columns: minmax(190px, 236px) minmax(0, 1fr);
+    gap: 28px;
+    padding-top: 22px;
+    align-items: start;
+}
+.book-nav {
+    position: sticky;
+    top: 16px;
+    max-height: calc(100vh - 32px);
+    overflow: auto;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-2);
+    padding: 14px 12px;
+}
+.book-nav h2 {
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin: 0 4px 4px;
+}
+.book-search {
+    display: grid;
+    gap: 5px;
+    margin: 10px 0 12px;
+    font-size: 10.5px;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    color: var(--muted);
+}
+.book-search input {
+    min-width: 0;
+    width: 100%;
+    color: var(--ink);
+    background: var(--page);
+    padding: 5px 8px;
+    border: 1px solid var(--line-2);
+    border-radius: var(--radius-1);
+    font: 12px var(--font-ui);
+}
+.book-nav ol { margin: 0; padding: 0; list-style: none; }
+.book-nav li { border-top: 1px solid var(--line); }
+.book-nav li:first-child { border-top: 0; }
+.book-nav li[hidden] { display: none; }
+.book-nav a {
+    display: grid;
+    grid-template-columns: 20px minmax(0, 1fr);
+    column-gap: 7px;
+    padding: 7px 6px;
+    border-left: 2px solid transparent;
+    border-radius: 0 var(--radius-1) var(--radius-1) 0;
+    text-decoration: none;
+    color: var(--ink-2);
+    font-size: 12px;
+}
+.book-nav a:hover, .book-nav a[aria-current] { background: var(--sunk); }
+.book-nav a[aria-current] { border-left-color: var(--accent); color: var(--ink); }
+.book-nav .toc-index { grid-row: 1 / span 2; font-family: var(--font-mono); font-size: 10px; color: var(--faint); padding-top: 2px; }
+.book-nav .toc-title { line-height: 1.4; }
+.book-nav .toc-module { grid-column: 2; font-family: var(--font-mono); font-size: 10.5px; color: var(--muted); }
+.book-nav .toc-title + .toc-module:empty { display: none; }
+
+.book-content { min-width: 0; }
+.chapter-heading { font-size: 19px; font-weight: 600; overflow-wrap: anywhere; }
+.book-nav ol ol { margin-left: 10px; border-left: 1px solid var(--line); }
+.book-nav a { grid-template-columns: max-content minmax(0, 1fr); }
+.book-nav .toc-index { min-width: 22px; }
+.chapter-children { padding-top: 12px; }
+.chapter { border-top: 1px solid var(--line-2); padding: 28px 0 34px; scroll-margin-top: 16px; }
+.chapter:first-child { border-top: 0; padding-top: 0; }
+.chapter-lead { break-inside: avoid; }
+.chapter-header { margin-bottom: 16px; }
+.chapter-crumbs {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin: 0 0 6px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--line);
+}
+.chapter-index { font-family: var(--font-mono); font-size: 12px; color: var(--accent); font-weight: 600; letter-spacing: .04em; }
+.chapter-nav { font-size: 11px; color: var(--muted); }
+.chapter-nav a { text-decoration: none; }
+.chapter-nav a:hover { text-decoration: underline; }
+.chapter-header h2 { font-size: 19px; }
+.chapter-title { margin: 3px 0 0; font-size: 13px; color: var(--ink-2); }
+.chapter-meta { margin: 7px 0 0; font-family: var(--font-mono); font-size: 11px; color: var(--muted); }
+.chapter-section { margin-top: 24px; }
+.section-title {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    margin: 0 0 12px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--line);
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    color: var(--muted);
+}
+.section-title .section-count { font-size: 10.5px; letter-spacing: 0; text-transform: none; color: var(--faint); }
+
+/* ---------- 图 ---------- */
+.diagram-figure { margin: 0 0 16px; }
+.diagram-toolbar { display: flex; justify-content: flex-end; gap: 8px; margin-bottom: 8px; }
+.diagram-print {
+    overflow: auto;
+    max-height: 74vh;
+    background: var(--panel);
+    padding: 12px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-2);
+}
+.diagram-caption { margin: 8px 0 0; font-size: 11px; color: var(--faint); }
+.diagram-empty {
+    margin: 0 0 6px;
+    padding: 9px 12px;
+    border-left: 2px solid var(--line-2);
+    border-radius: 0 var(--radius-1) var(--radius-1) 0;
+    color: var(--muted);
+    font-size: 12px;
+    background: var(--sunk);
+}
+
+/* ---------- 复核与附录 ---------- */
+.book-review {
+    margin: 0 0 14px;
+    padding: 9px 12px 9px 12px;
+    background: var(--sunk);
+    border-left: 2px solid var(--warn);
+    border-radius: 0 var(--radius-1) var(--radius-1) 0;
+    font-size: 12px;
+}
+.book-review h2, .book-review h3 {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    color: var(--warn);
+    margin: 0 0 4px;
+}
+.book-review ul { margin: 2px 0 0; padding-inline-start: 18px; }
+.book-review li { margin: 2px 0; }
+.book-detail {
+    margin: 10px 0;
+    padding: 8px 11px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-1);
+    background: var(--panel);
+    scroll-margin-top: 16px;
+}
+.book-detail summary { font-weight: 500; }
+.book-detail:target { border-color: var(--focus); }
+.book-stubs { border-color: var(--line-2); }
+
+/* 阅读页的目录和详情共用章节锚点。连接详情浮于右侧，保留图面滚动位置。 */
+.toc-row { position: relative; }
+.toc-toggle { position: absolute; top: 6px; right: 0; width: 24px; height: 24px; padding: 0; }
+.toc-toggle::before { content: '▸'; }
+.toc-toggle[aria-expanded=true]::before { content: '▾'; }
+.toc-row:has(.toc-toggle) > a { padding-right: 27px; }
+.connection-panel { position: fixed; right: 0; top: 0; bottom: 0; z-index: 20; display: flex;
+    flex-direction: column; width: min(420px, 100%); max-width: 100%; background: var(--panel);
+    border-left: 1px solid var(--line-2); box-shadow: -6px 0 24px #0002; }
+.connection-panel[hidden] { display: none; }
+.connection-panel > header { display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    padding: 12px 16px; border-bottom: 1px solid var(--line); }
+.connection-panel h2 { font: 600 15px var(--font-mono); overflow-wrap: anywhere; }
+.connection-panel-body { min-height: 0; padding: 12px 16px 20px; overflow: auto; overscroll-behavior: contain; }
+.connection-panel-body .interface-body > h3 { margin-top: 16px; }
+.connection-panel-body .table-scroll { max-width: 100%; }
+.connection-panel-body table { width: max-content; min-width: 100%; }
+.connection-panel-body :is(th, td) { white-space: nowrap; }
+.interface-endpoints, .interface-endpoints ul { list-style: none; margin: 6px 0; padding: 0; }
+.interface-endpoints > li { padding: 8px 0; border-top: 1px solid var(--line); }
+.interface-endpoints small { display: block; color: var(--muted); }
+.interface-endpoints ul { display: grid; gap: 2px; }
+.chapter-reference > .interface-section { margin: 5px 0; }
+.book-search:has([data-interface-filter]) { max-width: 280px; }
+.walkthrough { padding: 10px 12px; margin-bottom: 12px; border: 1px solid var(--line); border-radius: var(--radius-2); background: var(--panel); }
+.walkthrough h3, .walkthrough-origin { display: inline-block; margin: 0 8px 8px 0; }
+.walkthrough-origin, .walkthrough-links { font-size: 11px; color: var(--muted); }
+.walkthrough-controls { display: flex; flex-wrap: wrap; gap: 4px 6px; }
+.walkthrough-controls button[aria-pressed=true] { border-color: var(--action); color: var(--action); background: var(--sunk); }
+.walkthrough-detail p, .walkthrough li p { margin: 6px 0 0; }
+.walkthrough-unresolved { color: var(--warn); }
+.diagram-toolbar > a { align-self: center; font-size: 11px; margin-right: 4px; }
+
+@media screen {
+    .reading-book { padding-top: 20px; }
+    .reading-book .book-header { padding: 10px 0 8px; }
+    .reading-book .book-eyebrow { margin-bottom: 3px; }
+    .reading-book .book-meta { margin-top: 4px; }
+    .reading-book .book-summary { margin-top: 8px; gap: 4px 14px; border-top: 0; }
+    .reading-book .book-summary li { display: flex; align-items: baseline; gap: 4px; margin: 0; padding: 0 12px 0 0; }
+    .reading-book .book-summary strong { font-size: 11px; }
+    .reading-book .book-summary a, .review-count { font-size: 11px; }
+    .reading-book .book-layout { padding-top: 14px; }
+    .reading-book .chapter-header-root { margin-bottom: 6px; }
+    .reading-book .chapter-header-root .chapter-crumbs { display: none; }
+    .reading-book .chapter-header-root .chapter-meta { margin-top: 0; }
+    .reading-book .chapter-lead .chapter-section { margin-top: 12px; }
+    .reading-book .book-nav:not(.toc-filtered) li:has(> .toc-row > [aria-expanded=false]) > ol { display: none; }
+    .reading-book .book-nav.toc-filtered .toc-toggle { visibility: hidden; }
+    .reading-book .chapter-reference { margin-top: 8px; }
+    .architecture-svg .diagram-edge[data-book-selected] .edge-line { stroke: var(--focus); stroke-width: 3.2; }
+    .architecture-svg .diagram-edge[data-book-selected] .edge-arrow { fill: var(--focus); }
+    .architecture-svg .diagram-card[data-book-selected] > .card-frame { stroke: var(--focus); stroke-width: 2; }
+    .architecture-svg [data-book-selected] :is(.group-port-label, .pad-name, .pin-label) { fill: var(--focus); font-weight: 700; }
+    .module-pin[data-book-selected] { outline: 2px solid var(--focus); outline-offset: -2px; }
+    .architecture-svg .diagram-edge[data-book-walkthrough]:not([data-book-selected]) .edge-line { stroke: var(--down); stroke-width: 3.2; }
+    .architecture-svg .diagram-edge[data-book-walkthrough]:not([data-book-selected]) .edge-arrow { fill: var(--down); }
+    .architecture-svg .diagram-card[data-book-walkthrough]:not([data-book-selected]) > .card-frame { stroke: var(--down); stroke-width: 2; }
+    .architecture-svg [data-book-walkthrough]:not([data-book-selected]) :is(.group-port-label, .pad-name, .pin-label) { fill: var(--down); font-weight: 700; }
+}
+
+@media screen and (min-width: 1200px) {
+    .diagram-print[data-panel-docked] { margin-right: 390px; height: var(--undocked-height); }
+    .diagram-figure:has([data-panel-docked]) .diagram-toolbar { margin-right: 390px; }
+}
+
+/* ---------- 窄屏 ---------- */
+@media screen and (max-width: 820px) {
+    .book-layout { display: block; }
+    .book-nav { position: static; max-height: 260px; margin-bottom: 18px; }
+    .book-summary li { padding-right: 16px; margin-right: 16px; }
+    .connection-panel { top: auto; max-height: 58vh; border: 1px solid var(--line-2); border-radius: var(--radius-2) var(--radius-2) 0 0; }
+}
+
+/* ---------- 打印（PDF） ---------- */
+@page { size: A4 landscape; margin: 11mm 10mm; }
+@media print {
+    .connection-panel, .toc-toggle, .walkthrough-controls { display: none !important; }
+    .toc-row:has(.toc-toggle) > a { padding-right: 0; }
+    .architecture-book { padding: 0; max-width: none; background: #fff; font-size: 9pt; line-height: 1.35; print-color-adjust: exact; }
+    .book-header { border-top: 1px solid #666; border-bottom: 1px solid #999; padding: 8px 0 6px; }
+    .book-header h1 { font-size: 16pt; }
+    .book-eyebrow, .book-meta, .book-note { font-size: 7.5pt; }
+    .book-summary { margin-top: 8px; }
+    .book-summary li { padding-top: 4px; padding-right: 12px; margin-right: 12px; }
+    .book-summary strong { font-size: 12pt; }
+    .book-summary span { font-size: 7.5pt; }
+    .book-layout { display: block; padding-top: 8px; }
+    .book-nav { position: static; max-height: none; overflow: visible; padding: 6px 8px; margin-bottom: 10px; border-radius: 2px; }
+    .book-nav h2 { font-size: 8pt; }
+    .book-nav > ol { columns: 3; column-gap: 18px; }
+    .book-nav ol ol { columns: auto; margin-left: 6px; }
+    .book-nav li { break-inside: avoid; border-top: 0; }
+    .book-nav li:has(> ol) { break-inside: auto; }
+    .book-nav a { padding: 2px 0; font-size: 7.5pt; grid-template-columns: max-content minmax(0, 1fr); }
+    .book-nav .toc-module { display: none; }
+    .book-search, #no-chapters, .book-diagram-tools { display: none; }
+    .chapter { padding: 10px 0 12px; border-top: 1px solid #ccc; }
+    .chapter-header { margin-bottom: 8px; }
+    .chapter-header .chapter-heading { font-size: 12pt; }
+    .chapter-title { font-size: 8.5pt; }
+    .chapter-meta { font-size: 7pt; }
+    .chapter-crumbs { margin-bottom: 4px; padding-bottom: 0; border-bottom: 0; }
+    .chapter-nav { display: none; }
+    .section-title { font-size: 7.5pt; padding-bottom: 3px; margin-bottom: 6px; }
+    .architecture-book :is(h2, h3, h4, h5, h6, summary, .section-title) { break-after: avoid; }
+    .architecture-book :is(tr, .diagram-print, .diagram-figure, .handshake > div, .book-review li,
+        .named-connections dl > div, .book-detail) { break-inside: avoid; }
+    .architecture-book p { margin-block: 2px 5px; }
+    .diagram-print { max-height: none; overflow: visible; padding: 4px; }
+    .diagram-print .architecture-svg, .diagram-print.book-full-size .architecture-svg { max-height: 118mm; max-width: 100%; }
+    .architecture-book .named-connections dl { columns: 2; }
+    .architecture-book .table-scroll { overflow: visible; }
+    .architecture-book table { font-size: 8pt; margin-block: 2px 6px; }
+    .architecture-book :is(th, td) { padding: 2px 5px; }
+    .architecture-book thead th { white-space: normal; font-size: 7pt; }
+    .architecture-book thead { display: table-header-group; }
+    .book-detail { margin-block: 4px; padding: 4px 7px; }
+    .book-review { font-size: 8pt; }
+}

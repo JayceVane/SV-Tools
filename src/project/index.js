@@ -12,22 +12,32 @@ const LOCAL_ACTIONS = [{ id: 'setTop', label: '设置工程顶层…' }, { id: '
     {id:'moveToSim',label:'移入仿真集'}, {id:'moveToSources',label:'移入设计集'}];
 const VIVADO_ACTIONS = ['setTopSynth', 'setTopSim', 'moveToSim', 'moveToSources', 'removeFile', 'elaborate'];
 const VIVADO_LABELS = ['设置综合顶层…', '设置仿真顶层…', '移入仿真集', '移入设计集', '移出工程', '详细化模块…'];
+const IP_ACTION = { id: 'ipManager', label: 'IP 管理…', command: 'svtools.vivado.assets.ip' };
+const BD_ACTION = { id: 'blockDesign', label: 'Block Design', command: 'svtools.vivado.assets.bd', icon: 'blockDesign' };
+const CATALOG_ACTION = { id: 'ipCatalog', label: 'IP Catalog', command: 'svtools.vivado.assets.catalog', icon: 'catalog' };
+const SUMMARY_ACTION = { id: 'projectSummary', label: '工程概览', command: 'svtools.vivado.summary', icon: 'report', group: 'overview' };
+const ASSET_ACTIONS = [IP_ACTION, BD_ACTION, CATALOG_ACTION, SUMMARY_ACTION];
+const REMOVE_VIVADO_FILE = { id: 'removeFile', label: '移出工程' };
 const RUN_ACTIONS = [
     { id: 'synthesize', label: '综合', icon: 'synthesize', group: 'build' },
     { id: 'implement', label: '布局布线', icon: 'implement', group: 'build' },
     { id: 'bitstream', label: '生成 Bitstream', icon: 'bitstream', group: 'build' },
-    { id: 'stop', label: '停止任务', icon: 'stop', group: 'build' },
-    { id: 'reportSynth', label: '综合报告', icon: 'report', group: 'reports' },
-    { id: 'reportImplUtil', label: '资源报告', icon: 'report', group: 'reports' },
-    { id: 'reportTiming', label: '时序报告', icon: 'report', group: 'reports' }
+    { id: 'stop', label: '停止任务', icon: 'stop', group: 'build' }
 ];
+const TOOL_ACTIONS = [SUMMARY_ACTION, ...RUN_ACTIONS, ...[BD_ACTION, CATALOG_ACTION].map(action => ({ ...action, group: 'assets' }))];
+const ENGLISH_TOOL_LABELS = {
+    projectSummary: 'Project Overview', synthesize: 'Synthesize', implement: 'Implement', bitstream: 'Bitstream',
+    stop: 'Stop'
+};
 /**
  * 单一侧边栏；页面只传节点令牌和允许的动作，文件路径与工程身份由宿主持有。
  * @param {object} context 扩展上下文。
  * @param {{vscode:object,projects:object,vivado:object}} dependencies
  * @returns {object} 刷新、显式追踪及销毁。
  */
-function activateProjectView(context, { vscode, projects, vivado }) {
+function activateProjectView(context, { vscode, projects, vivado, designReview }) {
+    const english = !/^zh\b/i.test(vscode.env?.language || 'zh-CN');
+    const tools = english ? TOOL_ACTIONS.map(action => ({ ...action, label: ENGLISH_TOOL_LABELS[action.id] || action.label })) : TOOL_ACTIONS;
     let view, project, nodes = [], revision = 0, refreshGeneration = 0, disposed = false, message, busy = false, timer, selectionTimer;
     let progress=null, progressLinks=new Map(), progressTimer;
     const nodeIndex = new Map(), projections = new Map(), expandedState = context.workspaceState.get('svtools.project.views', {});
@@ -53,6 +63,17 @@ function activateProjectView(context, { vscode, projects, vivado }) {
             void refresh().catch(report);
         } });
     function actionsFor(node) {
+        if (project?.kind === 'vivado') {
+            if (node.id === 'vivado:ip') return [IP_ACTION];
+            if (node.id === 'vivado:bd') return [BD_ACTION];
+            if (node.kind === 'file' && /\.(xci|xcix)$/iu.test(node.file)) return [IP_ACTION, REMOVE_VIVADO_FILE];
+            if (node.kind === 'file' && /\.bd$/iu.test(node.file)) return [BD_ACTION, REMOVE_VIVADO_FILE];
+            if (node.isConstraint) {
+                const label = english ? 'Set as Target Constraints File' : '设为目标约束文件';
+                return node.isXdc && !node.isConstraintTarget
+                    ? [{ id: 'setConstraintTarget', label }, REMOVE_VIVADO_FILE] : [REMOVE_VIVADO_FILE];
+            }
+        }
         if (!project || !node.file || node.kind === 'set') {
             return [];
         }
@@ -67,7 +88,7 @@ function activateProjectView(context, { vscode, projects, vivado }) {
     function actionList() {
         if (!project) return [];
         return [{ id: 'trace', label: '追踪编辑器所选信号' }, { id: 'traceTrigger', label: traceTrigger() === 'selection' ? '✓ 自动追踪 · 切换为手动触发' : '手动追踪 · 切换为选择即触发' }, {id:'expandAll',label:'全部展开'}, {id:'collapseAll',label:'全部收起'},
-            ...(project?.kind === 'vivado' ? RUN_ACTIONS : [{ id: 'edit', label: '编辑工程配置（顶层、宏、include目录）' }])];
+            ...(project?.kind === 'vivado' ? [...ASSET_ACTIONS, ...RUN_ACTIONS] : [{ id: 'edit', label: '编辑工程配置（顶层、宏、include目录）' }])];
     }
     function send() {
         if (!view || disposed) {
@@ -81,7 +102,7 @@ function activateProjectView(context, { vscode, projects, vivado }) {
         }
         void view.webview.postMessage({ type: 'snapshot', revision, project: projectLabel, nodes, projection, progress,
             tracing: !!currentFlow, traceId: currentFlow?.traceId, traceRoot: currentFlow ? `${currentFlow.contextKind === 'simulation' ? '仿真' : '设计'}追踪根：${currentFlow.top}${currentFlow.rootFallback ? '（所选模块）' : ''}` : '', pinned: currentFlow?.pinned, busy, message,
-            actions: actionList().filter(action => !action.group), toolActions: project?.kind === 'vivado' ? RUN_ACTIONS : [], issues: currentFlow?.issues ||
+            actions: actionList().filter(action => !action.group), toolActions: project?.kind === 'vivado' ? tools : [], issues: currentFlow?.issues ||
                 (projection === 'instances' ? ['源码引用预览；执行信号追踪后显示静态RTL连接中可确定的实例层级'] : []) });
     }
     async function refresh() {
@@ -114,7 +135,8 @@ function activateProjectView(context, { vscode, projects, vivado }) {
             progress=loaded.snapshot;progressLinks=loaded.links;nodes=[];nodeIndex.clear();revision++;send();return;
         }
         progress=null;progressLinks.clear();
-        let next = projectTree(project, { projection, flow: flow.get() });
+        const topFiles = project?.kind === 'vivado' ? vivado.projectTree?.getTopFiles?.(project.path) : undefined;
+        let next = projectTree(project, { projection, flow: flow.get(), topFiles });
         if (project && projection === 'instances' && !flow.get()) {
             const preview = await buildProjectTree(project.parsed || { path: project.path, dir: project.root, sets: project.sets }, { workspaceFiles: [] });
             if (disposed || version !== refreshGeneration) {
@@ -122,7 +144,8 @@ function activateProjectView(context, { vscode, projects, vivado }) {
             }
             function convert(node) {
                 return { id: node.id, label: node.label, kind: node.nodeData?.kind === 'module' ? 'instance' : 'set', file: node.nodeData?.file,
-                    module: node.nodeData?.module, fileset: node.nodeData?.fileset, tooltip: node.tooltip, flags: [], children: (node.children || []).map(convert) };
+                    module: node.nodeData?.module, fileset: node.nodeData?.fileset, isTop: node.nodeData?.isTop,
+                    tooltip: node.tooltip, flags: [], children: (node.children || []).map(convert) };
             }
             next = preview.roots[0].children.filter(node => node.children.some(child => child.id.endsWith('/hierarchy'))).flatMap(node => node.children.filter(child => child.id.endsWith('/hierarchy')).map(convert));
             if (!next.length) {
@@ -260,6 +283,12 @@ function activateProjectView(context, { vscode, projects, vivado }) {
             }
         }
         else {
+            const asset = ASSET_ACTIONS.find(action => action.id === command);
+            if (asset) {
+                await vscode.commands.executeCommand(asset.command, { nodeData: { file: node?.file, fileset: node?.fileset, xpr: target.path } });
+                await refresh();
+                return;
+            }
             const name = ['setTopSynth', 'setTopSim', 'elaborate'].includes(command) ? await moduleOf(node) : node?.module;
             if (['setTopSynth', 'setTopSim', 'elaborate'].includes(command) && !name) {
                 return;
@@ -302,6 +331,9 @@ function activateProjectView(context, { vscode, projects, vivado }) {
         }
         else if(data.action==='openProgress') {
             await openProgressLink(progressLinks,data.linkId,project,vscode);
+        }
+        else if (data.action === 'designReview' && project?.root && progress) {
+            designReview?.open(project.root);
         }
         else if (data.action === 'refresh') {
             if((projections.get(project?.id)||expandedState[project?.id]?.projection)==='progress'){await refresh();return;}

@@ -2,6 +2,8 @@
 'use strict';
 (() => {
     const vscode = acquireVsCodeApi(), saved = vscode.getState() || {}, tree = document.getElementById('tree'), menu = document.getElementById('menu');
+    const english = document.documentElement?.lang === 'en';
+    const fileIcons = { v: 'verilog', vh: 'verilog', sv: 'systemverilog', svh: 'systemverilog', xdc: 'constraint', tcl: 'tcl' };
     let snapshot = { nodes: [], revision: 0 }, state = saved, focusId, menuAnchor;
     const send = (action, extra = {}) => vscode.postMessage({ action, revision: snapshot.revision, ...extra });
     const currentState = () => state[snapshot.project?.id] || (state[snapshot.project?.id] = { expanded: (snapshot.nodes || []).filter(node => !node.collapsedByDefault).map(node => node.id), projection: 'files' });
@@ -16,28 +18,42 @@
     function renderTools(local) {
         const isVivado = snapshot.project?.kind === 'vivado';
         document.getElementById('add').hidden = isVivado;
+        document.getElementById('ipManager').hidden = !isVivado;
         document.getElementById('vivadoTools').hidden = !isVivado;
         document.getElementById('tools').hidden = !isVivado;
         const expanded = local.toolsExpanded !== false;
         document.getElementById('toggleTools').setAttribute('aria-expanded', String(expanded));
         document.getElementById('toolBody').hidden = !expanded;
-        const actions = document.getElementById('toolActions');
-        actions.replaceChildren();
+        const slots = new Map([
+            ['overview', document.getElementById('toolOverview')],
+            ['build', document.getElementById('toolActions')],
+            ['assets', document.getElementById('assetActions')]
+        ]);
+        for (const slot of slots.values()) slot.replaceChildren();
         if (!isVivado) return;
         for (const action of snapshot.toolActions || []) {
-            if (action.group !== 'build') continue;
+            const slot = slots.get(action.group);
+            if (!slot) continue;
             const button = document.createElement('button'), label = document.createElement('span');
             button.type = 'button';
             button.dataset.command = action.id;
             label.textContent = action.label;
             button.append(icon(action.icon), label);
             button.addEventListener('click', () => send('command', { command: action.id }));
-            actions.append(button);
+            slot.append(button);
         }
     }
     function renderProgress() {
         const progress=snapshot.progress,local=currentState();
         local.progressExpanded||=[];
+        if (snapshot.project) {
+            const review = document.createElement('button');
+            review.type = 'button';
+            review.className = 'progress-link';
+            review.textContent = '打开设计讲解';
+            review.addEventListener('click', () => send('designReview'));
+            tree.append(review);
+        }
         const note=document.createElement('div');note.className='progress-note';
         if(!progress?.available){note.textContent=progress?.message||'正在读取设计进展…';tree.append(note);return;}
         const summary=progress.summary;
@@ -93,7 +109,7 @@
             local.traceId = snapshot.traceId;
             remember();
         }
-        text('projectName', project?.name || '选择或创建工程');
+        text('projectName', project?.name || (english ? 'Select or create a project' : '选择或创建工程'));
         text('projectLocation', project?.location);
         document.getElementById('projectLocation').hidden = !project?.location;
         document.getElementById('choose').title = project?.path || '';
@@ -141,7 +157,10 @@
                 padding.style.width = Math.min(depth, 32) * 14 + 'px';
                 const symbol = document.createElement('span');
                 symbol.className = 'symbol';
-                const iconName = node.icon || (node.kind === 'set' ? 'fileset' : node.kind === 'folder' ? (expanded ? 'folderOpen' : 'folder') : node.kind === 'instance' ? 'instance' : /\.xdc$/i.test(node.file || '') ? 'constraint' : 'file');
+                const extension = node.file?.match(/\.([A-Za-z]+)$/)?.[1].toLowerCase();
+                const iconName = node.icon || (node.kind === 'set' ? 'fileset' : node.kind === 'folder' ? (expanded ? 'folderOpen' : 'folder')
+                    : node.kind === 'instance' ? 'instance' : Object.hasOwn(fileIcons, extension) ? fileIcons[extension] : 'file');
+                symbol.dataset.icon = iconName;
                 symbol.append(icon(iconName));
                 const label = document.createElement('span');
                 label.className = 'label';
@@ -158,6 +177,16 @@
                 }
                 row.title = [node.file, node.tooltip].filter(Boolean).join('\n');
                 row.append(padding, chevron, symbol, label, flags);
+                if (node.isTop || node.isConstraintTarget) {
+                    const isTop = node.isTop;
+                    const status = document.createElement('span');
+                    row.dataset.mark = isTop ? 'top' : 'target';
+                    status.className = 'file-mark';
+                    status.textContent = isTop ? 'Top' : english ? 'Target' : '目标';
+                    status.title = isTop ? (english ? 'Top module' : '顶层模块') : (english ? 'Target constraints file' : '目标约束文件');
+                    row.title = [row.title, status.title].filter(Boolean).join('\n');
+                    row.append(status);
+                }
                 if (node.children.length) {
                     row.setAttribute('aria-expanded', String(expanded));
                 }
@@ -175,7 +204,7 @@
                 });
                 row.addEventListener('contextmenu', event => {
                     event.preventDefault();
-                    showMenu(node, undefined, row);
+                    showMenu(node, row);
                 });
                 row.addEventListener('keydown', event => {
                     if (event.key === 'ArrowRight' && node.children.length && !expanded) {
@@ -216,15 +245,16 @@
         if (anchor?.getAttribute('aria-haspopup') === 'menu') anchor.setAttribute('aria-expanded', 'false');
         if (restoreFocus) anchor?.focus?.();
     }
-    function toggleMenu(commandList, anchor = document.getElementById('actions')) {
+    function toggleMenu() {
+        const anchor = document.getElementById('actions');
         if (!menu.hidden && menuAnchor === anchor) closeMenu(true);
-        else showMenu(undefined, commandList, anchor);
+        else showMenu();
     }
-    function showMenu(node, commandList, anchor = document.getElementById('actions')) {
+    function showMenu(node, anchor = document.getElementById('actions')) {
         closeMenu();
         menuAnchor = anchor;
         menu.replaceChildren();
-        const commands = commandList || (node ? node.actions : [...(snapshot.actions || []), ...(snapshot.issues?.length ? [{ id: 'diagnostics', label: currentState().diagnostics ? '收起分析提示' : '查看分析提示' }] : [])]);
+        const commands = node ? node.actions : [...(snapshot.actions || []), ...(snapshot.issues?.length ? [{ id: 'diagnostics', label: currentState().diagnostics ? '收起分析提示' : '查看分析提示' }] : [])];
         for (const action of commands || []) {
             const button = document.createElement('button');
             button.type = 'button';
@@ -258,6 +288,7 @@
         document.getElementById(id).addEventListener('click', () => send(id));
     document.getElementById('actions').addEventListener('click', () => toggleMenu());
     document.getElementById('addVivado').addEventListener('click', () => send('add'));
+    document.getElementById('ipManager').addEventListener('click', () => send('command', { command: 'ipManager' }));
     document.getElementById('toggleTools').addEventListener('click', () => {
         currentState().toolsExpanded = currentState().toolsExpanded === false;
         remember();
@@ -268,7 +299,6 @@
         remember();
         render();
     });
-    document.getElementById('toolReports').addEventListener('click', () => toggleMenu((snapshot.toolActions || []).filter(action => action.group === 'reports'), document.getElementById('toolReports')));
     for (const projection of ['files', 'instances', 'progress'])
         document.getElementById(projection)?.addEventListener('click', () => {
             currentState().projection = projection;

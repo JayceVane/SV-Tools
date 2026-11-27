@@ -17,6 +17,7 @@ const { summarizeToolResult, processSucceeded } = require('../toolchains/result'
 const { acquireWorkspaceLease } = require('../toolchains/workspace-lease');
 const { buildArchitecture } = require('../design/arch');
 const { layoutArchitecture, renderArchitectureSvg, defaultFileName, normalizeStyle } = require('../design/svg');
+const { blockDesignImage } = require('../design/architecture-image');
 const { validateSpec, generateScaffold } = require('../design/scaffold');
 const { createContainedDirectories, cleanupDirectories } = require('../design/scaffold-paths');
 const { diffArchitectures } = require('../design/diff');
@@ -24,7 +25,9 @@ const { rasterizeSvg, DEFAULT_SCALE } = require('../graphics/rasterize');
 const { generateReportMarkdown } = require('../design/report');
 const wave = require('./wave');
 
-const capabilities = ['doctor','project.list','project.inspect','project.create','project.add','project.set-top','format.preview','format.check','format.write','lint','vivado.status','vivado.report','vivado.run','task.start','task.list','task.status','task.logs','task.cancel','design.plan-report','design.plan','design.tasks','design.claim','design.submit','design.return','design.review','design.evidence','design.arch','design.scaffold','design.render','design.check','design.diff','design.report','wave.signals','wave.values','wave.changes','wave.edges','wave.glitches','wave.stats','wave.timeline','wave.sample','wave.diff','wave.export'];
+const capabilities = ['doctor','project.list','project.inspect','project.create','project.add','project.set-top','format.preview','format.check','format.write','lint','vivado.status','vivado.report','vivado.run','task.start','task.list','task.status','task.logs','task.cancel','design.plan-report','design.plan','design.tasks','design.claim','design.submit','design.return','design.review','design.evidence','design.arch','design.scaffold','design.render','design.check','design.diff','design.report','wave.signals','wave.values','wave.changes','wave.edges','wave.glitches','wave.stats','wave.timeline','wave.sample','wave.diff','wave.export',
+    'design.export','note.add','note.list','note.get','note.update','note.reanchor','note.search','note.check','note.export','struct.parse','design.lower',
+    ...require('./vivado-assets').capabilities];
 async function locateIverilog(options) {
     const executable = process.platform === 'win32' ? 'iverilog.exe' : 'iverilog';
     const configured = options.iverilog ? path.resolve(options.workspace,options.iverilog) : null;
@@ -116,13 +119,13 @@ function scrubMissingIncludes(findings, snapshot) {
     }
 }
 /** 用内置Yosys链接空模块并投影顶层架构；可选落盘供后续比较。 */
-async function arch(input) {
+async function arch(input, { native } = {}) {
     if (!input.top) fail('INVALID_ARGUMENT','design arch需要--top');
     const resolved = await resolveContext(input);
     const { options, context, contents } = resolved;
     const files = [...contents].map(([file, value]) => ({ path: file, text: value.text }));
     const data = await buildArchitecture({ workspace: options.workspace, files, top: input.top, includeDirs: context.includeDirs,
-        defines: context.defines, depth: input.depth ?? 1, timeoutMs: options.timeoutMs, contextRevision: context.revision });
+        defines: context.defines, depth: input.depth ?? 1, timeoutMs: options.timeoutMs, contextRevision: context.revision, engine: input.engine, native });
     await assertCurrent(resolved);
     let snapshot;
     if (input.save !== undefined) {
@@ -134,13 +137,13 @@ async function arch(input) {
     return result('design.arch',{ ...data, ...(snapshot ? { snapshot } : {}) },context);
 }
 /** 结构检查：把架构数据中的 checks 提升为诊断；有 error 级问题时命令结论为 failed（退出码 1）。 */
-async function check(input) {
+async function check(input, { native } = {}) {
     if (!input.top) fail('INVALID_ARGUMENT','design check需要--top');
     const resolved = await resolveContext(input);
     const { options, context, contents } = resolved;
     const files = [...contents].map(([file, value]) => ({ path: file, text: value.text }));
     const data = await buildArchitecture({ workspace: options.workspace, files, top: input.top, includeDirs: context.includeDirs,
-        defines: context.defines, depth: input.depth ?? 1, timeoutMs: options.timeoutMs, contextRevision: context.revision });
+        defines: context.defines, depth: input.depth ?? 1, timeoutMs: options.timeoutMs, contextRevision: context.revision, engine: input.engine, native });
     await assertCurrent(resolved);
     const errors = data.checks.filter(item => item.severity === 'error');
     const warnings = data.checks.filter(item => item.severity === 'warning');
@@ -184,7 +187,7 @@ async function readBaseline(workspace, value) {
     return { data: baseline, path: file, name: byName === file ? trimmed : null };
 }
 /** 比较基线快照与当前架构的结构差异（实例/模块/顶层端口/接口/源文件）。 */
-async function diff(input) {
+async function diff(input, { native } = {}) {
     if (!input.top) fail('INVALID_ARGUMENT','design diff需要--top');
     const baseline = await readBaseline((await readOptions(input)).options.workspace, input.baseline);
     const resolved = await resolveContext(input);
@@ -194,7 +197,7 @@ async function diff(input) {
     }
     const files = [...contents].map(([file, value]) => ({ path: file, text: value.text }));
     const current = await buildArchitecture({ workspace: options.workspace, files, top: input.top, includeDirs: context.includeDirs,
-        defines: context.defines, depth: input.depth ?? 1, timeoutMs: options.timeoutMs, contextRevision: context.revision });
+        defines: context.defines, depth: input.depth ?? 1, timeoutMs: options.timeoutMs, contextRevision: context.revision, engine: input.engine ?? baseline.data.engine, native });
     await assertCurrent(resolved);
     const differences = diffArchitectures(baseline.data, current);
     const changed = Object.values(differences.summary).some(count => count > 0);
@@ -307,7 +310,7 @@ async function scaffold(input) {
     }, null, [], [{ kind: 'source', path: file }]);
 }
 /** 渲染 SVG/PNG 架构图；PNG 用内置 resvg 无宿主栅格化同一份 SVG。 */
-async function render(input) {
+async function render(input, { native } = {}) {
     if (!input.top) fail('INVALID_ARGUMENT','design render需要--top');
     const format = input.imageFormat || 'svg';
     if (!['svg', 'png'].includes(format)) fail('INVALID_ARGUMENT','不支持的--format：' + format + '（可选 svg|png）');
@@ -325,9 +328,11 @@ async function render(input) {
     const { options, context, contents } = resolved;
     const files = [...contents].map(([file, value]) => ({ path: file, text: value.text }));
     const arch = await buildArchitecture({ workspace: options.workspace, files, top: input.top, includeDirs: context.includeDirs,
-        defines: context.defines, depth: input.depth ?? 1, timeoutMs: options.timeoutMs, contextRevision: context.revision });
+        defines: context.defines, depth: input.depth ?? 1, timeoutMs: options.timeoutMs, contextRevision: context.revision, engine: input.engine, native });
     const layoutResult = await layoutArchitecture(arch, { bundle, bundleNames, detail, boundaryLayout });
-    const image = renderArchitectureSvg(arch, layoutResult, { title: typeof input.title === 'string' ? input.title : undefined, style });
+    const image = await blockDesignImage(resolved, arch,
+        renderArchitectureSvg(arch, layoutResult, { title: typeof input.title === 'string' ? input.title : undefined, style }),
+        { style, detail, bundle });
     await assertCurrent(resolved);
     const outputDirectory = input.out ? path.resolve(options.workspace, input.out) : await directory(options.workspace,'design','render');
     // 与 design scaffold 同一安全模型：拒绝越界 --out 与 symlink/junction 逃逸，失败清理本轮创建的目录。
@@ -384,10 +389,10 @@ async function report(input) {
     const { options, context, contents } = resolved;
     const files = [...contents].map(([file, value]) => ({ path: file, text: value.text }));
     const arch = await buildArchitecture({ workspace: options.workspace, files, top: input.top, includeDirs: context.includeDirs,
-        defines: context.defines, depth: input.depth ?? 1, timeoutMs: options.timeoutMs, contextRevision: context.revision });
+        defines: context.defines, depth: input.depth ?? 1, timeoutMs: options.timeoutMs, contextRevision: context.revision, engine: input.engine });
     const layoutResult = await layoutArchitecture(arch, { bundle, bundleNames, detail, boundaryLayout });
     const title = typeof input.title === 'string' ? input.title : (input.top + ' 架构报告');
-    const image = renderArchitectureSvg(arch, layoutResult, { title, style });
+    const image = await blockDesignImage(resolved, arch, renderArchitectureSvg(arch, layoutResult, { title, style }), { style, detail, bundle });
     await assertCurrent(resolved);
     const rasterized = rasterizeSvg(image.svg, { scale: DEFAULT_SCALE });
     const outputDirectory = input.out ? path.resolve(options.workspace, input.out) : await directory(options.workspace,'design','report');
@@ -446,6 +451,8 @@ async function report(input) {
     return response;
 }
 async function lint(input, {signal,onContext,onArtifacts} = {}) {
+    if (input.engine === 'xvlog') return require('./xvlog').lint(input, { signal, onContext, onArtifacts });
+    if (input.engine && input.engine !== 'iverilog') fail('INVALID_ARGUMENT', '--engine 必须为 iverilog 或 xvlog');
     const resolved = await resolveContext(input), {context,options} = resolved;
     if (input.expectedRevision && input.expectedRevision!==context.revision) fail('CONTEXT_CHANGED','任务启动前工程或源码已经变化',{},4);
     const target=selectTarget(resolved), tool=await locateIverilog(options);

@@ -1,0 +1,132 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Tcl",
+  "scopeName": "source.tcl",
+  "patterns": [
+    {
+      "include": "#syntax"
+    }
+  ],
+  "repository": {
+    "syntax": {
+      "patterns": [
+        {
+          "include": "#comments"
+        },
+        {
+          "include": "#strings"
+        },
+        {
+          "name": "meta.bus-index.tcl",
+          "match": "(?<=[A-Za-z0-9_])\\[(?:[0-9]+(?::[0-9]+)?|\\*)\\]"
+        },
+        {
+          "include": "#substitution"
+        },
+        {
+          "include": "#variables"
+        },
+        {
+          "include": "#escapes"
+        },
+        {
+          "include": "#vivado"
+        },
+        {
+          "name": "keyword.control.tcl",
+          "match": "\\b(?:if|elseif|else|switch|for|foreach|while|break|continue|return|try|throw|trap|finally|proc|namespace)\\b"
+        },
+        {
+          "name": "support.function.builtin.tcl",
+          "match": "\\b(?:after|append|array|binary|catch|cd|clock|close|concat|dict|encoding|eof|error|eval|exec|exit|expr|file|flush|format|gets|glob|global|incr|info|join|lappend|lassign|lindex|linsert|list|llength|lmap|lrange|lreplace|lsearch|lsort|open|package|pwd|puts|read|regexp|regsub|rename|scan|seek|set|source|split|string|subst|tell|trace|unset|update|uplevel|upvar|variable)\\b"
+        },
+        {
+          "name": "variable.parameter.option.tcl",
+          "match": "(?<!\\S)-[A-Za-z][A-Za-z0-9_]*(?=\\s|[\\]}]|$)"
+        },
+        {
+          "name": "constant.numeric.tcl",
+          "match": "(?<![\\w.])(?:0[xX][0-9A-Fa-f]+|0[bB][01]+|0[oO][0-7]+|(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)(?:[eE][+-]?[0-9]+)?)(?![\\w.])"
+        },
+        {
+          "name": "constant.language.boolean.tcl",
+          "match": "\\b(?:true|false|yes|no|on|off)\\b"
+        },
+        {
+          "name": "punctuation.section.group.tcl",
+          "match": "[{}]"
+        },
+        {
+          "name": "punctuation.terminator.command.tcl",
+          "match": ";"
+        }
+      ]
+    },
+    "comments": {
+      "name": "comment.line.number-sign.tcl",
+      "begin": "(?:^[ \\t]*|(?<=;)[ \\t]*)#",
+      "beginCaptures": {
+        "0": {
+          "name": "punctuation.definition.comment.tcl"
+        }
+      },
+      "end": "$"
+    },
+    "strings": {
+      "name": "string.quoted.double.tcl",
+      "begin": "\"",
+      "end": "\"",
+      "patterns": [
+        {
+          "include": "#escapes"
+        },
+        {
+          "include": "#variables"
+        },
+        {
+          "include": "#substitution"
+        }
+      ]
+    },
+    "substitution": {
+      "name": "meta.substitution.command.tcl",
+      "begin": "\\[(?=[ \\t]*[A-Za-z_:\\[\\$]|[ \\t]*$)",
+      "end": "\\]",
+      "beginCaptures": {
+        "0": {
+          "name": "punctuation.section.embedded.begin.tcl"
+        }
+      },
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.section.embedded.end.tcl"
+        }
+      },
+      "patterns": [
+        {
+          "include": "#syntax"
+        }
+      ]
+    },
+    "variables": {
+      "name": "variable.other.tcl",
+      "match": "\\$(?:\\{[^}\\r\\n]+\\}|(?:::)?[A-Za-z0-9_]+(?:::[A-Za-z0-9_]+)*(?:\\([^()\\r\\n]*\\))?)"
+    },
+    "escapes": {
+      "name": "constant.character.escape.tcl",
+      "match": "\\\\(?:.|$)"
+    },
+    "vivado": {
+      "patterns": [
+        {
+          "name": "support.function.vivado.tcl",
+          "match": "\\b(?:create_clock|create_generated_clock|set_clock_groups|set_clock_latency|set_clock_uncertainty|set_input_delay|set_output_delay|set_false_path|set_multicycle_path|set_max_delay|set_min_delay|set_case_analysis|set_disable_timing|set_bus_skew|set_property|get_property|reset_property|get_ports|get_cells|get_nets|get_pins|get_clocks|get_files|get_filesets|get_runs|get_bd_cells|get_bd_pins|get_bd_ports|get_ips|current_design|current_project|current_fileset|create_project|open_project|close_project|add_files|remove_files|read_verilog|read_xdc|synth_design|opt_design|place_design|route_design|launch_runs|wait_on_run|open_run|update_compile_order|write_bitstream|report_timing_summary|report_utilization|report_power)\\b"
+        },
+        {
+          "name": "constant.other.constraint-property.tcl",
+          "match": "\\b(?:PACKAGE_PIN|IOSTANDARD|DRIVE|SLEW|PULLUP|PULLDOWN|DIFF_TERM|CLOCK_DEDICATED_ROUTE|ASYNC_REG|DONT_TOUCH|KEEP|MARK_DEBUG|LOC|BEL|IS_ENABLED|SCOPED_TO_REF|SCOPED_TO_CELLS|PROCESSING_ORDER|TARGET_CONSTRS_FILE)\\b"
+        }
+      ]
+    }
+  }
+}

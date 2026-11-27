@@ -4,7 +4,7 @@
 })(typeof globalThis==='object'?globalThis:this,function(D){
     'use strict';
     /** @param {object} deps 页面现有行、选择和查询入口。 @returns {object} 关联显示不改变时间范围和原始事件。 */
-    function createWaveCircuitLink({state,post,addSignals,select,tracks,status,document}){
+    function createWaveCircuitLink({state,post,addSignals,select,tracks,status,document,navigate}){
         let subscribed=false,cursorKey;
         function reportCursors(){
             if(!subscribed||!state.metadata)return;
@@ -19,7 +19,10 @@
             if(message.type==='link-notice'){status(message.message);return true;}
             if(message.type!=='link-reveal')return false;
             try{
-                if(!state.metadata||!Array.isArray(message.keys)||!message.keys.length||message.keys.length>D.MAX_TRACKS)throw new Error('波形尚未加载或定位行超过预算');
+                const timed = message.at !== undefined;
+                if(!state.metadata||!Array.isArray(message.keys)||(!message.keys.length&&!timed)||message.keys.length>D.MAX_TRACKS)throw new Error('波形尚未加载或定位行超过预算');
+                if(timed&&(!Number.isSafeInteger(message.at)||message.at<0||message.at>state.metadata.endTime||!navigate))
+                    throw new Error('讲解采样点超出波形范围');
                 const keys=[...new Set(message.keys)], staged=new Map();
                 for(const key of keys){
                     if(typeof key!=='string'||key.length>131072)throw new Error('定位行身份无效');
@@ -32,9 +35,13 @@
                 if(new Set([...state.selected,...keys]).size>D.MAX_TRACKS||new Set([...state.bitKeys,...keys.filter(key=>Number.isInteger(staged.get(key).bitOffset))]).size>D.MAX_TRACKS)throw new Error('定位将超过2000条波形或隐藏位预算，请先移除部分信号');
                 for(const key of keys){const signal=staged.get(key);state.signals.set(key,signal);if(Number.isInteger(signal.bitOffset)){state.bitKeys.add(key);if(!state.groups[key]&&state.groups[signal.parentKey])state.groups[key]=state.groups[signal.parentKey];}}
                 const groups=new Set(keys.map(key=>state.groups[key]).filter(Boolean));state.collapsedGroups=state.collapsedGroups.filter(name=>!groups.has(name));
-                addSignals(keys);select({keys,anchor:keys[0],activeKey:keys[0]});
-                const row=state.rows.find(row=>row.key===keys[0]);if(row)tracks.scrollTop=row.y;
-                status('已从电路定位 '+keys.length+' 条波形；时间视窗保持不变');post({type:'link-revealed',token:message.token,ok:true});
+                if(keys.length){
+                    addSignals(keys);select({keys,anchor:keys[0],activeKey:keys[0]});
+                    const row=state.rows.find(row=>row.key===keys[0]);if(row)tracks.scrollTop=row.y;
+                }
+                if(timed)navigate(message.at);
+                status(timed ? '已定位到设计讲解采样点' : '已从电路定位 '+keys.length+' 条波形；时间视窗保持不变');
+                post({type:'link-revealed',token:message.token,ok:true});
             }catch(error){status(error.message);post({type:'link-revealed',token:message.token,ok:false,error:error.message});}
             return true;
         }

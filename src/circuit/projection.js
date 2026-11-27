@@ -102,7 +102,7 @@ function projectModule(design, moduleId, { boundaryLayout = 'auto' } = {}) {
     for (const port of module.ports) {
         const terminal = graphPort(port, inverse(port.direction));
         addNode({ id: `node:${port.id}`, label: port.name, kind: port.direction === 'unknown' ? 'unknown' : port.direction,
-            detail: `${port.direction} · ${port.bits.length} bit${port.bits.length === 1 ? '' : 's'}`, source: port.source,
+            detail: `${port.direction} · ${port.bits.length} bit${port.bits.length === 1 ? '' : 's'}`, source: port.source, terminal: true,
             ...(boundaryLayout === 'ends' ? { boundary: true } : {}),
             x: 0, y: 0, ...nodeSize(port.name, [terminal], true), ports: [terminal] });
         connect(terminal);

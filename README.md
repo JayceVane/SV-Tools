@@ -44,7 +44,7 @@
 
 **4.2 新增 Agent CLI、架构报告与设计进展。** 在终端可检查工程、运行工具、查询 VCD/FST 和导出报告。Agent 通过五个 Skill 使用同一套命令。在 IDE 的「SV Tools 工程 → 设计进展」可查看模块交接和证据。
 
-[Agent 安装与使用](docs/wiki/Agent-CLI.md) · [架构和验证交接](docs/wiki/Design-Delivery.md) · [CLI 合同](skills/svtools-agent/references/cli.md)
+[Agent 安装与使用](docs/wiki/Agent-CLI.md) · [架构和验证交接](docs/wiki/Design-Delivery.md) · [CLI 命令索引](skills/svtools-agent/references/cli.md)
 
 **格式化**（手动 / 选中区域，`docs/FORMAT_SPEC.md` 为唯一行为规范）
 
@@ -171,6 +171,28 @@ npm run package -- --target win32-x64 # 生成 Windows x64 VSIX
 ```
 
 相对路径以当前源码所属的工作区文件夹为准；也支持绝对路径。源码在工作区外时，相对路径以源码目录为准。优先顺序为**外部文件 → 内联模板 → 内置模板**；每次插入都会重新读取文件，文件不存在、为空或不是 UTF-8 时明确报错并保持源码不变。模板支持 `{FILE}`、`{DATE}`、`{TIME}`、`{YEAR}`，兼容 `{RDATE}`、`{RTIME}`；保留内部空行并补齐末尾换行。两项设置均可按工作区文件夹配置。
+
+### 在源码中查看设计笔记
+
+用独占一行的折叠标记给一段 Verilog 或 SystemVerilog 命名。
+
+~~~systemverilog
+//< 读口选择随 RAM 延迟打一拍
+always_ff @(posedge clk) begin
+    if (en) read_bank <= bank;
+end
+//>
+~~~
+
+也可以在声明或语句上方写 `//: 标题`，或悬停在已有的 `/** ... */` 上预览文档注释。
+
+在标题行悬停，点击「打开或创建笔记」，也可以用右键菜单中的「打开或创建设计笔记」。扩展把 Markdown 保存在工作区的 `docs/design-notes/` 中，并在标记末尾写入形如 `[note:nt_7a9c3f2d10]` 的短 ID。已有的 UUID 笔记也可以直接打开。保存源码和笔记后，标题可以独立改名。把同一 ID 附在同一工作区内的 RTL、断言或测试标记上，就可以从多处阅读同一份说明。
+
+区域标记使用 VS Code 的缩进折叠。如果另一个语言扩展接管了折叠，可在工作区设置中将 `editor.foldingStrategy` 设为 `indentation`。
+
+运行「SV Tools: 文档历史」，也可在笔记或 RTL 标题行用右键菜单打开。面板支持按模块筛选和按笔记标题、源码路径、ID 搜索。选中版本后，可与当前稿或任意另一版打开 VS Code Diff。
+
+在 VS Code 里新建或保存笔记会记录内容版本。让 Agent 从编辑器外批量改写前，可先在面板点「保存检查点」为当前内容命名。恢复旧版前会保存当前稿，再把旧内容载入编辑器供核对。历史保存在工程的 `.svtools/agent/note-history/`。
 
 ### CLI
 

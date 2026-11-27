@@ -41,11 +41,11 @@ function activateWaveViewer(context, deps) {
             dispose(){fileWatch?.close();fileWatch=null;registration?.dispose();return base.dispose();}};
         return registry.attach(key, panel, binding, sourceFile);
     }
-    async function openWaveform(filePath, { sourceFile } = {}) {
+    async function openWaveform(filePath, { sourceFile, viewColumn = vscode.ViewColumn.Beside } = {}) {
         const key = path.resolve(filePath), existing = registry.get(key);
         if (existing) { existing.panel.reveal(); await existing.binding.loaded; return existing.binding; }
         const panel = vscode.window.createWebviewPanel('svtoolsWaveViewer', `波形 · ${path.basename(key)}`,
-            vscode.ViewColumn.Beside, { enableScripts: true, retainContextWhenHidden: true });
+            viewColumn, { enableScripts: true, retainContextWhenHidden: true });
         const binding = attach(key, panel, sourceFile); await binding.loaded; return binding;
     }
     async function prepareForSimulation(options) {

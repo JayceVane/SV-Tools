@@ -9,7 +9,7 @@
 
 ## 证据与结论
 
-`skills/svtools-agent/references/cli.md` 对 `wave diff` 的合同写得很明确：
+[波形 CLI 参考](../../skills/svtools-waveform/references/cli.md)规定了 `wave diff` 的匹配规则。
 
 > 两份 VCD 同名信号（**键为路径+向量 range**）双指针对齐比较
 

@@ -5,7 +5,7 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const { createReadStream } = require('node:fs');
 const { createHash } = require('node:crypto');
-const { nativeApi, call } = require('../waveform/rust-backend');
+const { nativeApi, call, codeOf } = require('../waveform/rust-backend');
 const model = require('../waveform/model');
 const rowLayout = require('../waveform/row-layout');
 const { readSignalRoles } = require('../waveform/source-roles');
@@ -93,14 +93,16 @@ async function openTrace(input) {
     const startedAt = Date.now();
     let meta, handle = null;
     try {
-        const opened = call(() => nativeApi().waveSessionOpen(file));
+        const opened = input.asyncOpen ? JSON.parse(await nativeApi().waveSessionOpenAsync(file))
+            : call(() => nativeApi().waveSessionOpen(file));
         handle = opened.handle;
         meta = opened.meta;
     } catch (error) {
         // Rust 的错误码与 CLI 码同名，直接透传：`WAVE_FORMAT_UNSUPPORTED` 在
         // skills/svtools-agent/references/cli.md 里是独立条目（格式不支持），不能再折叠回 `VCD_PARSE`（语法损坏）——
         // 两者的处置不同（换格式 vs 重新仿真），折叠后调用方无法分派。
-        fail(error.code || 'VCD_PARSE', error.message, { file });
+        const { code, message } = codeOf(error);
+        fail(code || 'VCD_PARSE', message, { file });
     }
     const close = () => {
         if (handle === null) return;
@@ -247,11 +249,17 @@ async function values(trace, input) {
     if (input.at === undefined) fail('INVALID_ARGUMENT', 'wave values 需要 --at <ticks|时间>');
     const at = parseTick(trace, input.at, '--at');
     if (at > trace.meta.endTime) fail('INVALID_ARGUMENT', '--at 超出 VCD 记录范围', { at: tickString(at), endTime: tickString(trace.meta.endTime) });
-    const ids = requireSignals(trace, input);
-    const names = displayPaths(trace.meta);
-    const found = storeValues(trace, ids, at);
-    const out = {};
-    for (const id of ids) out[names.get(id).path] = decodedValue(found[id], names.get(id));
+    // 设计讲解依赖清单中的完整实例路径。信号丢失时不回退到同名或子串匹配。
+    const names = input.exactSignals ? null : displayPaths(trace.meta);
+    const variables = input.exactSignals ? input.exactSignals.map(name => {
+        const matches = trace.meta.vars.filter(variable => variable.path === name);
+        const first = matches[0];
+        if (!first || matches.some(variable => variable.id !== first.id || variable.width !== first.width))
+            fail('SIGNAL_NOT_FOUND', '波形中没有唯一的完整信号路径：' + name);
+        return first;
+    }) : requireSignals(trace, input).map(id => names.get(id));
+    const found = storeValues(trace, [...new Set(variables.map(variable => variable.id))], at);
+    const out = Object.fromEntries(variables.map(variable => [variable.path, decodedValue(found[variable.id], variable)]));
     return result('wave.values', {
         file: trace.file, at: tickString(at), timescale: trace.meta.timescale || null,
         timeText: model.formatTime(at, secondsPerTick(trace.meta.timescale)),

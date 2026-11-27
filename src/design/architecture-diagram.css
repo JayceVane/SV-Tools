@@ -1,0 +1,175 @@
+/* 架构连线图样式（architecture-diagram.js）。
+   规范见 docs/ARCHITECTURE_VISUAL.md 第 3 节；只使用 architecture.css 中的设计令牌。 */
+
+.architecture-svg { font-family: var(--font-ui); }
+.architecture-svg text { fill: var(--ink); user-select: none; }
+.architecture-svg a { color: inherit; cursor: pointer; text-decoration: none; }
+.architecture-svg [role=button], .architecture-svg a { cursor: pointer; outline: none; }
+
+/* ---------- 实例卡片 ---------- */
+.card-bg { fill: var(--panel); }
+.card-frame { fill: none; stroke: var(--line-2); stroke-width: 1; pointer-events: none; }
+.diagram-card.stub .card-frame { stroke-dasharray: 4 3; }
+.diagram-card.unresolved .card-frame { stroke: var(--warn); stroke-dasharray: 4 3; }
+.card-head { fill: var(--sunk); }
+.card-rule { stroke: var(--line); stroke-width: 1; }
+.card-title {
+    font-family: var(--font-ui);
+    font-size: 12.5px;
+    font-weight: 600;
+    fill: var(--ink);
+}
+.card-subtitle { font-family: var(--font-mono); font-size: 10.5px; fill: var(--muted); }
+.card-chip rect { fill: var(--sunk-2); stroke: var(--line); stroke-width: 1; }
+.card-chip text { font-family: var(--font-mono); font-size: 9.5px; fill: var(--muted); }
+.card-chip.status.unresolved rect { stroke: var(--warn); stroke-dasharray: 3 2; }
+.card-chip.status.unresolved text { fill: var(--warn); }
+.card-foot { font-family: var(--font-mono); font-size: 10px; fill: var(--muted); }
+.card-foot.internal { fill: var(--bus); cursor: pointer; }
+.card-foot.internal:is(:hover, :focus-visible) text { fill: var(--ink); text-decoration: underline; }
+.expand-caret { font-family: var(--font-mono); font-size: 9px; fill: var(--faint); }
+
+.card-members { cursor: pointer; }
+.card-members:is(:hover, :focus-visible, [aria-expanded=true]) .card-subtitle { fill: var(--ink); text-decoration: underline; }
+
+/* 分组卡片的对外端口：端点贴卡片边线，7px 短线向卡内引出，名称在卡内。
+   形状与 Block Design 原理图一致——信号是实心圆点，接口/总线是实心方块。 */
+.group-port-stem { stroke: var(--wire); stroke-width: 1.15; }
+.group-port-tip { fill: var(--wire); }
+.group-port-label { font-family: var(--font-mono); font-size: 10.5px; fill: var(--ink-2); }
+.group-port.bus .group-port-stem { stroke: var(--bus); stroke-width: 1.9; }
+.group-port.bus .group-port-tip { fill: var(--bus); }
+.group-port.bus .group-port-label { fill: var(--bus); }
+.group-port.clock .group-port-stem { stroke-dasharray: 3 2; }
+.group-port.clock .group-port-label { fill: var(--muted); }
+.group-port.clock .group-port-tip { fill: var(--panel); stroke: var(--wire); stroke-width: 1; }
+.clock-region rect { fill: var(--sunk); }
+.clock-region text { font-family: var(--font-ui); font-size: 11px; fill: var(--muted); }
+
+/* 卡底时钟/复位脚注：CLK / RST 两行，每行 14px；网络名逐条可悬浮。 */
+.clock-foot { font-family: var(--font-mono); font-size: 10px; fill: var(--ink-2); }
+.clock-tag { font-family: var(--font-ui); font-size: 9px; letter-spacing: .08em; fill: var(--faint); }
+.clock-sep { fill: var(--faint); }
+.clock-pin { fill: var(--wire); }
+.clock-row { cursor: help; }
+.clock-row-hit { fill: transparent; }
+/* 时钟/复位联动：悬停一个网络名，同名网络与使用它的卡片一起高亮。 */
+.clock-row.is-linked .clock-net { fill: var(--focus); font-weight: 700; }
+.diagram-card.instance.has-linked-clock .card-frame { stroke: var(--focus); stroke-width: 2; }
+.diagram-card.instance.has-linked-clock .card-bg { fill: var(--focus); fill-opacity: .07; }
+.wire-label text.is-linked { fill: var(--focus); }
+/* 联动期间压暗无关卡片，突出「谁用了这个时钟」。 */
+.architecture-svg.is-clock-linked .diagram-card.instance:not(.has-linked-clock) { opacity: .45; }
+.architecture-svg.is-clock-linked .diagram-card.instance:not(.has-linked-clock) .clock-net { opacity: .6; }
+
+/* 图2 式边界端口：没有外框、表头和分隔线，只有端口符号 + 名称 + 类型。 */
+.diagram-card.pad .pad-row-bg { fill: transparent; }
+.diagram-card.pad .pad-row:hover .pad-row-bg, .diagram-card.pad .pad-row:focus-visible .pad-row-bg { fill: var(--sunk-2); }
+.pad-pin-shape {
+    fill: color-mix(in srgb, var(--wire) 10%, var(--panel));
+    stroke: var(--wire);
+    stroke-width: 1.15;
+}
+.pad-row.bus .pad-pin-shape {
+    fill: color-mix(in srgb, var(--bus) 10%, var(--panel));
+    stroke: var(--bus);
+    stroke-width: 1.9;
+}
+.diagram-card.pad .pad-name { font-family: var(--font-mono); font-size: 10.5px; fill: var(--ink-2); }
+.diagram-card.pad .pad-row.bus .pad-name { fill: var(--bus); }
+.diagram-card.pad .pad-meta { font-family: var(--font-mono); font-size: 9.5px; fill: var(--faint); }
+.diagram-card.pad .pad-row:hover .pad-pin-shape { stroke: var(--focus); }
+/* 端子列小标：说明这一列属于当前模块的边界。 */
+.pad-column-label { font-family: var(--font-ui); font-size: 9.5px; letter-spacing: .08em; fill: var(--faint); }
+
+/* 分组卡片成员行 */
+.node-entry .row-bg { fill: transparent; }
+.node-entry:hover .row-bg, .node-entry:focus-visible .row-bg { fill: var(--sunk); }
+.entry-name { font-family: var(--font-mono); font-size: 11px; fill: var(--ink-2); }
+.entry-type { font-family: var(--font-mono); font-size: 10px; fill: var(--faint); }
+.entry-rule { stroke: var(--line); stroke-width: 1; }
+
+/* ---------- 引脚 ---------- */
+.pin-stub { stroke: var(--wire); stroke-width: 1.1; }
+.pin-stub.bus { stroke: var(--bus); stroke-width: 2; }
+.pin-dot { fill: var(--wire); }
+.pin-bus { fill: var(--bus); }
+.pin-label { font-family: var(--font-mono); font-size: 10.5px; fill: var(--ink-2); }
+.pin-label.bus { fill: var(--bus); }
+.pin-split { stroke: var(--line); stroke-width: 1; }
+
+/* ---------- 边界旗标（同方向端口不超过两个） ---------- */
+.boundary-symbol { fill: var(--sunk-2); stroke: var(--line-2); stroke-width: 1; }
+.boundary-caption { font-family: var(--font-mono); font-size: 10.5px; fill: var(--ink-2); }
+
+/* ---------- 汇聚节点 ---------- */
+.diagram-card.junction .card-frame { stroke: var(--line-2); }
+.junction-bus { stroke: var(--bus); stroke-width: 2; stroke-linecap: round; }
+.junction-title { font-family: var(--font-mono); font-size: 10.5px; fill: var(--ink-2); }
+.junction-chip rect { fill: var(--sunk-2); stroke: var(--line); stroke-width: 1; }
+.junction-chip text { font-family: var(--font-mono); font-size: 9.5px; fill: var(--muted); }
+
+/* ---------- 连线与标签 ---------- */
+.edge-hit { fill: none; stroke: transparent; stroke-width: 14; }
+.edge-hit.clock-hit { stroke-width: 12; stroke-linecap: round; pointer-events: stroke; }
+.edge-line {
+    fill: none;
+    stroke: var(--wire);
+    stroke-width: 1.1;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+.diagram-edge.bus .edge-line { stroke: var(--bus); stroke-width: 2.2; }
+.diagram-edge.unknown .edge-line { stroke-dasharray: 4 3; }
+/* 时钟/复位域：虚线 + 弱化色，和数据通路区分开，但必须看得见——
+   藏掉的话读者会以为时钟域根本没接。 */
+.diagram-edge.clock .edge-line { stroke: var(--wire); stroke-width: 1.2; stroke-dasharray: 5 4; }
+.diagram-edge.clock .edge-arrow { fill: var(--wire); }
+.diagram-edge.clock.is-linked .edge-line { stroke: var(--focus); stroke-width: 2; }
+.diagram-edge.clock.is-linked .edge-arrow { fill: var(--focus); }
+.diagram-card.instance.has-linked-clock .clock-pin { fill: var(--focus); }
+.edge-arrow { stroke: none; fill: var(--wire); }
+.diagram-edge.bus .edge-arrow { fill: var(--bus); }
+.wire-label rect { fill: var(--panel); stroke: var(--line); stroke-width: 1; }
+.wire-label text { font-family: var(--font-mono); font-size: 10px; fill: var(--ink-2); }
+
+/* ---------- 悬停与键盘焦点 ---------- */
+.architecture-svg [data-node]:is(:hover, :focus-visible) > .card-frame { stroke: var(--focus); stroke-width: 2; }
+.architecture-svg [data-node]:is(:hover, :focus-visible) > .boundary-symbol { stroke: var(--focus); stroke-width: 2; }
+.architecture-svg [data-edge]:is(:hover, :focus-visible) .edge-line { stroke: var(--focus); stroke-width: 2.4; }
+.architecture-svg .diagram-edge.unknown[data-edge]:is(:hover, :focus-visible) .edge-line { stroke-dasharray: 4 3; }
+/* 连线悬浮只高亮当前连线；端口/引脚悬浮才弹表格预览。 */
+.diagram-edge.is-hovered .edge-line { stroke: var(--focus); stroke-width: 2.4; }
+.diagram-edge.is-hovered.bus .edge-line { stroke-width: 2.8; }
+.diagram-edge.is-hovered.unknown .edge-line { stroke-dasharray: 4 3; }
+.diagram-edge.is-hovered .edge-arrow { fill: var(--focus); }
+
+/* ---------- 选中/上下游/共享状态（查看器设置 data-state） ---------- */
+.architecture-svg [data-state=dimmed] { opacity: .26; }
+.architecture-svg [data-state=dimmed]:is(:hover, :focus-visible) { opacity: 1; }
+.architecture-svg [data-state=selected] { --active: var(--focus); }
+.architecture-svg [data-state=upstream] { --active: var(--up); }
+.architecture-svg [data-state=downstream] { --active: var(--down); }
+.architecture-svg [data-state=related], .architecture-svg [data-state=both] { --active: var(--weak); }
+.architecture-svg [data-state]:not([data-state=normal], [data-state=dimmed]) > .card-frame {
+    stroke: var(--active);
+    stroke-width: 2;
+    stroke-dasharray: none;
+}
+.architecture-svg [data-state]:not([data-state=normal], [data-state=dimmed]) > .boundary-symbol {
+    stroke: var(--active);
+    stroke-width: 2;
+}
+.architecture-svg [data-state]:not([data-state=normal], [data-state=dimmed]) .pad-row-bg {
+    fill: color-mix(in srgb, var(--active) 12%, var(--panel));
+}
+.architecture-svg [data-state]:not([data-state=normal], [data-state=dimmed]) .pad-name { fill: var(--active); }
+.architecture-svg [data-state]:not([data-state=normal], [data-state=dimmed]) .entry-name { fill: var(--ink); }
+.architecture-svg .diagram-edge[data-state]:not([data-state=normal], [data-state=dimmed]) .edge-line {
+    stroke: var(--active);
+    stroke-width: 2.8;
+}
+.architecture-svg .diagram-edge[data-state]:not([data-state=normal], [data-state=dimmed]) .edge-arrow { fill: var(--active); }
+.architecture-svg .diagram-edge.unknown[data-state]:not([data-state=normal], [data-state=dimmed]) .edge-line {
+    stroke-dasharray: 4 3;
+}

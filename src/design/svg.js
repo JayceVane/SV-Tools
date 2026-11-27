@@ -30,6 +30,8 @@ const LAYOUT_OPTIONS = Object.freeze({
 const FONT_MONO = "Consolas, 'SFMono-Regular', 'Courier New', monospace";
 const FONT_UI = "-apple-system, 'Segoe UI', Roboto, sans-serif";
 const PADDING = 40, HEADER = 64, FOOTER = 52, PORT_PITCH = 17, HEADER_BAND = 54, GRID = 8;
+// 独立 SVG 的视觉节奏：44px 标题带、4px 圆角/拐角、6~10px 引脚外伸、10.5px 端口标签。
+const TITLE_BAND = 44, CARD_RADIUS = 4, PIN_REACH = 6, BUS_REACH = 10, LABEL_SIZE = 10.5;
 /** 基础图例项：[标签, 渲染类别]。颜色由主题在渲染时提供。 */
 const LEGEND_ITEMS = Object.freeze([['blackbox', 'dash'], ['collapsed', 'solid'], ['bus', 'bus'], ['boundary', 'boundary']]);
 const LEGEND_ROW_HEIGHT = 18;
@@ -37,13 +39,13 @@ const THEMES = Object.freeze({
     document: Object.freeze({
         background: '#ffffff', panel: '#ffffff', cellBg: '#ffffff', border: '#111111', fg: '#111111', muted: '#333333',
         wire: '#111111', accent: '#111111', blackbox: '#111111', collapsed: '#111111', input: '#111111', output: '#111111',
-        inout: '#111111', error: '#111111', grid: null, titleStrip: '#f5f5f5', font: FONT_UI, labelFont: FONT_UI, badgeFill: '#ffffff',
+        inout: '#111111', error: '#111111', grid: null, titleStrip: '#f5f5f5', font: FONT_UI, labelFont: FONT_UI, mono: FONT_MONO, badgeFill: '#ffffff',
         strokeWidth: 1.2, blackboxDash: '6 4', unresolvedDash: '2 3', gridBackground: false, busWidth: 1.8, wireWidth: 1
     }),
     presentation: Object.freeze({
         background: '#111923', panel: '#17222e', cellBg: '#1f252c', border: '#2c3a49', fg: '#d7e1ec', muted: '#9aaabc',
         wire: '#aebbc6', accent: '#63b8ff', blackbox: '#d3b57e', collapsed: '#7ccabf', input: '#eebc79', output: '#70d3c3',
-        inout: '#63b8ff', error: '#f29595', grid: '#23313f', titleStrip: null, font: FONT_MONO, labelFont: FONT_MONO, badgeFill: '#17222e',
+        inout: '#63b8ff', error: '#f29595', grid: '#23313f', titleStrip: null, font: FONT_MONO, labelFont: FONT_MONO, mono: FONT_MONO, badgeFill: '#17222e',
         strokeWidth: 1.5, blackboxDash: '4 3', unresolvedDash: '4 3', gridBackground: true, busWidth: 2.4, wireWidth: 1.25
     })
 });
@@ -165,7 +167,11 @@ function prepareInstanceNode(node, options) {
     const titleWidth = Math.max(textWidth(base.label, 13), textWidth(base.detail || '', 11)) + badgeWidth + 36;
     const sideWidth = list => Math.max(0, ...list.map(port => textWidth(port.displayLabel, 11)));
     const width = Math.ceil(Math.max(titleWidth, sideWidth(inputs) + sideWidth(outputs) + 48) / GRID) * GRID;
-    const height = Math.ceil((HEADER_BAND + PORT_PITCH * Math.max(inputs.length, outputs.length, 1) + 16) / GRID) * GRID;
+    // 无端口实例只保留标题带与副标题，不再为不存在的端口行预留空白。
+    const rows = Math.max(inputs.length, outputs.length);
+    const height = rows
+        ? Math.ceil((HEADER_BAND + PORT_PITCH * rows + 16) / GRID) * GRID
+        : Math.ceil((TITLE_BAND + 12) / GRID) * GRID;
     for (const [list, side] of [[inputs, 'WEST'], [outputs, 'EAST']]) {
         list.forEach((port, index) => {
             port.side = side;
@@ -187,7 +193,7 @@ function prepareBoundaryNode(node, boundaryLayout) {
     const height = 36;
     const side = node.direction === 'output' || (boundaryLayout === 'ends' && node.direction === 'inout') ? 'WEST' : 'EAST';
     const port = { id: node.id + '/' + node.ports[0].name, label: node.name, direction: node.ports[0].direction,
-        width: node.ports[0].width, bitWidth: node.ports[0].width, bits: [], side, x: side === 'WEST' ? 0 : width, y: height / 2, width: 0, height: 0 };
+        bitWidth: node.ports[0].width, bits: [], side, x: side === 'WEST' ? 0 : width, y: height / 2, width: 0, height: 0 };
     return { id: node.id, kind: 'boundary', label, name: node.name, direction: node.direction, boundary: true,
         width, height, paintBounds: { left: -10, top: -10, right: width + 10, bottom: height + 10 }, ports: [port] };
 }
@@ -423,6 +429,43 @@ async function layoutArchitecture(arch, options = {}) {
     return { projection, layout };
 }
 
+/** @param {number} x @param {number} y @param {number} width @param {number} height @param {number} radius @returns {string} 顶部圆角、底边平直的标题带路径。 */
+function titleBandPath(x, y, width, height, radius = CARD_RADIUS) {
+    const r = Math.max(0, Math.min(radius, width / 2, height));
+    return 'M ' + number(x) + ' ' + number(y + r)
+        + ' Q ' + number(x) + ' ' + number(y) + ' ' + number(x + r) + ' ' + number(y)
+        + ' H ' + number(x + width - r)
+        + ' Q ' + number(x + width) + ' ' + number(y) + ' ' + number(x + width) + ' ' + number(y + r)
+        + ' V ' + number(y + height) + ' H ' + number(x) + ' Z';
+}
+
+/**
+ * 画一个引脚符号：标量用外伸短线 + 圆点，inout 用实心菱形端头，
+ * 接口束用两条横线 + 内侧竖线的总线端头；方向由所在边表达，不再重复三角。
+ */
+function drawPortPin(side, px, py, bus, inout, theme, parts, color = theme.wire) {
+    const reach = bus ? BUS_REACH : PIN_REACH;
+    parts.push('<line x1="' + number(side === 'WEST' ? px - reach : px) + '" y1="' + number(py) + '" x2="'
+        + number(side === 'WEST' ? px : px + reach) + '" y2="' + number(py) + '" stroke="' + color
+        + '" stroke-width="' + (bus ? theme.busWidth : theme.wireWidth) + '" stroke-linecap="round"/>');
+    if (bus) {
+        const bar = side === 'WEST' ? px - 2 : px + 2, edge = side === 'WEST' ? px - 8 : px + 8;
+        parts.push('<path d="M ' + number(bar) + ' ' + number(py - 3) + ' V ' + number(py + 3)
+            + ' M ' + number(edge) + ' ' + number(py - 2) + ' H ' + number(bar)
+            + ' M ' + number(edge) + ' ' + number(py + 2) + ' H ' + number(bar)
+            + '" fill="none" stroke="' + color + '" stroke-width="' + theme.strokeWidth + '" stroke-linecap="round"/>');
+        return;
+    }
+    if (inout) {
+        parts.push('<path d="M ' + number(px) + ' ' + number(py - 3) + ' L ' + number(px + 3) + ' ' + number(py)
+            + ' L ' + number(px) + ' ' + number(py + 3) + ' L ' + number(px - 3) + ' ' + number(py)
+            + ' Z" fill="' + theme.cellBg + '" stroke="' + color + '" stroke-width="' + theme.strokeWidth + '"/>');
+        return;
+    }
+    parts.push('<circle cx="' + number(px) + '" cy="' + number(py) + '" r="2" fill="' + theme.cellBg
+        + '" stroke="' + color + '" stroke-width="' + theme.strokeWidth + '"/>');
+}
+
 /** @param {object} node 布局节点。 @param {object[]} parts SVG片段。 @param {object} theme 风格。 @returns {void} 追加实例盒。 */
 function drawInstance(node, parts, theme) {
     const accent = node.status === 'unresolved' ? theme.error : node.implementation === 'blackbox' ? theme.blackbox : theme.collapsed;
@@ -430,26 +473,31 @@ function drawInstance(node, parts, theme) {
         : node.implementation === 'blackbox' ? ' stroke-dasharray="' + theme.blackboxDash + '"' : '';
     parts.push('<g data-model-id="' + escape(node.id) + '" data-kind="instance" data-implementation="' + escape(node.implementation || 'collapsed') + '">');
     parts.push('<rect x="' + number(node.x) + '" y="' + number(node.y) + '" width="' + number(node.width) + '" height="' + number(node.height)
-        + '" rx="3" fill="' + theme.cellBg + '" stroke="' + accent + '" stroke-width="' + theme.strokeWidth + '"' + dash + '/>');
+        + '" rx="' + CARD_RADIUS + '" fill="' + theme.cellBg + '" stroke="' + accent + '" stroke-width="' + theme.strokeWidth + '"' + dash + '/>');
     if (theme.titleStrip) {
-        parts.push('<rect x="' + number(node.x) + '" y="' + number(node.y) + '" width="' + number(node.width) + '" height="44" fill="'
-            + theme.titleStrip + '"/>');
-        parts.push('<line x1="' + number(node.x) + '" y1="' + number(node.y + 44) + '" x2="' + number(node.x + node.width) + '" y2="'
-            + number(node.y + 44) + '" stroke="' + theme.border + '" stroke-width="0.6"/>');
+        // 标题带内缩 1px，保留虚线实现状态的完整上边框。
+        parts.push('<path d="' + titleBandPath(node.x + 1, node.y + 1, node.width - 2, TITLE_BAND - 1) + '" fill="' + theme.titleStrip + '"/>');
+        parts.push('<line x1="' + number(node.x) + '" y1="' + number(node.y + TITLE_BAND) + '" x2="' + number(node.x + node.width) + '" y2="'
+            + number(node.y + TITLE_BAND) + '" stroke="' + theme.border + '" stroke-width="0.6"/>');
     }
-    parts.push('<text x="' + number(node.x + 12) + '" y="' + number(node.y + 21) + '" fill="' + theme.fg + '" font-family="' + theme.font + '" font-size="13" font-weight="600">'
+    parts.push('<text x="' + number(node.x + 12) + '" y="' + number(node.y + 21) + '" fill="' + theme.fg + '" font-family="' + theme.mono + '" font-size="13" font-weight="600">'
         + escape(shorten(node.label, node.width - node.badgeWidth - 24, 13)) + '</text>');
-    parts.push('<text x="' + number(node.x + 12) + '" y="' + number(node.y + 38) + '" fill="' + theme.muted + '" font-family="' + theme.font + '" font-size="11">'
+    parts.push('<text x="' + number(node.x + 12) + '" y="' + number(node.y + 38) + '" fill="' + theme.muted + '" font-family="' + theme.mono + '" font-size="11">'
         + escape(shorten(node.detail || '', node.width - node.badgeWidth - 24, 11)) + '</text>');
+    // 右上角只标注值得注意的实现状态；默认 collapsed 由实线卡片和图例表达，避免每张卡片重复同一枚 chip。
     const badge = node.badge, badgeWidth = node.badgeWidth;
-    parts.push('<rect x="' + number(node.x + node.width - badgeWidth - 8) + '" y="' + number(node.y + 9) + '" width="' + number(badgeWidth)
-        + '" height="16" rx="8" fill="' + theme.badgeFill + '" stroke="' + accent + '" stroke-width="1"/>');
-    parts.push('<text x="' + number(node.x + node.width - badgeWidth / 2 - 8) + '" y="' + number(node.y + 20.5) + '" fill="' + accent
-        + '" font-family="' + FONT_UI + '" font-size="9" text-anchor="middle">' + escape(badge) + '</text>');
+    if (badge && badge !== 'collapsed') {
+        const chipX = node.x + node.width - badgeWidth - 10;
+        parts.push('<rect x="' + number(chipX) + '" y="' + number(node.y + 8) + '" width="' + number(badgeWidth)
+            + '" height="16" rx="3" fill="' + theme.badgeFill + '" stroke="' + accent + '" stroke-width="0.8"/>');
+        parts.push('<text x="' + number(chipX + badgeWidth / 2) + '" y="' + number(node.y + 19) + '" fill="' + accent
+            + '" font-family="' + theme.mono + '" font-size="9" text-anchor="middle">' + escape(badge) + '</text>');
+    }
     for (const port of node.ports) {
         const side = port.x <= node.width / 2 ? 'WEST' : 'EAST';
         const px = node.x + port.x, py = node.y + port.y;
         const label = port.displayLabel;
+        const bus = (port.bitWidth || 1) > 1;
         const labelWidth = node.width - (node.labelColumns?.[side === 'WEST' ? 'EAST' : 'WEST'] || 0) - 32;
         const title = port.members
             ? '虚拟接口端口 ' + port.label + (port.collapsed ? '*' : '') + ' (' + port.bitWidth + ' bits) · ' + port.direction
@@ -457,21 +505,10 @@ function drawInstance(node, parts, theme) {
             : port.label + ' · ' + port.direction + ' · ' + port.bitWidth + ' bit' + (port.bitWidth === 1 ? '' : 's');
         parts.push('<g data-model-id="' + escape(port.id) + '" data-kind="port" data-direction="' + escape(port.direction) + '">');
         parts.push('<title>' + escape(title) + '</title>');
-        parts.push('<line x1="' + number(side === 'WEST' ? px - 8 : px) + '" y1="' + number(py) + '" x2="' + number(side === 'WEST' ? px : px + 8)
-            + '" y2="' + number(py) + '" stroke="' + theme.wire + '" stroke-width="1.25"/>');
-        parts.push('<circle cx="' + number(px) + '" cy="' + number(py) + '" r="2" fill="' + theme.cellBg + '" stroke="' + theme.wire + '" stroke-width="1.25"/>');
-        if (port.direction !== 'inout' && !port.interfaceLevel) {
-            const sign = (side === 'EAST' ? 1 : -1) * (port.direction === 'output' ? 1 : -1), center = px + (side === 'EAST' ? 5 : -5);
-            parts.push('<path d="M ' + number(center + sign * 2.5) + ' ' + number(py) + ' L ' + number(center - sign * 2.5) + ' ' + number(py - 2.5)
-                + ' L ' + number(center - sign * 2.5) + ' ' + number(py + 2.5) + ' Z" fill="' + theme.wire + '"/>');
-        }
-        if (side === 'WEST') {
-            parts.push('<text x="' + number(node.x + 10) + '" y="' + number(py + 4) + '" fill="' + theme.fg + '" font-family="' + theme.labelFont
-                + '" font-size="11" text-anchor="start">' + escape(shorten(label, labelWidth, 11)) + '</text>');
-        } else {
-            parts.push('<text x="' + number(node.x + node.width - 10) + '" y="' + number(py + 4) + '" fill="' + theme.fg + '" font-family="' + theme.labelFont
-                + '" font-size="11" text-anchor="end">' + escape(shorten(label, labelWidth, 11)) + '</text>');
-        }
+        drawPortPin(side, px, py, bus, port.direction === 'inout', theme, parts);
+        parts.push('<text x="' + number(side === 'WEST' ? node.x + 12 : node.x + node.width - 12) + '" y="' + number(py + 3.5) + '" fill="' + theme.fg
+            + '" font-family="' + theme.mono + '" font-size="' + LABEL_SIZE + '"' + (bus ? ' font-weight="600"' : '')
+            + ' text-anchor="' + (side === 'WEST' ? 'start' : 'end') + '">' + escape(shorten(label, labelWidth, LABEL_SIZE)) + '</text>');
         parts.push('</g>');
     }
     parts.push('</g>');
@@ -482,18 +519,18 @@ function drawBoundary(node, parts, theme) {
     if (node.boundaryTable) { drawBoundaryTable(node, parts, theme); return; }
     const accent = node.direction === 'output' ? theme.output : node.direction === 'inout' ? theme.inout : theme.input;
     parts.push('<g data-model-id="' + escape(node.id) + '" data-kind="boundary" data-direction="' + escape(node.direction) + '">');
+    parts.push('<title>' + escape(node.label + ' · 边界' + node.direction + ' · ' + (node.ports[0] ? node.ports[0].bitWidth : 1) + ' bits') + '</title>');
     parts.push('<rect x="' + number(node.x) + '" y="' + number(node.y) + '" width="' + number(node.width) + '" height="' + number(node.height)
         + '" rx="3" fill="' + theme.panel + '" stroke="' + theme.border + '" stroke-width="' + theme.strokeWidth + '"/>');
-    parts.push('<rect x="' + number(node.direction === 'output' ? node.x + node.width - 4 : node.x) + '" y="' + number(node.y) + '" width="4" height="'
-        + number(node.height) + '" fill="' + accent + '"/>');
+    parts.push('<rect x="' + number(node.direction === 'output' ? node.x + node.width - 4 : node.x + 1) + '" y="' + number(node.y + 1)
+        + '" width="3" height="' + number(node.height - 2) + '" rx="1.5" fill="' + accent + '"/>');
     parts.push('<text x="' + number(node.x + node.width / 2) + '" y="' + number(node.y + node.height / 2 + 4) + '" fill="' + theme.fg
-        + '" font-family="' + theme.labelFont + '" font-size="12" text-anchor="middle">' + escape(node.label) + '</text>');
+        + '" font-family="' + theme.mono + '" font-size="11.5" text-anchor="middle">' + escape(node.label) + '</text>');
     for (const port of node.ports) {
         const px = node.x + port.x, py = node.y + port.y;
         parts.push('<g data-model-id="' + escape(port.id) + '" data-kind="port" data-direction="' + escape(port.direction) + '">');
         parts.push('<title>' + escape(port.label + ' · ' + node.direction + ' · ' + port.bitWidth + ' bit' + (port.bitWidth === 1 ? '' : 's')) + '</title>');
-        parts.push('<line x1="' + number(port.side === 'WEST' ? px - 10 : px) + '" y1="' + number(py) + '" x2="' + number(port.side === 'WEST' ? px : px + 10)
-            + '" y2="' + number(py) + '" stroke="' + accent + '" stroke-width="1.5"/>');
+        drawPortPin(port.side, px, py, (port.bitWidth || 1) > 1, port.direction === 'inout', theme, parts, accent);
         parts.push('</g>');
     }
     parts.push('</g>');
@@ -501,38 +538,55 @@ function drawBoundary(node, parts, theme) {
 
 /** 边界接口表：方向是相对于 RTL 顶层，位宽列表示位数，各行锚点保持原端口身份。 */
 function drawBoundaryTable(node, parts, theme) {
-    const left = node.x, top = node.y, dirX = left + node.width - 78, widthX = left + node.width - 26;
+    const left = node.x, top = node.y, pad = 10;
+    // 三列：名称左对齐；方向、位宽右对齐，列宽按最长值（四位数位宽）预留。
+    const dirRight = left + node.width - 70, bitsRight = left + node.width - pad;
+    const dirLine = dirRight - 34, bitsLine = bitsRight - 30;
     parts.push('<g data-model-id="' + escape(node.id) + '" data-kind="boundary-table">');
     parts.push('<title>' + escape(node.name + '：按名称前缀分组；方向相对于RTL顶层，未推断协议') + '</title>');
     parts.push('<rect x="' + number(left) + '" y="' + number(top) + '" width="' + node.width + '" height="' + node.height
-        + '" rx="2" fill="' + theme.panel + '" stroke="' + theme.border + '" stroke-width="' + theme.strokeWidth + '"/>');
-    if (theme.titleStrip) parts.push('<rect x="' + number(left+1) + '" y="' + number(top+1) + '" width="' + (node.width-2) + '" height="27" fill="' + theme.titleStrip + '"/>');
-    parts.push('<text x="' + number(left + 10) + '" y="' + number(top + 18) + '" fill="' + theme.fg + '" font-family="' + theme.font + '" font-size="12" font-weight="600">' + escape(node.name) + '</text>');
-    parts.push('<text x="' + number(left + node.width - 10) + '" y="' + number(top + 18) + '" fill="' + theme.muted + '" font-family="' + theme.labelFont + '" font-size="10" text-anchor="end">'
-        + node.rows.length + ' ports · ' + node.bitWidth + ' bits</text>');
-    for (const [label, x, anchor] of [['Signal',left+10,'start'],['Dir',dirX,'middle'],['Bits',widthX,'middle']]) {
-        parts.push('<text x="' + number(x) + '" y="' + number(top + 42) + '" fill="' + theme.muted + '" font-family="' + theme.labelFont
-            + '" font-size="10" text-anchor="' + anchor + '">' + label + '</text>');
+        + '" rx="3" fill="' + theme.panel + '" stroke="' + theme.border + '" stroke-width="' + theme.strokeWidth + '"/>');
+    if (theme.titleStrip) {
+        parts.push('<path d="' + titleBandPath(left + 1, top + 1, node.width - 2, node.headerHeight - 1, 3) + '" fill="' + theme.titleStrip + '"/>');
+    }
+    // 标题行与列标题之间的分隔线：两种主题共用，深色主题没有标题带底色时仍能读出表头层级。
+    parts.push('<line x1="' + number(left + 1) + '" y1="' + number(top + 30) + '" x2="' + number(left + node.width - 1) + '" y2="'
+        + number(top + 30) + '" stroke="' + theme.border + '" stroke-width="0.5" opacity="0.5"/>');
+    parts.push('<text x="' + number(left + pad) + '" y="' + number(top + 18) + '" fill="' + theme.fg + '" font-family="' + theme.mono
+        + '" font-size="12" font-weight="600">' + escape(node.name) + '</text>');
+    parts.push('<text x="' + number(left + node.width - pad) + '" y="' + number(top + 18) + '" fill="' + theme.muted + '" font-family="' + theme.mono
+        + '" font-size="10" text-anchor="end">' + node.rows.length + ' ports · ' + node.bitWidth + ' bits</text>');
+    for (const [label, x, anchor] of [['SIGNAL', left + pad, 'start'], ['DIR', dirRight, 'end'], ['BITS', bitsRight, 'end']]) {
+        parts.push('<text x="' + number(x) + '" y="' + number(top + 43) + '" fill="' + theme.muted + '" font-family="' + theme.mono
+            + '" font-size="10" letter-spacing="0.7" text-anchor="' + anchor + '">' + label + '</text>');
     }
     for (let row = 0; row <= node.rows.length; row++) {
         const y = top + node.headerHeight + row * node.rowHeight;
-        parts.push('<line x1="' + number(left) + '" y1="' + number(y) + '" x2="' + number(left+node.width) + '" y2="' + number(y) + '" stroke="' + theme.border + '" stroke-width="0.5" opacity="0.5"/>');
+        parts.push('<line x1="' + number(left) + '" y1="' + number(y) + '" x2="' + number(left + node.width) + '" y2="' + number(y)
+            + '" stroke="' + theme.border + '" stroke-width="0.5" opacity="0.55"/>');
     }
-    for (const x of [dirX - 25, widthX - 24]) parts.push('<line x1="' + number(x) + '" y1="' + number(top + 28) + '" x2="' + number(x) + '" y2="' + number(top + node.height) + '" stroke="' + theme.border + '" stroke-width="0.5" opacity="0.5"/>');
+    for (const x of [dirLine, bitsLine]) parts.push('<line x1="' + number(x) + '" y1="' + number(top + 30) + '" x2="' + number(x) + '" y2="'
+        + number(top + node.height) + '" stroke="' + theme.border + '" stroke-width="0.5" opacity="0.35"/>');
     for (const port of node.rows) {
         // 方向用 i/o/io 缩写而非箭头：箭头在左右两侧表中含义相反（→ 在左表为流入设计、右表为流出），
         // 缩写直接对应 RTL 端口方向且无视角歧义；全词保留在 <title>。
-        const y = top + port.y, x = left + port.x, direction = { input:'i',output:'o',inout:'io' }[port.boundaryDirection] || port.boundaryDirection;
+        const y = top + port.y, x = left + port.x, direction = { input: 'i', output: 'o', inout: 'io' }[port.boundaryDirection] || port.boundaryDirection;
         parts.push('<g data-model-id="' + escape(port.id) + '" data-kind="port" data-boundary-id="' + escape(port.sourceNodeId) + '" data-direction="' + port.boundaryDirection + '">');
         parts.push('<title>' + escape(port.label + ' · ' + port.boundaryDirection + ' · ' + port.bitWidth + ' bits') + '</title>');
-        parts.push('<text x="' + number(left+10) + '" y="' + number(y+4) + '" fill="' + theme.fg + '" font-family="' + theme.labelFont + '" font-size="11">' + escape(port.label) + '</text>');
-        for (const [label, column] of [[direction,dirX],[port.bitWidth,widthX]]) parts.push('<text x="' + number(column) + '" y="' + number(y+4) + '" fill="' + theme.fg + '" font-family="' + theme.labelFont + '" font-size="10" text-anchor="middle">' + label + '</text>');
-        if (node.detail==='signals') parts.push('<line x1="' + number(x) + '" y1="' + number(y) + '" x2="' + number(x+(port.side==='WEST'?-8:8)) + '" y2="' + number(y) + '" stroke="' + theme.wire + '" stroke-width="' + (port.bitWidth>1?theme.busWidth:theme.wireWidth) + '"/>');
+        parts.push('<text x="' + number(left + pad) + '" y="' + number(y + 3.5) + '" fill="' + theme.fg + '" font-family="' + theme.mono
+            + '" font-size="10.5">' + escape(port.label) + '</text>');
+        parts.push('<text x="' + number(dirRight) + '" y="' + number(y + 3.5) + '" fill="' + theme.fg + '" font-family="' + theme.mono
+            + '" font-size="9.5" text-anchor="end">' + direction + '</text>');
+        parts.push('<text x="' + number(bitsRight) + '" y="' + number(y + 3.5) + '" fill="' + theme.muted + '" font-family="' + theme.mono
+            + '" font-size="9.5" text-anchor="end">' + port.bitWidth + '</text>');
+        if (node.detail === 'signals') drawPortPin(port.side, x, y, (port.bitWidth || 1) > 1, port.boundaryDirection === 'inout', theme, parts);
         parts.push('</g>');
     }
-    if (node.detail!=='signals') {
-        const port=node.ports[0], x=left+port.x, y=top+port.y;
-        parts.push('<g data-model-id="'+escape(port.id)+'" data-kind="interface-port"><line x1="'+number(x)+'" y1="'+number(y)+'" x2="'+number(x+(port.side==='WEST'?-8:8))+'" y2="'+number(y)+'" stroke="'+theme.wire+'" stroke-width="'+theme.busWidth+'"/></g>');
+    if (node.detail !== 'signals') {
+        const port = node.ports[0], x = left + port.x, y = top + port.y;
+        parts.push('<g data-model-id="' + escape(port.id) + '" data-kind="interface-port">');
+        drawPortPin(port.side, x, y, true, false, theme, parts);
+        parts.push('</g>');
     }
     parts.push('</g>');
 }
@@ -540,20 +594,44 @@ function drawBoundaryTable(node, parts, theme) {
 /** @param {object} node 布局节点。 @param {object[]} parts SVG片段。 @param {object} theme 风格。 @returns {void} 追加接口汇合节点。 */
 function drawJunction(node, parts, theme) {
     parts.push('<g data-model-id="' + escape(node.id) + '" data-kind="junction">');
-    const center = node.x + node.width / 2, ys = node.ports.map(port => node.y + port.y);
+    const center = node.x + node.width / 2, ys = node.ports.map(port => node.y + port.y), bus = node.bitWidth > 1;
+    const trunk = bus ? theme.busWidth : theme.wireWidth;
     parts.push('<line x1="' + number(center) + '" y1="' + number(Math.min(...ys)) + '" x2="' + number(center) + '" y2="'
-        + number(Math.max(...ys)) + '" stroke="' + theme.wire + '" stroke-width="' + (node.bitWidth > 1 ? theme.busWidth : theme.wireWidth) + '"/>');
+        + number(Math.max(...ys)) + '" stroke="' + theme.wire + '" stroke-width="' + trunk + '" stroke-linecap="round"/>');
     parts.push('<text x="' + number(center) + '" y="' + number(node.y + 15) + '" fill="' + theme.fg
-        + '" font-family="' + theme.labelFont + '" font-size="11" text-anchor="middle">' + escape(shorten(node.label, node.width - 18, 11)) + '</text>');
+        + '" font-family="' + theme.mono + '" font-size="10.5" text-anchor="middle">' + escape(shorten(node.label, node.width - 18, 10.5)) + '</text>');
     for (const port of node.ports) {
         parts.push('<g data-model-id="' + escape(port.id) + '" data-kind="port">');
         parts.push('<line x1="' + number(node.x + port.x) + '" y1="' + number(node.y + port.y)
             + '" x2="' + number(center) + '" y2="' + number(node.y + port.y)
-            + '" stroke="' + theme.wire + '" stroke-width="1.5"/>');
-        parts.push('<circle cx="' + number(center) + '" cy="' + number(node.y + port.y) + '" r="2" fill="' + theme.wire + '"/>');
+            + '" stroke="' + theme.wire + '" stroke-width="' + trunk + '"/>');
+        parts.push('<circle cx="' + number(center) + '" cy="' + number(node.y + port.y) + '" r="2.2" fill="' + theme.wire + '"/>');
         parts.push('</g>');
     }
     parts.push('</g>');
+}
+
+/** @param {number[][]} points 折线点。 @param {number} [radius] 拐角半径。 @returns {string} 正交折线路径；拐角用二次曲线收圆，端点不变。 */
+function roundedPolyline(points, radius = CARD_RADIUS) {
+    if (!Array.isArray(points) || points.length < 2) {
+        return '';
+    }
+    let path = 'M ' + number(points[0][0]) + ' ' + number(points[0][1]);
+    for (let index = 1; index < points.length - 1; index++) {
+        const [ax, ay] = points[index - 1], [bx, by] = points[index], [cx, cy] = points[index + 1];
+        const inLength = Math.abs(bx - ax) + Math.abs(by - ay);
+        const outLength = Math.abs(cx - bx) + Math.abs(cy - by);
+        const r = Math.min(radius, inLength / 2, outLength / 2);
+        if (!(r > 0)) {
+            path += ' L ' + number(bx) + ' ' + number(by);
+            continue;
+        }
+        const sx = bx + (ax - bx) * r / inLength, sy = by + (ay - by) * r / inLength;
+        const ex = bx + (cx - bx) * r / outLength, ey = by + (cy - by) * r / outLength;
+        path += ' L ' + number(sx) + ' ' + number(sy) + ' Q ' + number(bx) + ' ' + number(by) + ' ' + number(ex) + ' ' + number(ey);
+    }
+    const last = points[points.length - 1];
+    return path + ' L ' + number(last[0]) + ' ' + number(last[1]);
 }
 
 /** @param {object} section 布局段。 @returns {string[]} 路径点。 */
@@ -654,8 +732,8 @@ function renderArchitectureSvg(arch, layoutResult, { title, style } = {}) {
     };
     parts.push('<metadata id="svtools-evidence">' + escape(JSON.stringify(evidence)) + '</metadata>');
     parts.push('<defs>');
-    parts.push('<marker id="arrow" viewBox="0 0 8 8" refX="7" refY="4" markerUnits="userSpaceOnUse" markerWidth="6" markerHeight="6" orient="auto-start-reverse">'
-        + '<path d="M 0 0 L 8 4 L 0 8 z" fill="' + theme.wire + '"/></marker>');
+    parts.push('<marker id="arrow" viewBox="0 0 8 8" refX="8" refY="4" markerUnits="userSpaceOnUse" markerWidth="6" markerHeight="6" orient="auto-start-reverse">'
+        + '<path d="M 0 0.6 L 7.4 4 L 0 7.4 z" fill="' + theme.wire + '"/></marker>');
     if (theme.gridBackground) {
         parts.push('<pattern id="arch-grid" width="20" height="20" patternUnits="userSpaceOnUse"><circle cx="1" cy="1" r="0.8" fill="' + theme.grid + '"/></pattern>');
     }
@@ -667,6 +745,8 @@ function renderArchitectureSvg(arch, layoutResult, { title, style } = {}) {
         + escape(shorten(heading, width - PADDING * 2, 17)) + '</text>');
     parts.push('<text x="' + PADDING + '" y="48" fill="' + theme.muted + '" font-family="' + FONT_UI + '" font-size="12"><title>' + escape(subtitle)
         + '</title>' + escape(shorten(subtitle, width - PADDING * 2, 12)) + '</text>');
+    parts.push('<line x1="' + PADDING + '" y1="' + (HEADER - 10) + '" x2="' + (width - PADDING) + '" y2="' + (HEADER - 10)
+        + '" stroke="' + theme.border + '" stroke-width="0.5" opacity="0.3"/>');
     parts.push('<g transform="translate(' + PADDING + ' ' + HEADER + ')">');
     for (const edge of layout.edges) {
         const item = edge.interface;
@@ -674,8 +754,7 @@ function renderArchitectureSvg(arch, layoutResult, { title, style } = {}) {
         if (!points.length) {
             continue;
         }
-        const d = edge.sections.map(section => sectionPoints(section).map((point, at) =>
-            (at ? 'L ' : 'M ') + number(point[0]) + ' ' + number(point[1])).join(' ')).join(' ');
+        const d = edge.sections.map(section => roundedPolyline(sectionPoints(section))).filter(Boolean).join(' ');
         const styleNameForEdge = edgeStyle(item.bits, theme);
         parts.push('<g data-interface-id="' + escape(item.id) + '" data-kind="interface">');
         parts.push('<title>' + escape(item.label + ' (' + item.bits + ' bits) · ' + item.from.kind + ':' + item.from.name + ' → '
@@ -689,8 +768,8 @@ function renderArchitectureSvg(arch, layoutResult, { title, style } = {}) {
             const label = item.label + ' (' + item.bits + ' bits)';
             const transform = anchor.angle ? ' transform="rotate(-90 ' + number(anchor.x) + ' ' + number(anchor.y - 6) + ')"' : '';
             parts.push('<text x="' + number(anchor.x) + '" y="' + number(anchor.y - 6) + '"' + transform + ' fill="' + theme.fg
-                + '" font-family="' + theme.labelFont + '" font-size="10" text-anchor="middle" paint-order="stroke" stroke="' + theme.background
-                + '" stroke-width="3.5" stroke-linejoin="round">' + escape(label) + '</text>');
+                + '" font-family="' + theme.mono + '" font-size="10" text-anchor="middle" paint-order="stroke" stroke="' + theme.background
+                + '" stroke-width="4" stroke-linejoin="round" stroke-linecap="round">' + escape(label) + '</text>');
         }
         parts.push('</g>');
     }
@@ -706,7 +785,9 @@ function renderArchitectureSvg(arch, layoutResult, { title, style } = {}) {
     parts.push('</g>');
     // 图例渲染：坐标来自 layoutLegend（行号 × 18 偏移），窄图自动换行不再裁剪。
     const legendY0 = HEADER + layout.height + 26;
-    const legendColors = { dash: theme.blackbox, solid: theme.collapsed, bus: theme.wire, boundary: theme.border, bundle: theme.wire, note: theme.muted };
+    parts.push('<line x1="' + PADDING + '" y1="' + (legendY0 - 12) + '" x2="' + (width - PADDING) + '" y2="' + (legendY0 - 12)
+        + '" stroke="' + theme.border + '" stroke-width="0.5" opacity="0.3"/>');
+    const legendColors = { dash: theme.blackbox, solid: theme.collapsed, bus: theme.wire, boundary: theme.input, bundle: theme.wire, note: theme.muted };
     for (const item of legendPlacements.placements) {
         const legendX = item.x, legendY = legendY0 + item.y * LEGEND_ROW_HEIGHT, color = legendColors[item.kind];
         if (item.kind === 'note') {
@@ -719,7 +800,7 @@ function renderArchitectureSvg(arch, layoutResult, { title, style } = {}) {
             parts.push('<line x1="' + (legendX + 13) + '" y1="' + (legendY - 4) + '" x2="' + (legendX + 17) + '" y2="' + (legendY + 4) + '" stroke="' + color + '" stroke-width="1.5"/>');
         } else if (item.kind === 'boundary') {
             parts.push('<rect x="' + legendX + '" y="' + (legendY - 7) + '" width="26" height="14" rx="2" fill="' + theme.panel + '" stroke="' + theme.border + '"/>');
-            parts.push('<rect x="' + legendX + '" y="' + (legendY - 7) + '" width="3" height="14" fill="' + color + '"/>');
+            parts.push('<rect x="' + (legendX + 1) + '" y="' + (legendY - 6) + '" width="2.5" height="12" rx="1.2" fill="' + color + '"/>');
         } else if (item.kind === 'bundle') {
             parts.push('<polygon points="' + (legendX + 13) + ',' + (legendY - 8) + ' ' + (legendX + 22) + ',' + legendY + ' '
                 + (legendX + 13) + ',' + (legendY + 8) + ' ' + (legendX + 4) + ',' + legendY + '" fill="' + theme.cellBg + '" stroke="' + color

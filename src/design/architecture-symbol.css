@@ -1,0 +1,274 @@
+/* 模块端口图：Block Design 风格的模块边界。
+   视觉契约见 docs/ARCHITECTURE_VISUAL.md 第 4 节；本文件由导出与查看器在 architecture.css
+   之后加载，端口图样式全部集中在这里（旧版 .module-* 规则已从 architecture.css 移除）。 */
+
+/* ---------- 外壳：宽度随内容并居中，同时作为窄容器查询的尺寸上下文 ---------- */
+.module-symbol-frame {
+    container-type: inline-size;
+    display: flex;
+    justify-content: center;
+    break-inside: avoid;
+}
+
+.module-symbol {
+    width: fit-content;
+    max-width: 100%;
+    min-width: 0;
+    margin: 4px 0 2px;
+    border: 1px solid var(--line-2);
+    border-radius: var(--radius-2);
+    background: var(--panel);
+    color: var(--ink);
+    font: 11.5px/1.45 var(--font-ui);
+}
+
+/* 标题带：与连线图卡片的 card-head 同款——左侧模块名、右侧端口规模。 */
+.module-symbol-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    min-height: 30px;
+    padding: 6px 12px 5px;
+    border-bottom: 1px solid var(--line);
+    border-radius: calc(var(--radius-2) - 1px) calc(var(--radius-2) - 1px) 0 0;
+    background: var(--sunk);
+    overflow-wrap: anywhere;
+}
+.module-symbol-title { color: var(--ink); font: 600 12px/1.45 var(--font-mono); }
+.module-symbol-title code { padding: 0; background: none; color: inherit; font: inherit; }
+.module-symbol-meta { flex: 0 0 auto; color: var(--faint); font: 10px/1.45 var(--font-mono); white-space: nowrap; }
+
+/* ---------- 两侧：输入与 Slave 类接口在左，输出与 Master 类接口在右。
+   空的语义分组由渲染层直接省略，列随内容收缩，不留空列宽度。 ---------- */
+.module-pin-sides { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: stretch; column-gap: 6px; }
+.module-pin-sides:has(> :only-child) { grid-template-columns: minmax(0, 1fr); }
+.module-symbol .module-pin-group { flex: 0 1 auto; min-width: 0; padding: 4px 0 6px; }
+.module-pin-sides > .module-pin-group:empty { display: none; }
+
+.module-symbol .module-pin-group > h4 {
+    display: flex;
+    align-items: baseline;
+    gap: 5px;
+    margin: 0;
+    padding: 7px 12px 5px;
+    border-bottom: 1px solid var(--line);
+    color: var(--muted);
+    font: 600 10px/1.3 var(--font-ui);
+    letter-spacing: .09em;
+    white-space: nowrap;
+}
+.module-symbol .module-pin-group-en { color: var(--faint); font-size: 9px; letter-spacing: .12em; }
+.module-symbol .module-pin-count {
+    margin-left: auto;
+    color: var(--faint);
+    font: 10px/1 var(--font-mono);
+    letter-spacing: 0;
+}
+
+.module-symbol .module-pin-group > ul { display: grid; margin: 0; padding: 0; list-style: none; }
+.module-symbol .module-pin-group li { min-width: 0; }
+
+/* ---------- 普通引脚：20px 行、外侧 8px 短线 + 端头；位宽紧跟名称，不拉出空档 ---------- */
+.module-symbol .module-pin {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+    min-height: 20px;
+    margin: 0;
+    padding: 0 12px;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    color: var(--ink);
+    font: 11.5px/1.4 var(--font-mono);
+    text-align: left;
+    text-decoration: none;
+}
+/* 极窄容器里允许标识符断行，避免名称撑破外框。 */
+.module-symbol .module-pin > code { overflow-wrap: anywhere; }
+.module-symbol .module-pin:is(a, button) { cursor: pointer; }
+.module-symbol .module-pin:is(a, button):hover,
+.module-symbol .module-pin[aria-pressed=true],
+.module-symbol .module-pin[aria-pressed=true]:hover {
+    background: var(--sunk);
+    border: 0;
+    color: var(--ink);
+}
+.module-symbol .module-pin:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.module-symbol .module-pin > code { flex: 0 1 auto; min-width: 0; color: inherit; font: inherit; }
+.module-symbol .module-pin-width {
+    flex: 0 0 auto;
+    margin-left: 2px;
+    color: var(--faint);
+    font: 9.5px/1 var(--font-mono);
+    letter-spacing: .01em;
+}
+
+/* 输出列：名称 → 位宽 → 外侧端头，整组贴右对齐。 */
+.module-symbol .module-pin-group.output .module-pin { justify-content: flex-end; }
+.module-symbol .module-pin-group.output .module-pin > code { order: 1; text-align: right; }
+.module-symbol .module-pin-group.output .module-pin-width { order: 2; }
+.module-symbol .module-pin-group.output .module-pin-lead { order: 3; }
+
+/* 双向在端头处用实心菱形表达；↔ 节点保留给读屏（既有契约依赖）。 */
+.module-symbol .module-pin-direction {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+}
+
+/* ---------- 引脚端头：贴边短线 + 实心圆点（与连线图 group-port 的信号端头一致） ---------- */
+.module-symbol .module-pin-lead { position: relative; flex: 0 0 auto; width: 13px; height: 10px; color: var(--wire); }
+.module-symbol .module-pin-lead::before {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 0;
+    width: 13px;
+    height: 1px;
+    margin-top: -.5px;
+    background: currentColor;
+}
+.module-symbol .module-pin-lead::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 0;
+    width: 5.4px;
+    height: 5.4px;
+    margin-top: -2.7px;
+    border-radius: 50%;
+    background: currentColor;
+}
+.module-symbol .module-pin-group.output .module-pin-lead::after { left: auto; right: 0; }
+/* 双向：实心菱形端头。 */
+.module-symbol .module-pin-lead[data-direction="inout"]::after { border-radius: 1px; transform: rotate(45deg); }
+/* 引用 / 方向待确认：虚线 + 空心圆点。 */
+.module-symbol .module-pin-lead:is([data-direction="ref"], [data-direction="unknown"])::before {
+    height: 0;
+    margin-top: 0;
+    border-top: 1px dashed currentColor;
+    background: none;
+}
+.module-symbol .module-pin-lead:is([data-direction="ref"], [data-direction="unknown"])::after {
+    background: var(--panel);
+    box-shadow: inset 0 0 0 1.2px currentColor;
+}
+
+/* ---------- 接口束：单行、总线字形、类型与 modport、角色芯片 ---------- */
+.module-symbol .module-pin.module-interface-pin {
+    --bus-accent: var(--bus);
+    display: grid;
+    grid-template-columns: 13px minmax(0, 1fr);
+    align-items: center;
+    gap: 8px;
+    min-height: 32px;
+    padding: 5px 12px;
+    white-space: normal;
+}
+.module-symbol .module-pin-group.output .module-interface-pin { grid-template-columns: minmax(0, 1fr) 13px; }
+.module-symbol .module-pin-group.output .module-interface-pin .module-bus-symbol { grid-column: 2; grid-row: 1; }
+.module-symbol .module-pin-group.output .module-interface-pin .module-interface-label { grid-column: 1; grid-row: 1; text-align: right; }
+.module-symbol .module-interface-pin.master { --bus-accent: var(--bus); }
+.module-symbol .module-interface-pin.slave { --bus-accent: var(--down); }
+
+/* 与连线图 group-port 同款：粗总线短线伸向卡内，贴外边缘放实心方块端头。 */
+.module-symbol .module-bus-symbol {
+    position: relative;
+    width: 13px;
+    height: 10px;
+    color: var(--bus);
+}
+.module-symbol .module-bus-symbol::before {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 0;
+    width: 13px;
+    height: 2px;
+    margin-top: -1px;
+    border-radius: 1px;
+    background: currentColor;
+}
+.module-symbol .module-bus-symbol::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 0;
+    width: 6.5px;
+    height: 6.5px;
+    margin-top: -3.25px;
+    border-radius: 1px;
+    background: currentColor;
+}
+.module-symbol .module-pin-group.output .module-bus-symbol::after { left: auto; right: 0; }
+
+.module-symbol .module-interface-label { display: grid; gap: 1px; min-width: 0; }
+.module-symbol .module-interface-label strong {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+    color: var(--bus);
+    font: 600 11.5px/1.45 var(--font-mono);
+}
+.module-symbol .module-interface-pin:is(a, button) strong { color: var(--action); }
+.module-symbol .module-interface-label strong code { padding: 0; background: none; color: inherit; font: inherit; }
+.module-symbol .module-interface-label small { color: var(--muted); font: 10px/1.4 var(--font-mono); }
+.module-symbol .module-interface-missing { color: var(--faint); }
+
+.module-symbol .module-interface-role {
+    flex: 0 0 auto;
+    padding: 1px 4px;
+    border-radius: 2px;
+    background: color-mix(in srgb, var(--bus-accent) 10%, var(--panel));
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--bus-accent) 34%, var(--panel));
+    color: var(--bus-accent);
+    font: 600 9.5px/1.35 var(--font-ui);
+    letter-spacing: .03em;
+}
+
+/* 接口行不再用分隔线：卡片式布局靠间距分组，与连线图卡片一致。 */
+
+/* ---------- 时钟/复位脚注：与连线图卡片的 CLK / RST 两行同款 ---------- */
+.module-symbol-foot {
+    display: grid;
+    gap: 2px;
+    padding: 6px 12px 8px;
+    border-top: 1px solid var(--line);
+}
+.module-symbol-foot .clock-foot { display: flex; align-items: baseline; gap: 12px; margin: 0; font-family: var(--font-mono); font-size: 10px; color: var(--muted); }
+.module-symbol-foot .clock-tag { flex: 0 0 26px; color: var(--faint); font: 600 9px/1.4 var(--font-ui); letter-spacing: .08em; }
+.module-symbol-foot .clock-start { display: flex; flex-wrap: wrap; align-items: baseline; }
+.module-symbol-foot .clock-net { border: 0; padding: 0; background: none; color: var(--ink-2); font: inherit; cursor: pointer; }
+.module-symbol-foot .clock-net:hover { color: var(--focus); }
+.module-symbol-foot .clock-sep { margin: 0 2px; color: var(--faint); }
+
+/* ---------- 共享 / 引用分组：页脚带，样式与普通引脚一致 ---------- */
+.module-symbol > .module-pin-group.shared { border-top: 1px solid var(--line); }
+.module-symbol .module-pin-group.shared > ul { display: flex; flex-wrap: wrap; padding: 2px 8px 0; }
+.module-symbol .module-pin-group.shared li { flex: 0 0 auto; }
+.module-symbol .module-pin-group.shared .module-pin { width: auto; padding: 0 6px; }
+
+/* ---------- 窄容器：单列堆叠 ---------- */
+@container (max-width: 360px) {
+    .module-symbol { width: 100%; }
+    .module-pin-sides { grid-template-columns: minmax(0, 1fr); }
+    .module-symbol .module-pin-group { width: 100%; }
+    .module-symbol .module-pin-sides > .module-pin-group + .module-pin-group {
+        border-top: 1px solid var(--line);
+        border-left: 0;
+    }
+    /* 单列时每行从左边起读：端头、名称、位宽依次排列。 */
+    .module-symbol .module-pin-group.output .module-pin { justify-content: flex-start; }
+    .module-symbol .module-pin-group.output .module-pin > code { text-align: left; }
+    /* 单列时角色芯片紧跟名称，不再拉到整行最右。 */
+    .module-symbol .module-interface-label strong { justify-content: flex-start; }
+}

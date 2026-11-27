@@ -29,6 +29,14 @@ test('无编辑器工程模型与CLI使用相同成员/文件集，并拒绝多�
     await assert.rejects(resolveContext({workspace}),{code:'AMBIGUOUS_PROJECT'});
     assert.equal((await resolveContext({workspace,project:file})).context.project.name,'one');
 });
+test('并发读取后快照顺序与文件集一致，两次读取哈希相同',async t=>{
+    const workspace=await fixture(t);
+    for(const name of ['b.v','a.v','c.v']) await fs.writeFile(path.join(workspace,name),'module '+name[0]+'; endmodule');
+    const value=await resolveContext({workspace});
+    assert.deepEqual([...value.contents.keys()],value.context.files.map(file=>file.path));
+    const again=await resolveContext({workspace});
+    assert.equal(again.context.revision,value.context.revision);
+});
 test('哈希身份发现相同文件长度和mtime的修改，配置和头文件变化也使快照失效',async t=>{
     const workspace=await fixture(t), file=path.join(workspace,'top.sv');
     const initial=await resolveContext({workspace}), stat=await fs.stat(file);

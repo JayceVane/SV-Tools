@@ -30,10 +30,13 @@ impl Engine {
             // 都表示 assign 表达式破行未写完，此时不能切断块——否则块只剩
             // 已写部分，align_assign 会因尾部换行多补一个空行（issue #3
             // 及其花括号变体）
-            session
-                .buffer
-                .output
-                .push_str(&self.align_assign(&session.buffer.block, AssignmentKind::Continuous));
+            if self.options.reindent_only() {
+                session.buffer.output.push_str(&session.buffer.block);
+            } else {
+                session.buffer.output.push_str(
+                    &self.align_assign(&session.buffer.block, AssignmentKind::Continuous),
+                );
+            }
             session.buffer.block.clear();
             self.block_state = BlockState::None;
         } else if matches!(self.block_state, BlockState::Decl)

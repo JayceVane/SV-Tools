@@ -21,7 +21,17 @@ const { createToolTaskManager, cancelledError } = require('../toolchains/job');
 const { createBufferedOutput } = require('../toolchains/channel');
 const { createSimulationEnginePicker } = require('../toolchains/simulation-engines');
 const { runVivadoBatchTask } = require('./batch');
+const { parseRunProgress } = require('./progress');
 const { prepareVivadoScript } = require('./script-task');
+const { createVivadoSessions } = require('./session');
+const versionCheck = require('./version');
+const { script: assetScript, sessionScript, readRows, rowsOf } = require('./asset-task');
+const summary = require('./summary');
+const { createSummaryReports, analysisCommands } = require('./summary-reports');
+const { createSummaryMessages } = require('./summary-messages');
+const { openSummaryPanels } = require('./summary-view');
+const { summaryStrings } = require('./summary-strings');
+const { showReport } = require('./reportView');
 const { scanWorkspaceSources } = require('../workspace/sources');
 const fs = require('fs');
 const os = require('os');
@@ -50,6 +60,9 @@ function activateVivado(context, deps) {
     let projectTree = null;
     const retainedRuns = () => vscode.workspace.getConfiguration('svtools.tasks').get('retainedRuns', 5);
     const output = createBufferedOutput(out), tasks = createToolTaskManager({ retention: { keep: retainedRuns }, onChange(job) { projectTree?.setRunning(job.finished ? null : job.state); } });
+    const sessionIdleMs = () => Math.max(1, vscode.workspace.getConfiguration('svtools.vivado').get('sessionIdleMinutes', 10)) * 60000;
+    // 传取值函数而不是快照：改设置后下一次重置空闲计时立即生效，不必重载窗口。
+    const sessions = createVivadoSessions({ log, idleMs: () => sessionIdleMs(), verify: verifyVivadoVersion });
     const projectSelection = deps?.projectSelection || createProjectSelection({ workspace: vscode.workspace, state: context.workspaceState });
 
     let running = null;      // { job, scriptPath }，准备阶段也可停止。
@@ -58,14 +71,14 @@ function activateVivado(context, deps) {
 
     function log(msg) { out.appendLine(msg); }
 
-    function status(text, command) {
+    function status(text, command, tooltip) {
         if (!statusItem) {
             statusItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 90);
             statusItem.name = 'svtools Vivado';
         }
         if (!text) { statusItem.hide(); return; }
         statusItem.text = text;
-        statusItem.tooltip = 'svtools Vivado';
+        statusItem.tooltip = tooltip || 'svtools Vivado';
         statusItem.command = command || undefined;
         statusItem.show();
     }
@@ -75,6 +88,99 @@ function activateVivado(context, deps) {
         const cfg = vscode.workspace.getConfiguration('svtools.vivado');
         binDirCache = findVivadoBinDir(cfg.get('path'), process.env, null, process.platform);
         return binDirCache;
+    }
+
+    let versionPrompt = { key: '', until: 0 };
+    /** 工程版本已知时，只有匹配的工具可打开工程。 */
+    async function versionMismatch(xpr, binDir) {
+        let project;
+        try { project = await versionCheck.projectVersion(xpr); }
+        catch (error) { log('[vivado] 读取工程版本失败：' + error.message); return null; }
+        if (!project) return null;
+        const tool = await versionCheck.vivadoVersion(binDir).catch(() => undefined);
+        if (versionCheck.same(project, tool)) return null;
+        return { project, tool };
+    }
+
+    /**
+     * 顶部输入框直接填写匹配版本的 Vivado 路径；
+     * 校验通过后写入 svtools.vivado.path，并返回可用的 bin 目录。
+     */
+    async function promptVivadoPath(project, tool) {
+        const cfg = vscode.workspace.getConfiguration('svtools.vivado');
+        let value = String(cfg.get('path') || '');
+        const check = input => {
+            const text = String(input || '').trim().replace(/^["']|["']$/gu, '').trim();
+            if (!text) return { error: '请输入 Vivado 安装目录、bin 目录或 vivado.bat 路径' };
+            const dir = findVivadoBinDir(text, process.env, null, process.platform);
+            if (!dir) return { error: '该路径下没有 vivado.bat / vivado' };
+            return { dir };
+        };
+        const promptText = project
+            ? (tool
+                ? '工程由 Vivado ' + project + ' 创建，当前配置的是 Vivado ' + tool + '。请输入 Vivado ' + project + ' 的安装目录（也接受 bin 目录或 vivado.bat 全路径），校验通过后写入 svtools.vivado.path。'
+                : '无法确认当前 Vivado 的版本。工程由 Vivado ' + project + ' 创建，请输入 Vivado ' + project + ' 的安装目录（也接受 bin 目录或 vivado.bat 全路径），校验通过后写入 svtools.vivado.path。')
+            : '未找到可用的 Vivado，请输入安装目录（也接受 bin 目录或 vivado.bat 全路径），校验通过后写入 svtools.vivado.path。';
+        const placeholder = '例如 D:\\Xilinx\\Vivado\\' + (project || '2022.1');
+        for (;;) {
+            const entered = await vscode.window.showInputBox({
+                title: project ? (tool ? 'Vivado 版本不匹配' : '核验 Vivado 版本') : '选择 Vivado 安装目录',
+                prompt: promptText,
+                placeHolder: placeholder,
+                value,
+                ignoreFocusOut: true,
+                validateInput: input => check(input).error
+            });
+            if (entered === undefined) return null;
+            value = entered.trim().replace(/^["']|["']$/gu, '').trim();
+            const quick = check(value);
+            if (quick.error) { vscode.window.showErrorMessage(quick.error); continue; }
+            const version = await versionCheck.vivadoVersion(quick.dir).catch(() => undefined);
+            if (!version) { vscode.window.showErrorMessage('无法读取该路径的 Vivado 版本，请检查安装是否完整'); continue; }
+            if (project && !versionCheck.same(project, version)) {
+                vscode.window.showErrorMessage('该路径是 Vivado ' + version + '，需要 Vivado ' + project + '，请重新输入');
+                continue;
+            }
+            const target = vscode.workspace.workspaceFolders?.length
+                ? vscode.ConfigurationTarget.Workspace : vscode.ConfigurationTarget.Global;
+            await cfg.update('path', value, target);
+            binDirCache = null;
+            log('[vivado] 已更新 svtools.vivado.path：' + value + '（Vivado ' + version + '）');
+            return quick.dir;
+        }
+    }
+
+    /** 打开工程前的版本闸门：不匹配时用顶部输入框修复路径，返回本次可用的 binDir。 */
+    async function ensureVivadoVersion(xpr) {
+        let project;
+        try { project = xpr ? await versionCheck.projectVersion(xpr) : undefined; }
+        catch (error) { log('[vivado] 读取工程版本失败：' + error.message); project = undefined; }
+        const binDir = resolveBinDir();
+        if (!binDir) {
+            if (!xpr) return { ok: true, binDir };
+            log('[vivado] 未找到 Vivado，提示填写安装路径');
+            const fixed = await promptVivadoPath(project, null);
+            return fixed ? { ok: true, binDir: fixed } : { ok: false, binDir: null };
+        }
+        if (!project) return { ok: true, binDir };
+        const tool = await versionCheck.vivadoVersion(binDir).catch(() => undefined);
+        if (versionCheck.same(project, tool)) return { ok: true, binDir };
+        log(tool ? '[vivado] 版本不匹配：工程 ' + project + '，工具 ' + tool
+            : '[vivado] 无法读取工具版本，工程需要 Vivado ' + project);
+        const fixed = await promptVivadoPath(project, tool);
+        return fixed ? { ok: true, binDir: fixed } : { ok: false, binDir: null };
+    }
+
+    /** 会话层兜底：正常入口已由 ensureVivadoVersion 处理，避免绕过闸门时静默执行。 */
+    async function verifyVivadoVersion(xpr, binDir) {
+        const mismatch = await versionMismatch(xpr, binDir);
+        if (!mismatch) return true;
+        const key = mismatch.project + '|' + mismatch.tool;
+        if (versionPrompt.key === key && versionPrompt.until > Date.now()) return false;
+        versionPrompt = { key, until: Date.now() + 30000 };
+        const fixed = await promptVivadoPath(mismatch.project, mismatch.tool);
+        if (fixed) vscode.window.showInformationMessage('已更新 Vivado 路径，请重新执行刚才的操作');
+        return false;
     }
 
     // ---------------- Vivado 工程探测（决定标签页按钮显隐） ----------------
@@ -125,9 +231,10 @@ function activateVivado(context, deps) {
     let incrementalOperation = null, incrementalCancelled = false, incrementalPicker = null;
 
     /** 编辑器增量入口先占用选择/准备阶段，避免并发命令互相覆盖或重复提交。 */
-    async function incrementalAction(label, action) {
+    async function incrementalAction(label, action, { quiet = false } = {}) {
         if (running || incrementalOperation || projectTree?.isBusy()) {
-            vscode.window.showWarningMessage('Vivado 正在处理任务，请等待完成或先停止。');
+            // 静默模式用于依赖求值等后台动作，避免频繁打断用户。
+            if (!quiet) vscode.window.showWarningMessage('Vivado 正在处理任务，请等待完成或先停止。');
             return { code: null, status: 'skipped', error: 'busy' };
         }
         incrementalOperation = label; incrementalCancelled = false;
@@ -170,18 +277,21 @@ function activateVivado(context, deps) {
     }
 
     /** 独立动作目录保存脚本；准备后再次核对工程及文件集，busy 时不触碰现有脚本。 */
-    async function runIncrementalTcl(name, scriptBody, xpr, validate) {
+    async function runIncrementalTcl(name, scriptBody, xpr, validate, options = {}) {
         if (incrementalCancelled) return { code: null, status: 'cancelled' };
         if (running) { vscode.window.showWarningMessage('Vivado 正在运行，请先等待或停止。'); return { code: null, error: 'busy' }; }
         if (!await sameEditorProject(xpr)) return { code: null, status: 'cancelled', error: 'project-changed' };
-        const valid = () => {
-            if (validate(parseXpr(xpr))) return true;
+        const valid = async () => {
+            if (await validate(parseXpr(xpr))) return true;
             vscode.window.showWarningMessage('工程文件集或成员已变化，已取消操作，请重新执行命令。'); return false;
         };
-        if (!valid()) return { code: null, status: 'cancelled', error: 'project-changed' };
-        return runScript({ anchor: xpr, name, body: scriptBody, async validate() {
-            if (incrementalCancelled || !await sameEditorProject(xpr) || !valid()) throw cancelledError('工程已切换或操作已取消');
-        } }, { editorAction: true });
+        if (!await valid()) return { code: null, status: 'cancelled', error: 'project-changed' };
+        return runScript({
+            anchor: xpr, name, body: scriptBody, sessionBody: options.sessionBody, watch: options.watch, readOnly: options.readOnly,
+            async validate() {
+                if (incrementalCancelled || !await sameEditorProject(xpr) || !await valid()) throw cancelledError('工程已切换或操作已取消');
+            }
+        }, { editorAction: true, ...options });
     }
 
     async function addCurrentToProject() {
@@ -454,13 +564,44 @@ function activateVivado(context, deps) {
         });
     }
 
+    /** 生成动作可复用常驻会话；用户脚本与未提供会话用脚本仍走批处理。 */
+    async function executeVivado(job, input, { binDir, executable, args, cwd, scriptPath, timeoutMs, session = false, onProgress }) {
+        const sessionBody = input && typeof input === 'object' ? input.sessionBody : undefined;
+        const enabled = sessionBody && (session || vscode.workspace.getConfiguration('svtools.vivado').get('session', true));
+        const batch = () => runVivadoBatchTask({ task: job, executable, args, cwd, scriptPath, timeoutMs, onOutput: output.append, onProgress });
+        if (enabled) {
+            const sessionPath = path.join(path.dirname(scriptPath), 'session-' + path.basename(scriptPath));
+            try {
+                await fs.promises.writeFile(sessionPath, sessionBody, { encoding: 'utf8', flag: 'wx' });
+                log('[vivado] 使用常驻会话：' + sessionPath);
+                return await sessions.run({ binDir, xpr: input.anchor, task: job, directory: path.dirname(scriptPath),
+                    scriptPath: sessionPath, name: input.name, timeoutMs, watch: input.watch || [],
+                    readOnly: input.readOnly, onOutput: output.append });
+            } catch (error) {
+                if (error.code === 'TOOL_CANCELLED' || job.signal.aborted) throw error;
+                log('[vivado] 常驻会话不可用，回退批处理：' + error.message);
+                await sessions.closeAll('会话异常');
+            }
+        }
+        // 批处理会独占工程；先释放常驻会话，避免两个 Vivado 进程同时持有同一工程。
+        await sessions.closeAll();
+        return batch();
+    }
+
     /** 运行用户Tcl或生成动作；所有输入和日志共用受控任务目录与保留预算。 */
     async function runScript(input, opts = {}) {
         if (running || incrementalOperation && !opts.editorAction || projectTree?.isBusy() && !opts.panel) {
             vscode.window.showWarningMessage('Vivado 正在处理任务，请先等待或停止');
             return { code: null, error: 'busy' };
         }
-        const binDir = resolveBinDir();
+        let binDir = resolveBinDir();
+        const versionTarget = input && typeof input === 'object' ? input.anchor : undefined;
+        if (versionTarget) {
+            // 未配置或不匹配时在顶部输入框让用户填路径，成功后继续本次操作。
+            const check = await ensureVivadoVersion(versionTarget);
+            if (check.ok) binDir = check.binDir;
+            else if (binDir) return { code: null, status: 'cancelled', error: 'version-mismatch' };
+        }
         if (!binDir) {
             const pick = vscode.window.showErrorMessage(
                 '未找到 Vivado（vivado.bat）。请在设置 svtools.vivado.path 中指定安装目录', '打开设置');
@@ -469,6 +610,23 @@ function activateVivado(context, deps) {
             });
             return { code: null, error: 'not-found' };
         }
+        // “在常驻会话中运行”：把用户脚本包装成 source 语句，先切换到脚本目录，再交给常驻会话执行。
+        if (opts.session) {
+            if (typeof input !== 'string') throw new TypeError('常驻会话运行只接受 TCL 脚本文件');
+            const scriptFile = path.resolve(input);
+            const anchor = await refreshProjectContext();
+            if (!anchor) {
+                vscode.window.showErrorMessage('在常驻会话中运行 TCL 需要先选择 Vivado 工程');
+                return { code: null, error: 'project-required' };
+            }
+            if (!binDir) return { code: null, error: 'not-found' };
+            const check = await ensureVivadoVersion(anchor);
+            if (!check.ok) return { code: null, status: 'cancelled', error: 'version-mismatch' };
+            binDir = check.binDir;
+            const body = 'cd ' + tclQuote(path.dirname(scriptFile)) + '\n' + 'source -notrace ' + tclQuote(scriptFile);
+            input = { anchor, name: 'user_script.tcl', body, sessionBody: body };
+            opts = { ...opts, cwd: path.dirname(scriptFile) };
+        }
         const executable = path.join(binDir, process.platform === 'win32' ? 'vivado.bat' : 'vivado');
         const timeoutMs = opts.timeoutMs === undefined
             ? vscode.workspace.getConfiguration('svtools.vivado').get('timeoutMs', 0) : opts.timeoutMs;
@@ -476,6 +634,13 @@ function activateVivado(context, deps) {
         status('$(loading~spin) Vivado 运行中…', 'svtools.vivado.stop');
         const job = tasks.start('vivado');
         const task = { job, scriptPath: typeof input === 'string' ? input : undefined };
+        const onProgress = line => {
+            if (running !== task) return;
+            const parsed = parseRunProgress(line);
+            if (!parsed) return;
+            status('$(loading~spin) Vivado ' + parsed.run + ' ' + parsed.progress, 'svtools.vivado.stop',
+                'svtools Vivado · ' + parsed.run + ' · ' + parsed.progress + (parsed.status ? '\n' + parsed.status : ''));
+        };
         running = task;
         try {
             const prepared = await prepareVivadoScript(job, input, { workspace: vscode.workspace, uri: vscode.Uri.file });
@@ -485,7 +650,7 @@ function activateVivado(context, deps) {
             log('————————————————————————————————————');
             log('[vivado] ' + executable + ' ' + args.join(' '));
             log('[vivado] cwd: ' + cwd);
-            const result = await runVivadoBatchTask({ task: job, executable, args, cwd, scriptPath, timeoutMs, onOutput: output.append });
+            const result = await executeVivado(job, input, { binDir, executable, args, cwd, scriptPath, timeoutMs, session: Boolean(opts.session), onProgress });
             output.flush();
             log(`[vivado] ${result.ok ? '完成' : result.message}，耗时 ${(result.ms / 1000).toFixed(1)}s`);
             if (result.logPath) log('完整日志：' + result.logPath);
@@ -496,7 +661,7 @@ function activateVivado(context, deps) {
             return { code: null, status: job.signal.aborted || error.code === 'TOOL_CANCELLED' ? 'cancelled' : 'failed', error: error.message };
         } finally {
             try { await job.finish({ keepArtifacts: true }); } catch (error) { log('任务产物清理失败：' + error.message); }
-            if (running === task) { running = null; status(null); projectTree?.setRunning(null); }
+            if (running === task) { running = null; status(null); projectTree?.setRunning(incrementalOperation ? 'preparing' : null); }
         }
     }
 
@@ -637,34 +802,40 @@ function activateVivado(context, deps) {
 
     // ---------------- 命令接线 ----------------
 
-    context.subscriptions.push(out, { dispose() { tasks.cancelAll(); output.dispose(); statusItem?.dispose(); tasks.dispose().catch(error => console.error('Vivado 任务释放失败：', error)); } },
-        vscode.commands.registerCommand('svtools.vivado.runScript', async () => {
-            const editor = vscode.window.activeTextEditor;
-            if (editor && /\.tcl$/i.test(editor.document.fileName)) {
-                if (editor.document.isUntitled) { vscode.window.showErrorMessage('请先保存 TCL 脚本'); return; }
-                await editor.document.save();
-                return runScript(editor.document.fileName);
-            }
-            const ws = vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders[0];
-            if (!ws) { vscode.window.showErrorMessage('请先打开一个工作区'); return; }
-            const picks = await scanTclFiles(vscode, ws.uri.fsPath);
-            if (!picks.length) { vscode.window.showInformationMessage('工作区内没有 .tcl 脚本'); return; }
-            const sel = await vscode.window.showQuickPick(
-                picks.map(f => ({ label: path.relative(ws.uri.fsPath, f), abs: f })),
-                { placeHolder: '选择要运行的 TCL 脚本' });
-            if (!sel) return;
-            return runScript(sel.abs);
-        }),
-        vscode.commands.registerCommand('svtools.vivado.runActiveScript', async () => {
-            const editor = vscode.window.activeTextEditor;
-            if (!editor || !/\.tcl$/i.test(editor.document.fileName)) {
-                vscode.window.showErrorMessage('当前编辑器不是 .tcl 文件');
-                return;
-            }
-            if (editor.document.isUntitled) { vscode.window.showErrorMessage('请先保存 TCL 脚本'); return; }
+    async function pickTclScript() {
+        const ws = vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders[0];
+        if (!ws) { vscode.window.showErrorMessage('请先打开一个工作区'); return undefined; }
+        const picks = await scanTclFiles(vscode, ws.uri.fsPath);
+        if (!picks.length) { vscode.window.showInformationMessage('工作区内没有 .tcl 脚本'); return undefined; }
+        const sel = await vscode.window.showQuickPick(
+            picks.map(f => ({ label: path.relative(ws.uri.fsPath, f), abs: f })),
+            { placeHolder: '选择要运行的 TCL 脚本' });
+        return sel?.abs;
+    }
+    async function tclFileFromEditor(editorOnly) {
+        const editor = vscode.window.activeTextEditor;
+        if (editor && /\.tcl$/i.test(editor.document.fileName)) {
+            if (editor.document.isUntitled) { vscode.window.showErrorMessage('请先保存 TCL 脚本'); return undefined; }
             await editor.document.save();
-            return runScript(editor.document.fileName);
-        }),
+            return editor.document.fileName;
+        }
+        if (editorOnly) { vscode.window.showErrorMessage('当前编辑器不是 .tcl 文件'); return undefined; }
+        return pickTclScript();
+    }
+    async function runTclCommand({ session = false, editorOnly = false } = {}) {
+        const file = await tclFileFromEditor(editorOnly);
+        if (!file) return undefined;
+        return runScript(file, session ? { session: true } : {});
+    }
+
+    context.subscriptions.push(out, { dispose() {
+        tasks.cancelAll(); output.dispose(); statusItem?.dispose();
+        sessions.dispose().catch(error => console.error('Vivado 会话释放失败：', error));
+        tasks.dispose().catch(error => console.error('Vivado 任务释放失败：', error));
+    } },
+        vscode.commands.registerCommand('svtools.vivado.runScript', () => runTclCommand()),
+        vscode.commands.registerCommand('svtools.vivado.runScriptInSession', () => runTclCommand({ session: true })),
+        vscode.commands.registerCommand('svtools.vivado.runActiveScript', () => runTclCommand({ editorOnly: true })),
         vscode.commands.registerCommand('svtools.vivado.stop', () => stopRun()),
         vscode.commands.registerCommand('svtools.vivado.createProject', () => createProject()),
         vscode.commands.registerCommand('svtools.vivado.addToFileset', () => addCurrentToProject()),
@@ -686,6 +857,99 @@ function activateVivado(context, deps) {
     } catch (err) {
         log('[vivado] 工程树初始化失败: ' + (err && err.message));
     }
+
+    // 工程概览：复用常驻会话读取 run 状态；面板轮询期间不启动任何构建。
+    const overviewText = summaryStrings(vscode.env?.language);
+    const reports = createSummaryReports(context.workspaceState);
+    const runMessages = createSummaryMessages();
+    let summaryFolder = null;
+    async function summaryDirectory() {
+        if (!summaryFolder) {
+            const base = context.storageUri?.fsPath || context.globalStorageUri?.fsPath || os.tmpdir();
+            summaryFolder = path.join(base, 'vivado-summary');
+            await fs.promises.mkdir(summaryFolder, { recursive: true });
+        }
+        return summaryFolder;
+    }
+    async function openSummaryPath(file, line) {
+        try {
+            const uri = vscode.Uri.file(file);
+            const info = await fs.promises.stat(file);
+            if (info.isDirectory()) {
+                if (!await vscode.env.openExternal(uri)) throw new Error(overviewText.folderFailed);
+            } else {
+                const selection = line ? new vscode.Range(line - 1, 0, line - 1, 0) : undefined;
+                await vscode.window.showTextDocument(uri, selection ? { preview: false, selection } : { preview: false });
+            }
+        }
+        catch (error) { vscode.window.showErrorMessage(overviewText.openFailed + ' ' + file + '\n' + error.message); }
+    }
+    async function loadSummary(xpr) {
+        if (running) return { busy: true };
+        const current = xpr || await refreshProjectContext();
+        if (!current) return { error: overviewText.noProject };
+        let binDir = resolveBinDir();
+        const versionGate = await ensureVivadoVersion(current);
+        if (!versionGate.ok) {
+            return { error: binDir ? overviewText.versionError : overviewText.noTool };
+        }
+        binDir = versionGate.binDir;
+        const directory = await summaryDirectory();
+        const scriptPath = path.join(directory, 'project_summary.tcl');
+        await fs.promises.writeFile(scriptPath, sessionScript(summary.query()), 'utf8');
+        const controller = new AbortController();
+        try {
+            const result = await sessions.run({ binDir, xpr: current, task: { signal: controller.signal }, directory,
+                scriptPath, name: 'project_summary', timeoutMs: 120000, readOnly: true });
+            if (!result.ok) return { error: result.error || overviewText.readFailed };
+            const parsed = summary.parse(await readRows(directory));
+            const paths = await Promise.all(Object.entries(summary.runPaths(parsed, current)).map(async ([id, { directory, log }]) => {
+                const [dirInfo, logInfo] = await Promise.all([directory, log].map(file => fs.promises.stat(file).catch(() => null)));
+                return [id, { directory: dirInfo?.isDirectory() ? directory : null, log: logInfo?.isFile() ? log : null }];
+            }));
+            const artifacts = Object.fromEntries(paths);
+            const [analysis, messages] = await Promise.all([reports.read(parsed, artifacts), runMessages.summarize(artifacts)]);
+            return { ...parsed, xpr: current, paths: artifacts, analysis, runMessages: messages };
+        } catch (error) {
+            return { error: error.message };
+        }
+    }
+    async function generateSummaryReports(xpr, request) {
+        const result = await runScript({
+            anchor: xpr, name: 'project_analysis.tcl', body: assetScript(xpr, analysisCommands(request), { readOnly: true }),
+            async validate() {
+                const project = await findProjectXpr();
+                if (!project || !samePath(project, xpr)) throw new Error(overviewText.switched);
+                if (!await reports.isCurrent(request)) throw new Error(overviewText.checkpointChanged);
+            }
+        }, { quiet: true, panel: true });
+        if (result?.code !== 0 || !result.logPath) {
+            const reason = result?.stdout?.match(/^SVTOOLS_TCL_ERROR (.*)$/mu)?.[1];
+            return { error: reason || result?.error || overviewText.generationFailed };
+        }
+        const directory = path.dirname(result.logPath);
+        await reports.remember(request, directory);
+        const errors = rowsOf(await readRows(directory), 'analysis_error');
+        if (errors.length) return { error: overviewText.partial + '\n' + errors.map(([kind, error]) => overviewText[kind] + ' · ' + error).join('\n') };
+    }
+    const summaryPanels = openSummaryPanels(context, vscode, {
+        load: loadSummary, generate: generateSummaryReports, openPath: openSummaryPath, runMessages, log,
+        openDetail: (file, label, run) => showReport(vscode, vscode.Uri.file(file), run + ' · ' + label)
+    });
+    context.subscriptions.push(vscode.commands.registerCommand('svtools.vivado.summary', async (node, section) => {
+        try {
+            const xpr = await refreshProjectContext();
+            if (!xpr) { vscode.window.showErrorMessage(overviewText.noProject); return; }
+            if (node?.nodeData?.xpr && !samePath(xpr, node.nodeData.xpr)) throw new Error(overviewText.switched);
+            summaryPanels.open(xpr, ['utilization', 'timing'].includes(section) ? section : undefined);
+        } catch (error) { vscode.window.showErrorMessage(overviewText.overviewFailed + '\n' + error.message); }
+    }));
+
+    require('./asset-commands').activateAssetCommands(context, {
+        vscode, findProjectXpr, incrementalAction, runIncrementalTcl, resolveBinDir,
+        pickerToken: () => incrementalPicker?.token,
+        refresh: () => projectTree?.refresh()
+    });
 
     return {
         runScript, stopRun, createProject, simulateWithVivado,

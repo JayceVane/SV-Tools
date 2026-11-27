@@ -55,7 +55,12 @@
         onStart() { ++edgeVersion; hideMenu(false); gestures.finishMotion(); },
         onPreview(view) { state.view = view; viewportChanged(); }, onCommit: persist, onEnd: () => columns.sync() });
     const circuitLink = window.WaveCircuitLink.createWaveCircuitLink({state,document,post:message=>api.postMessage(message),addSignals,
-        select:applySelection,tracks,status});
+        select:applySelection,tracks,status,navigate: time => {
+            ++edgeVersion;
+            const span = Math.min(state.view.span, Math.max(12, Math.ceil(state.metadata.endTime / 40)));
+            setCursor(time, 'A');
+            setView({ start: time - span / 2, span });
+        }});
     $('circuitLink').onclick=()=>api.postMessage({type:'circuit-link'});
     $('title').textContent = BOOT.fileName;
 

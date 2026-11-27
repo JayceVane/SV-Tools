@@ -1,6 +1,7 @@
 'use strict';
 const path = require('node:path');
 const { keyOf } = require('./model');
+const { samePath, isXdc } = require('../vivado/xpr');
 const SYMBOLS = { internal: '●', output: '→', input: '←', inout: '↔', unknown: '?' };
 const ROLES = ['internal', 'output', 'input', 'inout', 'unknown'];
 const namesOf = node => node.names?.join('.') || node.moduleName;
@@ -42,8 +43,8 @@ function annotation(nodes, roles, ambiguous) {
     }
     return { flags, tooltip: lines.join('\n') };
 }
-/** @param {object} project 工程成员快照。 @param {{projection?:string,flow?:object}} options @returns {object[]} 仅文件/模块节点，信号名只放提示。 */
-function projectTree(project, { projection = 'files', flow } = {}) {
+/** @param {object} project 工程成员快照。 @param {{projection?:string,flow?:object,topFiles?:Map}} options @returns {object[]} 仅文件/模块节点，信号名只放提示。 */
+function projectTree(project, { projection = 'files', flow, topFiles } = {}) {
     if (!project) {
         return [];
     }
@@ -54,6 +55,7 @@ function projectTree(project, { projection = 'files', flow } = {}) {
         for (const node of flow.nodes) {
             const item = nodes.get(node.id);
             if (node.parentId === null) {
+                item.isTop = !flow.rootFallback;
                 roots.push(item);
             }
             else {
@@ -70,11 +72,19 @@ function projectTree(project, { projection = 'files', flow } = {}) {
     const assetGroups = { '.xci': ips, '.xcix': ips, '.bd': designs };
     for (const set of project.sets) {
         const group = { id: 'set:' + set.name, label: set.name + (set.top ? ' · top: ' + set.top : ''), kind: 'set', fileset: set.name, children: [], flags: [] };
+        const top = topFiles?.get(set.name);
         const folders = new Map([['', group]]);
         for (const file of [...set.files].sort()) {
             const fileKey = keyOf(file), role = roles.get(fileKey);
             const item = { id: group.id + '/file:' + fileKey, label: path.basename(file), kind: 'file', file, fileset: set.name, children: [],
                 ...(role ? annotation(role.nodes, role.roles, role.ambiguous) : { flags: [] }) };
+            if (top?.module === set.top && samePath(top?.file, file)) item.isTop = true;
+            if (set.type === 'Constrs') {
+                item.isConstraint = true;
+                item.isXdc = isXdc(set, file);
+                item.isConstraintTarget = item.isXdc && samePath(set.constraintTarget, file);
+                if (!item.isXdc && /\.xdc$/i.test(file)) item.icon = 'tcl';
+            }
             const assets = project.kind === 'vivado' && assetGroups[path.extname(file).toLowerCase()];
             if (assets) {
                 assets.children.push({ ...item, icon: assets.icon, tooltip: [set.name, item.tooltip].filter(Boolean).join('\n') });

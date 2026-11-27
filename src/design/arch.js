@@ -835,7 +835,7 @@ function classifyYosysFailure(logs, output = {}) {
  * @returns {Promise<object>} 架构数据（schemaVersion/stage/top/modules/instances/unresolved/graph/limitations）。
  */
 async function buildArchitecture({ workspace, files, top, includeDirs = [], defines = [], depth = 1, timeoutMs = DEFAULT_TIMEOUT_MS,
-    budget = {}, contextRevision = null }) {
+    budget = {}, contextRevision = null, engine, native }) {
     if (!TOP_GLOB.test(top || '')) {
         fail('INVALID_ARGUMENT', '--top需要普通HDL标识符');
     }
@@ -846,6 +846,11 @@ async function buildArchitecture({ workspace, files, top, includeDirs = [], defi
         }
     }
     checkModuleBudget(files, limits);
+    if (engine !== undefined && !['struct', 'yosys'].includes(engine)) fail('INVALID_ARGUMENT', '--engine 需要 struct 或 yosys');
+    const structural = require('./struct');
+    if (engine === 'struct' || (engine === undefined && structural.usesProfile(files))) {
+        return structural.build({ workspace, files, top, defines, depth, budget: limits, contextRevision, native });
+    }
     const duplicates = duplicateCandidates(files, workspace);
     if (duplicates) {
         fail('AMBIGUOUS_MODULE', '工作区存在同名模块声明，请先消除歧义', { names: duplicates.names, candidates: duplicates.candidates });
@@ -924,5 +929,5 @@ async function createRunDirectory(workspace) {
     return runDirectory;
 }
 
-module.exports = { buildArchitecture, projectArchitecture, DEFAULT_BUDGET, SCHEMA_VERSION, buildArchScript, duplicateCandidates,
+module.exports = { buildArchitecture, projectArchitecture, archHash, DEFAULT_BUDGET, SCHEMA_VERSION, buildArchScript, duplicateCandidates,
     classifyYosysFailure, blackboxFlag: flagSet, labelForSignals };

@@ -26,14 +26,12 @@
 'use strict';
 const fs = require('fs');
 const path = require('path');
-const { parseXpr, fileSetOf, samePath } = require('./xpr');
+const { parseXpr, fileSetOf, samePath, isXdc } = require('./xpr');
 const { buildProjectTree } = require('./tree-model');
 const { cancelledError } = require('../toolchains/job');
-const { showReport } = require('./reportView');
 const {
     buildAddFilesScript, buildRemoveFilesScript, buildSetTopScript, buildMoveFileScript,
-    buildLaunchRunScript, buildRunReportsScript,
-    parseUtilHierSummary, parseLogicLevelSummary
+    buildLaunchRunScript, buildSetConstraintTargetScript
 } = require('./tclgen');
 
 /**
@@ -44,9 +42,12 @@ const {
 function activateProjectTree(context, deps) {
     const vscode = deps.vscode || require('vscode');
     const { findProjectXpr, runScript, log, out } = deps;
+    const english = !/^zh\b/i.test(vscode.env?.language || 'zh-CN');
+    const targetAction = english ? 'Set Target Constraints File' : '设置目标约束文件';
     const changes = new vscode.EventEmitter();
     let roots = [], parents = new WeakMap(), disposed = false, revision = 0, queued = false, refreshing = null;
     let watcherTimer = null, operation = null, externalStage = null, stopRequested = false, stopAction = null, modelUnits = new Map(), pickerToken = null;
+    let indexedProject, topFiles;
     function setRunning(stage) {
         if (disposed) return;
         externalStage = stage;
@@ -60,7 +61,7 @@ function activateProjectTree(context, deps) {
                 : node.expanded ? vscode.TreeItemCollapsibleState.Expanded : vscode.TreeItemCollapsibleState.Collapsed;
             const item = new vscode.TreeItem(node.label, state);
             for (const key of ['id', 'description', 'tooltip', 'contextValue', 'nodeData']) item[key] = node[key];
-            item.iconPath = new vscode.ThemeIcon(node.icon || 'file-code');
+            item.iconPath = new vscode.ThemeIcon(node.icon || 'file');
             if (node.command) item.command = { command: node.command, title: node.label, arguments: [item] };
             else if (node.nodeData?.file) {
                 item.resourceUri = vscode.Uri.file(node.nodeData.file);
@@ -102,6 +103,7 @@ function activateProjectTree(context, deps) {
                 catch (error) { log('[工程树] 刷新失败：' + error.message); snapshot = { roots: [info('读取工程失败：' + error.message)], issues: [error.message] }; }
                 if (disposed || version !== revision) continue;
                 parents = new WeakMap(); roots = items(snapshot.roots); modelUnits = snapshot.units || new Map();
+                indexedProject = snapshot.project; topFiles = snapshot.topFiles;
                 tree.description = snapshot.project ? path.basename(snapshot.project) : undefined;
                 tree.message = operation ? '正在执行：' + operation : externalStage ? 'Vivado 正在运行，可使用标题栏停止任务' : snapshot.issues.length ? '有 ' + snapshot.issues.length + ' 项工程提示，详见树和输出通道' : undefined;
                 tree.badge = snapshot.count ? { value: snapshot.count, tooltip: '当前工程文件数' } : undefined;
@@ -279,6 +281,37 @@ function activateProjectTree(context, deps) {
         vscode.window.showInformationMessage(mod + ' 已设为 ' + fileset + ' 顶层');
     }
 
+    async function setConstraintTarget(nodeArg) {
+        const xpr = await currentXpr(nodeArg); if (!xpr) return;
+        const parsed = parseXpr(xpr);
+        let node = nodeArg?.nodeData;
+        if (!nodeArg) {
+            const choices = parsed.sets.flatMap(set => set.files.filter(file => isXdc(set, file) && !samePath(set.constraintTarget, file))
+                .map(file => ({ label: path.basename(file), description: set.name, detail: file, file, fileset: set.name })));
+            if (!choices.length) {
+                vscode.window.showInformationMessage(english ? 'No other XDC files are available as a target.' : '没有其他可设为目标约束文件的 XDC。');
+                return;
+            }
+            node = await vscode.window.showQuickPick(choices, { title: targetAction }, pickerToken?.token);
+            if (!node) return;
+        }
+        const eligibleSet = snapshot => snapshot.sets.find(set => set.name === node?.fileset
+            && isXdc(set, node.file) && set.files.some(member => samePath(member, node.file)));
+        const set = eligibleSet(parsed);
+        if (!set) {
+            vscode.window.showWarningMessage(english ? 'Select an XDC file in a constraints set of the current project.' : '请选择当前工程约束集内的 XDC 文件。');
+            return;
+        }
+        if (samePath(set.constraintTarget, node.file)) return;
+        const result = await runTcl('set_constraint_target.tcl', buildSetConstraintTargetScript(xpr, set.name, node.file), xpr, eligibleSet);
+        if (!succeeded(result) || !xprFact(xpr, latest => samePath(eligibleSet(latest)?.constraintTarget, node.file))) {
+            reportWriteFail(targetAction, result);
+            return;
+        }
+        const name = path.basename(node.file);
+        vscode.window.showInformationMessage(english ? `${name} is now the target constraints file for ${set.name}.` : `${name} 已设为 ${set.name} 的目标约束文件。`);
+    }
+
     async function moveFile(nodeArg, type) {
         if (nodeArg?.nodeData?.isReference) { vscode.window.showWarningMessage('此节点仅为引用，请在实际文件集中管理。'); return; }
         const xpr = await currentXpr(nodeArg); if (!xpr) return;
@@ -372,50 +405,6 @@ function activateProjectTree(context, deps) {
         log('[' + run + '] ' + label + '完成');
     }
 
-    /**
-     * 报告：跑 tcl 生成 .rpt → webview 打开 + 摘要进通道。
-     * @param {'synth_1'|'impl_1'} run
-     * @param {Array<'utilization'|'logic_levels'|'timing_summary'>} [kinds] 缺省 = 该 run 全套
-     */
-    async function openRunReports(run, kinds, nodeArg) {
-        const xpr = await currentXpr(nodeArg); if (!xpr) return;
-        const base = vscode.workspace.getWorkspaceFolder(vscode.Uri.file(xpr))?.uri.fsPath || path.dirname(xpr);
-        const parent = path.join(base, '.svtools', 'vivado', 'reports', run);
-        await fs.promises.mkdir(parent, { recursive: true });
-        const outDir = await fs.promises.mkdtemp(path.join(parent, 'report-'));
-        const r = await runTcl('reports_' + run + '.tcl', buildRunReportsScript({ xprPath: xpr, run, outDir, reports: kinds }), xpr);
-        if (r?.status === 'cancelled') { log('[工程树] 报告任务已取消'); return; }
-        if (!succeeded(r)) {
-            out.show(true);
-            vscode.window.showErrorMessage(run + ' 报告生成失败——若 run 未完成请先运行综合/布局布线（详见输出通道）');
-            return;
-        }
-        const list = kinds || (run === 'synth_1' ? ['utilization', 'logic_levels'] : ['utilization', 'timing_summary']);
-        const FILE_OF = {
-            'synth_1:utilization': ['synth_utilization.rpt', '综合报告 · 分层资源占用', (t) => summarizeHier('synth', t)],
-            'synth_1:logic_levels': ['synth_logic_levels.rpt', '综合报告 · 逻辑级数分布', (t) => log('[synth] ' + parseLogicLevelSummary(t))],
-            'impl_1:utilization': ['impl_utilization.rpt', '布局布线报告 · 分层资源占用', (t) => summarizeHier('impl', t)],
-            'impl_1:timing_summary': ['timing_summary.rpt', '时序报告 · Timing Summary', summarizeTiming]
-        };
-        for (const k of list) {
-            const entry = FILE_OF[run + ':' + k];
-            if (!entry) continue;
-            const p = path.join(outDir, entry[0]);
-            if (fs.existsSync(p)) showReport(vscode, vscode.Uri.file(p), entry[1]);
-            if (entry[2]) { try { entry[2](fs.readFileSync(p, 'utf8')); } catch (err) { log('[工程树] 读取报告摘要失败：' + err.message); } }
-        }
-    }
-
-    /** 分层资源摘要进通道（synth/impl 共用 parseUtilHierSummary）。 */
-    function summarizeHier(tag, text) {
-        for (const s of parseUtilHierSummary(text)) log('[' + tag + '] ' + s);
-    }
-    function summarizeTiming(text) {
-        const m = text.match(/^\|\s*(?:Design Timing Summary|WNS\(ns\)[^\n]*\|)\s*\n[^\n]*\n\|\s*(-?[\d.]+)\s*\|\s*(-?[\d.]+)\s*\|\s*(-?[\d.]+)\s*\|\s*(-?[\d.]+)/m);
-        if (m) log('[impl] WNS ' + m[1] + 'ns | TNS ' + m[2] + 'ns | WHS ' + m[3] + 'ns | THS ' + m[4] + 'ns'
-            + (parseFloat(m[1]) >= 0 && parseFloat(m[3]) >= 0 ? '（时序满足）' : '（存在违例！）'));
-    }
-
     /** 全部展开（视图标题栏按钮；收起用 VS Code 内置 collapse-all）。 */
     async function expandAll() {
         if (deps.headless) return vscode.commands.executeCommand('svtools.project.expandAll');
@@ -441,6 +430,7 @@ function activateProjectTree(context, deps) {
         vscode.commands.registerCommand('svtools.vivado.tree.removeFile', guarded('移出文件', removeFileFromProject)),
         vscode.commands.registerCommand('svtools.vivado.tree.setTopSynth', guarded('设置综合顶层', n => setTop(n, 'DesignSrcs'))),
         vscode.commands.registerCommand('svtools.vivado.tree.setTopSim', guarded('设置仿真顶层', n => setTop(n, 'SimulationSrcs'))),
+        vscode.commands.registerCommand('svtools.vivado.tree.setConstraintTarget', guarded(targetAction, setConstraintTarget)),
         vscode.commands.registerCommand('svtools.vivado.tree.moveToSim', guarded('移入仿真集', n => moveFile(n, 'SimulationSrcs'))),
         vscode.commands.registerCommand('svtools.vivado.tree.moveToSources', guarded('移入设计集', n => moveFile(n, 'DesignSrcs'))),
         vscode.commands.registerCommand('svtools.vivado.tree.elaborate', guarded('详细化', elaborateTop)),
@@ -448,16 +438,17 @@ function activateProjectTree(context, deps) {
         vscode.commands.registerCommand('svtools.vivado.tree.synthesize', guarded('综合', n => launchRun('synth_1', null, '综合', n))),
         vscode.commands.registerCommand('svtools.vivado.tree.implement', guarded('布局布线', n => launchRun('impl_1', 'route_design', '布局布线', n))),
         vscode.commands.registerCommand('svtools.vivado.tree.bitstream', guarded('生成 Bitstream', n => launchRun('impl_1', 'write_bitstream', 'Bitstream 生成', n))),
-        vscode.commands.registerCommand('svtools.vivado.tree.reportSynth', guarded('综合报告', n => openRunReports('synth_1', undefined, n))),
-        vscode.commands.registerCommand('svtools.vivado.tree.reportImpl', guarded('实现报告', n => openRunReports('impl_1', undefined, n))),
-        vscode.commands.registerCommand('svtools.vivado.tree.reportImplUtil', guarded('资源报告', n => openRunReports('impl_1', ['utilization'], n))),
-        vscode.commands.registerCommand('svtools.vivado.tree.reportTiming', guarded('时序报告', n => openRunReports('impl_1', ['timing_summary'], n))),
+        vscode.commands.registerCommand('svtools.vivado.tree.reportSynth', n => vscode.commands.executeCommand('svtools.vivado.summary', n, 'utilization')),
+        vscode.commands.registerCommand('svtools.vivado.tree.reportImpl', n => vscode.commands.executeCommand('svtools.vivado.summary', n, 'timing')),
+        vscode.commands.registerCommand('svtools.vivado.tree.reportImplUtil', n => vscode.commands.executeCommand('svtools.vivado.summary', n, 'utilization')),
+        vscode.commands.registerCommand('svtools.vivado.tree.reportTiming', n => vscode.commands.executeCommand('svtools.vivado.summary', n, 'timing')),
         vscode.commands.registerCommand('svtools.vivado.tree.expandAll', expandAll)
     );
 
     const ready = refresh();
     setRunning(null);
-    return { refresh, ready, dispose, setRunning, isBusy: () => !!operation, getChildren: provider.getChildren, onDidChangeTreeData: changes.event };
+    return { refresh, ready, dispose, setRunning, isBusy: () => !!operation, getChildren: provider.getChildren, onDidChangeTreeData: changes.event,
+        getTopFiles: xpr => samePath(xpr, indexedProject) ? topFiles : undefined };
 }
 
 module.exports = { activateProjectTree };

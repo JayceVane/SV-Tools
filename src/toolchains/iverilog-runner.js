@@ -8,6 +8,7 @@ const { COMPILE_TIMEOUT_MS } = require('./compile-policy');
 const { simulationWaveforms } = require('./simulation-waveforms');
 const { defaultVcdPath } = require('./waveform-paths');
 const { waveformFormat } = require('../waveform/format');
+const { captureInputs, saveIcarusRun } = require('../design/review-runs');
 
 /** 同目录只记录波形元数据，仿真后按实际变化识别产物，不用时间容差猜测。 */
 function waveformSnapshot(directory, targets = []) {
@@ -140,6 +141,15 @@ function createIcarusRunner(deps) {
     async function simulate(task, document) {
         const prep = await prepareSimulation(task, document);
         channel.appendLine('==== 仿真：' + prep.filePath + ' ====');
+        const reviewRoot = workspace.getWorkspaceFolder(document.uri)?.uri.fsPath;
+        let snapshot, dependencyPath;
+        if (reviewRoot && deps.recordReviewRuns) {
+            try {
+                snapshot = await captureInputs(reviewRoot, prep.files);
+                dependencyPath = path.join(prep.directory, 'review-dependencies.txt');
+                prep.args.push('-Mprefix=' + dependencyPath);
+            } catch (error) { channel.appendLine('未采集仿真评审输入：' + error.message); }
+        }
         const { result: compiled, files } = await compile(prep.toolchain, prep.args, prep.files, prep.fileDir, {
             task, scanSources, timeoutMs: COMPILE_TIMEOUT_MS, onStdout: output.append, onStderr: output.append });
         task.throwIfCancelled();
@@ -205,8 +215,16 @@ function createIcarusRunner(deps) {
             try { await archiveLease?.dispose(); } finally { await lease?.dispose(); }
         }
         const filesWritten = [...waves, ...unsupported];
+        let reviewRun;
+        if (snapshot && dependencyPath && files?.length && waves.length) {
+            try {
+                reviewRun = await saveIcarusRun({ root: reviewRoot, prep, snapshot, dependencies: dependencyPath, files, waves,
+                    logs: [compiledSummary.logPath, summary.logPath], command: { compile: prep.args, simulate: invocation.args } });
+                channel.appendLine('仿真评审记录：' + reviewRun);
+            } catch (error) { channel.appendLine('仿真评审记录未生成：' + error.message); }
+        }
         await deps.showWaveforms(task, filesWritten, prep.config, prep.filePath, waves); task.throwIfCancelled();
-        return { ...summary, waves: filesWritten, vvpFile: prep.vvpFile };
+        return { ...summary, waves: filesWritten, vvpFile: prep.vvpFile, ...(reviewRun ? { reviewRun } : {}) };
     }
     return { lint, simulate };
 }

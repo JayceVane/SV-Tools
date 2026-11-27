@@ -7,14 +7,15 @@ description: SV Tools CLI 的通用入口：doctor 能力发现、RTL 工程与�
 
 将 `<svtools-root>` 替换为已构建的 SV Tools 目录，以 `node <svtools-root>/src/cli/main.js` 调用；已链接的 Node 包也提供 `svtools-agent`。CLI 的 `--workspace` 明确指向用户的 RTL 工作区，不能把工具安装目录当作被检查工程。
 
-先运行 `doctor --workspace <rtl-workspace>` 查看 `data.capabilities` 和实际工具可用性。缺依赖是未执行，不是零错误通过。MCP 尚未实现，不要编造；IP/BD、外部 Tcl 钩子与动态 XDC 读取暂不支持，遇到 `SNAPSHOT_UNSUPPORTED` 按未支持处理并停止。
+先运行 `doctor --workspace <rtl-workspace>` 查看 `data.capabilities` 和实际工具可用性。缺依赖是未执行，不是零错误通过。遇到 `SNAPSHOT_UNSUPPORTED` 时，按诊断核对隔离构建的输入范围。IP／BD 的工程内管理见 `svtools-vivado`。
 
 ## 任务路由（按域读取对应技能）
 
 | 任务类型 | 使用技能 |
 | --- | --- |
-| Vivado 工程/运行/时序资源 DRC 报告 | `svtools-vivado` |
-| RTL 架构建模、结构检查、架构图/报告 | `svtools-design` |
+| Vivado 工程概览、运行告警、时序/资源/功耗/DRC、IP 与 Block Design | `svtools-vivado` |
+| 架构设计、事后架构报告、分层伪 SV 和 HTML／PDF 导出 | `svtools-design` |
+| 富文本 Note、源码注释、选区和具名块锚点 | `svtools-design` |
 | 波形查询、仿真失败定位、ΔCycle 排查 | `svtools-waveform` |
 | RTL 模块开发、架构任务交接、功能修改、验证交付、模块验证报告 | `svtools-delivery` |
 
@@ -34,4 +35,8 @@ RTL 修改后运行 `lint --file <path> --top <module>`。这属于编译/详细
 
 报告实际运行的命令、工程/源码版本、工具版本、结论和仍未验证的部分。原始日志按需分页读取，避免将整份日志交给模型。
 
-需要配置字段、退出码、分页、include 边界或安装说明时，读取 `references/cli.md`；用 `--help` 核对当前版本命令。
+## 编辑器专属能力（CLI 无对应）
+
+重复、插入文件头、波形和电路的交互查看、设计讲解与评审面板、笔记历史操作，以及 Vivado 工程树的展开与工程追踪使用编辑器入口。CLI 可用 `format`（支持 `alignComma`）、`wave export`、`circuit trace` 和 `note export --final`。文件头模板 `headerTemplate` 用于编辑器的插入文件头命令。
+
+通用配置、退出码和分页字段见[通用 CLI 参考](references/core-cli.md)。按任务查[命令索引](references/cli.md)。

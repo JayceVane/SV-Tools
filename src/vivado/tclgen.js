@@ -166,6 +166,23 @@ function buildSetTopScript(o) {
     ]);
 }
 
+function buildSetConstraintTargetScript(xpr, fileset, file) {
+    return wrapProjectScript(xpr, [
+        'set name ' + tclQuote(fileset),
+        'set sets [lsearch -all -inline -exact [get_filesets -quiet] $name]',
+        'if {[llength $sets] != 1 || [get_property FILESET_TYPE $sets] ne "Constrs"} { error "Constraint set unavailable: $name" }',
+        'set wanted [file normalize ' + tclQuote(file) + ']',
+        'set matches {}',
+        'foreach f [get_files -quiet -of_objects $sets -filter {FILE_TYPE == XDC}] {',
+        '    set actual [file normalize $f]',
+        '    if {$::tcl_platform(platform) eq "windows"} { set equal [string equal -nocase $actual $wanted] } else { set equal [string equal $actual $wanted] }',
+        '    if {$equal} { lappend matches $f }',
+        '}',
+        'if {[llength $matches] != 1} { error "XDC file unavailable or ambiguous in set $name ($wanted)" }',
+        'set_property TARGET_CONSTRS_FILE [lindex $matches 0] $sets'
+    ]);
+}
+
 /**
  * 生成文件集移动事务：先加入并验证目标引用，再移除源；后续失败恢复源引用与常用属性。
  * @param {{xprPath:string, file:string, from:string, to:string, isSv:boolean}} o
@@ -218,10 +235,32 @@ function buildMoveFileScript(o) {
 }
 
 /**
- * 生成"综合 / 布局布线"TCL：launch_runs（impl 自动级联 synth）+ wait_on_run，
- * 结束打印 run 的 STATUS/PROGRESS 供插件判定成败。
+ * 生成"综合 / 布局布线"TCL：launch_runs（impl 自动级联 synth）+ 轮询 run 状态，
+ * 每 2 秒打印 SVTOOLS_RUN_PROGRESS 供插件更新状态栏，结束打印 STATUS/PROGRESS 供判定成败。
  * @param {{xprPath:string, run:'synth_1'|'impl_1', toStep?:string, jobs?:number}} o
  */
+function runProgressWait(runName) {
+    return [
+        '    set svtools_run ' + tclQuote(runName),
+        '    set svtools_initial [get_property STATUS [get_runs $svtools_run]]',
+        '    set svtools_polls 0',
+        '    while {1} {',
+        '        set svtools_status [get_property STATUS [get_runs $svtools_run]]',
+        '        set svtools_progress [get_property PROGRESS [get_runs $svtools_run]]',
+        '        incr svtools_polls',
+        '        puts "SVTOOLS_RUN_PROGRESS ' + runName + ' $svtools_progress $svtools_status"',
+        '        catch { flush stdout }',
+        '        if {$svtools_progress eq "100%" || [string match -nocase "*complete*" $svtools_status] || ' +
+            '[string match -nocase "*error*" $svtools_status] || [string match -nocase "*fail*" $svtools_status] || ' +
+            '[string match -nocase "*abort*" $svtools_status] || [string match -nocase "*cancel*" $svtools_status]} {',
+        '            if {$svtools_polls > 1 || $svtools_status ne $svtools_initial} { break }',
+        '        }',
+        '        after 2000',
+        '    }',
+        '    set r [get_runs $svtools_run]'
+    ];
+}
+
 function buildLaunchRunScript(o) {
     const step = o.toStep ? ' -to_step ' + o.toStep : '';
     // reset：显式"重新运行"语义（源已变化的已完成run需重置，否则launch_runs拒绝）。
@@ -233,13 +272,12 @@ function buildLaunchRunScript(o) {
         ...(o.prerequisiteRun ? [
             '    reset_run '+tclQuote(o.prerequisiteRun),
             '    launch_runs '+tclQuote(o.prerequisiteRun)+' -jobs '+(o.jobs || 4),
-            '    wait_on_run '+tclQuote(o.prerequisiteRun),
-            '    if {[get_property PROGRESS [get_runs '+tclQuote(o.prerequisiteRun)+']] ne "100%"} { error "Synthesis prerequisite failed" }'
+            ...runProgressWait(o.prerequisiteRun),
+            '    if {[get_property PROGRESS $r] ne "100%"} { error "Synthesis prerequisite failed" }'
         ] : []),
         ...(o.reset ? ['    reset_run ' + o.run] : []),
         '    launch_runs ' + o.run + step + ' -jobs ' + (o.jobs || 4),
-        '    wait_on_run ' + o.run,
-        '    set r [get_runs ' + o.run + ']',
+        ...runProgressWait(o.run),
         '    puts "SVTOOLS_RUN_STATUS [get_property STATUS $r] [get_property PROGRESS $r]"',
         ...(o.captureArtifacts ? [
             '    puts "SVTOOLS_RUN_VERSION [version -short]"',
@@ -253,36 +291,6 @@ function buildLaunchRunScript(o) {
         'close_project',
         'puts "SVTOOLS_DONE"'
     ].join('\n') + '\n';
-}
-
-/**
- * 生成"打开已完成的 run 并输出报告"TCL。synth 报告含分层资源 + 逻辑级数；
- * impl 报告含时序汇总 + 资源。run 未完成时 open_run 报错（插件提示先跑）。
- * @param {{xprPath:string, run:'synth_1'|'impl_1', outDir:string, reports?:Array<'utilization'|'logic_levels'|'timing_summary'>}} o
- * reports 缺省 = 该 run 全套；传子集则只生成所选报告（快捷区拆分入口用）。
- */
-function buildRunReportsScript(o) {
-    const isSynth = o.run === 'synth_1';
-    const kinds = o.reports || (isSynth ? ['utilization', 'logic_levels'] : ['utilization', 'timing_summary']);
-    const L = [
-        'open_project ' + tclQuote(o.xprPath),
-        'set outDir ' + tclQuote(o.outDir),
-        'file mkdir $outDir',
-        'open_run ' + o.run + (isSynth ? ' -name netlist_1' : ' -name impl_1')
-    ];
-    for (const k of kinds) {
-        if (k === 'utilization') {
-            // 与 Vivado GUI 对齐：synth/impl 打开设计后的 Utilization 视图都是
-            // 分层表（synthesized/implemented design 默认 hierarchical 展示）
-            L.push('report_utilization -hierarchical -file $outDir/' + (isSynth ? 'synth_utilization.rpt' : 'impl_utilization.rpt'));
-        } else if (k === 'logic_levels') {
-            L.push('report_design_analysis -logic_level_distribution -file $outDir/synth_logic_levels.rpt');
-        } else if (k === 'timing_summary') {
-            L.push('report_timing_summary -file $outDir/timing_summary.rpt');
-        }
-    }
-    L.push('puts "SVTOOLS_REPORTS_DONE"', 'puts "SVTOOLS_DONE"');
-    return L.join('\n') + '\n';
 }
 
 /**
@@ -486,7 +494,7 @@ function buildVivadoDrcScript({ xprPath, run }) {
 module.exports = {
     tclQuote, tclList, wrapProjectScript,
     buildCreateProjectScript, buildAddFilesScript, buildRemoveFilesScript, buildSimulateScript,
-    buildSetTopScript, buildMoveFileScript, buildLaunchRunScript, buildRunReportsScript,
+    buildSetTopScript, buildSetConstraintTargetScript, buildMoveFileScript, buildLaunchRunScript,
     buildOocReportsScript, parseUtilHierSummary, parseLogicLevelSummary,
     buildVivadoStatusScript, buildVivadoTimingScript, buildVivadoUtilizationScript, buildVivadoDrcScript,
     buildAddFilesBatchScript,

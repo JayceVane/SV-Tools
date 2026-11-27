@@ -1,0 +1,11 @@
+.catalog { grid-template-columns: minmax(300px, 3fr) minmax(220px, 2fr); }
+.catalog-browser { min-height: 0; display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto; gap: 10px; padding: 14px; border-right: 1px solid var(--vscode-panel-border); }
+.catalog-filters { display: grid; grid-template-columns: minmax(125px, 2fr) minmax(85px, 1fr) minmax(85px, 1fr); gap: 6px; }
+.catalog-details p { margin-block: 7px 15px; white-space: pre-line; overflow-wrap: anywhere; }
+#catalog-status { max-height: 80px; overflow: auto; }
+@media (max-width: 620px) {
+    .catalog { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(180px, 3fr) minmax(100px, 2fr); }
+    .catalog-browser { border-right: 0; border-bottom: 1px solid var(--vscode-panel-border); padding: 8px; }
+    .catalog-filters { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+    #catalog-search { grid-column: 1 / -1; }
+}

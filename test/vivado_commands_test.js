@@ -66,7 +66,8 @@ async function harness(t, f, options = {}) {
             createTreeView: (id, settings) => { h.provider = settings.treeDataProvider; return { reveal: async () => {}, dispose() {} }; },
             showWarningMessage: text => messages.push(text), showErrorMessage: text => { messages.push(text); return Promise.resolve(); },
             showInformationMessage: text => { messages.push(text); return Promise.resolve(); },
-            showQuickPick: async (choices, settings) => { picks.push({ choices, settings }); return h.onPick(choices, settings); } },
+            showQuickPick: async (choices, settings) => { picks.push({ choices, settings }); return h.onPick(choices, settings); },
+            showInputBox: async settings => h.onInput?.(settings) },
         workspace: { workspaceFolders: folders, getWorkspaceFolder: resource => folders.find(folder => {
                 const relative = path.relative(folder.uri.fsPath, resource.fsPath); return relative !== '..' && !relative.startsWith('..' + path.sep) && !path.isAbsolute(relative);
             }), findFiles: async () => [], asRelativePath: file => path.relative(wsRoot || f.root, file),
@@ -86,6 +87,18 @@ async function harness(t, f, options = {}) {
 
 const add = h => h.commands.get('svtools.vivado.addToFileset')();
 const remove = h => h.commands.get('svtools.vivado.removeFromFileset')();
+
+test('无法确认 Vivado 版本时阻止打开版本已知的工程', async t => {
+    const f = await fixture(t), h = await harness(t, f);
+    const body = await fs.readFile(f.xpr, 'utf8');
+    await fs.writeFile(f.xpr, '<!-- Product Version: Vivado v2018.3 (64-bit) -->\n' + body);
+    let prompt;
+    h.onInput = settings => { prompt = settings; return undefined; };
+    const result = await h.api.runScript({ anchor: f.xpr, name: 'verify.tcl', body: 'version' });
+    assert.equal(result.status, 'cancelled');
+    assert.equal(h.calls.length, 0);
+    assert.match(prompt.prompt, /无法确认当前 Vivado 的版本.*2018\.3/u);
+});
 
 test('仿真入口公开菜单只有两个内置引擎，取消不启动任务', async t => {
     const f = await fixture(t), h = await harness(t, f, { noProject: true });
