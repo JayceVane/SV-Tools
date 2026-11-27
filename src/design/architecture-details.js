@@ -55,7 +55,10 @@
 
     function renderModuleSymbol(name, ports, { interactive = false, selected, targets, owner } = {}) {
         if (!ports.length) return '<p class="subtle">没有已解析的端口。</p>';
-        const groups = groupPorts(ports, 'output');
+        // 时钟/复位折到卡片底部两行（CLK / RST），与连线图卡片保持同一画法，不占左右列。
+        const clocks = ports.filter(port => port.direction !== 'interface' && signalKind(port.name));
+        const rest = clocks.length ? ports.filter(port => !clocks.includes(port)) : ports;
+        const groups = groupPorts(rest, 'output');
         const interfaces = groups.shared.filter(port => port.direction === 'interface');
         groups.shared = groups.shared.filter(port => port.direction !== 'interface');
         const control = (port, content, className = 'module-pin') => {
@@ -90,19 +93,31 @@
             const score = roleScore({ modport: port.type?.split('.')[1] });
             interfaceSides[score > 0 ? 'output' : 'input'].push(port);
         }
-        const side = (kind, label, english) => {
+        const side = (kind, label) => {
             const buses = interfaceSides[kind];
             const count = groups[kind].length + buses.length;
-            const caption = buses.length ? groups[kind].length ? label + ' / 接口' : '接口' : label;
-            return count ? `<section class="module-pin-group ${kind}" aria-label="${caption}">${heading(caption, english, count)}<ul>${buses.map(port => terminals.get(port.name)).join('')}${groups[kind].map(pin).join('')}</ul></section>` : '';
+            return count ? `<section class="module-pin-group ${kind}" aria-label="${label}"><ul>${buses.map(port => terminals.get(port.name)).join('')}${groups[kind].map(pin).join('')}</ul></section>` : '';
         };
         const outputLabel = groups.output.some(port => port.direction === 'inout') ? '输出 / 双向' : '输出';
         const sharedLabel = [...new Set(groups.shared.map(port => port.direction === 'ref' ? '引用' : '方向待确认'))].join(' / ');
         const shared = groups.shared.length
             ? `<section class="module-pin-group shared" aria-label="${sharedLabel}">${heading(sharedLabel, '', groups.shared.length)}<ul>${groups.shared.map(pin).join('')}</ul></section>`
             : '';
-        return `<div class="module-symbol-frame"><figure class="module-symbol" aria-label="${escape(name)} 端口图"><figcaption>${code(name)}</figcaption>
-            <div class="module-pin-sides">${side('input', '输入', 'INPUT')}${side('output', outputLabel, 'OUTPUT')}</div>${shared}</figure></div>`;
+        // 卡片副标题：端口规模，替代原来的列头计数。
+        const counts = [['输入', groups.input.length + interfaceSides.input.length], ['输出', groups.output.length + interfaceSides.output.length]]
+            .filter(([, total]) => total).map(([label, total]) => total + ' 个' + label);
+        if (groups.shared.length) counts.push(groups.shared.length + ' 个待确认');
+        const meta = counts.length ? `<span class="module-symbol-meta">${escape(counts.join(' · '))}</span>` : '';
+        const clockRow = kind => {
+            const items = clocks.filter(port => signalKind(port.name) === kind);
+            if (!items.length) return '';
+            return `<p class="clock-foot"><span class="clock-tag">${kind}</span><span class="clock-start">${items
+                .map(port => control(port, code(port.name), 'clock-net')).join('<span class="clock-sep"> · </span>')}</span></p>`;
+        };
+        const foot = clocks.length ? `<footer class="module-symbol-foot">${clockRow('CLK')}${clockRow('RST')}</footer>` : '';
+        return `<div class="module-symbol-frame"><figure class="module-symbol" aria-label="${escape(name)} 端口图">
+            <header class="module-symbol-head"><span class="module-symbol-title">${code(name)}</span>${meta}</header>
+            <div class="module-pin-sides">${side('input', '输入')}${side('output', outputLabel)}</div>${shared}${foot}</figure></div>`;
     }
 
     function routeText(member, endpoints) {

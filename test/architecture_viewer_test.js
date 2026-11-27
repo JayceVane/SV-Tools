@@ -549,6 +549,20 @@ test('同一网名在标签网络、卡底时钟行与图形层只有一个结�
     assert.ok(clockEdges.every(edge => edge.clockOnly), '时钟连线应全部标记为同名标签连接');
     assert.equal(isClockLike('ddr_init_done'), false);
 });
+test('端口图把时钟/复位折到卡底两行，列内不再重复', () => {
+    const markup = renderModuleSymbol('demo', [
+        { name: 'clk', direction: 'input', width: 1, type: 'logic' },
+        { name: 'rst_n', direction: 'input', width: 1, type: 'logic' },
+        { name: 'din', direction: 'input', width: 8, type: 'logic' },
+        { name: 'dout', direction: 'output', width: 8, type: 'logic' },
+    ], { interactive: true });
+    assert.match(markup, /class="module-symbol-foot"/u);
+    assert.match(markup, /class="clock-tag">CLK<\/span>[^]*?data-port="clk"/u);
+    assert.match(markup, /class="clock-tag">RST<\/span>[^]*?data-port="rst_n"/u);
+    assert.equal((markup.match(/data-port="clk"/gu) || []).length, 1, '时钟端口只出现在脚注里');
+    assert.equal((markup.match(/data-port="rst_n"/gu) || []).length, 1, '复位端口只出现在脚注里');
+    assert.match(markup, /class="module-symbol-meta">1 个输入 · 1 个输出/u, '副标题只数列内端口');
+});
 test('时钟复位短标签与接口预览保留真实名称和未知方向', () => {
     assert.equal(signalKind('hp_axi_aclk'), 'CLK');
     assert.equal(signalKind('gp_clk_rst'), 'RST');
