@@ -29,6 +29,10 @@ test('报文汇聚简图保留独立实例、标签网络和架构握手证据�
     presentation.walkthroughs = { packet_hub: { steps: [
         { title: '仲裁 <输出>', description: '核对仲裁到 FIFO 的连接。', links: ['arbitrated', 'stale_link'] },
     ], clockResets: { clk: 'rst_n', invalid_clk: 'rst_n' } } };
+    presentation.designDocs = { packet_fifo: 'design.md' };
+    const designDoc = path.join(workspace, 'design.md');
+    const designText = '# FIFO 设计契约\n\n**出队顺序**按仲裁结果。\n\n[附件](https://example.invalid/contract) ![时序](https://example.invalid/wave.png)\n\n<script>globalThis.executed = true</script>\n';
+    await fs.writeFile(designDoc, designText);
     await fs.writeFile(configPath, JSON.stringify(presentation));
     const loaded = await buildArchitectureBook(await resolveContext({ workspace, top: 'packet_hub' }));
     const [top] = loaded.book.pages;
@@ -40,6 +44,9 @@ test('报文汇聚简图保留独立实例、标签网络和架构握手证据�
     assert.equal(child.parent, top.id);
     assert.match(child.number, /^1\.\d+$/u);
     assert.equal(child.depth, 1);
+    assert.equal(top.designDoc, undefined);
+    assert.equal(child.designDoc.path, 'design.md');
+    assert.equal(child.designDoc.sha256, createHash('sha256').update(designText).digest('hex'));
     assert.deepEqual(fifo.parameters, { DEPTH: 32 });
     assert.equal(loaded.book.pages.find(page => page.id === fifo.chapter).auto, 'detailed');
     const link = top.links.find(link => link.name === 'arbitrated');
@@ -102,6 +109,11 @@ test('报文汇聚简图保留独立实例、标签网络和架构握手证据�
     assert.match(html, /<figure class="module-symbol" aria-label="packet_fifo #\(DEPTH=32\) 端口图"/u);
     assert.match(html, /<a class="module-pin module-interface-pin" href="#module-\d+-link-\d+"[^>]*><span class="module-bus-symbol"[^>]*><\/span>\s*<span class="module-interface-label">\s*<strong><code>enqueue<\/code>/u);
     assert.match(html, /id="chapter-filter"/u);
+    assert.ok(html.includes(`id="${child.id}-design-doc" data-print-open>`));
+    assert.match(html, /<strong>出队顺序<\/strong>/u);
+    assert.match(html, /附件 <code>https:\/\/example\.invalid\/contract<\/code>/u);
+    assert.doesNotMatch(html, /<(?:img|a)[^>]+https:\/\/example\.invalid/u);
+    assert.ok(!html.includes('<script>globalThis.executed'));
     assert.match(html, /仲裁 &lt;输出&gt;/u);
     assert.match(html, /<code>stale_link<\/code> <span[^>]+>未定位<\/span>/u);
     assert.match(html, /<th scope="row">CLK <code>clk<\/code><\/th><td><code>clk（本章边界）<\/code><\/td><td>[^]*?<code>u_fifo\.clk<\/code>/u);
@@ -112,6 +124,7 @@ test('报文汇聚简图保留独立实例、标签网络和架构握手证据�
     const printed = await renderArchitectureBook(loaded.book, undefined, { print: true });
     assert.ok(printed.includes(`data-print-open id="${link.id}" open><summary>`));
     assert.match(printed, /class="book-detail book-stubs" data-print-open open/u);
+    assert.ok(printed.includes(`id="${child.id}-design-doc" data-print-open open>`));
     assert.doesNotMatch(printed, /<button[^>]+data-walkthrough-step/u);
     assert.ok(!printed.includes('<script>'));
     assert.ok(!printed.includes('<template'), '打印报告不嵌入交互预览副本');
@@ -134,12 +147,20 @@ test('报文汇聚简图保留独立实例、标签网络和架构握手证据�
     assert.equal(cli.output.operation, 'design.export');
     assert.equal(cli.output.data.chapterCount, loaded.book.pages.length);
     assert.equal(cli.output.data.revision, loaded.book.revision);
+    assert.deepEqual(cli.output.data.designDocs, [{ module: 'packet_fifo', path: 'design.md', sha256: child.designDoc.sha256 }]);
     const artifact = cli.output.artifacts[0];
     assert.equal(await fs.readFile(artifact.path, 'utf8'), html);
     assert.equal(artifact.sha256, createHash('sha256').update(html).digest('hex'));
     assert.equal((await run(args)).output.diagnostics[0].code, 'EEXIST');
+    await fs.appendFile(designDoc, '更新了设计约定。\n');
+    await assert.rejects(assertBookCurrent(loaded), { code: 'CONTEXT_CHANGED' });
+    const updated = await buildArchitectureBook(await resolveContext({ workspace, top: 'packet_hub' }));
+    assert.notEqual(updated.book.revision, loaded.book.revision);
+    await fs.writeFile(configPath, JSON.stringify({ ...presentation, designDocs: { packet_fifo: '../other.md' } }));
+    const outside = await run([...args.slice(0, -1), 'rejected.html']);
+    assert.equal(outside.output.diagnostics[0].code, 'INVALID_PATH');
     await fs.writeFile(path.join(workspace, 'svtools.architecture.json'), '{}');
-    await assert.rejects(assertBookCurrent(loaded), /已修改/u);
+    await assert.rejects(assertBookCurrent(updated), /已修改/u);
 });
 
 test('架构文档标出子模块接口的多个输出端，并在读取 XPR 之前拒绝用真实工程导出', async t => {

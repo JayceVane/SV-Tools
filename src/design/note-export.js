@@ -18,7 +18,7 @@ const { fail } = require('../agent/protocol');
 const KIND = 'svtools-note-export';
 const MAX_MANIFEST = 2 * 1024 * 1024;
 const escape = value => String(value).replace(/[&<>"']/gu, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
-const MarkdownIt = () => {
+const loadMarkdownIt = () => {
     try { const bundled = require('../../bin/vendor/note-markdown.cjs'); return bundled.default || bundled; }
     catch (error) { if (error.code !== 'MODULE_NOT_FOUND') throw error; return require('markdown-it'); }
 };
@@ -63,7 +63,7 @@ const verificationLabels = { unbound: '未绑定仿真运行', pending_review: '
     review_recorded: '已有复核结论，结果见清单' };
 
 function html(title, content) {
-    const render = new (MarkdownIt())({ html: false, linkify: false });
+    const render = new (loadMarkdownIt())({ html: false, linkify: false });
     return '<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">' +
         '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; style-src \'unsafe-inline\'">' +
         `<title>${escape(title)}</title><style>
@@ -209,4 +209,4 @@ async function exportNotes(root, options = {}) {
     }
 }
 
-module.exports = { exportNotes, inspectExport, printPdf, KIND, MAX_MANIFEST };
+module.exports = { exportNotes, inspectExport, printPdf, loadMarkdownIt, KIND, MAX_MANIFEST };

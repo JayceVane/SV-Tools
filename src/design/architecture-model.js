@@ -2,13 +2,15 @@
 
 const path = require('node:path');
 const { resolveContext, assertCurrent, hash } = require('../agent/context');
-const { json } = require('./workflow-files');
+const { json, unchanged } = require('./workflow-files');
 const { projectArchitecture } = require('./arch');
 const { analyzeStructure, unitInterface, interfaceOverrides, interfaceEvidence, position } = require('./struct');
 const { bindings } = require('../project/rtl-model');
 const { connectionEvidence } = require('./interface-evidence');
 const { isClockLike } = require('./architecture-details');
 const { walkthroughFor } = require('./architecture-reading');
+const { bindDesignDocs } = require('./architecture-design-doc');
+const { fail } = require('../agent/protocol');
 
 const CONFIG = 'svtools.architecture.json';
 const instanceId = name => 'instance:' + name;
@@ -209,16 +211,22 @@ async function buildArchitectureBook(snapshot, native) {
         return { id, file: path.relative(workspace, location.path).split(path.sep).join('/'), line: location.line };
     }
     const pages = [...ids.keys()].map(id => ({ ...modulePage(byId.get(id), basis, ids, presentation, source, workspace), ...positions.get(id) }));
-    const loaded = { snapshot, presentationRevision, sourceLocations, book: { revision: hash(context.revision + presentationRevision),
+    const { documents, bindings: designDocs } = await bindDesignDocs(workspace, presentation?.designDocs, pages, basis.parsed.units);
+    const designDocFiles = [...documents.values()].map(({ path, sha256 }) => ({ path, sha256 }));
+    const documentRevision = designDocFiles.length ? hash(JSON.stringify(designDocFiles)) : '';
+    const loaded = { snapshot, presentationRevision, sourceLocations, designDocFiles, designDocs,
+        book: { revision: hash(context.revision + presentationRevision + documentRevision),
         top: context.top, pages, diagnostics: basis.parsed.diagnostics, issues: basis.issues } };
     await assertBookCurrent(loaded);
     return loaded;
 }
 
-async function assertBookCurrent({ snapshot, presentationRevision }) {
+async function assertBookCurrent({ snapshot, presentationRevision, designDocFiles }) {
     await assertCurrent(snapshot);
     if (hash(JSON.stringify(await readPresentation(snapshot.context.workspace))) !== presentationRevision)
         throw new Error(CONFIG + ' 已修改，请重新读取架构。');
+    if (designDocFiles?.length && !await unchanged(snapshot.context.workspace, designDocFiles))
+        fail('CONTEXT_CHANGED', '绑定的模块设计文档已修改，请重新读取架构。', {}, 4);
 }
 
 function resolveReviewFocus(book, target) {

@@ -3,7 +3,7 @@
     'use strict';
 
     const api = acquireVsCodeApi();
-    const { escape, code, pageName, chapterNumber, chapterTitle, parameterText, sourceLink, portTable, renderModuleSymbol, portDescription,
+    const { escape, code, pageName, chapterNumber, chapterTitle, parameterText, sourceLink, designDocument, portTable, renderModuleSymbol, portDescription,
         interfaceDetails, signalEnds, backgroundSignals, connectionPreview } = ArchitectureDetails;
     const $ = id => document.getElementById(id);
     const action = (field, id, label) => `<button class="text-action" type="button" data-${field}="${escape(id)}">${escape(label)}</button>`;
@@ -71,6 +71,7 @@
         $('page-title').textContent = chapterTitle(page);
         $('page-meta').innerHTML = [code(pageName(page)), page.empty && '实现桩', site('', page)].filter(Boolean).join(' · ');
         $('labels').innerHTML = backgroundSignals(page, true);
+        $('module-design-doc').innerHTML = designDocument(page.designDoc, page.id);
         $('page-checks').innerHTML = diagnosticMarkup(page);
         $('graph-tools').hidden = !page.hasStructure;
         inspector.classList.toggle('symbol-only', !page.hasStructure);

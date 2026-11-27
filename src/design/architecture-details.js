@@ -25,6 +25,13 @@
         return interactive ? `<button class="text-action" type="button" data-source="${escape(source.id)}" title="${tooltip}">${name}</button>` : `<span class="source-label">${title ? `${name} (${tooltip})` : name}</span>`;
     }
 
+    function designDocument(document, id, print = false) {
+        if (!document) return '';
+        return `<details class="architecture-design-doc" id="${escape(id)}-design-doc" data-print-open${print ? ' open' : ''}>
+            <summary>模块设计说明</summary><p class="source-label">${code(document.path)} · SHA-256 ${code(document.sha256.slice(0, 12))}</p>
+            <div class="architecture-design-doc-body">${document.html}</div></details>`;
+    }
+
     function portTable(ports, interactive) {
         if (!ports.length) return '<p class="subtle">没有已解析的端口。</p>';
         return `<div class="table-scroll"><table><thead><tr><th scope="col">端口</th><th scope="col">声明类型</th><th scope="col">方向</th><th scope="col">位宽</th><th scope="col">源码</th></tr></thead><tbody>${ports.map(port =>
@@ -205,7 +212,7 @@
         }).join('')}</dl></details>`;
     }
 
-    const details = { escape, code, pageName, chapterNumber, chapterTitle, parameterText, sourceLink, portTable, portDescription, renderModuleSymbol,
+    const details = { escape, code, pageName, chapterNumber, chapterTitle, parameterText, sourceLink, designDocument, portTable, portDescription, renderModuleSymbol,
         interfaceDetails, signalEnds, backgroundSignals, connectionPreview, signalKind, isClockLike };
     if (typeof module === 'object' && module.exports) module.exports = details;
     else root.ArchitectureDetails = details;

@@ -9,7 +9,7 @@ const { hash } = require('../agent/context');
 const { fail, result } = require('../agent/protocol');
 const { layoutDiagram, renderDiagram } = require('./architecture-diagram');
 const { renderGroupDiagrams } = require('./architecture-group');
-const { escape, code, pageName, chapterNumber, sourceLink, portTable, renderModuleSymbol, interfaceDetails, signalEnds, connectionPreview } = require('./architecture-details');
+const { escape, code, pageName, chapterNumber, sourceLink, designDocument, portTable, renderModuleSymbol, interfaceDetails, signalEnds, connectionPreview } = require('./architecture-details');
 const { walkthrough, clockNetworks } = require('./architecture-reading');
 const { printPdf } = require('./note-export');
 const { create } = require('./workflow-files');
@@ -110,6 +110,7 @@ async function renderArchitectureBook(book, modes, { print = false } = {}) {
             </div>
             ${print ? walkthrough(page, true) : ''}
             ${section('子模块', instanceTable, instances.length)}
+            ${designDocument(page.designDoc, page.id, print)}
             ${interfaceSection}
             ${page.ports.length ? `<details class="book-detail chapter-reference" data-print-open${opened}><summary>模块边界 · ${page.ports.length} 个端口</summary>${figure ? symbol : ''}${portTable(page.ports, false)}</details>` : ''}
             ${clocks}
@@ -198,6 +199,7 @@ async function exportFromCli(input) {
         top: book.top, revision: book.revision, chapterCount: book.pages.length,
         interfaceCount: book.pages.reduce((count, page) => count + page.links.filter(link => link.kind === 'interface').length, 0),
         sourceFiles: snapshot.context.files.map(({ path: file, sha256 }) => ({ path: path.relative(snapshot.context.workspace, file).split(path.sep).join('/'), sha256 })),
+        designDocs: loaded.designDocs,
         limitations: book.issues, ...artifact
     }, snapshot.context, diagnostics, [artifact]);
 }
