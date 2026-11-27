@@ -66,6 +66,16 @@
         }
     }
 
+    function activateStep(button) {
+        const section = button.closest('.walkthrough');
+        for (const step of section.querySelectorAll('[data-walkthrough-step]')) {
+            const active = step === button;
+            step.setAttribute('aria-pressed', String(active));
+            document.getElementById(step.getAttribute('aria-controls')).hidden = !active;
+        }
+        highlight(section.closest('.chapter'), button.dataset.connections.split(' ').filter(Boolean), 'data-book-walkthrough');
+    }
+
     function closePanel({ restore = false } = {}) {
         if (!selection) return;
         const { chapter, origin, graph } = selection;
@@ -125,6 +135,11 @@
     }
 
     document.addEventListener('click', event => {
+        const step = event.target.closest?.('[data-walkthrough-step]');
+        if (step) {
+            activateStep(step);
+            return;
+        }
         const tocToggle = event.target.closest?.('.toc-toggle');
         if (tocToggle) {
             tocToggle.setAttribute('aria-expanded', String(tocToggle.getAttribute('aria-expanded') !== 'true'));
@@ -171,11 +186,12 @@
     });
     window.addEventListener('hashchange', syncLocation);
     syncLocation();
+    for (const firstStep of document.querySelectorAll('[data-walkthrough-step="0"]')) activateStep(firstStep);
 
     window.addEventListener('beforeprint', () => {
         closedForPrint = [...document.querySelectorAll('details[data-print-open]:not([open]), details.named-connections:not([open])')];
         for (const detail of closedForPrint) detail.open = true;
-        hiddenForPrint = [...document.querySelectorAll('.interface-section[hidden], .book-nav li[hidden]')];
+        hiddenForPrint = [...document.querySelectorAll('.interface-section[hidden], .walkthrough-detail[hidden], .book-nav li[hidden]')];
         for (const item of hiddenForPrint) item.hidden = false;
     });
     window.addEventListener('afterprint', () => {

@@ -8,6 +8,7 @@ const { analyzeStructure, unitInterface, interfaceOverrides, interfaceEvidence, 
 const { bindings } = require('../project/rtl-model');
 const { connectionEvidence } = require('./interface-evidence');
 const { isClockLike } = require('./architecture-details');
+const { walkthroughFor } = require('./architecture-reading');
 
 const CONFIG = 'svtools.architecture.json';
 const instanceId = name => 'instance:' + name;
@@ -166,7 +167,8 @@ function modulePage(module, { design, parsed, parameterValues }, chapterIds, pre
     const instances = nodes.filter(node => node.kind === 'instance');
     const dense = instances.length > 6 || links.length > 18 || nodes.length > 14 || instances.some(node => node.ports.length > 14);
     const hasStructure = instances.length > 0;
-    return { id, name: module.name, title: label(property(presentation?.titles, module.name)), source: source(module.source), empty: unit.empty,
+    const walkthrough = walkthroughFor({ links }, property(presentation?.walkthroughs, module.name));
+    return { id, name: module.name, title: label(property(presentation?.titles, module.name)), source: source(module.source), empty: unit.empty, walkthrough,
         nodes, links, checks, parameters, hasStructure, ports: boundaryPorts, auto: dense ? 'overview' : 'detailed' };
 }
 

@@ -16,7 +16,9 @@
 - **导出 HTML／PDF**包含各模块的端口图。页首给出统计条，章节导航支持筛选，图下有编号图注，复核项与接口详情单独成节。图内链接可进入子模块及单独的接口说明。PDF 使用 Edge 或通过 `SVTOOLS_PDF_BROWSER` 指定的 Chromium，两种格式保存在工程的 `.svtools/agent/architecture/`。
 - **独立 SVG／PNG**通过 `design render/report` 输出。伪 SV 的默认 `document` 架构图复用查看器的 Block Design 布局，但配色强制灰阶（R=G=B，接口束按线宽区分），保留结构快照证据与图像哈希，适合独立插入文档；HTML／PDF 报告仍是彩色。
 
-可以在根目录放置 `svtools.architecture.json`。`titles` 以模块类型名为键，`groups` 以父模块名为键，为其直接实例指定功能块名称。查看器以源码为连接依据，配置仅供章节命名和简图排版。[四路采集与报文汇聚示例](../example/struct-packet-hub/README.md)
+可以在根目录放置 `svtools.architecture.json`。`titles` 以模块类型名为键，`groups` 以父模块名为键，为其直接实例指定功能块名称。图中的接口和连线以源码为依据。 [四路采集与报文汇聚示例](../example/struct-packet-hub/README.md)
+
+HTML 报告可从 `walkthroughs` 读取模块讲解。以模块类型名为键，`steps` 为步骤列表，每步填写 `title`、`description`，并用 `links` 引用本章连接的接口名。选中步骤会高亮对应连线，失效或歧义引用显示「未定位」。`clockResets` 可给时钟网络指定关联复位，源端与接收端仍从结构连接获取。将示例中的 `walkthroughs` 并入项目已有配置即可复用。 [抓拍模块讲解示例](../example/architecture-walkthroughs/frame_cap_ss.json)
 
 Agent 可在单独的伪 SystemVerilog 工作区用 `design export --workspace <目录> --top <模块> --format html|pdf --out <文件>` 生成同样的分层文档。[架构 CLI](../skills/svtools-design/references/cli.md)
 

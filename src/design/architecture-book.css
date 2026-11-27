@@ -220,9 +220,22 @@
 .connection-panel-body { min-height: 0; padding: 12px 16px 20px; overflow: auto; overscroll-behavior: contain; }
 .connection-panel-body .interface-body > h3 { margin-top: 16px; }
 .connection-panel-body .table-scroll { max-width: 100%; }
-.connection-panel-body th code, .connection-panel-body td > code { white-space: nowrap; }
+.connection-panel-body table { width: max-content; min-width: 100%; }
+.connection-panel-body :is(th, td) { white-space: nowrap; }
+.interface-endpoints, .interface-endpoints ul { list-style: none; margin: 6px 0; padding: 0; }
+.interface-endpoints > li { padding: 8px 0; border-top: 1px solid var(--line); }
+.interface-endpoints small { display: block; color: var(--muted); }
+.interface-endpoints ul { display: grid; gap: 2px; }
 .chapter-reference > .interface-section { margin: 5px 0; }
 .book-search:has([data-interface-filter]) { max-width: 280px; }
+.walkthrough { padding: 10px 12px; margin-bottom: 12px; border: 1px solid var(--line); border-radius: var(--radius-2); background: var(--panel); }
+.walkthrough h3, .walkthrough-origin { display: inline-block; margin: 0 8px 8px 0; }
+.walkthrough-origin, .walkthrough-links { font-size: 11px; color: var(--muted); }
+.walkthrough-controls { display: flex; flex-wrap: wrap; gap: 4px 6px; }
+.walkthrough-controls button[aria-pressed=true] { border-color: var(--action); color: var(--action); background: var(--sunk); }
+.walkthrough-detail p, .walkthrough li p { margin: 6px 0 0; }
+.walkthrough-unresolved { color: var(--warn); }
+.diagram-toolbar > a { align-self: center; font-size: 11px; margin-right: 4px; }
 
 @media screen {
     .reading-book { padding-top: 20px; }
@@ -246,6 +259,10 @@
     .architecture-svg .diagram-card[data-book-selected] > .card-frame { stroke: var(--focus); stroke-width: 2; }
     .architecture-svg [data-book-selected] :is(.group-port-label, .pad-name, .pin-label) { fill: var(--focus); font-weight: 700; }
     .module-pin[data-book-selected] { outline: 2px solid var(--focus); outline-offset: -2px; }
+    .architecture-svg .diagram-edge[data-book-walkthrough]:not([data-book-selected]) .edge-line { stroke: var(--down); stroke-width: 3.2; }
+    .architecture-svg .diagram-edge[data-book-walkthrough]:not([data-book-selected]) .edge-arrow { fill: var(--down); }
+    .architecture-svg .diagram-card[data-book-walkthrough]:not([data-book-selected]) > .card-frame { stroke: var(--down); stroke-width: 2; }
+    .architecture-svg [data-book-walkthrough]:not([data-book-selected]) :is(.group-port-label, .pad-name, .pin-label) { fill: var(--down); font-weight: 700; }
 }
 
 @media screen and (min-width: 1200px) {
@@ -264,7 +281,7 @@
 /* ---------- 打印（PDF） ---------- */
 @page { size: A4 landscape; margin: 11mm 10mm; }
 @media print {
-    .connection-panel, .toc-toggle { display: none !important; }
+    .connection-panel, .toc-toggle, .walkthrough-controls { display: none !important; }
     .toc-row:has(.toc-toggle) > a { padding-right: 0; }
     .architecture-book { padding: 0; max-width: none; background: #fff; font-size: 9pt; line-height: 1.35; print-color-adjust: exact; }
     .book-header { border-top: 1px solid #666; border-bottom: 1px solid #999; padding: 8px 0 6px; }

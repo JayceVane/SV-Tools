@@ -153,12 +153,18 @@
             const chapter = chapterLinks && nodes.get(endpoint.node)?.chapter;
             const name = code(endpoints[index]);
             const target = chapter ? `<a href="#${escape(chapter)}">${name}</a>` : name;
-            return `<tr><th scope="row">${target}</th><td>${code(endpoint.type)}</td><td>${endpoint.boundary ? '模块边界' : '子实例'}${endpoint.invalid ? ' · modport 不匹配' : ''}</td><td>${[sourceLink(endpoint.declaration, interactive, '端口声明'), sourceLink(endpoint.modportSource, interactive, 'modport'), sourceLink(endpoint.binding, interactive, '例化连接')].filter(Boolean).join(' · ')}</td></tr>`;
+            const location = (endpoint.boundary ? '模块边界' : '子实例') + (endpoint.invalid ? ' · modport 不匹配' : '');
+            const sites = [sourceLink(endpoint.declaration, interactive, '端口声明'), sourceLink(endpoint.modportSource, interactive, 'modport'),
+                sourceLink(endpoint.binding, interactive, '例化连接')].filter(Boolean);
+            if (chapterLinks) return `<li><strong>${target}</strong><small>${code(endpoint.type)} · ${location}</small>${sites.length ? `<ul>${sites.map(site => `<li>${site}</li>`).join('')}</ul>` : ''}</li>`;
+            return `<tr><th scope="row">${target}</th><td>${code(endpoint.type)}</td><td>${location}</td><td>${sites.join(' · ')}</td></tr>`;
         }).join('');
+        const endpointDetails = chapterLinks ? `<ul class="interface-endpoints">${evidence}</ul>`
+            : `<div class="table-scroll"><table><thead><tr><th scope="col">端点</th><th scope="col">接口视图</th><th scope="col">位置</th><th scope="col">源码</th></tr></thead><tbody>${evidence}</tbody></table></div>`;
         const members = link.members.map(member => `<tr><th scope="row">${member.declaration && interactive ? sourceLink(member.declaration, true, member.name) : code(member.name)}</th><td>${member.width ?? '待确认'}</td>${member.directions.map(value => `<td>${direction(value)}</td>`).join('')}<td class="${member.flow}">${flowNames[member.flow]}${member.proven ? `<br>${routeText(member, endpoints)}` : ''}</td></tr>`).join('');
         return `<p class="connection-type">${code(link.type)} · ${sourceLink(link.definition, interactive, '接口定义')} · ${sourceLink(link.declaration, interactive, '连接声明')}</p>${summary}
             ${evidenceLine(link, endpoints)}
-            <h3>端点与声明</h3><div class="table-scroll"><table><thead><tr><th scope="col">端点</th><th scope="col">接口视图</th><th scope="col">位置</th><th scope="col">源码</th></tr></thead><tbody>${evidence}</tbody></table></div>
+            <h3>端点与声明</h3>${endpointDetails}
             <h3>成员方向</h3><p class="subtle">各端口列显示其 modport 声明。图内流向按当前模块观察，顶层边界的方向已按内侧换算。</p><div class="table-scroll"><table><thead><tr><th scope="col">信号</th><th scope="col">位宽</th>${endpoints.map(name => `<th scope="col">${code(name)}</th>`).join('')}<th scope="col">图内流向</th></tr></thead><tbody>${members}</tbody></table></div>`;
     }
 

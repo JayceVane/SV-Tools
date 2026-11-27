@@ -23,6 +23,12 @@ test('报文汇聚简图保留独立实例、标签网络和架构握手证据�
     for (const name of ['channels.sv', 'blocks.sv', 'packet_hub.sv', 'svtools.architecture.json']) {
         await fs.copyFile(path.join(fixture, name), path.join(workspace, name));
     }
+    const configPath = path.join(workspace, 'svtools.architecture.json');
+    const presentation = JSON.parse(await fs.readFile(configPath, 'utf8'));
+    presentation.walkthroughs = { packet_hub: { steps: [
+        { title: '仲裁 <输出>', description: '核对仲裁到 FIFO 的连接。', links: ['arbitrated', 'stale_link'] },
+    ], clockResets: { clk: 'rst_n', invalid_clk: 'rst_n' } } };
+    await fs.writeFile(configPath, JSON.stringify(presentation));
     const loaded = await buildArchitectureBook(await resolveContext({ workspace, top: 'packet_hub' }));
     const [top] = loaded.book.pages;
     assert.equal(top.auto, 'overview');
@@ -36,6 +42,8 @@ test('报文汇聚简图保留独立实例、标签网络和架构握手证据�
     assert.deepEqual(fifo.parameters, { DEPTH: 32 });
     assert.equal(loaded.book.pages.find(page => page.id === fifo.chapter).auto, 'detailed');
     const link = top.links.find(link => link.name === 'arbitrated');
+    assert.deepEqual(top.walkthrough.steps[0].connections, [{ name: 'arbitrated', id: link.id }, { name: 'stale_link', id: null }]);
+    assert.deepEqual(top.walkthrough.clockResets, { clk: 'rst_n' });
     assert.equal(link.handshake, true);
     assert.deepEqual(link.endpoints.map(endpoint => endpoint.name), ['u_arbiter.selected', 'u_fifo.enqueue']);
     assert.deepEqual(link.members.map(({ name, width, flow }) => [name, width, flow]),
@@ -93,6 +101,9 @@ test('报文汇聚简图保留独立实例、标签网络和架构握手证据�
     assert.match(html, /<figure class="module-symbol" aria-label="packet_fifo #\(DEPTH=32\) 端口图"/u);
     assert.match(html, /<a class="module-pin module-interface-pin" href="#module-\d+-link-\d+"[^>]*><span class="module-bus-symbol"[^>]*><\/span>\s*<span class="module-interface-label">\s*<strong><code>enqueue<\/code>/u);
     assert.match(html, /id="chapter-filter"/u);
+    assert.match(html, /仲裁 &lt;输出&gt;/u);
+    assert.match(html, /<code>stale_link<\/code> <span[^>]+>未定位<\/span>/u);
+    assert.match(html, /<th scope="row">CLK <code>clk<\/code><\/th><td><code>clk（本章边界）<\/code><\/td><td>[^]*?<code>u_fifo\.clk<\/code>/u);
     assert.match(html, /data-interface-filter/u);
     assert.match(html, /class="connection-panel"[^>]* hidden/u);
     assert.doesNotMatch(html, />接口目录</u);
@@ -100,6 +111,7 @@ test('报文汇聚简图保留独立实例、标签网络和架构握手证据�
     const printed = await renderArchitectureBook(loaded.book, undefined, { print: true });
     assert.ok(printed.includes(`data-print-open id="${link.id}" open><summary>`));
     assert.match(printed, /class="book-detail book-stubs" data-print-open open/u);
+    assert.doesNotMatch(printed, /<button[^>]+data-walkthrough-step/u);
     assert.ok(!printed.includes('<script>'));
     assert.ok(!printed.includes('<template'), '打印报告不嵌入交互预览副本');
     const pinCount = markup => (markup.match(/schematic-pin/g) || []).length;

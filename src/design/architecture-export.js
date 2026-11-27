@@ -8,7 +8,8 @@ const { resolveContext, buildArchitectureBook, assertBookCurrent } = require('./
 const { hash } = require('../agent/context');
 const { fail, result } = require('../agent/protocol');
 const { layoutDiagram, renderDiagram } = require('./architecture-diagram');
-const { escape, code, pageName, chapterNumber, sourceLink, portTable, renderModuleSymbol, interfaceDetails, signalEnds, backgroundSignals, connectionPreview } = require('./architecture-details');
+const { escape, code, pageName, chapterNumber, sourceLink, portTable, renderModuleSymbol, interfaceDetails, signalEnds, connectionPreview } = require('./architecture-details');
+const { walkthrough, clockNetworks } = require('./architecture-reading');
 const { printPdf } = require('./note-export');
 const { create } = require('./workflow-files');
 
@@ -72,9 +73,10 @@ async function renderArchitectureBook(book, modes, { print = false } = {}) {
         const checks = checkList && (print
             ? `<aside class="book-review" id="${checksId}"><h3>${checksTitle}</h3>${checkList}</aside>`
             : `<details class="book-detail book-review" id="${checksId}" data-print-open><summary>${checksTitle}</summary>${checkList}</details>`);
+        const clocks = clockNetworks(page, nodes, print);
         const figure = page.hasStructure
             ? `<figure class="diagram-figure">
-                <div class="diagram-toolbar book-diagram-tools">${print ? '' : '<button type="button" data-zoom aria-pressed="false">原始尺寸</button>'}</div>
+                <div class="diagram-toolbar book-diagram-tools">${print ? '' : `${clocks ? `<a href="#${page.id}-clocks">时钟与复位</a>` : ''}<button type="button" data-zoom aria-pressed="false">原始尺寸</button>`}</div>
                 <div class="diagram-print" tabindex="0" aria-label="架构图">${diagram}</div>
                 <figcaption class="diagram-caption">图 ${pad(index + 1)} · 结构连线（${diagramDescription}）</figcaption>
             </figure>`
@@ -98,12 +100,14 @@ async function renderArchitectureBook(book, modes, { print = false } = {}) {
                     <p class="chapter-meta">${sourceLink(page.source, false)}${page.empty ? ' · 实现桩' : ''}${counts ? ' · ' + counts : ''}${checkList && !print ? ` · <a class="review-count" href="#${checksId}">${checksTitle}</a>` : ''}</p>
                 </header>
                 ${print ? checks : ''}
+                ${print ? '' : walkthrough(page, false)}
                 ${figure || symbol || '<p class="subtle">没有已解析的端口或子实例。</p>'}
             </div>
+            ${print ? walkthrough(page, true) : ''}
             ${section('子模块', instanceTable, instances.length)}
             ${interfaceSection}
             ${page.ports.length ? `<details class="book-detail chapter-reference" data-print-open${opened}><summary>模块边界 · ${page.ports.length} 个端口</summary>${figure ? symbol : ''}${portTable(page.ports, false)}</details>` : ''}
-            ${backgroundSignals(page, !print)}
+            ${clocks}
             ${signals.length ? `<details class="book-detail chapter-reference" data-print-open${opened}><summary>普通信号 · ${signals.length}</summary>${signalTable}</details>` : ''}
             ${print ? '' : checks}
             ${stubs.length ? `<details class="book-detail book-stubs" data-print-open${opened}><summary>实现桩待实现输出 · ${stubs.length}</summary><ul>${diagnosticItems(stubs)}</ul></details>` : ''}

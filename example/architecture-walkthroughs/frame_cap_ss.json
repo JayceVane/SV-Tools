@@ -1,0 +1,33 @@
+{
+  "walkthroughs": {
+    "frame_cap_ss": {
+      "steps": [
+        {
+          "title": "接收 DVP",
+          "description": "外部 cam 带入 24 位像素、vsync 和 href。帧控制接收 cam，经 clean_stream 把清洗后的像素送到帧计数模块。",
+          "links": ["cam", "clean_stream"]
+        },
+        {
+          "title": "插入帧计数并分流",
+          "description": "帧计数模块接 cam_clk 和 reset_cam_clk。counted_stream 送裁剪缩放，mon 从同一模块分出，供上层显示支路使用。",
+          "links": ["clean_stream", "counted_stream", "mon"]
+        },
+        {
+          "title": "按裁剪窗处理",
+          "description": "裁剪缩放接 cam_clk 和 reset_cam_clk，从 counted_stream 取像素，从帧控制的 win 取坐标和步长，然后经 resized_stream 送 AXIS 转换。",
+          "links": ["counted_stream", "win", "resized_stream"]
+        },
+        {
+          "title": "输出 AXIS 视频",
+          "description": "AXIS 转换接 ddr_clk 和 ddr_clk_rst，img_out 暴露 24 位 tdata、帧起始 tuser 与 tvalid/tready。resized_stream 两端分别接 cam_clk 和 ddr_clk，需回到实现和验证确认跨域处理、背压及复位恢复行为。",
+          "links": ["resized_stream", "img_out"]
+        }
+      ],
+      "clockResets": {
+        "cam_clk": "reset_cam_clk",
+        "ddr_clk": "ddr_clk_rst",
+        "gp_clk": "gp_clk_rst"
+      }
+    }
+  }
+}
