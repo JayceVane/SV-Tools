@@ -15,6 +15,7 @@ description: SV Tools CLI 的通用入口：doctor 能力发现、RTL 工程与�
 | --- | --- |
 | Vivado 工程概览、运行告警、时序/资源/功耗/DRC、IP 与 Block Design | `svtools-vivado` |
 | 架构设计、事后架构报告、分层伪 SV 和 HTML／PDF 导出 | `svtools-design` |
+| 富文本 Note、源码注释、选区和具名块锚点 | `svtools-design` |
 | 波形查询、仿真失败定位、ΔCycle 排查 | `svtools-waveform` |
 | RTL 模块开发、架构任务交接、功能修改、验证交付、模块验证报告 | `svtools-delivery` |
 
