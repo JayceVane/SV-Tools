@@ -51,6 +51,53 @@ function anchorFor(card, port, edge) {
     return card.id;
 }
 
+// 折行后边界端口常被折到行首/行尾，连线只能绕整张图。
+// 这里把边界端口钉到整块图的左右外缘：左端口 x=12，右端口 x=内容右侧+16，
+// 竖位置对准与它相连的卡片，重叠时顺次下移。
+function placeBoundaryColumns(cards, edges, layout) {
+    const pads = cards.filter(card => card.kind === 'pad' || card.kind === 'boundary');
+    if (!pads.length) return;
+    const padIds = new Set(pads.map(card => card.id));
+    const body = layout.children.filter(child => !padIds.has(child.id));
+    if (!body.length) return;
+    const left = pads.filter(card => card.edgeSide !== 'right');
+    const right = pads.filter(card => card.edgeSide === 'right');
+    const shift = left.length ? Math.max(...left.map(card => card.width)) + 16 : 0;
+    if (shift) {
+        for (const child of body) child.x += shift;
+        // 卡片整体右移，ELK 已算好的连线路由也要跟着平移，否则线和卡片会错位。
+        for (const edge of layout.edges || []) {
+            for (const section of edge.sections || []) {
+                for (const key of ['startPoint', 'endPoint']) if (section[key]) section[key].x += shift;
+                for (const point of section.bendPoints || []) point.x += shift;
+            }
+        }
+    }
+    const byId = new Map(body.map(child => [child.id, child]));
+    const minY = Math.min(...body.map(child => child.y));
+    const maxBottom = Math.max(...body.map(child => child.y + child.height));
+    const maxX = Math.max(...body.map(child => child.x + child.width));
+    const place = (list, x) => {
+        let cursor = minY;
+        for (const card of list) {
+            const peers = edges.filter(edge => edge.from === card.id || edge.to === card.id)
+                .map(edge => byId.get(edge.from === card.id ? edge.to : edge.from)).filter(Boolean);
+            const center = peers.length
+                ? peers.reduce((sum, child) => sum + child.y + child.height / 2, 0) / peers.length
+                : minY + card.height / 2;
+            const y = Math.max(minY, Math.min(maxBottom - card.height, Math.round(center - card.height / 2)));
+            card.x = x;
+            card.y = Math.max(y, cursor);
+            cursor = card.y + card.height + 12;
+            layout.children.push({ id: card.id, x: card.x, y: card.y, width: card.width, height: card.height });
+        }
+    };
+    place(left, 12);
+    place(right, maxX + 16);
+    layout.width = Math.max(layout.width, ...pads.map(card => card.x + card.width + 12));
+    layout.height = Math.max(layout.height, maxBottom + 16);
+}
+
 async function runLayout(cards, edges, detailed, wrapped = false) {
     if (!elk) {
         let Engine;
@@ -103,6 +150,8 @@ async function runLayout(cards, edges, detailed, wrapped = false) {
     });
     if (!detailed && !wrapped && layout.width > OVERVIEW_MAX_WIDTH) return runLayout(cards, edges, detailed, true);
     layout.wrapped = wrapped;
+    // 折行页的边界端口不参与折叠，固定到左右外缘（连线在 layoutDiagram 改走外缘通道）。
+    if (wrapped) placeBoundaryColumns(cards, edges, layout);
     if (support.length) {
         const gap = 28, padding = 16, heading = 34;
         const top = layout.height + 20;

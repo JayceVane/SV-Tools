@@ -5,6 +5,100 @@ const { diagramTopology } = require('./architecture-topology');
 const { measureCards } = require('./architecture-measure');
 const { attachPeers, initialAssignment, deriveAssignment } = require('./architecture-assign');
 const { anchorFor, runLayout } = require('./architecture-elk');
+/* ---------- 折行布局的边界端口 ---------- */
+// 折行后边界端口常被折到行首/行尾，连线只能绕整张图。
+// 这里把边界端口放到整块图左右外缘，并把它的连线改走「行间隙 → 外缘通道」的直角路线。
+function padAnchor(card, port) {
+    if (card.rows?.length) {
+        const row = card.rows.find(item => item.port?.name === port || item.node.id === port || item.node.name === port) || card.rows[0];
+        return { x: card.x + row.x, y: card.y + row.y };
+    }
+    if (card.terminalPort) return { x: card.x + card.terminalPort.x, y: card.y + card.terminalPort.y };
+    return { x: card.x, y: card.y + card.height / 2 };
+}
+
+function rowGaps(cards) {
+    const bands = [];
+    for (const card of [...cards].sort((left, right) => left.y - right.y)) {
+        const last = bands[bands.length - 1];
+        if (last && card.y <= last.bottom + 8) last.bottom = Math.max(last.bottom, card.y + card.height);
+        else bands.push({ top: card.y, bottom: card.y + card.height });
+    }
+    const gaps = [];
+    for (let index = 1; index < bands.length; index++) gaps.push((bands[index - 1].bottom + bands[index].top) / 2);
+    return gaps;
+}
+
+function nearestGap(gaps, y, fallback) {
+    if (!gaps.length) return fallback;
+    return gaps.reduce((best, gap) => Math.abs(gap - y) < Math.abs(best - y) ? gap : best, gaps[0]);
+}
+
+// 边界端口的连线改走「贴卡边 → 最近的行间隙 → 外缘通道 → 端口行」。
+function routeBoundaryEdges(cards, edges) {
+    const byId = new Map(cards.map(card => [card.id, card]));
+    const body = cards.filter(card => card.kind !== 'pad' && card.kind !== 'boundary');
+    const gaps = rowGaps(body);
+    const fallback = body.length ? Math.min(...body.map(card => card.y)) - 12 : 0;
+    for (const edge of edges) {
+        if (edge.clockOnly) continue;
+        const fromPad = ['pad', 'boundary'].includes(byId.get(edge.from)?.kind);
+        const toPad = ['pad', 'boundary'].includes(byId.get(edge.to)?.kind);
+        if (!fromPad && !toPad) continue;
+        const pad = byId.get(fromPad ? edge.from : edge.to);
+        const padPoint = padAnchor(pad, fromPad ? edge.fromPort : edge.toPort);
+        const flat = (edge.sections || []).flatMap(section => [section.startPoint, ...(section.bendPoints || []), section.endPoint])
+            .filter(Boolean);
+        if (!flat.length) continue;
+        const other = fromPad ? flat[flat.length - 1] : flat[0];
+        const gapY = nearestGap(gaps, other.y, fallback);
+        const channel = pad.edgeSide === 'right' ? pad.x - 8 : pad.x + pad.width + 8;
+        const points = fromPad
+            ? [padPoint, { x: channel, y: padPoint.y }, { x: channel, y: gapY }, { x: other.x, y: gapY }, other]
+            : [other, { x: other.x, y: gapY }, { x: channel, y: gapY }, { x: channel, y: padPoint.y }, padPoint];
+        edge.sections = [{ startPoint: points[0], bendPoints: points.slice(1, -1), endPoint: points[points.length - 1] }];
+    }
+}
+
+// 折行布局里跨行的普通连线也会被 ELK 绕整张图外圈。
+// 这里把「明显绕远」的线改走最近的行间隙：起点竖直上/下到间隙 → 横穿 → 竖直进目标。
+// 任何一段会穿过其他卡片就保留原走线。
+function segmentHits(card, from, to) {
+    const pad = 2;
+    if (Math.abs(from.x - to.x) < 0.5) {
+        const x = from.x, low = Math.min(from.y, to.y), high = Math.max(from.y, to.y);
+        return card.x - pad < x && x < card.x + card.width + pad && low < card.y + card.height && high > card.y;
+    }
+    const y = from.y, low = Math.min(from.x, to.x), high = Math.max(from.x, to.x);
+    return card.y - pad < y && y < card.y + card.height + pad && low < card.x + card.width && high > card.x;
+}
+
+function routeLongEdges(cards, edges) {
+    const body = cards.filter(card => card.kind !== 'pad' && card.kind !== 'boundary');
+    const pads = new Set(cards.filter(card => card.kind === 'pad' || card.kind === 'boundary').map(card => card.id));
+    const gaps = rowGaps(body);
+    if (!gaps.length) return;
+    for (const edge of edges) {
+        if (edge.clockOnly || pads.has(edge.from) || pads.has(edge.to)) continue;
+        const flat = (edge.sections || []).flatMap(section => [section.startPoint, ...(section.bendPoints || []), section.endPoint])
+            .filter(Boolean);
+        if (flat.length < 2) continue;
+        let length = 0;
+        for (let index = 1; index < flat.length; index++) {
+            length += Math.abs(flat[index].x - flat[index - 1].x) + Math.abs(flat[index].y - flat[index - 1].y);
+        }
+        const start = flat[0], end = flat[flat.length - 1];
+        const direct = Math.abs(end.x - start.x) + Math.abs(end.y - start.y);
+        if (length < direct * 1.6 + 80) continue;
+        const gapY = nearestGap(gaps, (start.y + end.y) / 2, start.y);
+        const points = [start, { x: start.x, y: gapY }, { x: end.x, y: gapY }, end];
+        const blocked = body.some(card => card.id !== edge.from && card.id !== edge.to
+            && points.slice(1).some((point, index) => segmentHits(card, points[index], point)));
+        if (blocked) continue;
+        edge.sections = [{ startPoint: points[0], bendPoints: points.slice(1, -1), endPoint: points[points.length - 1] }];
+    }
+}
+
 /* ---------- 标签避让 ---------- */
 
 const overlaps = (a, b, gap = 0) => a.x < b.x + b.w + gap && a.x + a.w + gap > b.x
@@ -136,6 +230,8 @@ async function layoutDiagram(page, mode) {
             edge.sections.push(id === edge.from ? { startPoint: point, endPoint: end } : { startPoint: end, endPoint: point });
         }
     }
+    // 折行页的边界端口固定在外缘，连线走「行间隙 → 外缘通道」；左端口的落点也随之更新。
+    if (layout.wrapped) { routeBoundaryEdges(cards, edges); routeLongEdges(cards, edges); }
     placeLabels(edges, cards, width);
     return { width, height, cards, edges, clockRegion: layout.clockRegion, wrapped: layout.wrapped };
 }
