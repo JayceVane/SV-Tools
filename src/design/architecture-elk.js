@@ -73,9 +73,11 @@ async function runLayout(cards, edges, detailed, wrapped = false) {
             'elk.algorithm': 'layered',
             'elk.direction': 'RIGHT',
             'elk.edgeRouting': 'ORTHOGONAL',
-            'elk.spacing.nodeNode': detailed ? '24' : '16',
-            'elk.layered.spacing.nodeNodeBetweenLayers': detailed ? '68' : '42',
-            'elk.layered.spacing.edgeNodeBetweenLayers': detailed ? '12' : '6',
+            // 简图卡片边缘有 24px 时钟/复位引线，相邻两张卡对着的引线要留出 48px；
+            // 节点间距 24、层间距 56，正好让两条引线之间还剩 8px。
+            'elk.spacing.nodeNode': '24',
+            'elk.layered.spacing.nodeNodeBetweenLayers': detailed ? '68' : '56',
+            'elk.layered.spacing.edgeNodeBetweenLayers': detailed ? '12' : '10',
             'elk.layered.spacing.edgeEdgeBetweenLayers': detailed ? '12' : '6',
             'elk.layered.cycleBreaking.strategy': 'GREEDY',
             'elk.layered.considerModelOrder.strategy': 'NODES_AND_EDGES',
